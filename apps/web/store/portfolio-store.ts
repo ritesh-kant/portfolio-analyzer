@@ -1,3 +1,5 @@
+'use client';
+
 import { create } from 'zustand';
 
 import type { BenchmarkComparison, PortfolioHealthScore } from '@portfolio-analyzer/shared-types';
@@ -6,7 +8,9 @@ import {
   fetchBenchmarkWithContext,
   fetchHoldings,
   fetchScore,
+  fetchSnapshots,
   fetchSummary,
+  type SnapshotPoint,
   type PortfolioSummaryResponse,
 } from '@/lib/api';
 import { mockGrowth, mockHoldings } from '@/lib/mock-data';
@@ -64,6 +68,12 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
 
     try {
       const [holdingsResponse, summary] = await Promise.all([fetchHoldings(), fetchSummary()]);
+      const snapshotsResponse = await fetchSnapshots().catch(() => ({
+        source: 'empty',
+        storage: 'memory' as const,
+        count: 0,
+        points: [] as SnapshotPoint[],
+      }));
 
       const liveHoldings =
         holdingsResponse.holdings.length > 0 ? holdingsResponse.holdings : mockHoldings;
@@ -81,8 +91,15 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
       // Refetch score with real alpha
       const finalScore = await fetchScore(benchmark.alphaPct, liveHoldings).catch(() => score);
 
+      const growthSeries = buildGrowthSeries(
+        snapshotsResponse.points,
+        benchmark.benchmarkReturnPct,
+        summary.currentValue,
+      );
+
       set({
         holdings: liveHoldings,
+        growthSeries,
         summary,
         benchmark,
         score: finalScore,
@@ -98,3 +115,33 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
     }
   },
 }));
+
+function buildGrowthSeries(
+  points: SnapshotPoint[],
+  benchmarkReturnPct: number,
+  currentValue: number,
+) {
+  if (points.length === 0) {
+    return mockGrowth;
+  }
+
+  const first = points[0];
+  if (!first || first.portfolio === 0) {
+    return mockGrowth;
+  }
+
+  const totalGrowthRatio = currentValue / first.portfolio;
+  const benchmarkGrowthRatio = 1 + benchmarkReturnPct / 100;
+
+  return points.map((p, idx) => {
+    const month = new Date(p.date).toLocaleString('en-IN', { month: 'short' });
+    const progress = points.length <= 1 ? 1 : idx / (points.length - 1);
+
+    return {
+      month,
+      portfolio: Math.round(p.portfolio),
+      benchmark: Math.round(first.portfolio * (1 + (benchmarkGrowthRatio - 1) * progress)),
+      _ratio: totalGrowthRatio,
+    };
+  });
+}

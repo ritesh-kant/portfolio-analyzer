@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   Area,
@@ -44,12 +44,48 @@ export default function DashboardPage() {
   const portfolioReturn = summary.pnlPct;
   const benchmarkReturn = benchmark.benchmarkReturnPct;
   const alpha = benchmark.alphaPct;
+  const [sortKey, setSortKey] = useState<'symbol' | 'invested' | 'current' | 'return'>('current');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   const sectorMap = new Map<string, number>();
   for (const h of holdings) {
     sectorMap.set(h.sector ?? 'Other', (sectorMap.get(h.sector ?? 'Other') ?? 0) + h.currentValue);
   }
   const sectorData = [...sectorMap.entries()].map(([name, value]) => ({ name, value }));
+  const sortedHoldings = useMemo(() => {
+    const cloned = [...holdings];
+    const dir = sortDir === 'asc' ? 1 : -1;
+
+    cloned.sort((a, b) => {
+      if (sortKey === 'symbol') {
+        return a.symbol.localeCompare(b.symbol) * dir;
+      }
+
+      if (sortKey === 'invested') {
+        return (a.investedAmount - b.investedAmount) * dir;
+      }
+
+      if (sortKey === 'current') {
+        return (a.currentValue - b.currentValue) * dir;
+      }
+
+      const aRet = a.investedAmount === 0 ? 0 : (a.currentValue - a.investedAmount) / a.investedAmount;
+      const bRet = b.investedAmount === 0 ? 0 : (b.currentValue - b.investedAmount) / b.investedAmount;
+      return (aRet - bRet) * dir;
+    });
+
+    return cloned;
+  }, [holdings, sortDir, sortKey]);
+
+  const setSort = (nextKey: 'symbol' | 'invested' | 'current' | 'return') => {
+    if (sortKey === nextKey) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+
+    setSortKey(nextKey);
+    setSortDir(nextKey === 'symbol' ? 'asc' : 'desc');
+  };
 
   return (
     <div className="space-y-4">
@@ -158,14 +194,22 @@ export default function DashboardPage() {
         </div>
 
         <div className="mb-1 hidden grid-cols-[1.2fr_auto_auto_auto] gap-2 px-3 text-xs font-semibold uppercase tracking-wide text-ink/50 sm:grid">
-          <span>Symbol</span>
-          <span className="text-right">Invested</span>
-          <span className="text-right">Current</span>
-          <span className="text-right">Return</span>
+          <button type="button" className="text-left" onClick={() => setSort('symbol')}>
+            Symbol {sortKey === 'symbol' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+          </button>
+          <button type="button" className="text-right" onClick={() => setSort('invested')}>
+            Invested {sortKey === 'invested' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+          </button>
+          <button type="button" className="text-right" onClick={() => setSort('current')}>
+            Current {sortKey === 'current' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+          </button>
+          <button type="button" className="text-right" onClick={() => setSort('return')}>
+            Return {sortKey === 'return' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+          </button>
         </div>
 
         <div className="space-y-1.5">
-          {holdings.map((h, idx) => {
+          {sortedHoldings.map((h, idx) => {
             const linePnl = h.currentValue - h.investedAmount;
             const linePnlPct = h.investedAmount === 0 ? 0 : (linePnl / h.investedAmount) * 100;
             const isMf = h.assetType === 'mf';

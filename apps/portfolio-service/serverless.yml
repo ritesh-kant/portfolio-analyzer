@@ -1,6 +1,16 @@
 service: portfolio-service
 frameworkVersion: '4'
 
+build:
+  esbuild:
+    bundle: true
+    format: cjs
+    platform: node
+    target: node20
+    external:
+      - mongoose
+      - mongodb
+
 provider:
   name: aws
   runtime: nodejs20.x
@@ -48,3 +58,21 @@ functions:
       - httpApi:
           path: /portfolio/summary
           method: get
+  snapshots:
+    handler: src/handlers/snapshots.handler
+    events:
+      - httpApi:
+          path: /portfolio/snapshots
+          method: get
+  transactions:
+    handler: src/handlers/transactions.handler
+    events:
+      - httpApi:
+          path: /portfolio/transactions
+          method: get
+  importTransactions:
+    handler: src/handlers/import-transactions.handler
+    events:
+      - httpApi:
+          path: /portfolio/transactions/import
+          method: post

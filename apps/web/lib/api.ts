@@ -21,12 +21,28 @@ interface HoldingsResponse {
   message?: string;
 }
 
+export interface SnapshotPoint {
+  date: string;
+  portfolio: number;
+}
+
+interface SnapshotsResponse {
+  source: string;
+  storage: 'mongo' | 'memory';
+  count: number;
+  points: SnapshotPoint[];
+}
+
 export async function fetchHoldings(): Promise<HoldingsResponse> {
   return fetchJson<HoldingsResponse>(`${PORTFOLIO_API_BASE}/portfolio/holdings`);
 }
 
 export async function fetchSummary(): Promise<PortfolioSummaryResponse> {
   return fetchJson<PortfolioSummaryResponse>(`${PORTFOLIO_API_BASE}/portfolio/summary`);
+}
+
+export async function fetchSnapshots(): Promise<SnapshotsResponse> {
+  return fetchJson<SnapshotsResponse>(`${PORTFOLIO_API_BASE}/portfolio/snapshots`);
 }
 
 export async function fetchBenchmark(): Promise<BenchmarkComparison> {

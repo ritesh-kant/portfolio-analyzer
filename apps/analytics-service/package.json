@@ -2,7 +2,7 @@
   "name": "analytics-service",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
+  "type": "commonjs",
   "scripts": {
     "dev": "serverless offline",
     "build": "tsc -p tsconfig.json",
@@ -12,7 +12,8 @@
   "dependencies": {
     "@portfolio-analyzer/analytics-core": "workspace:*",
     "@portfolio-analyzer/shared-types": "workspace:*",
-    "@portfolio-analyzer/tax-core": "workspace:*"
+    "@portfolio-analyzer/tax-core": "workspace:*",
+    "mongoose": "^8.9.2"
   },
   "devDependencies": {
     "serverless": "^4.5.0",

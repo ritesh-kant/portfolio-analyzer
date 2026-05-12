@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 
+import { ImportTransactionsCard } from '@/components/import-transactions-card';
 import { useTaxStore } from '@/store/tax-store';
 
 export default function TaxPage() {
@@ -63,6 +64,12 @@ export default function TaxPage() {
           ))}
         </div>
       </section>
+
+      <ImportTransactionsCard
+        onImported={() => {
+          void loadTaxSummary();
+        }}
+      />
     </div>
   );
 }

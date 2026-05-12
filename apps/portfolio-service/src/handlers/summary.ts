@@ -1,8 +1,8 @@
 import { json } from '../lib/http.js';
-import { getHoldings } from '../lib/store.js';
+import { loadHoldings } from '../lib/persistence.js';
 
 export async function handler() {
-  const holdings = getHoldings();
+  const { holdings, mode } = await loadHoldings();
 
   if (holdings.length === 0) {
     // Return reasonable demo values when no holdings are imported yet
@@ -12,6 +12,7 @@ export async function handler() {
       pnl: 19271,
       pnlPct: 13.64,
       source: 'demo',
+      storage: mode,
     });
   }
 
@@ -26,6 +27,7 @@ export async function handler() {
     pnl: Math.round(pnl),
     pnlPct: Math.round(pnlPct * 100) / 100,
     source: 'live',
+    storage: mode,
     holdingsCount: holdings.length,
   });
 }

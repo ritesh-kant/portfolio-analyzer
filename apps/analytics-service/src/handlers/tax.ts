@@ -2,6 +2,7 @@ import type { Transaction } from '@portfolio-analyzer/shared-types';
 import { calculateTaxSummary } from '@portfolio-analyzer/tax-core';
 
 import { json } from '../lib/http.js';
+import { loadTransactionsFromMongo } from '../lib/transactions.js';
 
 const sampleTransactions: Transaction[] = [
   {
@@ -23,7 +24,31 @@ const sampleTransactions: Transaction[] = [
 ];
 
 export async function handler() {
-  const result = calculateTaxSummary(sampleTransactions);
+  try {
+    const transactions = await loadTransactionsFromMongo();
 
-  return json(200, result);
+    if (transactions.length === 0) {
+      const result = calculateTaxSummary(sampleTransactions);
+      return json(200, {
+        ...result,
+        source: 'sample',
+        message: 'No persisted transactions found. Import transactions via portfolio-service endpoint.',
+      });
+    }
+
+    const result = calculateTaxSummary(transactions);
+
+    return json(200, {
+      ...result,
+      source: 'live',
+      transactionCount: transactions.length,
+    });
+  } catch {
+    const result = calculateTaxSummary(sampleTransactions);
+    return json(200, {
+      ...result,
+      source: 'sample',
+      message: 'MongoDB unavailable; using sample tax data.',
+    });
+  }
 }

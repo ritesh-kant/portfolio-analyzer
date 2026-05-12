@@ -1,3 +1,5 @@
+'use client';
+
 import { create } from 'zustand';
 
 import { fetchTaxSummary } from '@/lib/api';
