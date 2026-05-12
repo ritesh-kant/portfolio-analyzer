@@ -1,0 +1,50 @@
+service: analytics-service
+frameworkVersion: '4'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  stage: dev
+  region: ap-south-1
+  httpApi:
+    cors:
+      allowedOrigins:
+        - '*'
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+
+plugins:
+  - serverless-offline
+
+custom:
+  serverless-offline:
+    httpPort: 4001
+    lambdaPort: 4003
+    noPrependStageInUrl: true
+
+functions:
+  benchmark:
+    handler: src/handlers/benchmark.handler
+    events:
+      - httpApi:
+          path: /analytics/benchmark
+          method: get
+  tax:
+    handler: src/handlers/tax.handler
+    events:
+      - httpApi:
+          path: /analytics/tax
+          method: get
+  score:
+    handler: src/handlers/score.handler
+    events:
+      - httpApi:
+          path: /analytics/score
+          method: get

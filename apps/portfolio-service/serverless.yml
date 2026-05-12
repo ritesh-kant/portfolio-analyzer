@@ -1,0 +1,50 @@
+service: portfolio-service
+frameworkVersion: '4'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  stage: dev
+  region: ap-south-1
+  httpApi:
+    cors:
+      allowedOrigins:
+        - '*'
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+
+plugins:
+  - serverless-offline
+
+custom:
+  serverless-offline:
+    httpPort: 3001
+    lambdaPort: 3003
+    noPrependStageInUrl: true
+
+functions:
+  holdings:
+    handler: src/handlers/holdings.handler
+    events:
+      - httpApi:
+          path: /portfolio/holdings
+          method: get
+  importGroww:
+    handler: src/handlers/import.handler
+    events:
+      - httpApi:
+          path: /portfolio/import
+          method: post
+  summary:
+    handler: src/handlers/summary.handler
+    events:
+      - httpApi:
+          path: /portfolio/summary
+          method: get
