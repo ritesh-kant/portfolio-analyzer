@@ -11,10 +11,10 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchHistoricalWithRetry(ticker: string, period1: string, maxAttempts = 3) {
+async function fetchChartWithRetry(ticker: string, period1: string, maxAttempts = 3) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await yahooFinance.historical(ticker, { period1, interval: '1d' });
+      return await yahooFinance.chart(ticker, { period1, interval: '1d' });
     } catch (err) {
       const msg = String(err);
       const isRateLimit =
@@ -23,7 +23,7 @@ async function fetchHistoricalWithRetry(ticker: string, period1: string, maxAtte
         msg.includes('rate') ||
         msg.includes('Unexpected token');
       if (isRateLimit && attempt < maxAttempts) {
-        await sleep(attempt * 1500); // 1.5s, 3s between retries
+        await sleep(attempt * 1500);
         continue;
       }
       throw err;
@@ -62,18 +62,19 @@ export async function handler(event: {
   try {
     const period1 = new Date();
     period1.setDate(period1.getDate() - 120);
-    const period1Str = period1.toISOString().slice(0, 10); // 'YYYY-MM-DD' — v3 rejects Date objects
+    const period1Str = period1.toISOString().slice(0, 10);
 
-    const historical = await fetchHistoricalWithRetry(ticker, period1Str);
+    const chartResult = await fetchChartWithRetry(ticker, period1Str);
+    const quotes = chartResult.quotes ?? [];
 
-    if (historical.length < 30) {
-      return fallback(`Only ${historical.length} days of data — insufficient for indicators`);
+    if (quotes.length < 30) {
+      return fallback(`Only ${quotes.length} days of data — insufficient for indicators`);
     }
 
-    const closes = historical.map((d) => d.close);
-    const volumes = historical.map((d) => d.volume ?? 0);
-    const highs = historical.map((d) => d.high);
-    const lows = historical.map((d) => d.low);
+    const closes = quotes.map((q) => q.close ?? 0).filter((v) => v > 0);
+    const volumes = quotes.map((q) => q.volume ?? 0);
+    const highs = quotes.map((q) => q.high ?? 0).filter((v) => v > 0);
+    const lows = quotes.map((q) => q.low ?? 0).filter((v) => v > 0);
 
     const result = computeTechnicals(symbol, closes, volumes, highs, lows);
     return json(200, result);
@@ -81,4 +82,3 @@ export async function handler(event: {
     return fallback(String(err));
   }
 }
-

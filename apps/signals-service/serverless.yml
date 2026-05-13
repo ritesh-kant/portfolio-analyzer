@@ -31,6 +31,7 @@ provider:
     KIMI_MODEL: ${env:KIMI_MODEL, 'moonshotai/kimi-k2-instruct'}
     OLLAMA_BASE_URL: ${env:OLLAMA_BASE_URL, 'http://localhost:11434'}
     OLLAMA_MODEL: ${env:OLLAMA_MODEL, 'llama3.1'}
+    OLLAMA_TIMEOUT: ${env:OLLAMA_TIMEOUT, '600000'}
   httpApi:
     cors:
       allowedOrigins:
@@ -92,7 +93,7 @@ functions:
           method: get
   analyze:
     handler: src/handlers/analyze.handler
-    timeout: 300
+    timeout: 900
     events:
       - httpApi:
           path: /signals/analyze

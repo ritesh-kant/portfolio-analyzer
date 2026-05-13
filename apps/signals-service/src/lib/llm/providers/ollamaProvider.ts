@@ -12,6 +12,7 @@ interface OllamaChatResponse {
 export async function call(systemPrompt: string, userPrompt: string): Promise<string> {
   const baseUrl = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
   const model = process.env.OLLAMA_MODEL ?? 'llama3.1';
+  const timeout = parseInt(process.env.OLLAMA_TIMEOUT ?? '600000', 10); // default 10 min
 
   const response = await axios.post<OllamaChatResponse>(
     `${baseUrl}/api/chat`,
@@ -23,7 +24,7 @@ export async function call(systemPrompt: string, userPrompt: string): Promise<st
         { role: 'user', content: userPrompt },
       ],
     },
-    { timeout: 120_000 },
+    { timeout },
   );
 
   return response.data.message.content;
