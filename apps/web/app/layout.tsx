@@ -32,6 +32,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 >
                   Tax
                 </Link>
+                <Link
+                  href="/signals"
+                  className="rounded-full px-4 py-1.5 text-sm font-semibold transition hover:bg-black/5"
+                >
+                  Signals
+                </Link>
               </nav>
             </div>
           </header>

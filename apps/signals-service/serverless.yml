@@ -1,0 +1,99 @@
+service: signals-service
+frameworkVersion: '4'
+
+build:
+  esbuild:
+    bundle: true
+    format: cjs
+    platform: node
+    target: node20
+    external:
+      - yahoo-finance2
+      - stock-nse-india
+      - technicalindicators
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  stage: dev
+  region: ap-south-1
+  environment:
+    NEWSDATA_API_KEY: ${env:NEWSDATA_API_KEY, ''}
+    AI_PROVIDER: ${env:AI_PROVIDER, 'anthropic'}
+    ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY, ''}
+    ANTHROPIC_MODEL: ${env:ANTHROPIC_MODEL, 'claude-sonnet-4-5'}
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY, ''}
+    OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-4o'}
+    GEMINI_API_KEY: ${env:GEMINI_API_KEY, ''}
+    GEMINI_MODEL: ${env:GEMINI_MODEL, 'gemini-2.0-flash'}
+    NVIDIA_API_KEY: ${env:NVIDIA_API_KEY, ''}
+    NVIDIA_BASE_URL: ${env:NVIDIA_BASE_URL, 'https://integrate.api.nvidia.com/v1'}
+    KIMI_MODEL: ${env:KIMI_MODEL, 'moonshotai/kimi-k2-instruct'}
+    OLLAMA_BASE_URL: ${env:OLLAMA_BASE_URL, 'http://localhost:11434'}
+    OLLAMA_MODEL: ${env:OLLAMA_MODEL, 'llama3.1'}
+  httpApi:
+    cors:
+      allowedOrigins:
+        - '*'
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - GET
+        - POST
+        - OPTIONS
+
+plugins:
+  - serverless-dotenv-plugin
+  - serverless-offline
+
+custom:
+  serverless-offline:
+    httpPort: 5001
+    lambdaPort: 5003
+    noPrependStageInUrl: true
+
+functions:
+  news:
+    handler: src/handlers/news.handler
+    events:
+      - httpApi:
+          path: /signals/news
+          method: get
+  technicals:
+    handler: src/handlers/technicals.handler
+    events:
+      - httpApi:
+          path: /signals/technicals
+          method: get
+  fiiDii:
+    handler: src/handlers/fiiDii.handler
+    events:
+      - httpApi:
+          path: /signals/fii-dii
+          method: get
+  options:
+    handler: src/handlers/options.handler
+    events:
+      - httpApi:
+          path: /signals/options
+          method: get
+  macro:
+    handler: src/handlers/macro.handler
+    events:
+      - httpApi:
+          path: /signals/macro
+          method: get
+  settings:
+    handler: src/handlers/settings.handler
+    events:
+      - httpApi:
+          path: /signals/settings
+          method: get
+  analyze:
+    handler: src/handlers/analyze.handler
+    timeout: 300
+    events:
+      - httpApi:
+          path: /signals/analyze
+          method: post
