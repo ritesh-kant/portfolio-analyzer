@@ -3,8 +3,7 @@
  * Holds the last imported set of holdings in process memory.
  * Sufficient for single-user local usage without MongoDB.
  */
-import type { Holding } from '@portfolio-analyzer/shared-types';
-import type { Transaction } from '@portfolio-analyzer/shared-types';
+import type { Holding, Transaction } from '@portfolio-analyzer/shared-types';
 
 const store: { holdings: Holding[]; transactions: Transaction[] } = {
   holdings: [],

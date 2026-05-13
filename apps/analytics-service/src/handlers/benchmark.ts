@@ -78,7 +78,12 @@ export async function handler(event: {
     });
   } catch (error) {
     // Fallback to hardcoded stub if MFAPI is unreachable
-    const result = calculateBenchmarkComparison(portfolioCurrentValue, investedAmount, 158.22, 176.31);
+    const result = calculateBenchmarkComparison(
+      portfolioCurrentValue,
+      investedAmount,
+      158.22,
+      176.31,
+    );
     return json(200, {
       ...result,
       benchmarkScheme: 'UTI Nifty 50 Index Fund Direct Growth (fallback)',

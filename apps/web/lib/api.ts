@@ -5,7 +5,8 @@ import type {
   TaxDashboardSummary,
 } from '@portfolio-analyzer/shared-types';
 
-const PORTFOLIO_API_BASE = process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE ?? 'http://localhost:3001';
+export const PORTFOLIO_API_BASE =
+  process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE ?? 'http://localhost:3001';
 const ANALYTICS_API_BASE = process.env.NEXT_PUBLIC_ANALYTICS_API_BASE ?? 'http://localhost:4001';
 
 export interface PortfolioSummaryResponse {
@@ -49,7 +50,10 @@ export async function fetchBenchmark(): Promise<BenchmarkComparison> {
   return fetchJson<BenchmarkComparison>(`${ANALYTICS_API_BASE}/analytics/benchmark`);
 }
 
-export async function fetchScore(alphaPct: number, holdings: Holding[]): Promise<PortfolioHealthScore> {
+export async function fetchScore(
+  alphaPct: number,
+  holdings: Holding[],
+): Promise<PortfolioHealthScore> {
   const params = new URLSearchParams({
     alphaPct: alphaPct.toFixed(4),
     holdings: encodeURIComponent(JSON.stringify(holdings)),
@@ -61,7 +65,9 @@ export async function fetchBenchmarkWithContext(
   currentValue: number,
   investedAmount: number,
   inceptionDate: string,
-): Promise<BenchmarkComparison & { benchmarkScheme?: string; benchmarkAsOf?: string; navLatest?: string }> {
+): Promise<
+  BenchmarkComparison & { benchmarkScheme?: string; benchmarkAsOf?: string; navLatest?: string }
+> {
   const params = new URLSearchParams({
     currentValue: currentValue.toFixed(2),
     investedAmount: investedAmount.toFixed(2),

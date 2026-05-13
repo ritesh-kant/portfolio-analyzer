@@ -28,6 +28,8 @@ export class GrowwCsvAdapter implements BrokerAdapter {
         investedAmount: row.investedAmount,
         currentValue: row.currentValue,
         sector: row.sector,
+        // TODO: Groww exports can include stocks and ETFs; infer assetType
+        //  from the `category` column once the mapping is confirmed.
         assetType: 'mf',
         broker: 'groww',
         asOf: new Date().toISOString(),
@@ -47,9 +49,7 @@ export function parseGrowwCsv(csv: string): GrowwRow[] {
   const lines = csv.split(/\r?\n/);
 
   // Find the row that starts the holdings table
-  const headerIdx = lines.findIndex((line) =>
-    line.trim().toLowerCase().startsWith('scheme name'),
-  );
+  const headerIdx = lines.findIndex((line) => line.trim().toLowerCase().startsWith('scheme name'));
 
   if (headerIdx === -1) {
     throw new Error(

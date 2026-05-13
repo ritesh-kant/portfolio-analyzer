@@ -12,8 +12,7 @@ export function HealthScoreCard({ score }: { score: PortfolioHealthScore }) {
         ? 'border-amber-700/20 bg-amber-50'
         : 'border-rose-700/20 bg-rose-50';
 
-  const scoreColor =
-    total >= 70 ? '#047857' : total >= 50 ? '#b45309' : '#b91c1c';
+  const scoreColor = total >= 70 ? '#047857' : total >= 50 ? '#b45309' : '#b91c1c';
 
   return (
     <div className={`rounded-2xl border p-4 shadow-card ${toneClass}`}>
@@ -29,15 +28,40 @@ export function HealthScoreCard({ score }: { score: PortfolioHealthScore }) {
       </div>
 
       <div className="mt-4 space-y-2">
-        <ScoreBar label="Diversification" value={breakdown.diversification} max={35} color={scoreColor} />
-        <ScoreBar label="Benchmark Performance" value={breakdown.benchmarkPerformance} max={35} color={scoreColor} />
-        <ScoreBar label="Risk Concentration" value={breakdown.riskConcentration} max={30} color={scoreColor} />
+        <ScoreBar
+          label="Diversification"
+          value={breakdown.diversification}
+          max={35}
+          color={scoreColor}
+        />
+        <ScoreBar
+          label="Benchmark Performance"
+          value={breakdown.benchmarkPerformance}
+          max={35}
+          color={scoreColor}
+        />
+        <ScoreBar
+          label="Risk Concentration"
+          value={breakdown.riskConcentration}
+          max={30}
+          color={scoreColor}
+        />
       </div>
     </div>
   );
 }
 
-function ScoreBar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
+function ScoreBar({
+  label,
+  value,
+  max,
+  color,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  color: string;
+}) {
   const pct = max === 0 ? 0 : Math.min((value / max) * 100, 100);
 
   return (

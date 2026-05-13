@@ -5,6 +5,7 @@ AI Portfolio Analytics Platform for Indian investors.
 ## Purpose
 
 This monorepo provides a lean MVP that helps users:
+
 - import portfolio holdings from brokers
 - compare portfolio performance vs Nifty 50 benchmark
 - view tax signals (LTCG/STCG and harvesting view)
@@ -57,15 +58,18 @@ flowchart LR
 ### 1) Web App
 
 Primary responsibility:
+
 - user interface and state orchestration
 
 Owns:
+
 - dashboard widgets and charts
 - tax screen visualization
 - CSV upload interaction
 - calling backend APIs and handling fallback states
 
 Does not own:
+
 - financial calculations
 - tax logic
 - broker normalization logic
@@ -73,15 +77,18 @@ Does not own:
 ### 2) Portfolio Service
 
 Primary responsibility:
+
 - ingest and expose holdings data
 
 Owns:
+
 - holdings retrieval endpoint
 - Groww CSV import endpoint
 - portfolio summary endpoint
 - broker adapter invocation for holdings data
 
 Does not own:
+
 - benchmark comparisons
 - scoring model
 - tax calculations
@@ -89,35 +96,42 @@ Does not own:
 ### 3) Analytics Service
 
 Primary responsibility:
+
 - compute analytics from portfolio context
 
 Owns:
+
 - benchmark comparison endpoint
 - portfolio health score endpoint
 - tax summary endpoint
 - MFAPI integration for Nifty 50 NAV history
 
 Does not own:
+
 - broker import ingestion
 - frontend presentation
 
 ## Package Responsibilities
 
 ### shared-types
+
 - source of truth for cross-service data contracts
 - minimizes drift between frontend and backend payloads
 
 ### broker-sdk
+
 - normalizes broker-specific response formats
 - includes Groww CSV parser for MVP import path
 - includes Zerodha holdings adapter
 
 ### analytics-core
+
 - benchmark math and alpha computation
 - portfolio health score calculation
 - independent of transport or framework details
 
 ### tax-core
+
 - deterministic FIFO lot matching
 - realized tax summary primitives
 - pure computation package (no API/web concerns)
@@ -125,11 +139,13 @@ Does not own:
 ## API Surface (Current)
 
 Portfolio Service:
+
 - GET /portfolio/holdings
 - POST /portfolio/import
 - GET /portfolio/summary
 
 Analytics Service:
+
 - GET /analytics/benchmark
 - GET /analytics/score
 - GET /analytics/tax

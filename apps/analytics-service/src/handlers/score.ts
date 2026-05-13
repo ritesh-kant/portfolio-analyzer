@@ -13,7 +13,9 @@ export async function handler(event: {
   // Falls back to a minimal default set so the endpoint always returns a score.
   let holdings: Holding[];
   try {
-    holdings = qs.holdings ? (JSON.parse(decodeURIComponent(qs.holdings)) as Holding[]) : defaultHoldings();
+    holdings = qs.holdings
+      ? (JSON.parse(decodeURIComponent(qs.holdings)) as Holding[])
+      : defaultHoldings();
   } catch {
     holdings = defaultHoldings();
   }

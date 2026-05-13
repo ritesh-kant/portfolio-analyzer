@@ -32,7 +32,8 @@ export async function handler() {
       return json(200, {
         ...result,
         source: 'sample',
-        message: 'No persisted transactions found. Import transactions via portfolio-service endpoint.',
+        message:
+          'No persisted transactions found. Import transactions via portfolio-service endpoint.',
       });
     }
 

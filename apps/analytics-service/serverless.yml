@@ -17,7 +17,7 @@ provider:
   stage: dev
   region: ap-south-1
   environment:
-    MONGODB_URI: mongodb://admin:admin123@localhost:27017/portfolio_analyzer?authSource=admin
+    MONGODB_URI: ${env:MONGODB_URI, 'mongodb://admin:admin123@localhost:27017/portfolio_analyzer?authSource=admin'}
     MFAPI_SCHEME_CODE: '120716'
   httpApi:
     cors:

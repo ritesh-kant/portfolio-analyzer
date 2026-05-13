@@ -2,14 +2,11 @@
 
 import { useRef, useState } from 'react';
 
+import { PORTFOLIO_API_BASE } from '@/lib/api';
+
 interface ImportCsvCardProps {
   onImported: (count: number) => void;
 }
-
-const PORTFOLIO_API_BASE =
-  typeof window !== 'undefined' && process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE
-    ? process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE
-    : 'http://localhost:3001';
 
 export function ImportCsvCard({ onImported }: ImportCsvCardProps) {
   const [status, setStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
@@ -75,7 +72,10 @@ export function ImportCsvCard({ onImported }: ImportCsvCardProps) {
     <div
       className={`rounded-2xl border-2 p-4 shadow-card transition-colors cursor-pointer select-none ${bgClass}`}
       onClick={() => inputRef.current?.click()}
-      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragging(true);
+      }}
       onDragLeave={() => setDragging(false)}
       onDrop={handleDrop}
     >
@@ -111,7 +111,11 @@ export function ImportCsvCard({ onImported }: ImportCsvCardProps) {
 function UploadIcon() {
   return (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 12V3m0 0L8 7m4-4 4 4" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 12V3m0 0L8 7m4-4 4 4"
+      />
     </svg>
   );
 }

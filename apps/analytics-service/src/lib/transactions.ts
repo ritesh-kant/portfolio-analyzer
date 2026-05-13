@@ -30,7 +30,12 @@ async function connectMongo(): Promise<typeof mongoose> {
     });
   }
 
-  return connectionPromise;
+  try {
+    return await connectionPromise;
+  } catch (error) {
+    connectionPromise = null; // allow retry on next invocation
+    throw error;
+  }
 }
 
 function toTransaction(doc: TransactionDoc): Transaction {

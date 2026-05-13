@@ -1,8 +1,9 @@
-"use client";
+'use client';
 
 import { useEffect } from 'react';
 
 import { ImportTransactionsCard } from '@/components/import-transactions-card';
+import { formatCurrency } from '@/lib/format';
 import { useTaxStore } from '@/store/tax-store';
 
 export default function TaxPage() {
@@ -21,9 +22,18 @@ export default function TaxPage() {
     <div className="space-y-4">
       <section className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-black/5 bg-panel px-3 py-2 text-xs text-ink/70 shadow-card">
         <p>
-          Data source: <span className="font-semibold text-ink">{source === 'live' ? 'Live APIs' : 'Fallback mocks'}</span>
+          Data source:{' '}
+          <span className="font-semibold text-ink">
+            {source === 'live' ? 'Live APIs' : 'Fallback mocks'}
+          </span>
         </p>
-        <p>{loading ? 'Refreshing...' : error ? 'Live services unavailable, using fallback.' : 'Synchronized'}</p>
+        <p>
+          {loading
+            ? 'Refreshing...'
+            : error
+              ? 'Live services unavailable, using fallback.'
+              : 'Synchronized'}
+        </p>
       </section>
 
       <section className="rounded-2xl border border-black/5 bg-panel p-4 shadow-card">
@@ -36,7 +46,10 @@ export default function TaxPage() {
             {formatCurrency(ltcgUsed)} / {formatCurrency(ltcgLimit)}
           </p>
           <div className="mt-2 h-2 w-full rounded-full bg-black/10">
-            <div className="h-2 rounded-full bg-accentWarm" style={{ width: `${Math.min(progress, 100)}%` }} />
+            <div
+              className="h-2 rounded-full bg-accentWarm"
+              style={{ width: `${Math.min(progress, 100)}%` }}
+            />
           </div>
           <p className="mt-2 text-sm text-ink/70">Remaining: {formatCurrency(remaining)}</p>
         </div>
@@ -59,7 +72,9 @@ export default function TaxPage() {
             >
               <p className="font-semibold">{row.symbol}</p>
               <p className="text-right text-sm text-ink/70">Qty {row.quantity}</p>
-              <p className="text-right font-semibold text-rose-700">-{formatCurrency(row.potentialLoss)}</p>
+              <p className="text-right font-semibold text-rose-700">
+                -{formatCurrency(row.potentialLoss)}
+              </p>
             </div>
           ))}
         </div>
@@ -81,12 +96,4 @@ function Card({ label, value }: { label: string; value: string }) {
       <p className="font-display text-2xl leading-tight">{value}</p>
     </div>
   );
-}
-
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(value);
 }

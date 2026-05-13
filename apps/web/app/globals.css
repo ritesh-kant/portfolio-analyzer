@@ -14,7 +14,8 @@ body {
 }
 
 .bg-grain {
-  background-image: radial-gradient(circle at 25% 20%, rgba(15, 118, 110, 0.14), transparent 45%),
+  background-image:
+    radial-gradient(circle at 25% 20%, rgba(15, 118, 110, 0.14), transparent 45%),
     radial-gradient(circle at 75% 5%, rgba(199, 90, 27, 0.15), transparent 38%),
     radial-gradient(circle at 50% 120%, rgba(23, 33, 42, 0.1), transparent 40%);
 }

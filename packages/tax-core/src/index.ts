@@ -64,6 +64,8 @@ export function calculateTaxSummary(transactions: Transaction[]): TaxDashboardSu
       ltcg: realizedLtcg,
       stcg: realizedStcg,
     },
+    // TODO: Calculate unrealized P&L by comparing current holdings prices
+    //  against their remaining lot cost basis.
     unrealized: {
       profits: 0,
       losses: 0,
@@ -71,6 +73,7 @@ export function calculateTaxSummary(transactions: Transaction[]): TaxDashboardSu
     ltcgExemptionUsed,
     ltcgExemptionLimit: LTCG_EXEMPTION_LIMIT,
     ltcgExemptionRemaining,
+    // TODO: Identify harvestable lots where unrealized loss can offset LTCG.
     harvestable: [],
   };
 }

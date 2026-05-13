@@ -180,7 +180,10 @@ export async function saveHoldings(
 
     return 'mongo';
   } catch (error) {
-    console.error('[MongoDB] Save failed, falling back to memory:', error instanceof Error ? error.message : error);
+    console.error(
+      '[MongoDB] Save failed, falling back to memory:',
+      error instanceof Error ? error.message : error,
+    );
     setMemoryHoldings(holdings);
     return 'memory';
   }
@@ -240,10 +243,7 @@ export async function loadTransactions(userKey = 'local-user'): Promise<{
 }> {
   try {
     await connectMongo();
-    const docs = await transactionCollection()
-      .find({ userKey })
-      .sort({ executedAt: 1 })
-      .toArray();
+    const docs = await transactionCollection().find({ userKey }).sort({ executedAt: 1 }).toArray();
 
     return {
       transactions: docs.map(toTransaction),
@@ -264,10 +264,7 @@ export async function loadSnapshots(userKey = 'local-user'): Promise<{
   try {
     await connectMongo();
 
-    const docs = await snapshotCollection()
-      .find({ userKey })
-      .sort({ capturedAt: 1 })
-      .toArray();
+    const docs = await snapshotCollection().find({ userKey }).sort({ capturedAt: 1 }).toArray();
 
     return {
       points: docs.map((d) => ({

@@ -2,14 +2,11 @@
 
 import { useRef, useState } from 'react';
 
+import { PORTFOLIO_API_BASE } from '@/lib/api';
+
 interface ImportTransactionsCardProps {
   onImported: (count: number) => void;
 }
-
-const PORTFOLIO_API_BASE =
-  typeof window !== 'undefined' && process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE
-    ? process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE
-    : 'http://localhost:3001';
 
 export function ImportTransactionsCard({ onImported }: ImportTransactionsCardProps) {
   const [status, setStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
@@ -74,18 +71,16 @@ export function ImportTransactionsCard({ onImported }: ImportTransactionsCardPro
         Required headers: symbol, quantity, price, side, executedAt (or executed_at), broker
       </p>
 
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".csv"
-        className="hidden"
-        onChange={onFileChange}
-      />
+      <input ref={inputRef} type="file" accept=".csv" className="hidden" onChange={onFileChange} />
 
       {status !== 'idle' ? (
         <p
           className={`mt-2 text-xs ${
-            status === 'success' ? 'text-emerald-700' : status === 'error' ? 'text-rose-700' : 'text-ink/70'
+            status === 'success'
+              ? 'text-emerald-700'
+              : status === 'error'
+                ? 'text-rose-700'
+                : 'text-ink/70'
           }`}
         >
           {status === 'uploading' ? 'Uploading…' : message}

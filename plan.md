@@ -4,11 +4,11 @@ Goal
 
 Build a simple portfolio analytics platform for Indian investors that:
 
-* Connects with Groww and Zerodha
-* Compares portfolio performance against index funds
-* Shows tax harvesting opportunities
-* Provides a simple portfolio health score
-* Works well on mobile devices
+- Connects with Groww and Zerodha
+- Compares portfolio performance against index funds
+- Shows tax harvesting opportunities
+- Provides a simple portfolio health score
+- Works well on mobile devices
 
 This MVP should be small, fast to build, and easy to iterate on.
 
@@ -20,23 +20,23 @@ Core MVP Features
 
 Supported Brokers
 
-* Groww
-* Zerodha
+- Groww
+- Zerodha
 
 Data To Fetch
 
-* Holdings
-* Quantity
-* Average buy price
-* Current price
-* Invested amount
-* Current value
+- Holdings
+- Quantity
+- Average buy price
+- Current price
+- Invested amount
+- Current value
 
 Notes
 
-* No authentication system initially
-* Single-user local usage is acceptable for MVP
-* Store broker tokens/config locally or via env variables initially
+- No authentication system initially
+- Single-user local usage is acceptable for MVP
+- Store broker tokens/config locally or via env variables initially
 
 ⸻
 
@@ -44,15 +44,15 @@ Notes
 
 Compare Portfolio Against
 
-* Nifty 50 Index Fund
+- Nifty 50 Index Fund
 
 Show
 
-* Portfolio return %
-* Benchmark return %
-* Difference %
-* Portfolio current value
-* Benchmark equivalent value
+- Portfolio return %
+- Benchmark return %
+- Difference %
+- Portfolio current value
+- Benchmark equivalent value
 
 Goal
 
@@ -68,19 +68,19 @@ Show
 
 Realized
 
-* LTCG
-* STCG
+- LTCG
+- STCG
 
 Unrealized
 
-* Unrealized profits
-* Unrealized losses
+- Unrealized profits
+- Unrealized losses
 
 Tax Harvesting
 
-* Remaining LTCG exemption
-* Potential losses that can offset profits
-* Holdings eligible for harvesting
+- Remaining LTCG exemption
+- Potential losses that can offset profits
+- Holdings eligible for harvesting
 
 ⸻
 
@@ -101,20 +101,20 @@ Diversification
 
 Checks:
 
-* sector concentration
-* stock concentration
+- sector concentration
+- stock concentration
 
 Benchmark Performance
 
 Checks:
 
-* underperforming or outperforming benchmark
+- underperforming or outperforming benchmark
 
 Risk Concentration
 
 Checks:
 
-* too much capital in single stock/sector
+- too much capital in single stock/sector
 
 ⸻
 
@@ -130,16 +130,16 @@ Frontend
 
 Stack
 
-* Next.js
-* Tailwind CSS
-* Zustand
-* TypeScript
+- Next.js
+- Tailwind CSS
+- Zustand
+- TypeScript
 
 Requirements
 
-* Mobile responsive
-* Mobile-first UI
-* Simple dashboard layout
+- Mobile responsive
+- Mobile-first UI
+- Simple dashboard layout
 
 ⸻
 
@@ -154,18 +154,18 @@ Backend
 
 Stack
 
-* Node.js
-* TypeScript
-* AWS Lambda
-* API Gateway
+- Node.js
+- TypeScript
+- AWS Lambda
+- API Gateway
 
 ⸻
 
 Services
 
 /services
-  /portfolio-service
-  /analytics-service
+/portfolio-service
+/analytics-service
 
 ⸻
 
@@ -173,7 +173,7 @@ Database
 
 Database
 
-* MongoDB
+- MongoDB
 
 ⸻
 
@@ -189,26 +189,26 @@ Infrastructure
 
 Stack
 
-* Terraform
-* Serverless Framework
-* AWS Cloud
+- Terraform
+- Serverless Framework
+- AWS Cloud
 
 ⸻
 
 Monorepo Structure
 
 /apps
-  /web
+/web
 /services
-  /portfolio-service
-  /analytics-service
+/portfolio-service
+/analytics-service
 /packages
-  /shared-types
-  /broker-sdk
-  /tax-core
-  /analytics-core
+/shared-types
+/broker-sdk
+/tax-core
+/analytics-core
 /infrastructure
-  /terraform
+/terraform
 
 ⸻
 
@@ -220,9 +220,9 @@ Step 1 — Setup Monorepo
 
 Setup:
 
-* Turborepo
-* PNPM
-* TypeScript
+- Turborepo
+- PNPM
+- TypeScript
 
 ⸻
 
@@ -230,14 +230,14 @@ Step 2 — Setup Frontend
 
 Setup:
 
-* Next.js
-* Tailwind CSS
-* Zustand
+- Next.js
+- Tailwind CSS
+- Zustand
 
 Create:
 
-* dashboard page
-* tax page
+- dashboard page
+- tax page
 
 ⸻
 
@@ -245,9 +245,9 @@ Step 3 — Setup Backend
 
 Setup:
 
-* Lambda handlers
-* API Gateway
-* local serverless development
+- Lambda handlers
+- API Gateway
+- local serverless development
 
 ⸻
 
@@ -255,9 +255,9 @@ Step 4 — Setup MongoDB
 
 Create collections:
 
-* holdings
-* transactions
-* portfolio_snapshots
+- holdings
+- transactions
+- portfolio_snapshots
 
 ⸻
 
@@ -267,8 +267,8 @@ Step 5 — Zerodha Integration
 
 Fetch:
 
-* holdings
-* positions
+- holdings
+- positions
 
 Normalize response structure.
 
@@ -278,8 +278,8 @@ Step 6 — Groww Integration
 
 Fetch:
 
-* holdings
-* positions
+- holdings
+- positions
 
 Normalize response structure.
 
@@ -290,13 +290,13 @@ Step 7 — Create Shared Holding Model
 Example:
 
 type Holding = {
-  symbol: string
-  quantity: number
-  averagePrice: number
-  currentPrice: number
-  investedAmount: number
-  currentValue: number
-  assetType: 'stock' | 'mf' | 'etf'
+symbol: string
+quantity: number
+averagePrice: number
+currentPrice: number
+investedAmount: number
+currentValue: number
+assetType: 'stock' | 'mf' | 'etf'
 }
 
 ⸻
@@ -307,10 +307,10 @@ Step 8 — Portfolio Dashboard
 
 Show:
 
-* invested amount
-* current value
-* total P&L
-* benchmark comparison
+- invested amount
+- current value
+- total P&L
+- benchmark comparison
 
 ⸻
 
@@ -318,12 +318,12 @@ Step 9 — Benchmark Engine
 
 Compare:
 
-* portfolio growth
-* Nifty 50 growth
+- portfolio growth
+- Nifty 50 growth
 
 Use:
 
-* CAGR or XIRR
+- CAGR or XIRR
 
 ⸻
 
@@ -331,9 +331,9 @@ Step 10 — Charts
 
 Add charts:
 
-* portfolio growth
-* allocation
-* benchmark comparison
+- portfolio growth
+- allocation
+- benchmark comparison
 
 Charts must work well on mobile.
 
@@ -345,10 +345,10 @@ Step 11 — FIFO Tax Engine
 
 Implement:
 
-* FIFO calculation
-* LTCG/STCG classification
-* realized gains
-* unrealized gains
+- FIFO calculation
+- LTCG/STCG classification
+- realized gains
+- unrealized gains
 
 ⸻
 
@@ -356,12 +356,12 @@ Step 12 — Tax Dashboard
 
 Show:
 
-* realized LTCG
-* realized STCG
-* unrealized gains/losses
-* remaining exemption
-* profitable holdings
-* loss-making holdings
+- realized LTCG
+- realized STCG
+- unrealized gains/losses
+- remaining exemption
+- profitable holdings
+- loss-making holdings
 
 ⸻
 
@@ -371,9 +371,9 @@ Create basic scoring logic.
 
 Factors:
 
-* diversification
-* concentration
-* benchmark performance
+- diversification
+- concentration
+- benchmark performance
 
 ⸻
 
@@ -381,17 +381,17 @@ Mobile Responsiveness Requirements
 
 Must Support
 
-* mobile devices first
-* responsive charts
-* responsive cards
-* sticky summary section
+- mobile devices first
+- responsive charts
+- responsive cards
+- sticky summary section
 
 ⸻
 
 Avoid
 
-* huge desktop-only tables
-* complex multi-column layouts
+- huge desktop-only tables
+- complex multi-column layouts
 
 ⸻
 
@@ -409,8 +409,8 @@ Benchmarking
 
 Benchmark calculations must:
 
-* use same time period
-* use correct portfolio cash flow timing
+- use same time period
+- use correct portfolio cash flow timing
 
 ⸻
 
@@ -426,17 +426,17 @@ Out Of Scope For MVP
 
 Do NOT build:
 
-* Authentication
-* Payments
-* AI chatbot
-* Mutual fund overlap analysis
-* Notifications
-* Real-time websocket updates
-* SQS/SNS workflows
-* Multi-user support
-* Social/community features
-* Options/F&O support
-* Stock recommendations
+- Authentication
+- Payments
+- AI chatbot
+- Mutual fund overlap analysis
+- Notifications
+- Real-time websocket updates
+- SQS/SNS workflows
+- Multi-user support
+- Social/community features
+- Options/F&O support
+- Stock recommendations
 
 ⸻
 
@@ -444,13 +444,13 @@ Suggested Future Features
 
 After MVP:
 
-* AI insights
-* Mutual fund overlap analysis
-* Advanced risk metrics
-* Tax optimization suggestions
-* Multi-broker portfolio merging
-* User authentication
-* Subscription plans
+- AI insights
+- Mutual fund overlap analysis
+- Advanced risk metrics
+- Tax optimization suggestions
+- Multi-broker portfolio merging
+- User authentication
+- Subscription plans
 
 ⸻
 
@@ -458,8 +458,8 @@ Primary Success Metric
 
 Users should immediately understand:
 
-* whether they are beating index investing
-* how much tax harvesting opportunity exists
-* whether their portfolio is healthy
+- whether they are beating index investing
+- how much tax harvesting opportunity exists
+- whether their portfolio is healthy
 
 within 2 minutes of opening the app.

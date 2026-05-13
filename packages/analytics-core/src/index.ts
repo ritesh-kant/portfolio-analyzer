@@ -46,8 +46,10 @@ export function calculateBenchmarkComparison(
   benchmarkStartNav: number,
   benchmarkEndNav: number,
 ): BenchmarkComparison {
-  const portfolioReturnPct = investedAmount === 0 ? 0 : (portfolioCurrentValue - investedAmount) / investedAmount;
-  const benchmarkReturnPct = benchmarkStartNav === 0 ? 0 : (benchmarkEndNav - benchmarkStartNav) / benchmarkStartNav;
+  const portfolioReturnPct =
+    investedAmount === 0 ? 0 : (portfolioCurrentValue - investedAmount) / investedAmount;
+  const benchmarkReturnPct =
+    benchmarkStartNav === 0 ? 0 : (benchmarkEndNav - benchmarkStartNav) / benchmarkStartNav;
   const benchmarkEquivalentValue = investedAmount * (1 + benchmarkReturnPct);
 
   return {
@@ -59,10 +61,7 @@ export function calculateBenchmarkComparison(
   };
 }
 
-export function calculateHealthScore(
-  holdings: Holding[],
-  alphaPct: number,
-): PortfolioHealthScore {
+export function calculateHealthScore(holdings: Holding[], alphaPct: number): PortfolioHealthScore {
   const totalValue = holdings.reduce((sum, h) => sum + h.currentValue, 0);
   const maxSingleWeight = holdings.reduce((max, h) => {
     const weight = totalValue === 0 ? 0 : h.currentValue / totalValue;

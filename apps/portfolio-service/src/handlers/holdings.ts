@@ -13,9 +13,10 @@ export async function handler() {
       source: holdings.length > 0 ? 'imported' : 'mock',
       storage: mode,
       holdings,
-      message: holdings.length === 0
-        ? 'No holdings found. Import a Groww CSV or set ZERODHA_API_KEY + ZERODHA_ACCESS_TOKEN.'
-        : `${holdings.length} holdings loaded from last import.`,
+      message:
+        holdings.length === 0
+          ? 'No holdings found. Import a Groww CSV or set ZERODHA_API_KEY + ZERODHA_ACCESS_TOKEN.'
+          : `${holdings.length} holdings loaded from last import.`,
     });
   }
 

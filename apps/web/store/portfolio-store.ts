@@ -78,18 +78,13 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
       const liveHoldings =
         holdingsResponse.holdings.length > 0 ? holdingsResponse.holdings : mockHoldings;
 
-      // Benchmark and score both depend on summary + holdings, fetch after
-      const [benchmark, score] = await Promise.all([
-        fetchBenchmarkWithContext(summary.currentValue, summary.investedAmount, INCEPTION_DATE),
-        fetchScore(
-          // Use computed alpha until benchmark returns; initial optimistic estimate
-          fallbackBenchmark.alphaPct,
-          liveHoldings,
-        ),
-      ]);
-
-      // Refetch score with real alpha
-      const finalScore = await fetchScore(benchmark.alphaPct, liveHoldings).catch(() => score);
+      // Fetch benchmark first so score uses the real alpha — avoids a wasted round-trip
+      const benchmark = await fetchBenchmarkWithContext(
+        summary.currentValue,
+        summary.investedAmount,
+        INCEPTION_DATE,
+      );
+      const finalScore = await fetchScore(benchmark.alphaPct, liveHoldings);
 
       const growthSeries = buildGrowthSeries(
         snapshotsResponse.points,
@@ -141,7 +136,6 @@ function buildGrowthSeries(
       month,
       portfolio: Math.round(p.portfolio),
       benchmark: Math.round(first.portfolio * (1 + (benchmarkGrowthRatio - 1) * progress)),
-      _ratio: totalGrowthRatio,
     };
   });
 }

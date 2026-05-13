@@ -23,4 +23,3 @@ const serverless = spawn('npx', ['serverless', 'offline'], {
 serverless.on('close', (code) => {
   process.exit(code);
 });
-

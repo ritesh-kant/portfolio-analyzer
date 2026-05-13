@@ -17,6 +17,7 @@ import {
 
 import { HealthScoreCard } from '@/components/health-score-card';
 import { ImportCsvCard } from '@/components/import-csv-card';
+import { formatCurrency } from '@/lib/format';
 import { usePortfolioStore } from '@/store/portfolio-store';
 
 const sectorPalette = ['#0f766e', '#c75a1b', '#3b5b92', '#766530', '#5d4f7d'];
@@ -47,11 +48,13 @@ export default function DashboardPage() {
   const [sortKey, setSortKey] = useState<'symbol' | 'invested' | 'current' | 'return'>('current');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const sectorMap = new Map<string, number>();
-  for (const h of holdings) {
-    sectorMap.set(h.sector ?? 'Other', (sectorMap.get(h.sector ?? 'Other') ?? 0) + h.currentValue);
-  }
-  const sectorData = [...sectorMap.entries()].map(([name, value]) => ({ name, value }));
+  const sectorData = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const h of holdings) {
+      map.set(h.sector ?? 'Other', (map.get(h.sector ?? 'Other') ?? 0) + h.currentValue);
+    }
+    return [...map.entries()].map(([name, value]) => ({ name, value }));
+  }, [holdings]);
   const sortedHoldings = useMemo(() => {
     const cloned = [...holdings];
     const dir = sortDir === 'asc' ? 1 : -1;
@@ -69,8 +72,10 @@ export default function DashboardPage() {
         return (a.currentValue - b.currentValue) * dir;
       }
 
-      const aRet = a.investedAmount === 0 ? 0 : (a.currentValue - a.investedAmount) / a.investedAmount;
-      const bRet = b.investedAmount === 0 ? 0 : (b.currentValue - b.investedAmount) / b.investedAmount;
+      const aRet =
+        a.investedAmount === 0 ? 0 : (a.currentValue - a.investedAmount) / a.investedAmount;
+      const bRet =
+        b.investedAmount === 0 ? 0 : (b.currentValue - b.investedAmount) / b.investedAmount;
       return (aRet - bRet) * dir;
     });
 
@@ -108,8 +113,16 @@ export default function DashboardPage() {
 
       {/* Hero metrics */}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Invested" value={formatCurrency(invested)} subtitle="Total deployed capital" />
-        <MetricCard label="Current" value={formatCurrency(current)} subtitle="Mark-to-market value" />
+        <MetricCard
+          label="Invested"
+          value={formatCurrency(invested)}
+          subtitle="Total deployed capital"
+        />
+        <MetricCard
+          label="Current"
+          value={formatCurrency(current)}
+          subtitle="Mark-to-market value"
+        />
         <MetricCard
           label="P&L"
           value={formatCurrency(pnl)}
@@ -145,7 +158,12 @@ export default function DashboardPage() {
                 <YAxis />
                 <Tooltip />
                 <Area type="monotone" dataKey="benchmark" stroke="#c75a1b" fill="#c75a1b22" />
-                <Area type="monotone" dataKey="portfolio" stroke="#0f766e" fill="url(#portfolioFill)" />
+                <Area
+                  type="monotone"
+                  dataKey="portfolio"
+                  stroke="#0f766e"
+                  fill="url(#portfolioFill)"
+                />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -157,7 +175,13 @@ export default function DashboardPage() {
           <div className="h-48 w-full">
             <ResponsiveContainer>
               <PieChart>
-                <Pie data={sectorData} dataKey="value" nameKey="name" innerRadius={46} outerRadius={72}>
+                <Pie
+                  data={sectorData}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius={46}
+                  outerRadius={72}
+                >
                   {sectorData.map((entry, index) => (
                     <Cell key={entry.name} fill={sectorPalette[index % sectorPalette.length]} />
                   ))}
@@ -250,7 +274,13 @@ export default function DashboardPage() {
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-ink/60">Return</p>
-                  <p className={linePnl >= 0 ? 'font-semibold text-emerald-700' : 'font-semibold text-rose-700'}>
+                  <p
+                    className={
+                      linePnl >= 0
+                        ? 'font-semibold text-emerald-700'
+                        : 'font-semibold text-rose-700'
+                    }
+                  >
                     {(linePnlPct >= 0 ? '+' : '') + linePnlPct.toFixed(2) + '%'}
                   </p>
                 </div>
@@ -288,12 +318,4 @@ function MetricCard({
       <p className="text-xs text-ink/70">{subtitle}</p>
     </div>
   );
-}
-
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(value);
 }
