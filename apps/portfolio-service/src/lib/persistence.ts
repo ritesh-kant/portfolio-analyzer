@@ -1,10 +1,3 @@
-import { config as loadEnv } from 'dotenv';
-import path from 'path';
-
-// Load .env from root directory
-const rootDir = path.resolve(__dirname, '../../../..');
-loadEnv({ path: path.join(rootDir, '.env') });
-
 import type { Holding, Transaction } from '@portfolio-analyzer/shared-types';
 import mongoose from 'mongoose';
 
@@ -64,6 +57,7 @@ let connectionPromise: Promise<typeof mongoose> | null = null;
 
 async function connectMongo(): Promise<typeof mongoose> {
   if (!MONGODB_URI) {
+    console.error('[MongoDB] MONGODB_URI env var is not set. Check your .env file.');
     throw new Error('MONGODB_URI is not set');
   }
 
@@ -72,12 +66,21 @@ async function connectMongo(): Promise<typeof mongoose> {
   }
 
   if (!connectionPromise) {
+    console.log('[MongoDB] Connecting to database...');
     connectionPromise = mongoose.connect(MONGODB_URI, {
       serverSelectionTimeoutMS: 3000,
     });
   }
 
-  return connectionPromise;
+  try {
+    const conn = await connectionPromise;
+    console.log('[MongoDB] Connected successfully');
+    return conn;
+  } catch (error) {
+    console.error('[MongoDB] Connection failed:', error instanceof Error ? error.message : error);
+    connectionPromise = null;
+    throw error;
+  }
 }
 
 function toHolding(doc: HoldingDoc): Holding {
@@ -177,8 +180,7 @@ export async function saveHoldings(
 
     return 'mongo';
   } catch (error) {
-    console.error('[Persistence] Failed to save to MongoDB:', error);
-    console.error('[Persistence] MONGODB_URI:', process.env.MONGODB_URI ? 'SET' : 'NOT SET');
+    console.error('[MongoDB] Save failed, falling back to memory:', error instanceof Error ? error.message : error);
     setMemoryHoldings(holdings);
     return 'memory';
   }

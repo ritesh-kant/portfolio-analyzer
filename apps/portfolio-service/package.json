@@ -4,7 +4,7 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "dev": "serverless offline",
+    "dev": "node dev.js",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

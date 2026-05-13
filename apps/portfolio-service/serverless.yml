@@ -16,6 +16,12 @@ provider:
   runtime: nodejs20.x
   stage: dev
   region: ap-south-1
+  environment:
+    MONGODB_URI: mongodb://admin:admin123@localhost:27017/portfolio_analyzer?authSource=admin
+    ZERODHA_API_KEY: ''
+    ZERODHA_API_SECRET: ''
+    ZERODHA_ACCESS_TOKEN: ''
+    MFAPI_SCHEME_CODE: '120716'
   httpApi:
     cors:
       allowedOrigins:
@@ -31,6 +37,7 @@ provider:
         - OPTIONS
 
 plugins:
+  - serverless-dotenv-plugin
   - serverless-offline
 
 custom:

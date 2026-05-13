@@ -21,6 +21,9 @@ importers:
       prettier:
         specifier: ^3.4.2
         version: 3.8.3
+      serverless-dotenv-plugin:
+        specifier: ^6.0.0
+        version: 6.0.0
       turbo:
         specifier: ^2.3.3
         version: 2.9.12
@@ -1479,6 +1482,14 @@ packages:
   dom-helpers@5.2.1:
     resolution: {integrity: sha512-nRCa7CK3VTrM2NmGkIy4cbK7IZlgBE/PYMn55rrXefr5xXDP0LdtfPnblFDoVdcAfslJ7or6iqAUnx0CCGIWQA==}
 
+  dotenv-expand@10.0.0:
+    resolution: {integrity: sha512-GopVGCpVS1UKH75VKHGuQFqS1Gusej0z4FyQkPdwjil2gNIv+LNsqBlboOzpJFZKVT95GkCyWJbBSdFEFUWI2A==}
+    engines: {node: '>=12'}
+
+  dotenv@16.6.1:
+    resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
+    engines: {node: '>=12'}
+
   dotenv@17.4.2:
     resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
     engines: {node: '>=12'}
@@ -2615,6 +2626,11 @@ packages:
     resolution: {integrity: sha512-AcM7dV/5ul4EekoQ29Agm5vri8JNqRyj39o0qpX6vDF2GZrtutZl5RwgD1XnZjiTAfncsJhMI48QQH3sN87YNA==}
     engines: {node: '>=10'}
     hasBin: true
+
+  serverless-dotenv-plugin@6.0.0:
+    resolution: {integrity: sha512-8tLVNwHfDO0sBz6+m+DLTZquRk0AZq9rzqk3kphm1iIWKfan9R7RKt4hdq3eQ0kmDoqzudjPYBEXAJ5bUNKeGQ==}
+    peerDependencies:
+      serverless: 1 || 2 || pre-3 || 3
 
   serverless-offline@14.6.0:
     resolution: {integrity: sha512-LpPycA5IT9cbp6nHgi+YAH0GohJT+iPaINosoq4zPZ18pELRBcNPaYGHWW6X6+/xJM4jPmnbT+JGoOXxn72jng==}
@@ -4663,6 +4679,10 @@ snapshots:
       '@babel/runtime': 7.29.2
       csstype: 3.2.3
 
+  dotenv-expand@10.0.0: {}
+
+  dotenv@16.6.1: {}
+
   dotenv@17.4.2: {}
 
   dunder-proto@1.0.1:
@@ -5979,6 +5999,12 @@ snapshots:
   semver@6.3.1: {}
 
   semver@7.8.0: {}
+
+  serverless-dotenv-plugin@6.0.0:
+    dependencies:
+      chalk: 4.1.2
+      dotenv: 16.6.1
+      dotenv-expand: 10.0.0
 
   serverless-offline@14.6.0(serverless@4.35.1):
     dependencies:
