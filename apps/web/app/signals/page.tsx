@@ -44,10 +44,6 @@ export default function SignalsPage() {
     void fetchSignalsMacro()
       .then((r) => setMacro(r.indicators))
       .catch(() => null);
-
-    void fetchSignalsNews()
-      .then((r) => setNews(r.articles))
-      .catch(() => null);
   }, []);
 
   async function handleAnalyze(e: React.FormEvent) {
@@ -58,11 +54,13 @@ export default function SignalsPage() {
     setError(null);
     setSignal(null);
     setTechnicals(null);
+    setNews([]);
 
-    // Fire analyze + technicals in parallel
-    const [signalResult, techResult] = await Promise.allSettled([
+    // Fire analyze + technicals + news in parallel
+    const [signalResult, techResult, newsResult] = await Promise.allSettled([
       analyzeSignal({ symbol: symbol.trim().toUpperCase(), exchange }),
       fetchSignalsTechnicals(symbol.trim().toUpperCase(), exchange),
+      fetchSignalsNews(symbol.trim().toUpperCase()),
     ]);
 
     if (signalResult.status === 'fulfilled') {
@@ -73,6 +71,10 @@ export default function SignalsPage() {
 
     if (techResult.status === 'fulfilled') {
       setTechnicals(techResult.value);
+    }
+
+    if (newsResult.status === 'fulfilled') {
+      setNews(newsResult.value.articles);
     }
 
     setLoading(false);

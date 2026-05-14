@@ -46,7 +46,11 @@ export async function handler(event: { body?: string }): Promise<ReturnType<type
 
   // Fetch all signals in parallel — failures return null, analysis continues
   const [newsResult, techResult, fiiResult, optResult, macroResult] = await Promise.allSettled([
-    parseHandlerResponse<NewsResponse>(() => newsHandler()),
+    parseHandlerResponse<NewsResponse>(() =>
+      newsHandler({
+        queryStringParameters: { symbol, companyName },
+      }),
+    ),
     parseHandlerResponse<TechnicalsResponse>(() =>
       technicalsHandler({ queryStringParameters: { symbol, exchange } }),
     ),

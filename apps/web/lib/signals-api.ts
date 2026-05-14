@@ -118,8 +118,14 @@ export async function fetchSignalsSettings(): Promise<SettingsResponse> {
   return fetchJson<SettingsResponse>(`${SIGNALS_API_BASE}/signals/settings`);
 }
 
-export async function fetchSignalsNews(): Promise<NewsResponse> {
-  return fetchJson<NewsResponse>(`${SIGNALS_API_BASE}/signals/news`);
+export async function fetchSignalsNews(symbol?: string, companyName?: string): Promise<NewsResponse> {
+  const params = new URLSearchParams();
+  if (symbol) params.append('symbol', symbol);
+  if (companyName) params.append('companyName', companyName);
+  const queryString = params.toString();
+  return fetchJson<NewsResponse>(
+    `${SIGNALS_API_BASE}/signals/news${queryString ? `?${queryString}` : ''}`,
+  );
 }
 
 export async function fetchSignalsTechnicals(

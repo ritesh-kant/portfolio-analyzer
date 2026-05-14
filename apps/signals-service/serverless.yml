@@ -81,6 +81,7 @@ functions:
           method: get
   macro:
     handler: src/handlers/macro.handler
+    timeout: 900
     events:
       - httpApi:
           path: /signals/macro
