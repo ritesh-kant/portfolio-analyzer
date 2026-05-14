@@ -39,6 +39,7 @@ export interface BenchmarkComparison {
   alphaPct: number;
   portfolioCurrentValue: number;
   benchmarkEquivalentValue: number;
+  history?: BenchmarkPoint[];
 }
 
 export interface TaxRealizedSummary {

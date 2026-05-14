@@ -39,6 +39,7 @@ interface SnapshotDoc {
 export interface SnapshotPoint {
   date: string;
   portfolio: number;
+  invested: number;
 }
 
 interface TransactionDoc {
@@ -266,11 +267,23 @@ export async function loadSnapshots(userKey = 'local-user'): Promise<{
 
     const docs = await snapshotCollection().find({ userKey }).sort({ capturedAt: 1 }).toArray();
 
+    // Group by day to avoid multiple points for the same day in the chart
+    const dailyPoints = new Map<string, { portfolio: number; invested: number }>();
+    for (const d of docs) {
+      const day = d.capturedAt.toISOString().slice(0, 10);
+      dailyPoints.set(day, { portfolio: d.currentValue, invested: d.investedAmount });
+    }
+
+    const points = [...dailyPoints.entries()]
+      .map(([date, data]) => ({
+        date,
+        portfolio: data.portfolio,
+        invested: data.invested,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
     return {
-      points: docs.map((d) => ({
-        date: d.capturedAt.toISOString().slice(0, 10),
-        portfolio: d.currentValue,
-      })),
+      points,
       mode: 'mongo',
     };
   } catch {

@@ -25,6 +25,7 @@ interface HoldingsResponse {
 export interface SnapshotPoint {
   date: string;
   portfolio: number;
+  invested: number;
 }
 
 interface SnapshotsResponse {

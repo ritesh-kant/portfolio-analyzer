@@ -75,6 +75,7 @@ export async function handler(event: {
       benchmarkAsOf: latestEntry?.date,
       navAtInception: navAtInception.toFixed(4),
       navLatest: latestNav.toFixed(4),
+      history: history.map(h => ({ date: parseDdmmYyyyToDate(h.date).toISOString().slice(0, 10), nav: parseFloat(h.nav) })),
     });
   } catch (error) {
     // Fallback to hardcoded stub if MFAPI is unreachable

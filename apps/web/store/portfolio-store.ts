@@ -90,6 +90,8 @@ export const usePortfolioStore = create<PortfolioStore>((set, get) => ({
         snapshotsResponse.points,
         benchmark.benchmarkReturnPct,
         summary.currentValue,
+        benchmark.history,
+        parseFloat(benchmark.navAtInception ?? '0'),
       );
 
       set({
@@ -115,17 +117,40 @@ function buildGrowthSeries(
   points: SnapshotPoint[],
   benchmarkReturnPct: number,
   currentValue: number,
+  benchmarkHistory?: { date: string; nav: number }[],
+  navAtInception?: number,
 ) {
   if (points.length === 0) {
     return mockGrowth;
   }
 
+  // Use real NAV history if available for a more accurate benchmark line
+  if (benchmarkHistory && benchmarkHistory.length > 0 && navAtInception) {
+    // Sort history oldest first to simplify searching
+    const sortedHistory = [...benchmarkHistory].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+    );
+
+    return points.map((p) => {
+      const month = new Date(p.date).toLocaleString('en-IN', { month: 'short' });
+      const navOnDate = findNavOnOrBefore(sortedHistory, p.date) || navAtInception;
+      const ratio = navOnDate / navAtInception;
+
+      return {
+        month,
+        portfolio: Math.round(p.portfolio),
+        // Benchmark equivalent = invested amount * benchmark growth ratio
+        benchmark: Math.round(p.invested * ratio),
+      };
+    });
+  }
+
+  // Fallback to linear interpolation if history is missing
   const first = points[0];
   if (!first || first.portfolio === 0) {
     return mockGrowth;
   }
 
-  const totalGrowthRatio = currentValue / first.portfolio;
   const benchmarkGrowthRatio = 1 + benchmarkReturnPct / 100;
 
   return points.map((p, idx) => {
@@ -135,7 +160,22 @@ function buildGrowthSeries(
     return {
       month,
       portfolio: Math.round(p.portfolio),
-      benchmark: Math.round(first.portfolio * (1 + (benchmarkGrowthRatio - 1) * progress)),
+      benchmark: Math.round(p.invested * (1 + (benchmarkGrowthRatio - 1) * progress)),
     };
   });
+}
+
+function findNavOnOrBefore(history: { date: string; nav: number }[], targetDate: string): number | null {
+  const target = new Date(targetDate).getTime();
+  let bestNav: number | null = null;
+
+  for (const entry of history) {
+    if (new Date(entry.date).getTime() <= target) {
+      bestNav = entry.nav;
+    } else {
+      break; // History is sorted oldest first
+    }
+  }
+
+  return bestNav;
 }

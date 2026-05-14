@@ -154,9 +154,27 @@ export default function DashboardPage() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#00000014" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip />
+                <XAxis
+                  dataKey="month"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  dy={10}
+                />
+                <YAxis
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(val) => `₹${(val / 1000).toFixed(0)}k`}
+                />
+                <Tooltip
+                  formatter={(value: number) => [formatCurrency(value), '']}
+                  contentStyle={{
+                    borderRadius: '12px',
+                    border: 'none',
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.1)',
+                  }}
+                />
                 <Area type="monotone" dataKey="benchmark" stroke="#c75a1b" fill="#c75a1b22" />
                 <Area
                   type="monotone"
