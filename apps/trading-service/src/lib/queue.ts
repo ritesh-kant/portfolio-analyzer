@@ -30,8 +30,9 @@ class LocalQueueService implements QueueService {
   }
 
   async dispatch(payload: PipelineRunPayload): Promise<void> {
+    let res: Response;
     try {
-      const res = await fetch(`${this.url}/pipeline/run`, {
+      res = await fetch(`${this.url}/pipeline/run`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -39,15 +40,14 @@ class LocalQueueService implements QueueService {
         },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        console.error('[QueueService/local] Signal engine returned %d: %s', res.status, text);
-      }
     } catch (err: unknown) {
-      console.error(
-        '[QueueService/local] Signal engine unreachable:',
-        err instanceof Error ? err.message : String(err),
+      throw new Error(
+        `[QueueService/local] Signal engine unreachable at ${this.url}: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`[QueueService/local] Signal engine returned ${res.status}: ${text}`);
     }
   }
 }

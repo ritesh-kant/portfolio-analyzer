@@ -74,7 +74,16 @@ export async function triggerPipelineRun(opts?: {
   });
 
   const queue = createQueueService();
-  void queue.dispatch({ run_id: runId, date, ai_provider: aiProvider });
+  try {
+    await queue.dispatch({ run_id: runId, date, ai_provider: aiProvider });
+  } catch (err: unknown) {
+    // Clean up the pending document so it doesn't linger
+    await db.pipelineRuns().updateOne(
+      { run_id: runId },
+      { $set: { status: 'failed', error_summary: String(err), updatedAt: new Date() } },
+    );
+    throw err;
+  }
 
   console.log(`[orchestrator] triggered run_id=${runId} date=${date} provider=${aiProvider}`);
   return { run_id: runId, date, ai_provider: aiProvider, skipped: false };
