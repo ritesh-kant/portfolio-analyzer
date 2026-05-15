@@ -1,0 +1,64 @@
+service: signal-engine
+frameworkVersion: '4'
+
+# Heavy Python deps (pandas, yfinance, langgraph) exceed the 250 MB zip limit.
+# Deploy as a Docker container image pushed to ECR.
+build:
+  esbuild: false  # Python — no esbuild
+
+provider:
+  name: aws
+  region: ${env:AWS_REGION, 'ap-south-1'}
+  stage: ${opt:stage, 'dev'}
+  memorySize: 2048
+  timeout: 900  # max Lambda timeout; pipeline can take ~10 min
+  logRetentionInDays: 14
+
+  ecr:
+    images:
+      signal-engine:
+        path: ./           # build context — uses Dockerfile at repo root of this app
+        platform: linux/amd64
+
+  environment:
+    MONGODB_URI: ${ssm:/portfolio-analyzer/${sls:stage}/MONGODB_URI}
+    SIGNAL_ENGINE_API_KEY: ${ssm:/portfolio-analyzer/${sls:stage}/SIGNAL_ENGINE_API_KEY}
+    AI_PROVIDER: ${env:AI_PROVIDER, 'anthropic'}
+    ANTHROPIC_API_KEY: ${ssm:/portfolio-analyzer/${sls:stage}/ANTHROPIC_API_KEY, ''}
+    OPENAI_API_KEY: ${ssm:/portfolio-analyzer/${sls:stage}/OPENAI_API_KEY, ''}
+    GEMINI_API_KEY: ${ssm:/portfolio-analyzer/${sls:stage}/GEMINI_API_KEY, ''}
+    TRADING_MODE: ${env:TRADING_MODE, 'paper'}
+    ALERT_WEBHOOK_URL: ${env:ALERT_WEBHOOK_URL, ''}
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - ssm:GetParameter
+            - ssm:GetParameters
+          Resource: arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/portfolio-analyzer/${sls:stage}/*
+
+plugins:
+  - serverless-dotenv-plugin
+
+custom:
+  serverless-offline:
+    httpPort: 8000
+
+functions:
+  api:
+    image:
+      name: signal-engine
+    events:
+      - httpApi:
+          path: /health
+          method: get
+      - httpApi:
+          path: /pipeline/run
+          method: post
+    description: Signal-engine FastAPI (Mangum ASGI adapter)
+    # Override handler for container images — Mangum entry point
+    environment:
+      # Lambda sets AWS_LAMBDA_FUNCTION_NAME; secrets.py uses this to activate SSM
+      AWS_SECRETS_ENABLED: 'true'

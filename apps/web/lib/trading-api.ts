@@ -42,8 +42,14 @@ export interface Signal {
   base_score: number;
   llm_bonus: number;
   triggered_signals: string[];
+  weak_signals?: string[];
   reasoning: string;
   entry_price: number;
+  target_pct?: number;
+  stop_pct?: number;
+  r_r_ratio?: number;
+  holding_days?: number;
+  signal_scores?: Record<string, number>;
   rsi?: number;
   macd_hist?: number;
   above_ema20?: boolean;
@@ -96,6 +102,7 @@ export interface NewsArticle {
   url: string;
   source: string;
   sentiment: 'positive' | 'negative' | 'neutral';
+  tier?: 1 | 2 | 3;
   affected_sectors: string[];
   affected_stocks: string[];
   summary?: string;
@@ -111,7 +118,17 @@ export interface PortfolioSnapshot {
   wins: number;
 }
 
+export interface DashboardData {
+  latest_run?: PipelineRun;
+  signals: Signal[];
+  open_orders: Order[];
+  portfolio: Portfolio | null;
+  recent_news: NewsArticle[];
+}
+
 // ─── API calls ────────────────────────────────────────────────────────────────
+
+export const fetchDashboard = () => get<DashboardData>('/trading/dashboard');
 
 export const fetchPortfolio = () => get<Portfolio>('/trading/portfolio');
 

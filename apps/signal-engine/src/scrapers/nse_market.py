@@ -10,6 +10,8 @@ import httpx
 import pandas as pd
 import yfinance as yf
 
+from ._retry import with_retry
+
 logger = logging.getLogger(__name__)
 
 _NSE_HEADERS = {
@@ -70,7 +72,8 @@ def fetch_nifty_vix_sync() -> dict[str, Any]:
 
 async def fetch_fii_dii() -> dict[str, Any]:
     """Fetch today's FII/DII net equity flows from NSE. Returns {} on failure."""
-    try:
+
+    async def _do() -> dict[str, Any]:
         async with httpx.AsyncClient(
             headers=_NSE_HEADERS, timeout=_TIMEOUT, follow_redirects=True
         ) as client:
@@ -91,6 +94,8 @@ async def fetch_fii_dii() -> dict[str, Any]:
         logger.info("fii_dii_fetched fii=%s dii=%s", fii_net, dii_net)
         return {"fii_net_crore": fii_net, "dii_net_crore": dii_net}
 
-    except Exception as exc:
-        logger.warning("fii_dii_fetch_failed error=%s", exc)
+    result = await with_retry(_do, max_attempts=3, base_delay=2.0, label="nse:fii_dii")
+    if result is None:
+        logger.warning("fii_dii_fetch_failed exhausted retries")
         return {}
+    return result

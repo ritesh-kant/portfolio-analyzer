@@ -29,8 +29,10 @@ provider:
     POSITION_SIZE_PCT: ${env:POSITION_SIZE_PCT, '12'}
     QUEUE_PROVIDER: ${env:QUEUE_PROVIDER, 'local'}
     REDIS_URL: ${env:REDIS_URL, 'redis://localhost:6379'}
+    SQS_QUEUE_URL: ${env:SQS_QUEUE_URL, ''}
     AI_PROVIDER: ${env:AI_PROVIDER, 'anthropic'}
     ALERT_WEBHOOK_URL: ${env:ALERT_WEBHOOK_URL, ''}
+    AWS_REGION_NAME: ${env:AWS_REGION, 'ap-south-1'}
   httpApi:
     cors:
       allowedOrigins:
@@ -42,6 +44,18 @@ provider:
         - GET
         - POST
         - OPTIONS
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource:
+            - !GetAtt PipelineRunQueue.Arn
 
 plugins:
   - serverless-dotenv-plugin
@@ -151,3 +165,47 @@ functions:
       - httpApi:
           path: /trading/runs/schedule
           method: post
+
+  # SQS consumer — only active when QUEUE_PROVIDER=sqs
+  # Receives pipeline-run messages and forwards to signal-engine container.
+  pipelineConsumer:
+    handler: src/handlers/pipelineConsumer.handler
+    timeout: 60
+    reservedConcurrency: 1  # one pipeline at a time
+    events:
+      - sqs:
+          arn: !GetAtt PipelineRunQueue.Arn
+          batchSize: 1
+          enabled: ${strToBool(${env:QUEUE_PROVIDER, 'local'} == 'sqs')}
+
+resources:
+  Resources:
+    PipelineRunQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        # FIFO ensures at-most-once delivery and dedup via run_id
+        QueueName: pipeline-runs-${sls:stage}.fifo
+        FifoQueue: true
+        ContentBasedDeduplication: false
+        MessageRetentionPeriod: 86400  # 24 h
+        VisibilityTimeout: 120         # > pipelineConsumer timeout
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt PipelineRunDLQ.Arn
+          maxReceiveCount: 3
+
+    PipelineRunDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: pipeline-runs-dlq-${sls:stage}.fifo
+        FifoQueue: true
+        MessageRetentionPeriod: 604800  # 7 days
+
+  Outputs:
+    PipelineRunQueueUrl:
+      Value: !Ref PipelineRunQueue
+      Export:
+        Name: ${sls:stage}-PipelineRunQueueUrl
+    PipelineRunQueueArn:
+      Value: !GetAtt PipelineRunQueue.Arn
+      Export:
+        Name: ${sls:stage}-PipelineRunQueueArn

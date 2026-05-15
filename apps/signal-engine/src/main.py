@@ -2,10 +2,16 @@
 
 import asyncio
 import logging
+import os
 from datetime import date as _date
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
+
+# Pull secrets from SSM before Pydantic-settings reads env vars (Lambda only).
+from .secrets import bootstrap_secrets
+
+bootstrap_secrets(stage=os.getenv("STAGE", "dev"))
 
 from .config import Settings
 from .db.client import close_client, get_db

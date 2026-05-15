@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
 import {
   Area,
   AreaChart,
@@ -43,6 +43,9 @@ const AGENT_LABELS: Record<string, string> = {
   technical_agent: 'Tech', market_agent: 'Market', guard_agent: 'Guard',
   signal_agent: 'Signals', order_agent: 'Orders', audit_agent: 'Audit',
 };
+
+const POLL_ACTIVE_MS = 30_000;
+const POLL_IDLE_MS = 5 * 60 * 1000;
 
 type TabId = 'overview' | 'signals' | 'orders' | 'analytics';
 type SigDir = 'all' | 'BUY' | 'SELL';
@@ -367,6 +370,7 @@ function SignalsTab({ signals }: { signals: Signal[] }) {
                 <th className="px-4 py-3 text-left font-semibold">Confidence</th>
                 <th className="px-4 py-3 text-left font-semibold">Signals</th>
                 <th className="px-4 py-3 text-right font-semibold">Entry ₹</th>
+                <th className="px-4 py-3 text-right font-semibold">Target</th>
                 <th className="px-4 py-3 text-left font-semibold">Status</th>
               </tr>
             </thead>
@@ -375,9 +379,8 @@ function SignalsTab({ signals }: { signals: Signal[] }) {
                 const key = s._id ?? `${s.run_id}-${s.symbol}`;
                 const isExpanded = expanded === key;
                 return (
-                  <>
+                  <Fragment key={key}>
                     <tr
-                      key={key}
                       className="cursor-pointer border-b border-black/5 last:border-0 hover:bg-black/[0.02]"
                       onClick={() => setExpanded(isExpanded ? null : key)}
                     >
@@ -422,6 +425,11 @@ function SignalsTab({ signals }: { signals: Signal[] }) {
                           ? `₹${s.entry_price.toLocaleString('en-IN')}`
                           : '—'}
                       </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-emerald-700">
+                        {s.target_pct !== undefined
+                          ? `+${s.target_pct.toFixed(1)}%`
+                          : '—'}
+                      </td>
                       <td className="px-4 py-3">
                         {s.order_placed ? (
                           <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
@@ -440,7 +448,7 @@ function SignalsTab({ signals }: { signals: Signal[] }) {
                     </tr>
                     {isExpanded && (
                       <tr key={`${key}-expand`} className="border-b border-black/5 bg-black/[0.015]">
-                        <td colSpan={6} className="px-4 pb-3 pt-1">
+                        <td colSpan={7} className="px-4 pb-3 pt-1">
                           <p className="text-xs font-semibold text-ink/50">LLM Reasoning</p>
                           <p className="mt-1 text-xs leading-relaxed text-ink/70">
                             {s.reasoning || 'No reasoning recorded.'}
@@ -476,7 +484,7 @@ function SignalsTab({ signals }: { signals: Signal[] }) {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -713,23 +721,26 @@ function OverviewTab({
                 </span>
               )}
             </div>
-            <div className="flex flex-wrap items-center gap-0.5">
-              {AGENTS.map((agent, i) => {
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-9">
+              {AGENTS.map((agent) => {
                 const status = latestRun.agent_statuses[agent] ?? 'pending';
                 const ms = latestRun.agent_timings[agent];
                 return (
-                  <span key={agent} className="flex items-center gap-0.5">
-                    <span
-                      className="flex flex-col items-center gap-1"
-                      title={`${agent}: ${status}${ms ? ` (${(ms / 1000).toFixed(1)}s)` : ''}`}
-                    >
-                      <AgentDot status={status} />
-                      <span className="text-[9px] text-ink/40">{AGENT_LABELS[agent]}</span>
+                  <div
+                    key={agent}
+                    className="flex flex-col items-center gap-1.5 rounded-xl border border-black/5 bg-bg px-2 py-3 text-center"
+                    title={`${agent}: ${status}${ms ? ` (${(ms / 1000).toFixed(1)}s)` : ''}`}
+                  >
+                    <AgentDot status={status} />
+                    <span className="text-[10px] font-semibold text-ink/70">
+                      {AGENT_LABELS[agent]}
                     </span>
-                    {i < AGENTS.length - 1 && (
-                      <span className="mb-3 text-[10px] text-black/20">→</span>
-                    )}
-                  </span>
+                    <span className="text-[9px] text-ink/40 tabular-nums">
+                      {status === 'done' && ms
+                        ? `${(ms / 1000).toFixed(1)}s`
+                        : status}
+                    </span>
+                  </div>
                 );
               })}
             </div>
@@ -783,17 +794,32 @@ function OverviewTab({
                 >
                   {article.headline}
                 </a>
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                    article.sentiment === 'positive'
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : article.sentiment === 'negative'
-                      ? 'bg-rose-100 text-rose-700'
-                      : 'bg-black/5 text-ink/50'
-                  }`}
-                >
-                  {article.sentiment}
-                </span>
+                <div className="flex shrink-0 items-center gap-1">
+                  {article.tier && (
+                    <span
+                      className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                        article.tier === 1
+                          ? 'bg-accent/10 text-accent'
+                          : article.tier === 2
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-black/5 text-ink/50'
+                      }`}
+                    >
+                      T{article.tier}
+                    </span>
+                  )}
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      article.sentiment === 'positive'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : article.sentiment === 'negative'
+                        ? 'bg-rose-100 text-rose-700'
+                        : 'bg-black/5 text-ink/50'
+                    }`}
+                  >
+                    {article.sentiment}
+                  </span>
+                </div>
               </div>
               <p className="mt-0.5 text-xs text-ink/50">
                 {article.source}
@@ -829,7 +855,6 @@ export default function TradingPage() {
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const analyticsLoadedRef = useRef(false);
-  const ordersLoadedRef = useRef(false);
 
   const loadAll = useCallback(async () => {
     const [pRes, sRes, oRes, rRes, nRes] = await Promise.allSettled([
@@ -855,19 +880,21 @@ export default function TradingPage() {
     } catch {}
   }, []);
 
-  // Polling when pipeline is active
+  // Polling: 30s when active, 5min when idle — always running
   useEffect(() => {
     const latestRun = runs[0];
     const isActive =
       latestRun?.status === 'running' || latestRun?.status === 'pending';
-    if (isActive && !pollRef.current) {
-      pollRef.current = setInterval(() => void loadAll(), 5000);
-    } else if (!isActive && pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
+    const ms = isActive ? POLL_ACTIVE_MS : POLL_IDLE_MS;
+
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(() => void loadAll(), ms);
+
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
     };
   }, [runs, loadAll]);
 

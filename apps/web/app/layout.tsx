@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
+import { NavLinks } from '../components/nav-links';
 
 import './globals.css';
 
@@ -20,30 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <p className="text-xs text-ink/70">Indian investor cockpit</p>
               </div>
               <nav className="flex items-center gap-2 rounded-full bg-panel p-1 shadow-card">
-                <Link
-                  href="/dashboard"
-                  className="rounded-full px-4 py-1.5 text-sm font-semibold transition hover:bg-black/5"
-                >
-                  Dashboard
-                </Link>
-                <Link
-                  href="/tax"
-                  className="rounded-full px-4 py-1.5 text-sm font-semibold transition hover:bg-black/5"
-                >
-                  Tax
-                </Link>
-                <Link
-                  href="/signals"
-                  className="rounded-full px-4 py-1.5 text-sm font-semibold transition hover:bg-black/5"
-                >
-                  Signals
-                </Link>
-                <Link
-                  href="/trading"
-                  className="rounded-full px-4 py-1.5 text-sm font-semibold transition hover:bg-black/5"
-                >
-                  Trading
-                </Link>
+                <NavLinks />
               </nav>
             </div>
           </header>

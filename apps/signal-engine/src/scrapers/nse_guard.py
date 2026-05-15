@@ -10,6 +10,8 @@ from typing import Any
 
 import httpx
 
+from ._retry import with_retry
+
 logger = logging.getLogger(__name__)
 
 _NSE_HEADERS = {
@@ -49,9 +51,10 @@ async def _nse_get(client: httpx.AsyncClient, url: str, params: dict | None = No
 
 async def fetch_asm_gsm_symbols() -> tuple[set[str], set[str]]:
     """Return (asm_symbols, gsm_symbols) as sets of NSE symbol strings."""
-    asm: set[str] = set()
-    gsm: set[str] = set()
-    try:
+
+    async def _do() -> tuple[set[str], set[str]]:
+        asm: set[str] = set()
+        gsm: set[str] = set()
         async with httpx.AsyncClient(
             headers=_NSE_HEADERS, timeout=_TIMEOUT, follow_redirects=True
         ) as client:
@@ -59,7 +62,6 @@ async def fetch_asm_gsm_symbols() -> tuple[set[str], set[str]]:
 
             try:
                 data = await _nse_get(client, _ASM_URL)
-                # ASM response: {"longterm": {"data": [...]}, "shortterm": {"data": [...]}}
                 for section in (data.values() if isinstance(data, dict) else [data]):
                     rows = section.get("data", []) if isinstance(section, dict) else section
                     for row in rows if isinstance(rows, list) else []:
@@ -72,7 +74,6 @@ async def fetch_asm_gsm_symbols() -> tuple[set[str], set[str]]:
 
             try:
                 data = await _nse_get(client, _GSM_URL)
-                # GSM response: flat list of objects with "symbol" key
                 for row in (data if isinstance(data, list) else data.get("data", [])):
                     if isinstance(row, dict):
                         sym = row.get("symbol") or row.get("Symbol", "")
@@ -81,11 +82,14 @@ async def fetch_asm_gsm_symbols() -> tuple[set[str], set[str]]:
             except Exception as exc:
                 logger.warning("gsm_fetch_failed error=%s", exc)
 
-    except Exception as exc:
-        logger.warning("asm_gsm_session_failed error=%s", exc)
+        logger.info("asm_gsm_fetched asm=%d gsm=%d", len(asm), len(gsm))
+        return asm, gsm
 
-    logger.info("asm_gsm_fetched asm=%d gsm=%d", len(asm), len(gsm))
-    return asm, gsm
+    result = await with_retry(_do, max_attempts=3, base_delay=2.0, label="nse:asm_gsm")
+    if result is None:
+        logger.warning("asm_gsm_fetch_failed exhausted retries")
+        return set(), set()
+    return result
 
 
 async def fetch_earnings_within_days(
@@ -93,11 +97,11 @@ async def fetch_earnings_within_days(
 ) -> dict[str, str]:
     """Return {nse_symbol: date_str} for stocks with results within `days` calendar days."""
     set_symbols = {s.replace(".NS", "").upper() for s in symbols}
-    upcoming: dict[str, str] = {}
     today = date.today()
     cutoff = today + timedelta(days=days)
 
-    try:
+    async def _do() -> dict[str, str]:
+        upcoming: dict[str, str] = {}
         async with httpx.AsyncClient(
             headers=_NSE_HEADERS, timeout=_TIMEOUT, follow_redirects=True
         ) as client:
@@ -118,8 +122,11 @@ async def fetch_earnings_within_days(
             if ex_date and today <= ex_date <= cutoff:
                 upcoming[sym] = ex_date_str
 
-    except Exception as exc:
-        logger.warning("earnings_calendar_fetch_failed error=%s", exc)
+        logger.info("earnings_upcoming count=%d", len(upcoming))
+        return upcoming
 
-    logger.info("earnings_upcoming count=%d", len(upcoming))
-    return upcoming
+    result = await with_retry(_do, max_attempts=3, base_delay=2.0, label="nse:earnings")
+    if result is None:
+        logger.warning("earnings_calendar_fetch_failed exhausted retries")
+        return {}
+    return result

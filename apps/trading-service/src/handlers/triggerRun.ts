@@ -1,10 +1,9 @@
 import { json } from '../lib/http.js';
 import { getTradingDb } from '../lib/db.js';
+import { createQueueService } from '../lib/queue.js';
 import crypto from 'crypto';
 
 export async function handler(event: { body?: string }): Promise<ReturnType<typeof json>> {
-  const SIGNAL_ENGINE_URL = process.env.SIGNAL_ENGINE_URL ?? 'http://localhost:8000';
-  const SIGNAL_ENGINE_API_KEY = process.env.SIGNAL_ENGINE_API_KEY ?? '';
   const AI_PROVIDER = process.env.AI_PROVIDER ?? 'anthropic';
 
   let body: { date?: string; ai_provider?: string } = {};
@@ -43,17 +42,9 @@ export async function handler(event: { body?: string }): Promise<ReturnType<type
     updatedAt: now,
   });
 
-  // Fire-and-forget: POST to signal engine (non-blocking)
-  fetch(`${SIGNAL_ENGINE_URL}/pipeline/run`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': SIGNAL_ENGINE_API_KEY,
-    },
-    body: JSON.stringify({ run_id: runId, date, ai_provider: aiProvider }),
-  }).catch((err: unknown) => {
-    console.error('[triggerRun] Signal engine unreachable:', err instanceof Error ? err.message : String(err));
-  });
+  // Dispatch to signal-engine via the configured queue provider (local HTTP or SQS).
+  const queue = createQueueService();
+  void queue.dispatch({ run_id: runId, date, ai_provider: aiProvider });
 
   return json(202, { run_id: runId, date, ai_provider: aiProvider, status: 'pending' });
 }

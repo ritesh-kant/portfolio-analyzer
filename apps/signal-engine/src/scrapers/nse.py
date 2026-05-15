@@ -12,6 +12,8 @@ from typing import Any
 
 import httpx
 
+from ._retry import with_retry
+
 logger = logging.getLogger(__name__)
 
 _NSE_HOME = "https://www.nseindia.com/"
@@ -46,12 +48,11 @@ def _make_hash(symbol: str, subject: str) -> str:
 
 async def fetch_nse_announcements() -> list[dict[str, Any]]:
     """Return today's NSE corporate announcements as normalised article dicts."""
-    try:
+
+    async def _do() -> list[dict[str, Any]]:
         async with httpx.AsyncClient(headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True) as client:
-            # Establish session to get cookies
             await client.get(_NSE_HOME)
             await asyncio.sleep(0.5)
-
             resp = await client.get(_NSE_ANN_URL, params=_PARAMS)
             resp.raise_for_status()
             data = resp.json()
@@ -81,6 +82,8 @@ async def fetch_nse_announcements() -> list[dict[str, Any]]:
         logger.info("nse_fetched count=%d", len(articles))
         return articles
 
-    except Exception as exc:
-        logger.warning("nse_fetch_failed error=%s", exc)
+    result = await with_retry(_do, max_attempts=3, base_delay=2.0, label="nse:announcements")
+    if result is None:
+        logger.warning("nse_fetch_failed exhausted retries")
         return []
+    return result

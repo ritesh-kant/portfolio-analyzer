@@ -14,6 +14,8 @@ from typing import Any
 import feedparser
 import httpx
 
+from ._retry import with_retry
+
 logger = logging.getLogger(__name__)
 
 RSS_FEEDS = [
@@ -102,15 +104,19 @@ async def _fetch_one(
     client: httpx.AsyncClient, feed_cfg: dict[str, str]
 ) -> list[dict[str, Any]]:
     source = feed_cfg["source"]
-    try:
+
+    async def _do() -> list[dict[str, Any]]:
         resp = await client.get(feed_cfg["url"])
         resp.raise_for_status()
         articles = _parse_feed_content(resp.text, source, feed_cfg["tier"])
         logger.info("rss_fetched source=%s count=%d", source, len(articles))
         return articles
-    except Exception as exc:
-        logger.warning("rss_fetch_failed source=%s error=%s", source, exc)
+
+    result = await with_retry(_do, max_attempts=3, base_delay=1.0, label=f"rss:{source}")
+    if result is None:
+        logger.warning("rss_fetch_failed source=%s exhausted retries", source)
         return []
+    return result
 
 
 async def fetch_all_rss() -> list[dict[str, Any]]:

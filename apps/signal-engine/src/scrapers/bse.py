@@ -11,6 +11,8 @@ from typing import Any
 
 import httpx
 
+from ._retry import with_retry
+
 logger = logging.getLogger(__name__)
 
 _BSE_URL = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
@@ -52,7 +54,8 @@ def _make_hash(news_id: str, scrip_code: str) -> str:
 
 async def fetch_bse_announcements() -> list[dict[str, Any]]:
     """Return today's BSE corporate announcements as normalised article dicts."""
-    try:
+
+    async def _do() -> list[dict[str, Any]]:
         async with httpx.AsyncClient(headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True) as client:
             resp = await client.get(_BSE_URL, params=_PARAMS)
             resp.raise_for_status()
@@ -88,6 +91,8 @@ async def fetch_bse_announcements() -> list[dict[str, Any]]:
         logger.info("bse_fetched count=%d", len(articles))
         return articles
 
-    except Exception as exc:
-        logger.warning("bse_fetch_failed error=%s", exc)
+    result = await with_retry(_do, max_attempts=3, base_delay=1.5, label="bse:announcements")
+    if result is None:
+        logger.warning("bse_fetch_failed exhausted retries")
         return []
+    return result

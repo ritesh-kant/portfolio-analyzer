@@ -36,10 +36,10 @@ class AuditAgent(BaseAgent):
             final_status = "completed"
 
         stats = {
-            "articles_fetched": len(state.raw_news),
-            "stocks_selected": len(state.selected_stocks),
-            "signals_generated": len(state.signals),
-            "orders_placed": len(state.orders),
+            "news_count": len(state.raw_news),
+            "signals_count": len(state.signals),
+            "orders_count": len(state.orders),
+            "errors_count": len(state.errors),
         }
         error_summary = "; ".join(state.errors) if state.errors else None
 
