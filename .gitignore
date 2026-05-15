@@ -8,3 +8,4 @@ dist
 coverage
 **/.serverless/
 **/__pycache__
+.claude
