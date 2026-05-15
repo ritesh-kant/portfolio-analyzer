@@ -28,7 +28,6 @@ provider:
     MAX_POSITIONS: ${env:MAX_POSITIONS, '8'}
     POSITION_SIZE_PCT: ${env:POSITION_SIZE_PCT, '12'}
     QUEUE_PROVIDER: ${env:QUEUE_PROVIDER, 'local'}
-    REDIS_URL: ${env:REDIS_URL, 'redis://localhost:6379'}
     SQS_QUEUE_URL: ${env:SQS_QUEUE_URL, ''}
     AI_PROVIDER: ${env:AI_PROVIDER, 'anthropic'}
     ALERT_WEBHOOK_URL: ${env:ALERT_WEBHOOK_URL, ''}

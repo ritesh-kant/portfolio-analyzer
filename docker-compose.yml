@@ -14,15 +14,6 @@ services:
     volumes:
       - mongo_data:/data/db
 
-  redis:
-    image: redis:7.2-alpine
-    container_name: portfolio-redis
-    restart: unless-stopped
-    ports:
-      - '6379:6379'
-    volumes:
-      - redis_data:/data
-
   mongo-express:
     image: mongo-express:1.0.2
     container_name: portfolio-mongo-express
@@ -39,4 +30,3 @@ services:
 
 volumes:
   mongo_data:
-  redis_data:
