@@ -24,8 +24,6 @@ from .agents import (
     audit_agent,
 )
 from ..providers.llm_factory import get_llm
-from ..db.client import get_db
-from ..db.repositories.pipeline_runs import PipelineRunsRepository
 
 
 def _after_guard(state: TradingState) -> str:
@@ -100,7 +98,6 @@ def _get_graph():
 
 async def run_pipeline(run_id: str, date: str, ai_provider: str) -> TradingState:
     """Execute the full pipeline and return the final TradingState."""
-    repo = PipelineRunsRepository(get_db())
     llm = get_llm(provider=ai_provider)
 
     initial_state = TradingState(
