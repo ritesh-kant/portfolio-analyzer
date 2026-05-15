@@ -66,6 +66,9 @@ custom:
     httpPort: 6002
     lambdaPort: 6004
     noPrependStageInUrl: true
+  sqsEnabled:
+    sqs: true
+    local: false
 
 functions:
   health:
@@ -176,7 +179,7 @@ functions:
       - sqs:
           arn: !GetAtt PipelineRunQueue.Arn
           batchSize: 1
-          enabled: ${strToBool(${env:QUEUE_PROVIDER, 'local'} == 'sqs')}
+          enabled: ${self:custom.sqsEnabled.${env:QUEUE_PROVIDER, 'local'}, false}
 
 resources:
   Resources:

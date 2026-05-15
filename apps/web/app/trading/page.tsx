@@ -877,7 +877,7 @@ export default function TradingPage() {
     try {
       const res = await fetchPortfolioHistory();
       setHistory(res);
-    } catch {}
+    } catch { /* ignore */ }
   }, []);
 
   // Polling: 30s when active, 5min when idle — always running

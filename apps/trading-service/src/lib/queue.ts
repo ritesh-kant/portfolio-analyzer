@@ -63,11 +63,7 @@ class SqsQueueService implements QueueService {
   async dispatch(payload: PipelineRunPayload): Promise<void> {
     // Dynamic import so the package is only required when this provider is active.
     // Install: pnpm add @aws-sdk/client-sqs --filter trading-service
-    const { SQSClient, SendMessageCommand } = await import(
-      '@aws-sdk/client-sqs' as string
-    ).catch(() => {
-      throw new Error('@aws-sdk/client-sqs is not installed — run: pnpm add @aws-sdk/client-sqs --filter trading-service');
-    }) as typeof import('@aws-sdk/client-sqs');
+    const { SQSClient, SendMessageCommand } = await import('@aws-sdk/client-sqs');
 
     const client = new SQSClient({ region: process.env.AWS_REGION ?? 'ap-south-1' });
     await client.send(
