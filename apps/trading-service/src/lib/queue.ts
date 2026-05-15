@@ -30,19 +30,25 @@ class LocalQueueService implements QueueService {
   }
 
   async dispatch(payload: PipelineRunPayload): Promise<void> {
-    await fetch(`${this.url}/pipeline/run`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': this.apiKey,
-      },
-      body: JSON.stringify(payload),
-    }).catch((err: unknown) => {
+    try {
+      const res = await fetch(`${this.url}/pipeline/run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': this.apiKey,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        console.error('[QueueService/local] Signal engine returned %d: %s', res.status, text);
+      }
+    } catch (err: unknown) {
       console.error(
         '[QueueService/local] Signal engine unreachable:',
         err instanceof Error ? err.message : String(err),
       );
-    });
+    }
   }
 }
 

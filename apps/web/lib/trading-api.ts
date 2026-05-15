@@ -130,7 +130,7 @@ export interface DashboardData {
 
 export const fetchDashboard = () => get<DashboardData>('/trading/dashboard');
 
-export const fetchPortfolio = () => get<Portfolio>('/trading/portfolio');
+export const fetchPortfolio = () => get<Portfolio | null>('/trading/portfolio');
 
 export const fetchPortfolioHistory = () =>
   get<{ snapshots: PortfolioSnapshot[]; initial_capital: number }>('/trading/portfolio/history');

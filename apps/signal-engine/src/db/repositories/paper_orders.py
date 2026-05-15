@@ -26,7 +26,7 @@ class PaperOrdersRepository(BaseRepository):
         return await cursor.to_list(length=None)  # type: ignore[arg-type]
 
     async def close_order(
-        self, order_id: str, exit_price: float, actual_return_pct: float, was_correct: bool
+        self, order_id: Any, exit_price: float, actual_return_pct: float, was_correct: bool
     ) -> None:
         await self.update_one(
             {"_id": order_id},

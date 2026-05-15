@@ -21,7 +21,12 @@ logger = logging.getLogger(__name__)
 RSS_FEEDS = [
     {
         "url": "https://economictimes.indiatimes.com/markets/rss.cms",
-        "source": "Economic Times",
+        "source": "Economic Times Markets",
+        "tier": "tier1",
+    },
+    {
+        "url": "https://economictimes.indiatimes.com/news/economy/rssfeeds/1373380680.cms",
+        "source": "Economic Times Economy",
         "tier": "tier1",
     },
     {
@@ -42,6 +47,21 @@ RSS_FEEDS = [
     {
         "url": "https://www.thehindubusinessline.com/markets/?service=rss",
         "source": "BusinessLine",
+        "tier": "tier2",
+    },
+    {
+        "url": "https://feeds.feedburner.com/ndtvprofit-latest",
+        "source": "NDTV Business",
+        "tier": "tier2",
+    },
+    {
+        "url": "https://news.google.com/rss/search?q=india+stock+market+NSE&hl=en-IN&gl=IN&ceid=IN:en",
+        "source": "Google News India Finance",
+        "tier": "tier2",
+    },
+    {
+        "url": "https://news.google.com/rss/search?q=global+markets+fed+rbi+rate&hl=en-IN&gl=IN&ceid=IN:en",
+        "source": "Google News Global Macro",
         "tier": "tier2",
     },
 ]

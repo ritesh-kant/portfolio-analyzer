@@ -5,8 +5,7 @@ export async function handler(): Promise<ReturnType<typeof json>> {
   try {
     const db = await getTradingDb();
     const portfolio = await db.virtualPortfolio().findOne({ portfolio_id: 'main' });
-    if (!portfolio) return json(404, { error: 'Portfolio not initialised yet' });
-    return json(200, portfolio);
+    return json(200, portfolio ?? null);
   } catch (error) {
     return json(500, { error: 'Failed to fetch portfolio', detail: error instanceof Error ? error.message : String(error) });
   }

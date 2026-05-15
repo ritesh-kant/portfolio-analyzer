@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from datetime import date as _date
+from datetime import date as _date, datetime, timezone
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -17,6 +17,7 @@ from .config import Settings
 from .db.client import close_client, get_db
 from .db.repositories.pipeline_runs import PipelineRunsRepository
 from .pipeline import run_pipeline
+from .pipeline.agents.monitor_agent import run_monitor
 
 logger = logging.getLogger(__name__)
 settings = Settings()
@@ -60,7 +61,12 @@ async def trigger_pipeline(
     ai_provider = body.ai_provider or settings.ai_provider
 
     repo = PipelineRunsRepository(get_db())
-    await repo.create(body.run_id, body.date, ai_provider)
+    # Document already exists (created by trading-service with status='pending').
+    # Just flip it to 'running'; avoid insert_one which would raise DuplicateKeyError.
+    await repo.update_one(
+        {"run_id": body.run_id},
+        {"$set": {"status": "running", "updatedAt": datetime.now(timezone.utc)}},
+    )
 
     background_tasks.add_task(_run_pipeline_task, body.run_id, body.date, ai_provider)
 
@@ -74,3 +80,18 @@ async def _run_pipeline_task(run_id: str, date: str, ai_provider: str) -> None:
         logger.exception("pipeline run %s failed: %s", run_id, exc)
         repo = PipelineRunsRepository(get_db())
         await repo.finalize(run_id, "failed", error_summary=str(exc))
+
+
+@app.post("/pipeline/monitor", status_code=202)
+async def trigger_monitor(background_tasks: BackgroundTasks) -> dict[str, str]:
+    """Scan open positions for stop-loss / target triggers. Fire-and-forget."""
+    background_tasks.add_task(_run_monitor_task)
+    return {"status": "accepted"}
+
+
+async def _run_monitor_task() -> None:
+    try:
+        summary = await run_monitor()
+        logger.info("monitor completed checked=%s closed=%s", summary.get("checked"), summary.get("closed"))
+    except Exception as exc:
+        logger.exception("monitor task failed: %s", exc)
