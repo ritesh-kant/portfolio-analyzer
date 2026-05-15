@@ -7,3 +7,4 @@ dist
 .env.local
 coverage
 **/.serverless/
+**/__pycache__

@@ -1,0 +1,96 @@
+"""NSE market data scraper: Nifty 50, India VIX (yfinance) + FII/DII net flows (NSE API).
+
+All functions gracefully return empty/None on any network failure.
+"""
+
+import logging
+from typing import Any
+
+import httpx
+import pandas as pd
+import yfinance as yf
+
+logger = logging.getLogger(__name__)
+
+_NSE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.nseindia.com/",
+}
+_TIMEOUT = httpx.Timeout(connect=8.0, read=12.0, write=5.0, pool=5.0)
+
+
+def _strip_commas(val: Any) -> float:
+    """Parse NSE string values like '1,23,456.78' or '-2,444.44'."""
+    try:
+        return float(str(val).replace(",", "").strip())
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def fetch_nifty_vix_sync() -> dict[str, Any]:
+    """Fetch Nifty 50 and India VIX via yfinance. Returns {} on failure."""
+    try:
+        data = yf.download(
+            ["^NSEI", "^INDIAVIX"],
+            period="5d",
+            auto_adjust=True,
+            progress=False,
+            threads=False,
+        )
+        if data.empty:
+            return {}
+
+        closes = data["Close"] if isinstance(data.columns, pd.MultiIndex) else data
+
+        nifty = closes.get("^NSEI", pd.Series(dtype=float)).dropna()
+        vix = closes.get("^INDIAVIX", pd.Series(dtype=float)).dropna()
+
+        if nifty.shape[0] < 2:
+            return {}
+
+        nifty_close = float(nifty.iloc[-1])
+        nifty_prev = float(nifty.iloc[-2])
+        nifty_change_pct = (nifty_close - nifty_prev) / nifty_prev * 100
+
+        return {
+            "nifty_close": round(nifty_close, 2),
+            "nifty_prev_close": round(nifty_prev, 2),
+            "nifty_change_pct": round(nifty_change_pct, 3),
+            "vix": round(float(vix.iloc[-1]), 2) if not vix.empty else None,
+        }
+    except Exception as exc:
+        logger.warning("nifty_vix_fetch_failed error=%s", exc)
+        return {}
+
+
+async def fetch_fii_dii() -> dict[str, Any]:
+    """Fetch today's FII/DII net equity flows from NSE. Returns {} on failure."""
+    try:
+        async with httpx.AsyncClient(
+            headers=_NSE_HEADERS, timeout=_TIMEOUT, follow_redirects=True
+        ) as client:
+            await client.get("https://www.nseindia.com/")
+            resp = await client.get("https://www.nseindia.com/api/fiidiiTradeReact")
+            resp.raise_for_status()
+            rows = resp.json()
+
+        fii_net = dii_net = None
+        for row in rows if isinstance(rows, list) else []:
+            category = str(row.get("category", "")).upper()
+            net = _strip_commas(row.get("netValue") or row.get("net_value") or 0)
+            if "FII" in category or "FPI" in category:
+                fii_net = net
+            elif "DII" in category:
+                dii_net = net
+
+        logger.info("fii_dii_fetched fii=%s dii=%s", fii_net, dii_net)
+        return {"fii_net_crore": fii_net, "dii_net_crore": dii_net}
+
+    except Exception as exc:
+        logger.warning("fii_dii_fetch_failed error=%s", exc)
+        return {}

@@ -38,6 +38,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 >
                   Signals
                 </Link>
+                <Link
+                  href="/trading"
+                  className="rounded-full px-4 py-1.5 text-sm font-semibold transition hover:bg-black/5"
+                >
+                  Trading
+                </Link>
               </nav>
             </div>
           </header>

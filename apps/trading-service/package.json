@@ -1,0 +1,24 @@
+{
+  "name": "trading-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "node dev.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@portfolio-analyzer/db": "workspace:*",
+    "@portfolio-analyzer/trading-types": "workspace:*",
+    "mongoose": "^8.9.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "serverless": "^4.5.0",
+    "serverless-dotenv-plugin": "^6.0.0",
+    "serverless-offline": "^14.4.0",
+    "typescript": "5.7.2"
+  }
+}

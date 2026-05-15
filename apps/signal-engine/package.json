@@ -1,0 +1,11 @@
+{
+  "name": "signal-engine",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "make dev",
+    "build": "echo 'Python: no build step required'",
+    "typecheck": "uv run mypy src",
+    "lint": "uv run ruff check src"
+  }
+}
