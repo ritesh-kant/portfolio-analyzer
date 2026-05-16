@@ -58,11 +58,14 @@ def fetch_nifty_vix_sync() -> dict[str, Any]:
         nifty_close = float(nifty.iloc[-1])
         nifty_prev = float(nifty.iloc[-2])
         nifty_change_pct = (nifty_close - nifty_prev) / nifty_prev * 100
+        nifty_5d_start = float(nifty.iloc[0])
+        nifty_5d_return = (nifty_close - nifty_5d_start) / nifty_5d_start * 100
 
         return {
             "nifty_close": round(nifty_close, 2),
             "nifty_prev_close": round(nifty_prev, 2),
             "nifty_change_pct": round(nifty_change_pct, 3),
+            "nifty_5d_return": round(nifty_5d_return, 3),
             "vix": round(float(vix.iloc[-1]), 2) if not vix.empty else None,
         }
     except Exception as exc:

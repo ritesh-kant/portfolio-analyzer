@@ -148,6 +148,13 @@ functions:
           path: /trading/news
           method: get
 
+  accuracy:
+    handler: src/handlers/accuracy.handler
+    events:
+      - httpApi:
+          path: /trading/accuracy
+          method: get
+
   # Daily scheduler — fires at 9:15 AM IST (3:45 AM UTC) Mon-Fri
   scheduler:
     handler: src/handlers/scheduler.handler

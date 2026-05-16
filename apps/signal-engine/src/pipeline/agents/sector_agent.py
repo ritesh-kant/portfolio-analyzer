@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 _SYSTEM_PROMPT = """\
 You are a sector analyst for Indian stock markets.
 Given today's classified news, identify the most impacted sectors.
+Each news line is prefixed with [HIGH], [MED], or [LOW] significance — weight your
+direction and score accordingly. A single [HIGH] item should outweigh several [LOW] items.
 Output ONLY a valid JSON array — no prose, no markdown.
 """
 
@@ -117,8 +119,11 @@ class SectorAgent(BaseAgent):
         if state.llm is None:
             sectors = _heuristic_sectors(articles)
         else:
+            # Weight each article line by significance so the LLM knows what to prioritise
+            sig_prefix = {"high": "[HIGH]", "medium": "[MED]", "low": "[LOW]"}
             news_lines = "\n".join(
-                f"- [{a.get('sentiment','neutral')}][{','.join(a.get('affected_sectors') or [])}] "
+                f"- {sig_prefix.get(a.get('significance','low'),'[LOW]')} "
+                f"[{a.get('sentiment','neutral')}][{','.join(a.get('affected_sectors') or [])}] "
                 f"{a.get('summary') or a['headline']}"
                 for a in articles[:50]  # cap to avoid context overflow
             )

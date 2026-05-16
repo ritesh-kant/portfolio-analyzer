@@ -117,6 +117,11 @@ class OrderAgent(BaseAgent):
                 )
                 continue
 
+            # Skip if an open position for this symbol already exists
+            if await orders_repo.has_open_position(symbol):
+                logger.info("order_agent duplicate_position symbol=%s already OPEN — skipping", symbol)
+                continue
+
             shares, position_value, kelly_frac = _calc_position(
                 confidence, total_value, entry_price, position_size_pct, cash
             )

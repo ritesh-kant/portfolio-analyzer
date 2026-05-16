@@ -32,22 +32,46 @@ logger = logging.getLogger(__name__)
 _CLASSIFY_BATCH = 15
 
 _SYSTEM_PROMPT = """\
-You are a financial news analyst for Indian stock markets (NSE/BSE).
-Classify market relevance and sentiment for each news article.
+You are a financial news analyst for Indian equity markets (NSE/BSE).
+Classify each headline for market relevance, sentiment, and impact.
+
+MARKET RELEVANCE — mark is_market_relevant=true ONLY if the article:
+  - Directly affects the price of one or more listed Indian companies, OR
+  - Describes a macro event that will move an entire sector (rate decision, budget, regulatory change), OR
+  - Is an earnings/results announcement or guidance update for a listed company.
+  Mark false for: general business news, global macro with no direct India equity impact,
+  political news without regulatory consequence, sports/entertainment, natural disasters
+  (unless they affect supply chains of listed companies).
+
+SIGNIFICANCE — score the likely price impact:
+  high   : earnings surprise, major M&A, RBI/SEBI policy, budget item, fraud/scam
+  medium : analyst upgrade/downgrade, sector trend, import/export data, management change
+  low    : routine corporate announcement, minor product launch, general market commentary
+
+CATALYST TYPE — pick one: earnings | regulation | macro | m_and_a | management |
+  product | legal | commodities | forex | other
+
+SECTORS — use ONLY these exact strings:
+  IT, Banking, Pharma, Auto, FMCG, Energy, Metals, Realty,
+  Infrastructure, Finance, Chemicals, Consumer, Telecom, Healthcare
+
+STOCKS — NSE symbols with .NS suffix (e.g. TCS.NS, INFY.NS). Leave empty if uncertain.
+
 Output ONLY a valid JSON array — no prose, no markdown.
 """
 
 _USER_TMPL = """\
-Classify each headline below. Return a JSON array of objects with these fields:
-  idx          (integer, 0-based index)
-  is_market_relevant  (boolean — true if directly impacts listed Indian stocks/sectors)
-  sentiment    ("positive" | "negative" | "neutral")
-  affected_sectors  (array of sector strings from: IT, Banking, Pharma, Auto, FMCG,
-                     Energy, Metals, Realty, Infrastructure, Finance, Chemicals,
-                     Consumer, Telecom, Healthcare)
-  affected_stocks   (array of NSE symbols with .NS suffix, e.g. ["TCS.NS","INFY.NS"])
-  significance ("high" | "medium" | "low")
-  summary      (one sentence ≤15 words)
+Classify each headline. Return a JSON array with one object per headline.
+
+Required fields per object:
+  idx               (integer, 0-based)
+  is_market_relevant (boolean)
+  sentiment         ("positive" | "negative" | "neutral")
+  affected_sectors  (array using only the valid sector strings)
+  affected_stocks   (array of NSE symbols with .NS suffix)
+  significance      ("high" | "medium" | "low")
+  catalyst_type     ("earnings" | "regulation" | "macro" | "m_and_a" | "management" | "product" | "legal" | "commodities" | "forex" | "other")
+  summary           (one sentence ≤15 words describing the market impact)
 
 Headlines:
 {headlines}
@@ -81,6 +105,7 @@ def _apply_classification(article: dict[str, Any], cls: dict[str, Any]) -> dict[
         "affected_sectors": cls.get("affected_sectors") or [],
         "affected_stocks": cls.get("affected_stocks") or [],
         "significance": cls.get("significance", "low"),
+        "catalyst_type": cls.get("catalyst_type", "other"),
         "summary": cls.get("summary", article["headline"][:80]),
     }
 
@@ -133,21 +158,28 @@ class NewsAgent(BaseAgent):
                         "affected_sectors": [],
                         "affected_stocks": [],
                         "significance": "low",
+                        "catalyst_type": "other",
                         "summary": article["headline"][:80],
                     }
                 )
 
-        # 4. Persist market-relevant articles
+        # 4. Persist market-relevant articles (all significance levels)
         market_relevant = [a for a in classified if a.get("is_market_relevant")]
         if market_relevant:
             await repo.bulk_insert(market_relevant)
         logger.info("news_saved count=%d", len(market_relevant))
 
-        # 5. Update state
+        # 5. Update state — classified_news only carries high/medium significance articles
+        # to avoid diluting sector scoring and signal scoring with low-quality noise.
+        actionable_news = [
+            a for a in market_relevant
+            if a.get("significance") in ("high", "medium")
+        ]
+        logger.info("news_actionable (high+med) count=%d", len(actionable_news))
         return state.model_copy(
             update={
                 "raw_news": raw_all,
-                "classified_news": market_relevant,
+                "classified_news": actionable_news,
             }
         )
 

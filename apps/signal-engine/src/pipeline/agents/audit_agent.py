@@ -40,6 +40,7 @@ class AuditAgent(BaseAgent):
             "signals_count": len(state.signals),
             "orders_count": len(state.orders),
             "errors_count": len(state.errors),
+            "blocked_count": len(state.guard_result.get("blocked", [])),
         }
         error_summary = "; ".join(state.errors) if state.errors else None
 
@@ -53,12 +54,23 @@ class AuditAgent(BaseAgent):
 
 
 async def _post_webhook(url: str, state: TradingState) -> None:
+    top_signals = sorted(state.signals, key=lambda s: s.get("confidence", 0), reverse=True)[:5]
     payload = {
         "run_id": state.run_id,
         "date": state.date,
-        "signals": len(state.signals),
-        "orders": len(state.orders),
+        "signals_total": len(state.signals),
+        "orders_placed": len(state.orders),
         "errors": state.errors,
+        "top_signals": [
+            {
+                "symbol": s["symbol"],
+                "confidence": s.get("confidence"),
+                "direction": s.get("direction"),
+                "entry_price": s.get("entry_price"),
+                "meets_threshold": s.get("meets_threshold"),
+            }
+            for s in top_signals
+        ],
     }
     try:
         async with httpx.AsyncClient(timeout=10) as client:

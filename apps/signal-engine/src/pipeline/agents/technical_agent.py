@@ -7,6 +7,7 @@ Each symbol is processed in a thread pool, all symbols run in parallel.
 import asyncio
 import logging
 import math
+from datetime import date as _date
 from typing import Any
 
 import pandas as pd
@@ -43,6 +44,19 @@ def _compute_indicators(symbol: str) -> dict[str, Any]:
         logger.warning("technical_agent insufficient_data symbol=%s bars=%d", symbol, len(df))
         return {}
 
+    # Staleness guard: last bar must be today or the previous trading day.
+    # On NSE holidays yfinance returns the prior session's data — if we let it
+    # through, change_pct_today and all indicators are computed on stale prices.
+    last_bar_date = df.index[-1].date() if hasattr(df.index[-1], "date") else df.index[-1]
+    today = _date.today()
+    days_stale = (today - last_bar_date).days
+    if days_stale > 1:
+        logger.warning(
+            "technical_agent stale_data symbol=%s last_bar=%s today=%s days_stale=%d — skipping",
+            symbol, last_bar_date, today, days_stale,
+        )
+        return {"stale": True, "last_data_date": str(last_bar_date)}
+
     # pandas-ta expects DataFrame with Open/High/Low/Close/Volume columns (case-insensitive)
     df.ta.rsi(length=14, append=True)
     df.ta.macd(fast=12, slow=26, signal=9, append=True)
@@ -56,6 +70,9 @@ def _compute_indicators(symbol: str) -> dict[str, Any]:
     prev_close = _safe_float(prev.get("Close"), close)
     change_pct = (close - prev_close) / prev_close * 100 if prev_close else 0.0
 
+    close_5d_ago = _safe_float(df["Close"].iloc[-5], close) if len(df) >= 5 else close
+    five_day_ret = (close - close_5d_ago) / close_5d_ago * 100 if close_5d_ago else 0.0
+
     vol_series = df["Volume"].tail(20)
     vol_avg = float(vol_series.mean()) if not vol_series.empty else 0.0
     vol_today = _safe_float(last.get("Volume"), 0.0)
@@ -68,6 +85,7 @@ def _compute_indicators(symbol: str) -> dict[str, Any]:
         "symbol": symbol,
         "close": round(close, 2),
         "change_pct_today": round(change_pct, 3),
+        "five_day_ret": round(five_day_ret, 3),
         "rsi": round(_safe_float(last.get("RSI_14"), 50.0), 2),
         "macd": round(_safe_float(last.get("MACD_12_26_9"), 0.0), 4),
         "macd_signal": round(_safe_float(last.get("MACDs_12_26_9"), 0.0), 4),

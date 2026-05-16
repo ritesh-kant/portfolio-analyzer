@@ -60,6 +60,11 @@ export interface TradingSignalDoc {
   volume_ratio?: number;
   meets_threshold: boolean;
   order_placed: boolean;
+  prompt_version?: string;       // semver string — set by signal_agent, enables A/B comparison
+  weak_signals?: string[];       // near-miss indicators that almost triggered
+  actual_return_pct?: number;    // filled by monitor_agent when position closes
+  was_correct?: boolean;         // true if exit_price > entry_price
+  outcome_date?: string;         // ISO date when position was closed
   createdAt: Date;
   updatedAt: Date;
 }
@@ -112,6 +117,7 @@ export interface PipelineRunStats {
   signals_count: number;
   orders_count: number;
   errors_count: number;
+  blocked_count: number;
 }
 
 export interface PipelineRunDoc {

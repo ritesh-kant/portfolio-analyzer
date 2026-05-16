@@ -14,19 +14,21 @@ Returns a summary dict for the /pipeline/monitor response.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import yfinance as yf
 
 from ...db.client import get_db
 from ...db.repositories.paper_orders import PaperOrdersRepository
+from ...db.repositories.trading_signals import TradingSignalsRepository
 from ...db.repositories.virtual_portfolio import VirtualPortfolioRepository
 from ...db.repositories.agent_logs import AgentLogsRepository
 
 logger = logging.getLogger(__name__)
 
 _AGENT_NAME = "monitor_agent"
+_MAX_POSITION_DAYS = 10   # force-close positions held longer than this
 
 
 async def _fetch_price(symbol: str) -> float | None:
@@ -49,11 +51,12 @@ async def _fetch_price(symbol: str) -> float | None:
 async def _close_position(
     orders_repo: PaperOrdersRepository,
     portfolio_repo: VirtualPortfolioRepository,
+    signals_repo: TradingSignalsRepository,
     order: dict[str, Any],
     exit_price: float,
     reason: str,
 ) -> None:
-    """Write exit data to paper_orders and release cash back to virtual_portfolio."""
+    """Write exit data to paper_orders, release cash, and back-fill trading_signals."""
     order_id = order["_id"]  # raw ObjectId — matches MongoDB's _id index
     entry_price = float(order["entry_price"])
     shares = int(order["shares"])
@@ -63,12 +66,31 @@ async def _close_position(
     pnl = exit_value - position_value
     return_pct = round((pnl / position_value) * 100, 4) if position_value else 0.0
     was_correct = pnl > 0
+    outcome_date = datetime.now(timezone.utc).date().isoformat()
 
     await orders_repo.close_order(order_id, exit_price, return_pct, was_correct)
     logger.info(
         "monitor closed symbol=%s reason=%s entry=%.2f exit=%.2f pnl=%.2f (%.2f%%)",
         order["symbol"], reason, entry_price, exit_price, pnl, return_pct,
     )
+
+    # Back-fill outcome onto the originating trading_signal document so accuracy
+    # queries can be run on a single collection (no cross-collection join needed).
+    run_id = order.get("run_id", "")
+    if run_id:
+        try:
+            await signals_repo.update_outcome(
+                run_id=run_id,
+                symbol=order["symbol"],
+                actual_return_pct=return_pct,
+                was_correct=was_correct,
+                outcome_date=outcome_date,
+            )
+        except Exception as exc:
+            logger.warning(
+                "monitor outcome_backfill_failed symbol=%s run_id=%s error=%s",
+                order["symbol"], run_id, exc,
+            )
 
     # Return cash and update portfolio stats
     await portfolio_repo.close_position(exit_value, position_value, was_correct)
@@ -79,6 +101,7 @@ async def run_monitor() -> dict[str, Any]:
     db = get_db()
     orders_repo = PaperOrdersRepository(db)
     portfolio_repo = VirtualPortfolioRepository(db)
+    signals_repo = TradingSignalsRepository(db)
     logs_repo = AgentLogsRepository(db)
 
     open_orders = await orders_repo.get_open_orders()
@@ -110,13 +133,27 @@ async def run_monitor() -> dict[str, Any]:
         run_id = order.get("run_id", "monitor")
 
         try:
+            # Max age check: force-close positions open longer than _MAX_POSITION_DAYS
+            order_date_str = order.get("date", "")
+            if order_date_str:
+                try:
+                    order_date = date.fromisoformat(order_date_str)
+                    age_days = (date.today() - order_date).days
+                    if age_days >= _MAX_POSITION_DAYS:
+                        await _close_position(orders_repo, portfolio_repo, signals_repo, order, current_price, "max_age")
+                        await logs_repo.log(run_id, _AGENT_NAME, "warn", f"max_age {symbol} held {age_days}d @ {current_price}")
+                        closed += 1
+                        continue
+                except ValueError:
+                    pass
+
             if stop_loss > 0 and current_price <= stop_loss:
-                await _close_position(orders_repo, portfolio_repo, order, current_price, "stop_loss")
+                await _close_position(orders_repo, portfolio_repo, signals_repo, order, current_price, "stop_loss")
                 await logs_repo.log(run_id, _AGENT_NAME, "info", f"stop_loss triggered {symbol} @ {current_price}")
                 closed += 1
 
             elif current_price >= target:
-                await _close_position(orders_repo, portfolio_repo, order, current_price, "target_hit")
+                await _close_position(orders_repo, portfolio_repo, signals_repo, order, current_price, "target_hit")
                 await logs_repo.log(run_id, _AGENT_NAME, "info", f"target_hit {symbol} @ {current_price}")
                 closed += 1
 

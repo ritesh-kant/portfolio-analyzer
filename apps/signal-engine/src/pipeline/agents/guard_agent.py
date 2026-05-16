@@ -27,6 +27,7 @@ from ...scrapers.nse_guard import fetch_asm_gsm_symbols, fetch_earnings_within_d
 logger = logging.getLogger(__name__)
 
 _VIX_THRESHOLD = 22.0
+_VIX_CAUTION = 18.0     # soft warning: no kill-switch but flag in market_data
 _NIFTY_DROP_THRESHOLD = -1.5   # percent
 _PRICE_MOVE_THRESHOLD = 5.0    # percent (absolute)
 _EARNINGS_WINDOW_DAYS = 5
@@ -66,6 +67,13 @@ class GuardAgent(BaseAgent):
             blocked = [{"symbol": s, "reason": reason} for s in stocks]
             return state.model_copy(
                 update={"guard_result": {"passed": [], "blocked": blocked}}
+            )
+
+        # Soft VIX caution: flag in market_data so downstream agents can reduce confidence
+        if vix is not None and _VIX_CAUTION < vix <= _VIX_THRESHOLD:
+            logger.info("guard_agent vix_caution vix=%.1f (%.1f–%.1f warning zone)", vix, _VIX_CAUTION, _VIX_THRESHOLD)
+            state = state.model_copy(
+                update={"market_data": {**state.market_data, "vix_caution": True}}
             )
 
         nifty_chg = md.get("nifty_change_pct")
