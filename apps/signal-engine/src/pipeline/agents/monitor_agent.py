@@ -1,6 +1,6 @@
 """monitor_agent — thesis-break detection; closes paper positions at stop-loss or target.
 
-Runs independently of the main LangGraph pipeline, triggered every 30 minutes
+Runs independently of the main LangGraph pipeline, triggered every 5 minutes
 during NSE market hours (09:15–15:30 IST, Monday–Friday).
 
 For each OPEN paper order it:
@@ -160,6 +160,7 @@ async def run_monitor() -> dict[str, Any]:
 
     closed = 0
     errors: list[str] = []
+    remaining_market_value = 0.0  # live value of positions that survive this cycle
 
     for order in open_orders:
         symbol = order["symbol"]
@@ -167,6 +168,7 @@ async def run_monitor() -> dict[str, Any]:
 
         if current_price is None:
             errors.append(f"{symbol}: price fetch failed")
+            remaining_market_value += float(order.get("position_value", 0.0))
             continue
 
         stop_loss = float(order.get("stop_loss", 0))
@@ -197,11 +199,22 @@ async def run_monitor() -> dict[str, Any]:
                 await _close_position(orders_repo, portfolio_repo, signals_repo, order, current_price, "target_hit", db=db)
                 await logs_repo.log(run_id, _AGENT_NAME, "info", f"target_hit {symbol} @ {current_price}")
                 closed += 1
+            else:
+                # Position survives — accumulate at live market price for MTM update
+                remaining_market_value += current_price * int(order.get("shares", 0))
 
         except Exception as exc:
             err = f"{symbol}: {exc!s}"
             errors.append(err)
             logger.error("monitor error %s", err)
+
+    # Update portfolio total_value to live market prices so the portfolio floor
+    # circuit-breaker in order_agent responds to unrealized losses, not just realized ones.
+    try:
+        await portfolio_repo.update_mark_to_market(remaining_market_value)
+    except Exception as exc:
+        logger.error("monitor mark_to_market_update_failed error=%s", exc)
+        errors.append(f"mark_to_market_update failed: {exc!s}")
 
     summary = {
         "checked": len(open_orders),

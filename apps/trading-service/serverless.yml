@@ -175,18 +175,18 @@ functions:
           path: /trading/runs/schedule
           method: post
 
-  # Position monitor — fires every 30 min during NSE market hours (09:15–15:45 IST)
-  # cron(15,45 3-9 ? * MON-FRI *) in UTC corresponds to 08:45–15:15 UTC = 14:15–20:45 IST
-  # Adjusted: cron(15,45 3-10 ? * MON-FRI *) covers 09:15–16:15 IST to catch all 30-min slots
+  # Position monitor — fires every 5 min during NSE market hours (09:15–15:30 IST)
+  # cron(0/5 3-10 ? * MON-FRI *) fires at :00,:05,...,:55 from 08:30–16:59 IST,
+  # safely bracketing the full NSE session. Lambda timeout=30s; no overlap risk at 5-min gaps.
   monitor:
     handler: src/handlers/monitor.handler
     timeout: 30
     events:
       - schedule:
-          rate: cron(15,45 3-10 ? * MON-FRI *)
+          rate: cron(0/5 3-10 ? * MON-FRI *)
           enabled: true
           name: position-monitor-${sls:stage}
-          description: Scans open positions for stop-loss and target triggers every 30 min during NSE hours
+          description: Scans open positions for stop-loss and target triggers every 5 min during NSE hours
 
   # Manual HTTP trigger for the monitor (for testing)
   monitorHttp:
