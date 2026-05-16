@@ -11,8 +11,46 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
 
-# Conservative per-token cost covering Sonnet / GPT-4o tier pricing
-_APPROX_COST_PER_TOKEN_USD = 3e-6
+# Per-provider cost rates (USD per token).
+# Input tokens dominate pipeline prompts; output is typically short JSON.
+# Rates are approximate — use for circuit-breaker budgeting, not billing.
+#
+# Sources (May 2025):
+#   Anthropic  — Sonnet: $3/1M in, $15/1M out
+#   OpenAI     — GPT-4o: $2.5/1M in, $10/1M out
+#   Gemini     — 2.0 Flash: $0.075/1M in, $0.30/1M out
+#   NVIDIA/Kimi — billed via OpenAI-compatible endpoint; use OpenAI rates as ceiling
+#   Ollama     — local inference, no API cost
+_PROVIDER_RATES: dict[str, tuple[float, float]] = {
+    # class-name prefix → (cost_per_input_token, cost_per_output_token)
+    "ChatAnthropic":              (3e-6,    15e-6),
+    "ChatOpenAI":                 (2.5e-6,  10e-6),
+    "ChatGoogleGenerativeAI":     (0.075e-6, 0.3e-6),
+    "ChatOllama":                 (0.0,     0.0),   # local — always free
+}
+
+# Fallback for unknown providers: use Anthropic Sonnet rates (highest realistic cost)
+# so the circuit breaker errs on the side of caution.
+_FALLBACK_RATE: tuple[float, float] = (3e-6, 15e-6)
+
+# Rough output budget assumption when actual output length is unknown pre-call.
+# Most pipeline responses are short JSON objects (< 200 tokens).
+_ASSUMED_OUTPUT_TOKENS = 150
+
+
+def _estimate_cost(llm: Any, input_chars: int) -> float:
+    """Estimate USD cost for one LLM call given input character count."""
+    class_name = type(llm).__name__
+    input_rate, output_rate = _FALLBACK_RATE
+    for prefix, rates in _PROVIDER_RATES.items():
+        if class_name.startswith(prefix):
+            input_rate, output_rate = rates
+            break
+    else:
+        logger.debug("llm_spend: unknown provider class %r — using fallback rate", class_name)
+
+    input_tokens = input_chars // 4
+    return input_tokens * input_rate + _ASSUMED_OUTPUT_TOKENS * output_rate
 
 
 def extract_json(text: str) -> Any:
@@ -44,8 +82,16 @@ def extract_json(text: str) -> Any:
     return None
 
 
-async def _guard_spend(system_prompt: str, user_prompt: str) -> None:
-    """Check daily LLM spend limit and record estimated usage. Raises RuntimeError if limit hit."""
+async def _guard_spend(llm: Any, system_prompt: str, user_prompt: str) -> None:
+    """Check daily LLM spend limit and record estimated usage.
+
+    Cost is estimated per-provider using _PROVIDER_RATES. Ollama (local) is
+    always free and never counted. Raises RuntimeError if the daily limit is hit.
+    """
+    estimated_cost = _estimate_cost(llm, len(system_prompt) + len(user_prompt))
+    if estimated_cost == 0.0:
+        return  # free provider (Ollama) — skip DB entirely
+
     try:
         from ..config import Settings
         from ..db.client import get_db
@@ -59,11 +105,12 @@ async def _guard_spend(system_prompt: str, user_prompt: str) -> None:
         if daily_cost >= settings.llm_daily_spend_limit_usd:
             raise RuntimeError(
                 f"Daily LLM spend limit ${settings.llm_daily_spend_limit_usd:.2f} reached "
-                f"(current: ${daily_cost:.4f}). No further LLM calls today."
+                f"(current: ${daily_cost:.4f}, provider: {type(llm).__name__}). "
+                "No further LLM calls today."
             )
 
-        approx_tokens = (len(system_prompt) + len(user_prompt)) // 4
-        await repo.record_usage(today, approx_tokens, approx_tokens * _APPROX_COST_PER_TOKEN_USD)
+        approx_tokens = (len(system_prompt) + len(user_prompt)) // 4 + _ASSUMED_OUTPUT_TOKENS
+        await repo.record_usage(today, approx_tokens, estimated_cost)
     except RuntimeError:
         raise
     except Exception as exc:
@@ -76,7 +123,8 @@ async def call_llm_json(llm: Any, system_prompt: str, user_prompt: str) -> Any:
 
     Applies two safety layers:
     - asyncio.wait_for timeout (configurable via LLM_TIMEOUT_S, default 30s)
-    - daily spend circuit breaker (configurable via LLM_DAILY_SPEND_LIMIT_USD)
+    - daily spend circuit breaker (configurable via LLM_DAILY_SPEND_LIMIT_USD),
+      with per-provider cost rates so Ollama (free) is never blocked
     """
     try:
         from ..config import Settings
@@ -85,7 +133,7 @@ async def call_llm_json(llm: Any, system_prompt: str, user_prompt: str) -> Any:
         timeout_s = 30.0
 
     try:
-        await _guard_spend(system_prompt, user_prompt)
+        await _guard_spend(llm, system_prompt, user_prompt)
         response = await asyncio.wait_for(
             llm.ainvoke(
                 [
