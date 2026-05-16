@@ -7,9 +7,13 @@ Graph topology:
 """
 
 import asyncio
+import logging
 import time
+from datetime import date as _date
 
 from langgraph.graph import StateGraph, END
+
+_graph_logger = logging.getLogger(__name__)
 
 from .state import TradingState
 from .agents import (
@@ -103,8 +107,34 @@ _NSE_HOLIDAYS: frozenset[str] = frozenset({
     "2025-04-10", "2025-04-14", "2025-04-18", "2025-05-01", "2025-08-15",
     "2025-08-27", "2025-10-02", "2025-10-21", "2025-10-22", "2025-11-05",
     "2025-12-25",
-    # 2026 — add when NSE publishes
+    # 2026 — verify against NSE circular before each year begins
+    "2026-01-26",  # Republic Day
+    "2026-03-20",  # Holi
+    "2026-04-03",  # Good Friday
+    "2026-04-14",  # Dr. Ambedkar Jayanti
+    "2026-05-01",  # Maharashtra Day
+    "2026-08-15",  # Independence Day
+    "2026-08-25",  # Ganesh Chaturthi
+    "2026-10-02",  # Gandhi Jayanti / Dussehra
+    "2026-10-20",  # Diwali (Laxmi Puja)
+    "2026-11-24",  # Gurunanak Jayanti
+    "2026-12-25",  # Christmas
 })
+
+
+def _warn_if_holidays_stale() -> None:
+    """Log a warning if the current year has fewer than 5 holidays listed."""
+    current_year = str(_date.today().year)
+    count = sum(1 for d in _NSE_HOLIDAYS if d.startswith(current_year))
+    if count < 5:
+        _graph_logger.warning(
+            "nse_holidays_stale: only %d holidays found for %s — "
+            "update _NSE_HOLIDAYS from nseindia.com/resources/exchange-communication-holidays",
+            count, current_year,
+        )
+
+
+_warn_if_holidays_stale()
 
 
 async def run_pipeline(run_id: str, date: str, ai_provider: str) -> TradingState:

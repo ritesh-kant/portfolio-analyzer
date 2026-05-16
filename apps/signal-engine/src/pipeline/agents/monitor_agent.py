@@ -31,8 +31,11 @@ _AGENT_NAME = "monitor_agent"
 _MAX_POSITION_DAYS = 10   # force-close positions held longer than this
 
 
+_PRICE_FETCH_TIMEOUT_S = 10.0
+
+
 async def _fetch_price(symbol: str) -> float | None:
-    """Fetch latest trade price for a symbol. Returns None on failure."""
+    """Fetch latest trade price for a symbol. Returns None on failure or timeout."""
     loop = asyncio.get_event_loop()
     try:
         def _download() -> float | None:
@@ -42,7 +45,13 @@ async def _fetch_price(symbol: str) -> float | None:
                 return None
             return float(hist["Close"].iloc[-1])
 
-        return await loop.run_in_executor(None, _download)
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _download),
+            timeout=_PRICE_FETCH_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("monitor price_fetch_timeout symbol=%s after %.0fs", symbol, _PRICE_FETCH_TIMEOUT_S)
+        return None
     except Exception as exc:
         logger.warning("monitor price_fetch_failed symbol=%s error=%s", symbol, exc)
         return None

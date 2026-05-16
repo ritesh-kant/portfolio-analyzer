@@ -1,6 +1,12 @@
 """Application configuration loaded from environment variables."""
 
+import os
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEFAULT_API_KEY = "local-dev-key-change-in-prod"
+_DEFAULT_MONGO_CREDS = "admin:admin123"
 
 
 class Settings(BaseSettings):
@@ -11,7 +17,7 @@ class Settings(BaseSettings):
     )
 
     # MongoDB
-    mongodb_uri: str = "mongodb://admin:admin123@localhost:27017/portfolio_analyzer?authSource=admin"
+    mongodb_uri: str = f"mongodb://{_DEFAULT_MONGO_CREDS}@localhost:27017/portfolio_analyzer?authSource=admin"
     mongodb_db_name: str = "portfolio_analyzer"
 
     # AI provider — mirrors Node.js AI_PROVIDER env var
@@ -44,10 +50,34 @@ class Settings(BaseSettings):
     portfolio_floor_pct: float = 70.0   # absolute halt if total_value < 70% of initial
 
     # Auth
-    signal_engine_api_key: str = "local-dev-key-change-in-prod"
+    signal_engine_api_key: str = _DEFAULT_API_KEY
+
+    # LLM safety limits
+    llm_timeout_s: float = 30.0             # asyncio.wait_for budget per LLM call
+    llm_daily_spend_limit_usd: float = 5.0  # halt new LLM calls when daily cost exceeds this
 
     # Observability
     langchain_tracing_v2: bool = False
     langchain_api_key: str = ""
     langchain_project: str = "trading-signals"
     alert_webhook_url: str = ""
+
+    @model_validator(mode="after")
+    def _reject_default_secrets(self) -> "Settings":
+        """Refuse to start in non-dev environments with insecure default credentials."""
+        stage = os.getenv("STAGE", "dev")
+        if stage == "dev":
+            return self
+        insecure: list[str] = []
+        if self.signal_engine_api_key == _DEFAULT_API_KEY:
+            insecure.append("SIGNAL_ENGINE_API_KEY is still the default dev value")
+        if _DEFAULT_MONGO_CREDS in self.mongodb_uri:
+            insecure.append("MONGODB_URI contains default dev credentials")
+        if not any([self.anthropic_api_key, self.openai_api_key, self.gemini_api_key, self.nvidia_api_key]):
+            insecure.append("No LLM provider API key is set")
+        if insecure:
+            raise ValueError(
+                f"Refusing to start in STAGE={stage!r} with insecure defaults:\n"
+                + "\n".join(f"  • {msg}" for msg in insecure)
+            )
+        return self
