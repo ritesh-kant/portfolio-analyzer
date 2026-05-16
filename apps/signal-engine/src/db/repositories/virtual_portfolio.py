@@ -28,6 +28,7 @@ class VirtualPortfolioRepository(BaseRepository):
                     "portfolio_id": _PORTFOLIO_ID,
                     "cash": initial_capital,
                     "invested": 0.0,
+                    "unrealized_pnl": 0.0,
                     "total_value": initial_capital,
                     "initial_capital": initial_capital,
                     "open_positions": 0,
@@ -123,3 +124,33 @@ class VirtualPortfolioRepository(BaseRepository):
                 {"portfolio_id": _PORTFOLIO_ID},
                 {"$inc": {"daily_pnl": pnl}, "$set": {"updatedAt": now}},
             )
+
+    async def update_mark_to_market(self, current_positions_market_value: float) -> None:
+        """Recompute total_value and unrealized_pnl using live market prices.
+
+        Called by run_monitor() at the END of each monitoring cycle, after all
+        close decisions have been made. Closed positions must already be excluded
+        from current_positions_market_value by the caller.
+
+        Does NOT touch: cash, invested, daily_pnl, open_positions, or trade counters.
+        """
+        doc = await self.get()
+        if doc is None:
+            return
+        cash     = float(doc.get("cash", 0.0))
+        invested = float(doc.get("invested", 0.0))
+        initial  = float(doc.get("initial_capital", 1.0) or 1.0)
+
+        total_value    = round(cash + current_positions_market_value, 2)
+        unrealized_pnl = round(current_positions_market_value - invested, 2)
+        total_pnl_pct  = round(((total_value - initial) / initial) * 100, 4) if initial else 0.0
+
+        await self._col.update_one(
+            {"portfolio_id": _PORTFOLIO_ID},
+            {"$set": {
+                "total_value":    total_value,
+                "unrealized_pnl": unrealized_pnl,
+                "total_pnl_pct":  total_pnl_pct,
+                "updatedAt":      datetime.now(timezone.utc),
+            }},
+        )
