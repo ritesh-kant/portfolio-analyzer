@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     nvidia_api_key: str = ""
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-chat"
+    deepseek_base_url: str = "https://api.deepseek.com"
     ollama_base_url: str = "http://localhost:11434"
     ollama_timeout: int = 600_000
 
@@ -73,7 +76,7 @@ class Settings(BaseSettings):
             insecure.append("SIGNAL_ENGINE_API_KEY is still the default dev value")
         if _DEFAULT_MONGO_CREDS in self.mongodb_uri:
             insecure.append("MONGODB_URI contains default dev credentials")
-        if not any([self.anthropic_api_key, self.openai_api_key, self.gemini_api_key, self.nvidia_api_key]):
+        if not any([self.anthropic_api_key, self.openai_api_key, self.gemini_api_key, self.nvidia_api_key, self.deepseek_api_key]):
             insecure.append("No LLM provider API key is set")
         if insecure:
             raise ValueError(

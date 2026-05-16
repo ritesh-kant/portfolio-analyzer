@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 #   Anthropic  — Sonnet: $3/1M in, $15/1M out
 #   OpenAI     — GPT-4o: $2.5/1M in, $10/1M out
 #   Gemini     — 2.0 Flash: $0.075/1M in, $0.30/1M out
+#   DeepSeek   — R1 (ceiling, uncached): $2.19/1M in, $8.19/1M out
+#                V3 (deepseek-chat) is ~2x cheaper, but we don't know the model at runtime
 #   NVIDIA/Kimi — billed via OpenAI-compatible endpoint; use OpenAI rates as ceiling
 #   Ollama     — local inference, no API cost
 _PROVIDER_RATES: dict[str, tuple[float, float]] = {
@@ -26,7 +28,8 @@ _PROVIDER_RATES: dict[str, tuple[float, float]] = {
     "ChatAnthropic":              (3e-6,    15e-6),
     "ChatOpenAI":                 (2.5e-6,  10e-6),
     "ChatGoogleGenerativeAI":     (0.075e-6, 0.3e-6),
-    "ChatOllama":                 (0.0,     0.0),   # local — always free
+    "ChatDeepSeek":               (2.19e-6,  8.19e-6),  # R1 ceiling; V3 is cheaper
+    "ChatOllama":                 (0.0,     0.0),        # local — always free
 }
 
 # Fallback for unknown providers: use Anthropic Sonnet rates (highest realistic cost)

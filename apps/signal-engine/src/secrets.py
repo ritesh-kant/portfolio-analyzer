@@ -25,6 +25,7 @@ _SECRETS_KEYS = (
     "OPENAI_API_KEY",
     "GEMINI_API_KEY",
     "NVIDIA_API_KEY",
+    "DEEPSEEK_API_KEY",
 )
 
 

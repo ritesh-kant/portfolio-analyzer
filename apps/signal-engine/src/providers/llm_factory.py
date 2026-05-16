@@ -1,16 +1,17 @@
 """AI provider factory — Python mirror of apps/signals-service/src/lib/llm/llmProvider.ts.
 
-Provider selection: AI_PROVIDER env var → anthropic | openai | gemini | kimi | ollama
+Provider selection: AI_PROVIDER env var → anthropic | openai | gemini | kimi | deepseek | ollama
 """
 
 from langchain_anthropic import ChatAnthropic
+from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 
 from src.config import Settings
 
-_VALID_PROVIDERS = {"anthropic", "openai", "gemini", "kimi", "ollama"}
+_VALID_PROVIDERS = {"anthropic", "openai", "gemini", "kimi", "deepseek", "ollama"}
 
 
 def get_llm(provider: str | None = None, settings: Settings | None = None) -> object:
@@ -52,6 +53,14 @@ def get_llm(provider: str | None = None, settings: Settings | None = None) -> ob
             model=s.kimi_model,
             api_key=s.nvidia_api_key,  # type: ignore[arg-type]
             base_url=s.nvidia_base_url,
+            max_tokens=2048,
+        )
+
+    if name == "deepseek":
+        return ChatDeepSeek(
+            model=s.deepseek_model,
+            api_key=s.deepseek_api_key,  # type: ignore[arg-type]
+            api_base=s.deepseek_base_url,
             max_tokens=2048,
         )
 
