@@ -10,6 +10,7 @@ provider:
   name: aws
   region: ${env:AWS_REGION, 'ap-south-1'}
   stage: ${opt:stage, 'dev'}
+  architecture: arm64
   memorySize: 2048
   timeout: 900  # max Lambda timeout; pipeline can take ~10 min
   logRetentionInDays: 14
@@ -18,7 +19,7 @@ provider:
     images:
       signal-engine:
         path: ./           # build context — uses Dockerfile at repo root of this app
-        platform: linux/amd64
+        platform: linux/arm64
 
   environment:
     MONGODB_URI: ${ssm:/portfolio-analyzer/${sls:stage}/MONGODB_URI}

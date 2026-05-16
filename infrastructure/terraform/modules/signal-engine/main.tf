@@ -103,6 +103,7 @@ resource "aws_lambda_function" "signal_engine" {
   image_uri     = "${aws_ecr_repository.signal_engine.repository_url}:${var.lambda_image_tag}"
   timeout       = 900
   memory_size   = 2048
+  architectures = ["arm64"]
 
   environment {
     variables = {
