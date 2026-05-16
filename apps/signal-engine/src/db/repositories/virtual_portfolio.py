@@ -35,6 +35,8 @@ class VirtualPortfolioRepository(BaseRepository):
                     "winning_trades": 0,
                     "total_pnl": 0.0,
                     "total_pnl_pct": 0.0,
+                    "daily_pnl": 0.0,
+                    "daily_pnl_date": "",
                     "updatedAt": now,
                 }
             )
@@ -84,3 +86,40 @@ class VirtualPortfolioRepository(BaseRepository):
     async def update_totals(self, updates: dict[str, Any]) -> None:
         updates["updatedAt"] = datetime.now(timezone.utc)
         await self.update_one({"portfolio_id": _PORTFOLIO_ID}, {"$set": updates})
+
+    async def get_daily_loss_pct(self) -> float:
+        """Return today's realized PnL as % of initial capital. Negative means loss.
+
+        Returns 0.0 when no positions have been closed today or on the first
+        run of a new day (before the daily reset in order_agent fires).
+        """
+        doc = await self.get()
+        if doc is None:
+            return 0.0
+        today = datetime.now(timezone.utc).date().isoformat()
+        if doc.get("daily_pnl_date", "") != today:
+            return 0.0
+        initial = float(doc.get("initial_capital", 1.0) or 1.0)
+        return round(float(doc.get("daily_pnl", 0.0)) / initial * 100.0, 4)
+
+    async def record_close_pnl(self, pnl: float) -> None:
+        """Accumulate realized PnL for today's circuit-breaker counter.
+
+        Called by monitor_agent after every position close. Automatically
+        resets the daily counter when called on a new calendar date.
+        """
+        today = datetime.now(timezone.utc).date().isoformat()
+        doc = await self.get()
+        if doc is None:
+            return
+        now = datetime.now(timezone.utc)
+        if doc.get("daily_pnl_date", "") != today:
+            await self._col.update_one(
+                {"portfolio_id": _PORTFOLIO_ID},
+                {"$set": {"daily_pnl": pnl, "daily_pnl_date": today, "updatedAt": now}},
+            )
+        else:
+            await self._col.update_one(
+                {"portfolio_id": _PORTFOLIO_ID},
+                {"$inc": {"daily_pnl": pnl}, "$set": {"updatedAt": now}},
+            )

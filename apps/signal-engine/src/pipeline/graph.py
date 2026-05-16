@@ -96,8 +96,30 @@ def _get_graph():
     return _compiled_graph
 
 
+# NSE trading holidays — update annually from nseindia.com/resources/exchange-communication-holidays
+_NSE_HOLIDAYS: frozenset[str] = frozenset({
+    # 2025
+    "2025-01-14", "2025-01-26", "2025-02-19", "2025-03-14", "2025-03-31",
+    "2025-04-10", "2025-04-14", "2025-04-18", "2025-05-01", "2025-08-15",
+    "2025-08-27", "2025-10-02", "2025-10-21", "2025-10-22", "2025-11-05",
+    "2025-12-25",
+    # 2026 — add when NSE publishes
+})
+
+
 async def run_pipeline(run_id: str, date: str, ai_provider: str) -> TradingState:
     """Execute the full pipeline and return the final TradingState."""
+    if date in _NSE_HOLIDAYS:
+        import logging
+        logging.getLogger(__name__).info(
+            "pipeline_skipped run_id=%s reason=nse_holiday date=%s", run_id, date
+        )
+        from ..db.client import get_db
+        from ..db.repositories.pipeline_runs import PipelineRunsRepository
+        repo = PipelineRunsRepository(get_db())
+        await repo.finalize(run_id, "skipped", {"reason": "nse_holiday", "date": date}, None)
+        return TradingState(run_id=run_id, date=date, ai_provider=ai_provider)
+
     llm = get_llm(provider=ai_provider)
 
     initial_state = TradingState(

@@ -10,10 +10,17 @@ Per-stock kill-switches (block individual symbol):
   5. Earnings / results announcement within 5 calendar days
   6. Stock already moved > 5% today (news priced in)
 
-Unimplemented (Phase 6):
-  7. Promoter pledging > 30% (requires quarterly SEBI filings)
+Per-stock near-misses (passed but confidence penalised downstream):
+  7. Earnings 6-10 days away (−5 pts confidence)
 
-Populates state.guard_result = { passed: [...], blocked: [{symbol, reason}, ...] }
+Unimplemented (Phase 6):
+  8. Promoter pledging > 30% (requires quarterly SEBI filings)
+
+Populates state.guard_result = {
+  passed: [...],
+  blocked: [{symbol, reason}, ...],
+  near_misses: {symbol: [{type, detail, confidence_penalty}]}
+}
 """
 
 import asyncio
@@ -27,23 +34,28 @@ from ...scrapers.nse_guard import fetch_asm_gsm_symbols, fetch_earnings_within_d
 logger = logging.getLogger(__name__)
 
 _VIX_THRESHOLD = 22.0
-_VIX_CAUTION = 18.0     # soft warning: no kill-switch but flag in market_data
-_NIFTY_DROP_THRESHOLD = -1.5   # percent
-_PRICE_MOVE_THRESHOLD = 5.0    # percent (absolute)
+_VIX_CAUTION = 18.0
+_NIFTY_DROP_THRESHOLD = -1.5
+_PRICE_MOVE_THRESHOLD = 5.0
 _EARNINGS_WINDOW_DAYS = 5
+_EARNINGS_NEAR_MISS_DAYS = 10   # 6-10 day window triggers a confidence penalty
 
 
 def _nse_sym(yf_sym: str) -> str:
-    """Strip .NS suffix to get the bare NSE symbol."""
     return yf_sym.replace(".NS", "").replace(".BO", "").upper()
 
 
-async def _fetch_guard_data(symbols: list[str]) -> tuple[set[str], set[str], dict[str, str]]:
-    """Fetch ASM, GSM, and earnings data concurrently."""
+async def _fetch_guard_data(
+    symbols: list[str],
+) -> tuple[set[str], set[str], dict[str, str], dict[str, str]]:
+    """Fetch ASM, GSM, 5-day earnings, and 10-day earnings concurrently."""
     asm_gsm_task = fetch_asm_gsm_symbols()
-    earnings_task = fetch_earnings_within_days(symbols, days=_EARNINGS_WINDOW_DAYS)
-    (asm, gsm), earnings = await asyncio.gather(asm_gsm_task, earnings_task)
-    return asm, gsm, earnings
+    earnings_5d_task = fetch_earnings_within_days(symbols, days=_EARNINGS_WINDOW_DAYS)
+    earnings_10d_task = fetch_earnings_within_days(symbols, days=_EARNINGS_NEAR_MISS_DAYS)
+    (asm, gsm), earnings_5d, earnings_10d = await asyncio.gather(
+        asm_gsm_task, earnings_5d_task, earnings_10d_task
+    )
+    return asm, gsm, earnings_5d, earnings_10d
 
 
 class GuardAgent(BaseAgent):
@@ -53,7 +65,7 @@ class GuardAgent(BaseAgent):
         stocks = list(state.selected_stocks)
         if not stocks:
             return state.model_copy(
-                update={"guard_result": {"passed": [], "blocked": []}}
+                update={"guard_result": {"passed": [], "blocked": [], "near_misses": {}}}
             )
 
         md = state.market_data
@@ -66,10 +78,9 @@ class GuardAgent(BaseAgent):
             logger.warning("guard_agent vix_kill_switch vix=%s", vix)
             blocked = [{"symbol": s, "reason": reason} for s in stocks]
             return state.model_copy(
-                update={"guard_result": {"passed": [], "blocked": blocked}}
+                update={"guard_result": {"passed": [], "blocked": blocked, "near_misses": {}}}
             )
 
-        # Soft VIX caution: flag in market_data so downstream agents can reduce confidence
         if vix is not None and _VIX_CAUTION < vix <= _VIX_THRESHOLD:
             logger.info("guard_agent vix_caution vix=%.1f (%.1f–%.1f warning zone)", vix, _VIX_CAUTION, _VIX_THRESHOLD)
             state = state.model_copy(
@@ -82,13 +93,24 @@ class GuardAgent(BaseAgent):
             logger.warning("guard_agent nifty_kill_switch change=%s", nifty_chg)
             blocked = [{"symbol": s, "reason": reason} for s in stocks]
             return state.model_copy(
-                update={"guard_result": {"passed": [], "blocked": blocked}}
+                update={"guard_result": {"passed": [], "blocked": blocked, "near_misses": {}}}
             )
 
         # ── Per-stock kill-switches ────────────────────────────────────────
-        asm, gsm, earnings = await _fetch_guard_data(stocks)
+        asm, gsm, earnings_5d, earnings_10d = await _fetch_guard_data(stocks)
+
+        # Warn if earnings calendar fetch failed — guard is operating blind
+        if "_FETCH_FAILED" in earnings_5d:
+            logger.warning(
+                "guard_agent earnings_5d_calendar_unavailable — cannot block pre-earnings stocks"
+            )
+            earnings_5d = {}
+        if "_FETCH_FAILED" in earnings_10d:
+            earnings_10d = {}
 
         passed: list[str] = []
+        near_misses: dict[str, list[dict[str, Any]]] = {}
+
         for sym in stocks:
             nse_sym = _nse_sym(sym)
             td = state.technical_data.get(sym, {})
@@ -98,8 +120,8 @@ class GuardAgent(BaseAgent):
                 block_reason = f"Stock {nse_sym} is on NSE ASM list"
             elif nse_sym in gsm:
                 block_reason = f"Stock {nse_sym} is on NSE GSM list"
-            elif nse_sym in earnings:
-                block_reason = f"Earnings announcement on {earnings[nse_sym]} (within {_EARNINGS_WINDOW_DAYS}d)"
+            elif nse_sym in earnings_5d:
+                block_reason = f"Earnings announcement on {earnings_5d[nse_sym]} (within {_EARNINGS_WINDOW_DAYS}d)"
             else:
                 change_pct = td.get("change_pct_today")
                 if change_pct is not None and abs(change_pct) > _PRICE_MOVE_THRESHOLD:
@@ -112,14 +134,24 @@ class GuardAgent(BaseAgent):
                 logger.info("guard_agent blocked symbol=%s reason=%s", sym, block_reason)
             else:
                 passed.append(sym)
+                # Near-miss: earnings in 6-10 days — passed guard but reduce confidence
+                stock_near_misses: list[dict[str, Any]] = []
+                if nse_sym in earnings_10d and nse_sym not in earnings_5d:
+                    stock_near_misses.append({
+                        "type": "earnings_near",
+                        "detail": f"Earnings on {earnings_10d[nse_sym]} (6-10d away)",
+                        "confidence_penalty": 5,
+                    })
+                if stock_near_misses:
+                    near_misses[sym] = stock_near_misses
+                    logger.info(
+                        "guard_agent near_miss symbol=%s misses=%s", sym, stock_near_misses
+                    )
 
-        logger.info(
-            "guard_agent passed=%d blocked=%d",
-            len(passed),
-            len(blocked),
-        )
+        logger.info("guard_agent passed=%d blocked=%d near_miss_stocks=%d",
+                    len(passed), len(blocked), len(near_misses))
         return state.model_copy(
-            update={"guard_result": {"passed": passed, "blocked": blocked}}
+            update={"guard_result": {"passed": passed, "blocked": blocked, "near_misses": near_misses}}
         )
 
 

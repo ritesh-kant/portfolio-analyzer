@@ -35,11 +35,15 @@ def _strip_commas(val: Any) -> float:
 
 
 def fetch_nifty_vix_sync() -> dict[str, Any]:
-    """Fetch Nifty 50 and India VIX via yfinance. Returns {} on failure."""
+    """Fetch Nifty 50 and India VIX via yfinance. Returns {} on failure.
+
+    Downloads 55 days so we can compute: today's change, 5-day return,
+    30-day return, and whether Nifty is above its 50-day EMA (regime context).
+    """
     try:
         data = yf.download(
             ["^NSEI", "^INDIAVIX"],
-            period="5d",
+            period="55d",
             auto_adjust=True,
             progress=False,
             threads=False,
@@ -58,14 +62,28 @@ def fetch_nifty_vix_sync() -> dict[str, Any]:
         nifty_close = float(nifty.iloc[-1])
         nifty_prev = float(nifty.iloc[-2])
         nifty_change_pct = (nifty_close - nifty_prev) / nifty_prev * 100
-        nifty_5d_start = float(nifty.iloc[0])
+
+        nifty_5d_start = float(nifty.iloc[-5]) if len(nifty) >= 5 else float(nifty.iloc[0])
         nifty_5d_return = (nifty_close - nifty_5d_start) / nifty_5d_start * 100
+
+        nifty_30d_start = float(nifty.iloc[-30]) if len(nifty) >= 30 else float(nifty.iloc[0])
+        nifty_30d_return = (nifty_close - nifty_30d_start) / nifty_30d_start * 100
+
+        # 50-day EMA to classify bull/bear regime
+        nifty_ema50: float | None = None
+        nifty_above_ema50: bool | None = None
+        if len(nifty) >= 50:
+            nifty_ema50 = float(nifty.ewm(span=50, adjust=False).mean().iloc[-1])
+            nifty_above_ema50 = nifty_close > nifty_ema50
 
         return {
             "nifty_close": round(nifty_close, 2),
             "nifty_prev_close": round(nifty_prev, 2),
             "nifty_change_pct": round(nifty_change_pct, 3),
             "nifty_5d_return": round(nifty_5d_return, 3),
+            "nifty_30d_return": round(nifty_30d_return, 3),
+            "nifty_ema50": round(nifty_ema50, 2) if nifty_ema50 is not None else None,
+            "nifty_above_ema50": nifty_above_ema50,
             "vix": round(float(vix.iloc[-1]), 2) if not vix.empty else None,
         }
     except Exception as exc:

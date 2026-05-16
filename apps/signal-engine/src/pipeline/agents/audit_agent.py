@@ -35,12 +35,15 @@ class AuditAgent(BaseAgent):
         else:
             final_status = "completed"
 
+        failed_feeds = [src for src, ok in state.feed_health.items() if not ok]
         stats = {
             "news_count": len(state.raw_news),
             "signals_count": len(state.signals),
             "orders_count": len(state.orders),
             "errors_count": len(state.errors),
             "blocked_count": len(state.guard_result.get("blocked", [])),
+            "feed_health": state.feed_health,
+            "failed_feeds": failed_feeds,
         }
         error_summary = "; ".join(state.errors) if state.errors else None
 

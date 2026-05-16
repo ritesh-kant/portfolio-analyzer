@@ -1,4 +1,5 @@
-"""technical_agent — compute RSI(14), MACD(12,26,9), EMA(20/50), volume ratio.
+"""technical_agent — compute RSI(14), MACD(12,26,9), EMA(20/50), Bollinger Bands,
+volume ratio, and 52-week high/low proximity.
 
 Uses yfinance for 75-day OHLCV data and pandas-ta for indicator calculation.
 Each symbol is processed in a thread pool, all symbols run in parallel.
@@ -16,6 +17,7 @@ import yfinance as yf
 
 from .base import BaseAgent
 from ..state import TradingState
+from ...scrapers.nse_options import fetch_pcr_batch
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,24 @@ def _safe_float(val: Any, default: float = 0.0) -> float:
         return default
 
 
+def _is_stale(last_bar_date: _date, today: _date) -> bool:
+    """Return True only if data is older than the most recent valid trading session.
+
+    Accounts for weekends and long-weekend gaps so Monday/post-holiday runs
+    don't incorrectly flag Friday's data as stale.
+    """
+    gap = (today - last_bar_date).days
+    if gap <= 1:
+        return False
+    # Monday: Friday close is 3 calendar days ago — still valid
+    if gap <= 3 and today.weekday() == 0:
+        return False
+    # Tuesday: allow 4-day gap to cover Mon public holidays
+    if gap <= 4 and today.weekday() == 1:
+        return False
+    return True
+
+
 def _compute_indicators(symbol: str) -> dict[str, Any]:
     """Sync — runs inside asyncio.to_thread."""
     df = yf.download(symbol, period=_PERIOD, auto_adjust=True, progress=False, threads=False)
@@ -44,16 +64,13 @@ def _compute_indicators(symbol: str) -> dict[str, Any]:
         logger.warning("technical_agent insufficient_data symbol=%s bars=%d", symbol, len(df))
         return {}
 
-    # Staleness guard: last bar must be today or the previous trading day.
-    # On NSE holidays yfinance returns the prior session's data — if we let it
-    # through, change_pct_today and all indicators are computed on stale prices.
+    # Staleness guard: last bar must be today or the most recent valid trading day.
     last_bar_date = df.index[-1].date() if hasattr(df.index[-1], "date") else df.index[-1]
     today = _date.today()
-    days_stale = (today - last_bar_date).days
-    if days_stale > 1:
+    if _is_stale(last_bar_date, today):
         logger.warning(
-            "technical_agent stale_data symbol=%s last_bar=%s today=%s days_stale=%d — skipping",
-            symbol, last_bar_date, today, days_stale,
+            "technical_agent stale_data symbol=%s last_bar=%s today=%s — skipping",
+            symbol, last_bar_date, today,
         )
         return {"stale": True, "last_data_date": str(last_bar_date)}
 
@@ -62,6 +79,7 @@ def _compute_indicators(symbol: str) -> dict[str, Any]:
     df.ta.macd(fast=12, slow=26, signal=9, append=True)
     df.ta.ema(length=20, append=True)
     df.ta.ema(length=50, append=True)
+    df.ta.bbands(length=20, std=2, append=True)
 
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -81,6 +99,20 @@ def _compute_indicators(symbol: str) -> dict[str, Any]:
     ema20 = _safe_float(last.get("EMA_20"), close)
     ema50 = _safe_float(last.get("EMA_50"), close)
 
+    # Bollinger Bands (20-period, 2 std dev)
+    bb_upper = _safe_float(last.get("BBU_20_2.0"), close * 1.02)
+    bb_lower = _safe_float(last.get("BBL_20_2.0"), close * 0.98)
+    bb_mid   = _safe_float(last.get("BBM_20_2.0"), close)
+    bb_range = bb_upper - bb_lower
+    bb_pct   = (close - bb_lower) / bb_range if bb_range > 0 else 0.5
+    bb_width = bb_range / bb_mid if bb_mid > 0 else 0.0
+
+    # 52-week high/low using the full 75-day window as a proxy
+    high_75d = float(df["High"].max()) if "High" in df.columns else close
+    low_75d  = float(df["Low"].min())  if "Low"  in df.columns else close
+    pct_from_high = (close - high_75d) / high_75d * 100 if high_75d > 0 else 0.0
+    pct_from_low  = (close - low_75d)  / low_75d  * 100 if low_75d  > 0 else 0.0
+
     return {
         "symbol": symbol,
         "close": round(close, 2),
@@ -96,6 +128,16 @@ def _compute_indicators(symbol: str) -> dict[str, Any]:
         "volume_ratio": round(vol_ratio, 3),
         "above_ema20": close > ema20,
         "above_ema50": close > ema50,
+        # Bollinger Bands
+        "bb_upper": round(bb_upper, 2),
+        "bb_lower": round(bb_lower, 2),
+        "bb_pct": round(bb_pct, 3),    # 0 = at lower band, 1 = at upper band
+        "bb_width": round(bb_width, 4),
+        # 52-week proxy (75-day window)
+        "high_75d": round(high_75d, 2),
+        "low_75d": round(low_75d, 2),
+        "pct_from_high": round(pct_from_high, 2),
+        "pct_from_low": round(pct_from_low, 2),
     }
 
 
@@ -124,6 +166,14 @@ class TechnicalAgent(BaseAgent):
 
         results = await asyncio.gather(*[_fetch_one(s) for s in state.selected_stocks])
         technical_data = {sym: data for sym, data in results if data}
+
+        # Fetch PCR for all non-stale symbols concurrently (fails gracefully per symbol)
+        valid_symbols = [sym for sym, data in technical_data.items() if not data.get("stale")]
+        if valid_symbols:
+            pcr_data = await fetch_pcr_batch(valid_symbols)
+            for sym, pcr_info in pcr_data.items():
+                if sym in technical_data and pcr_info:
+                    technical_data[sym].update(pcr_info)
 
         logger.info(
             "technical_agent computed symbols=%d failed=%d",

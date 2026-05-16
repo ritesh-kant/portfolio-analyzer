@@ -48,3 +48,6 @@ class TradingState(BaseModel):
 
     # Per-agent wall-clock duration in milliseconds
     agent_timings: dict[str, float] = Field(default_factory=dict)
+
+    # RSS feed health: { source_name: True (ok) | False (failed) }
+    feed_health: dict[str, bool] = Field(default_factory=dict)

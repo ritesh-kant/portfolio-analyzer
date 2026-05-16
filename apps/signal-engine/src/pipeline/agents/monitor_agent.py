@@ -48,6 +48,37 @@ async def _fetch_price(symbol: str) -> float | None:
         return None
 
 
+_EXIT_NOTES = {
+    "stop_loss": "Stop-loss triggered — thesis failed. Price fell to stop level.",
+    "target_hit": "Target hit — thesis correct. Price reached upside target.",
+    "max_age": f"Force-closed after {_MAX_POSITION_DAYS} days — maximum hold period reached.",
+}
+
+
+async def _log_thesis_break(
+    db: Any,
+    order: dict[str, Any],
+    exit_price: float,
+    return_pct: float,
+) -> None:
+    """Record a stop-loss event in trading_thesis_breaks so future signals on the
+    same stock can factor in a recent thesis failure via _fetch_hist_context()."""
+    try:
+        col = db["trading_thesis_breaks"]
+        await col.insert_one({
+            "symbol": order["symbol"],
+            "date": datetime.now(timezone.utc).date().isoformat(),
+            "run_id": order.get("run_id", ""),
+            "entry_price": float(order["entry_price"]),
+            "exit_price": exit_price,
+            "return_pct": return_pct,
+            "original_reasoning": order.get("reasoning", ""),
+            "createdAt": datetime.now(timezone.utc),
+        })
+    except Exception as exc:
+        logger.warning("monitor thesis_break_log_failed symbol=%s error=%s", order["symbol"], exc)
+
+
 async def _close_position(
     orders_repo: PaperOrdersRepository,
     portfolio_repo: VirtualPortfolioRepository,
@@ -55,9 +86,10 @@ async def _close_position(
     order: dict[str, Any],
     exit_price: float,
     reason: str,
+    db: Any = None,
 ) -> None:
     """Write exit data to paper_orders, release cash, and back-fill trading_signals."""
-    order_id = order["_id"]  # raw ObjectId — matches MongoDB's _id index
+    order_id = order["_id"]
     entry_price = float(order["entry_price"])
     shares = int(order["shares"])
     position_value = float(order["position_value"])
@@ -68,14 +100,17 @@ async def _close_position(
     was_correct = pnl > 0
     outcome_date = datetime.now(timezone.utc).date().isoformat()
 
-    await orders_repo.close_order(order_id, exit_price, return_pct, was_correct)
+    exit_note = (
+        f"{_EXIT_NOTES.get(reason, reason)} "
+        f"Entry ₹{entry_price:.2f} → Exit ₹{exit_price:.2f} ({return_pct:+.2f}%)"
+    )
+    await orders_repo.close_order(order_id, exit_price, return_pct, was_correct, exit_note=exit_note)
     logger.info(
         "monitor closed symbol=%s reason=%s entry=%.2f exit=%.2f pnl=%.2f (%.2f%%)",
         order["symbol"], reason, entry_price, exit_price, pnl, return_pct,
     )
 
-    # Back-fill outcome onto the originating trading_signal document so accuracy
-    # queries can be run on a single collection (no cross-collection join needed).
+    # Back-fill outcome onto the originating trading_signal document.
     run_id = order.get("run_id", "")
     if run_id:
         try:
@@ -92,8 +127,14 @@ async def _close_position(
                 order["symbol"], run_id, exc,
             )
 
+    # Log thesis breaks (stop-loss events) for future signal calibration
+    if reason == "stop_loss" and db is not None:
+        await _log_thesis_break(db, order, exit_price, return_pct)
+
     # Return cash and update portfolio stats
     await portfolio_repo.close_position(exit_value, position_value, was_correct)
+    # Update daily circuit-breaker counter (pnl negative on losses)
+    await portfolio_repo.record_close_pnl(pnl)
 
 
 async def run_monitor() -> dict[str, Any]:
@@ -140,7 +181,7 @@ async def run_monitor() -> dict[str, Any]:
                     order_date = date.fromisoformat(order_date_str)
                     age_days = (date.today() - order_date).days
                     if age_days >= _MAX_POSITION_DAYS:
-                        await _close_position(orders_repo, portfolio_repo, signals_repo, order, current_price, "max_age")
+                        await _close_position(orders_repo, portfolio_repo, signals_repo, order, current_price, "max_age", db=db)
                         await logs_repo.log(run_id, _AGENT_NAME, "warn", f"max_age {symbol} held {age_days}d @ {current_price}")
                         closed += 1
                         continue
@@ -148,12 +189,12 @@ async def run_monitor() -> dict[str, Any]:
                     pass
 
             if stop_loss > 0 and current_price <= stop_loss:
-                await _close_position(orders_repo, portfolio_repo, signals_repo, order, current_price, "stop_loss")
+                await _close_position(orders_repo, portfolio_repo, signals_repo, order, current_price, "stop_loss", db=db)
                 await logs_repo.log(run_id, _AGENT_NAME, "info", f"stop_loss triggered {symbol} @ {current_price}")
                 closed += 1
 
             elif current_price >= target:
-                await _close_position(orders_repo, portfolio_repo, signals_repo, order, current_price, "target_hit")
+                await _close_position(orders_repo, portfolio_repo, signals_repo, order, current_price, "target_hit", db=db)
                 await logs_repo.log(run_id, _AGENT_NAME, "info", f"target_hit {symbol} @ {current_price}")
                 closed += 1
 

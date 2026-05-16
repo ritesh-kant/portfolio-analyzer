@@ -115,13 +115,16 @@ class NewsAgent(BaseAgent):
 
     async def _execute(self, state: TradingState) -> TradingState:
         # 1. Fetch all sources concurrently
-        rss_articles, nse_articles, bse_articles = await asyncio.gather(
+        (rss_result, feed_health), nse_articles, bse_articles = await asyncio.gather(
             fetch_all_rss(),
             fetch_nse_announcements(),
             fetch_bse_announcements(),
         )
-        raw_all = rss_articles + nse_articles + bse_articles
-        logger.info("news_fetched total=%d", len(raw_all))
+        raw_all = rss_result + nse_articles + bse_articles
+        failed_feeds = [src for src, ok in feed_health.items() if not ok]
+        if failed_feeds:
+            logger.warning("news_agent feed_failures sources=%s", failed_feeds)
+        logger.info("news_fetched total=%d feed_health=%s", len(raw_all), feed_health)
 
         # 2. Deduplicate via MongoDB 24 h hash check
         repo = NewsArticlesRepository(get_db())
@@ -180,6 +183,7 @@ class NewsAgent(BaseAgent):
             update={
                 "raw_news": raw_all,
                 "classified_news": actionable_news,
+                "feed_health": feed_health,
             }
         )
 
