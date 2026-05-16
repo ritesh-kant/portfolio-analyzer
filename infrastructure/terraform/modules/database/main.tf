@@ -1,102 +1,140 @@
-# Database module — Amazon DocumentDB (MongoDB-compatible) cluster
+# Database module — MongoDB Atlas
 #
-# DocumentDB is a drop-in replacement for the self-hosted MongoDB used in local
-# dev.  Set MONGODB_URI in SSM to the cluster endpoint after first apply.
+# Replaces Amazon DocumentDB. Atlas runs outside the VPC, so Lambda functions
+# need no vpc_config and no NAT Gateway to reach the database.
 #
-# Minimum viable cluster: 1 instance (t3.medium).
-# Production: use db.r6g.large with 3 instances across 3 AZs.
+# Free tier (M0) is used for dev. Serverless (pay-per-operation) is used for
+# staging and prod — cost is typically $0–$5/month at low traffic.
+#
+# Prerequisites:
+#   1. Create a MongoDB Atlas account at https://cloud.mongodb.com
+#   2. Create an API key (Organisation > Access Manager > API Keys)
+#      with "Organisation Project Creator" permission
+#   3. Pass the org_id, public_key, and private_key via tfvars / env vars
 
-variable "environment"  { type = string }
-variable "vpc_id"       { type = string }
-variable "subnet_ids"   { type = list(string) }
+variable "environment"         { type = string }
+variable "atlas_org_id"        { type = string; sensitive = true }
+variable "atlas_public_key"    { type = string; sensitive = true }
+variable "atlas_private_key"   { type = string; sensitive = true }
+variable "atlas_region"        { type = string; default = "AP_SOUTH_1" }
+
+terraform {
+  required_providers {
+    mongodbatlas = {
+      source  = "mongodb/mongodbatlas"
+      version = "~> 1.15"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "mongodbatlas" {
+  public_key  = var.atlas_public_key
+  private_key = var.atlas_private_key
+}
 
 locals {
   identifier = "portfolio-analyzer-${var.environment}"
-  port       = 27017
+  is_dev     = var.environment == "dev"
 }
 
-# ─── Security group ───────────────────────────────────────────────────────────
+# ─── Atlas Project ────────────────────────────────────────────────────────────
 
-resource "aws_security_group" "docdb" {
-  name        = "${local.identifier}-docdb"
-  description = "Allow MongoDB traffic from Lambda functions"
-  vpc_id      = var.vpc_id
-
-  ingress {
-    from_port   = local.port
-    to_port     = local.port
-    protocol    = "tcp"
-    self        = true  # allow same-SG (Lambda → DocumentDB)
-    description = "MongoDB from Lambda"
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+resource "mongodbatlas_project" "main" {
+  name   = local.identifier
+  org_id = var.atlas_org_id
 }
 
-# ─── Subnet group ─────────────────────────────────────────────────────────────
+# ─── Cluster — M0 free tier for dev ──────────────────────────────────────────
 
-resource "aws_docdb_subnet_group" "main" {
+resource "mongodbatlas_cluster" "free" {
+  count      = local.is_dev ? 1 : 0
+  project_id = mongodbatlas_project.main.id
   name       = local.identifier
-  subnet_ids = var.subnet_ids
+
+  # Shared (free) tier — no cost, 512 MB storage limit
+  provider_name               = "TENANT"
+  backing_provider_name       = "AWS"
+  provider_region_name        = var.atlas_region
+  provider_instance_size_name = "M0"
 }
 
-# ─── Cluster ──────────────────────────────────────────────────────────────────
+# ─── Serverless instance — pay-per-operation for staging / prod ───────────────
 
-resource "aws_docdb_cluster_parameter_group" "main" {
-  family = "docdb5.0"
-  name   = "${local.identifier}-params"
+resource "mongodbatlas_serverless_instance" "main" {
+  count      = local.is_dev ? 0 : 1
+  project_id = mongodbatlas_project.main.id
+  name       = local.identifier
 
-  parameter {
-    name  = "tls"
-    value = "enabled"
-  }
+  provider_settings_backing_provider_name = "AWS"
+  provider_settings_provider_name         = "SERVERLESS"
+  provider_settings_region_name           = var.atlas_region
 }
 
-resource "random_password" "docdb_master" {
+# ─── DB credentials ───────────────────────────────────────────────────────────
+
+resource "random_password" "atlas" {
   length  = 32
-  special = false  # DocumentDB doesn't allow some special chars
+  special = false
 }
 
-resource "aws_docdb_cluster" "main" {
-  cluster_identifier              = local.identifier
-  engine                          = "docdb"
-  engine_version                  = "5.0.0"
-  master_username                 = "portfolioadmin"
-  master_password                 = random_password.docdb_master.result
-  db_subnet_group_name            = aws_docdb_subnet_group.main.name
-  vpc_security_group_ids          = [aws_security_group.docdb.id]
-  db_cluster_parameter_group_name = aws_docdb_cluster_parameter_group.main.name
-  backup_retention_period         = 7
-  preferred_backup_window         = "02:00-03:00"  # 7:30 AM IST — before market open
-  skip_final_snapshot             = var.environment != "prod"
-  deletion_protection             = var.environment == "prod"
+resource "mongodbatlas_database_user" "app" {
+  project_id         = mongodbatlas_project.main.id
+  username           = "portfolioadmin"
+  password           = random_password.atlas.result
+  auth_database_name = "admin"
 
-  lifecycle {
-    ignore_changes = [master_password]  # rotated outside Terraform
+  roles {
+    role_name     = "readWrite"
+    database_name = "portfolio_analyzer"
   }
 }
 
-resource "aws_docdb_cluster_instance" "main" {
-  count              = var.environment == "prod" ? 3 : 1
-  identifier         = "${local.identifier}-${count.index}"
-  cluster_identifier = aws_docdb_cluster.main.id
-  instance_class     = var.environment == "prod" ? "db.r6g.large" : "db.t3.medium"
+# ─── IP access list ───────────────────────────────────────────────────────────
+# Lambda functions have dynamic IPs that change on every cold start; allowing
+# all IPs is the standard pattern. Security is enforced via credentials + TLS.
+
+resource "mongodbatlas_project_ip_access_list" "all" {
+  project_id = mongodbatlas_project.main.id
+  cidr_block = "0.0.0.0/0"
+  comment    = "Lambda functions have dynamic IPs; security enforced via credentials + TLS"
 }
 
-# ─── Write connection string to SSM ───────────────────────────────────────────
+# ─── Build connection string ──────────────────────────────────────────────────
+
+locals {
+  # standard_srv format: mongodb+srv://<cluster-host>
+  atlas_srv_host = local.is_dev ? (
+    mongodbatlas_cluster.free[0].connection_strings[0].standard_srv
+  ) : (
+    mongodbatlas_serverless_instance.main[0].connection_strings_standard_srv
+  )
+
+  # Embed credentials and database name into the SRV URI
+  connection_string = "${replace(local.atlas_srv_host, "mongodb+srv://", "mongodb+srv://${mongodbatlas_database_user.app.username}:${random_password.atlas.result}@")}/portfolio_analyzer?retryWrites=true&w=majority"
+}
+
+# ─── Write connection string to SSM (same path as before — no Lambda changes) ─
 
 resource "aws_ssm_parameter" "mongodb_uri" {
   name  = "/portfolio-analyzer/${var.environment}/MONGODB_URI"
   type  = "SecureString"
-  value = "mongodb://${aws_docdb_cluster.main.master_username}:${random_password.docdb_master.result}@${aws_docdb_cluster.main.endpoint}:${local.port}/portfolio_analyzer?tls=true&tlsCAFile=/opt/rds-combined-ca-bundle.pem&replicaSet=rs0&readPreference=secondaryPreferred"
+  value = local.connection_string
+
+  lifecycle {
+    ignore_changes = [value]  # rotated outside Terraform
+  }
 }
 
 # ─── Outputs ──────────────────────────────────────────────────────────────────
 
-output "endpoint"          { value = aws_docdb_cluster.main.endpoint; sensitive = true }
-output "connection_string" { value = aws_ssm_parameter.mongodb_uri.value; sensitive = true }
+output "connection_string" { value = local.connection_string; sensitive = true }
+output "project_id"        { value = mongodbatlas_project.main.id }
+output "cluster_name"      { value = local.identifier }

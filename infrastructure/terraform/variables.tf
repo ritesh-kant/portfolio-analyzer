@@ -15,14 +15,22 @@ variable "environment" {
   }
 }
 
-variable "vpc_id" {
-  description = "VPC ID for DocumentDB and Lambda placement"
+variable "atlas_org_id" {
+  description = "MongoDB Atlas Organisation ID (find it under Organisation > Settings)"
   type        = string
+  sensitive   = true
 }
 
-variable "private_subnet_ids" {
-  description = "List of private subnet IDs (≥2 AZs required for DocumentDB)"
-  type        = list(string)
+variable "atlas_public_key" {
+  description = "MongoDB Atlas API public key (Organisation > Access Manager > API Keys)"
+  type        = string
+  sensitive   = true
+}
+
+variable "atlas_private_key" {
+  description = "MongoDB Atlas API private key"
+  type        = string
+  sensitive   = true
 }
 
 variable "signal_engine_image_tag" {

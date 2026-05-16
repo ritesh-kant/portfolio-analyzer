@@ -13,8 +13,12 @@ output "pipeline_queue_url" {
   value       = module.trading_service.queue_url
 }
 
-output "database_endpoint" {
-  description = "DocumentDB cluster endpoint"
-  value       = module.database.endpoint
-  sensitive   = true
+output "atlas_project_id" {
+  description = "MongoDB Atlas project ID"
+  value       = module.database.project_id
+}
+
+output "atlas_cluster_name" {
+  description = "MongoDB Atlas cluster / serverless instance name"
+  value       = module.database.cluster_name
 }

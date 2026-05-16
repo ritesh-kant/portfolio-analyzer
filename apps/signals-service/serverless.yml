@@ -18,6 +18,7 @@ provider:
   architecture: arm64
   stage: dev
   region: ap-south-1
+  logRetentionInDays: 14
   environment:
     NEWSDATA_API_KEY: ${env:NEWSDATA_API_KEY, ''}
     AI_PROVIDER: ${env:AI_PROVIDER, 'anthropic'}

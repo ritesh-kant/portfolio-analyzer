@@ -6,6 +6,14 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    mongodbatlas = {
+      source  = "mongodb/mongodbatlas"
+      version = "~> 1.15"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 
   # Remote state — swap out for your S3 bucket before first apply.
@@ -32,10 +40,11 @@ provider "aws" {
 # ─── Modules ──────────────────────────────────────────────────────────────────
 
 module "database" {
-  source      = "./modules/database"
-  environment = var.environment
-  vpc_id      = var.vpc_id
-  subnet_ids  = var.private_subnet_ids
+  source           = "./modules/database"
+  environment      = var.environment
+  atlas_org_id     = var.atlas_org_id
+  atlas_public_key = var.atlas_public_key
+  atlas_private_key = var.atlas_private_key
 }
 
 module "signal_engine" {

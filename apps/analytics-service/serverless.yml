@@ -17,6 +17,7 @@ provider:
   architecture: arm64
   stage: dev
   region: ap-south-1
+  logRetentionInDays: 14
   environment:
     MONGODB_URI: ${env:MONGODB_URI, 'mongodb://admin:admin123@localhost:27017/portfolio_analyzer?authSource=admin'}
     MFAPI_SCHEME_CODE: '120716'
