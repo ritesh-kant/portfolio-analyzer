@@ -29,19 +29,36 @@ class PaperOrdersRepository(BaseRepository):
         doc = await self._col.find_one({"symbol": symbol, "status": "OPEN"})
         return doc is not None
 
+    async def get_open_sector_counts(self, sector_map: dict[str, str]) -> dict[str, int]:
+        """Return {sector_name: open_position_count} for all currently OPEN orders.
+
+        Uses in-memory grouping on get_open_orders() — safe because open positions
+        are always bounded by max_positions (≤8), so no aggregation pipeline needed.
+        """
+        open_orders = await self.get_open_orders()
+        counts: dict[str, int] = {}
+        for order in open_orders:
+            sector = sector_map.get(order.get("symbol", ""))
+            if sector:
+                counts[sector] = counts.get(sector, 0) + 1
+        return counts
+
     async def close_order(
-        self, order_id: Any, exit_price: float, actual_return_pct: float, was_correct: bool
+        self,
+        order_id: Any,
+        exit_price: float,
+        actual_return_pct: float,
+        was_correct: bool,
+        exit_note: str = "",
     ) -> None:
-        await self.update_one(
-            {"_id": order_id},
-            {
-                "$set": {
-                    "status": "CLOSED",
-                    "exit_price": exit_price,
-                    "exit_date": datetime.now(timezone.utc).date().isoformat(),
-                    "actual_return_pct": actual_return_pct,
-                    "was_correct": was_correct,
-                    "updatedAt": datetime.now(timezone.utc),
-                }
-            },
-        )
+        fields: dict[str, Any] = {
+            "status": "CLOSED",
+            "exit_price": exit_price,
+            "exit_date": datetime.now(timezone.utc).date().isoformat(),
+            "actual_return_pct": actual_return_pct,
+            "was_correct": was_correct,
+            "updatedAt": datetime.now(timezone.utc),
+        }
+        if exit_note:
+            fields["exit_note"] = exit_note
+        await self.update_one({"_id": order_id}, {"$set": fields})

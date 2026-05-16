@@ -128,5 +128,7 @@ async def fetch_earnings_within_days(
     result = await with_retry(_do, max_attempts=3, base_delay=2.0, label="nse:earnings")
     if result is None:
         logger.warning("earnings_calendar_fetch_failed exhausted retries")
-        return {}
+        # Return sentinel so guard_agent can distinguish "no earnings" from "fetch failed".
+        # Guard agent must NOT pass pre-earnings stocks when calendar is unavailable.
+        return {"_FETCH_FAILED": "true"}
     return result

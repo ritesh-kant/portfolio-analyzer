@@ -34,6 +34,17 @@ Market-relevant news:
 
 Valid sectors: {sector_list}
 
+SCORE CALIBRATION — use this scale strictly:
+  90-100: Multiple HIGH-significance items agree on direction. Strong consensus.
+  70-89:  At least one HIGH-significance item with supporting MED items.
+  50-69:  Mostly MED-significance items, or one HIGH item standing alone.
+  30-49:  Weak signal — only LOW items, or mixed sentiment with no clear direction.
+  Below 30 / neutral: Conflicting signals or no clear market-moving news.
+
+IMPORTANT: A score above 60 will trigger stock selection from that sector.
+  Only assign score > 60 when you are genuinely confident in the direction.
+  When in doubt, score lower and set direction to "neutral".
+
 Return a JSON array of objects:
   name        (exact sector name from the valid list)
   direction   ("bullish" | "bearish" | "neutral")

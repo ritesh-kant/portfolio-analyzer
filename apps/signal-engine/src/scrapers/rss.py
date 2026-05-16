@@ -122,7 +122,8 @@ def _parse_feed_content(content: str | bytes, source: str, tier: str) -> list[di
 
 async def _fetch_one(
     client: httpx.AsyncClient, feed_cfg: dict[str, str]
-) -> list[dict[str, Any]]:
+) -> tuple[str, list[dict[str, Any]], bool]:
+    """Return (source_name, articles, success_bool)."""
     source = feed_cfg["source"]
 
     async def _do() -> list[dict[str, Any]]:
@@ -135,15 +136,21 @@ async def _fetch_one(
     result = await with_retry(_do, max_attempts=3, base_delay=1.0, label=f"rss:{source}")
     if result is None:
         logger.warning("rss_fetch_failed source=%s exhausted retries", source)
-        return []
-    return result
+        return source, [], False
+    return source, result, True
 
 
-async def fetch_all_rss() -> list[dict[str, Any]]:
-    """Fetch all configured RSS feeds concurrently. Never raises."""
+async def fetch_all_rss() -> tuple[list[dict[str, Any]], dict[str, bool]]:
+    """Fetch all configured RSS feeds concurrently. Never raises.
+
+    Returns (articles, feed_health) where feed_health maps source name → success.
+    """
     async with httpx.AsyncClient(headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True) as client:
-        batches = await asyncio.gather(*[_fetch_one(client, f) for f in RSS_FEEDS])
-    results: list[dict[str, Any]] = []
-    for batch in batches:
-        results.extend(batch)
-    return results
+        results = await asyncio.gather(*[_fetch_one(client, f) for f in RSS_FEEDS])
+
+    articles: list[dict[str, Any]] = []
+    feed_health: dict[str, bool] = {}
+    for source, arts, ok in results:
+        articles.extend(arts)
+        feed_health[source] = ok
+    return articles, feed_health

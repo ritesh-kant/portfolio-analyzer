@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     min_signal_confidence: float = 60.0
     max_positions: int = 8
     position_size_pct: float = 12.0
+    max_sector_positions: int = 3       # max open positions in any single sector
+    daily_loss_limit_pct: float = 3.0   # halt new orders if portfolio drops ≥3% today
+    portfolio_floor_pct: float = 70.0   # absolute halt if total_value < 70% of initial
 
     # Auth
     signal_engine_api_key: str = "local-dev-key-change-in-prod"
