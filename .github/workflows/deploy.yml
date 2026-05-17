@@ -170,6 +170,8 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy infrastructure
+        env:
+          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
         run: pnpm exec serverless deploy --stage prod --verbose --config infrastructure/serverless.yml
 
   # ──────────────────────────────────────────────
@@ -225,6 +227,7 @@ jobs:
       - name: Deploy portfolio-service
         working-directory: apps/portfolio-service
         env:
+          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           ZERODHA_API_KEY: ${{ secrets.ZERODHA_API_KEY }}
           ZERODHA_API_SECRET: ${{ secrets.ZERODHA_API_SECRET }}
@@ -284,6 +287,7 @@ jobs:
       - name: Deploy signals-service
         working-directory: apps/signals-service
         env:
+          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
           NEWSDATA_API_KEY: ${{ secrets.NEWSDATA_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -348,6 +352,7 @@ jobs:
       - name: Deploy signal-engine
         working-directory: apps/signal-engine
         env:
+          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
           AI_PROVIDER: ${{ vars.AI_PROVIDER }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -418,6 +423,7 @@ jobs:
       - name: Deploy trading-service
         working-directory: apps/trading-service
         env:
+          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           SIGNAL_ENGINE_URL: ${{ steps.signal-engine-url.outputs.url }}
           SIGNAL_ENGINE_API_KEY: ${{ secrets.SIGNAL_ENGINE_API_KEY }}
@@ -484,6 +490,7 @@ jobs:
       - name: Deploy analytics-service
         working-directory: apps/analytics-service
         env:
+          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
           ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
