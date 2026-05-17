@@ -35,7 +35,7 @@ _MAX_POSITION_DAYS = 10   # force-close positions held longer than this
 _PRICE_FETCH_TIMEOUT_S = 10.0
 
 
-async def _fetch_price(symbol: str) -> tuple[float | None, list[dict] | None]:
+async def _fetch_price(symbol: str) -> tuple[float | None, list[dict[str, Any]] | None]:
     """Fetch latest trade price and full 1m bar list for a symbol.
 
     Returns (latest_close, bars) where bars is a list of {time, open, high, low, close, volume}
@@ -43,7 +43,7 @@ async def _fetch_price(symbol: str) -> tuple[float | None, list[dict] | None]:
     """
     loop = asyncio.get_event_loop()
     try:
-        def _download() -> tuple[float | None, list[dict] | None]:
+        def _download() -> tuple[float | None, list[dict[str, Any]] | None]:
             ticker = yf.Ticker(symbol)
             hist = ticker.history(period="1d", interval="1m")
             if hist.empty:
@@ -178,7 +178,7 @@ async def run_monitor() -> dict[str, Any]:
         return {"checked": 0, "closed": 0, "errors": []}
 
     symbols = list({o["symbol"] for o in open_orders})
-    fetch_results: list[tuple[float | None, list[dict] | None]] = await asyncio.gather(
+    fetch_results: list[tuple[float | None, list[dict[str, Any]] | None]] = await asyncio.gather(
         *[_fetch_price(s) for s in symbols]
     )
     prices: dict[str, float | None] = {}

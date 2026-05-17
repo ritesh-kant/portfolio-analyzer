@@ -1,7 +1,8 @@
-"""BaseAgent — error-safe wrapper pattern for every pipeline node."""
+"""BaseAgent - error-safe wrapper pattern for every pipeline node."""
 
 import time
 from abc import ABC, abstractmethod
+from typing import Any
 
 import structlog
 
@@ -62,7 +63,7 @@ class BaseAgent(ABC):
         level: str,
         message: str,
         duration_ms: float | None = None,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
     ) -> None:
         try:
             repo = AgentLogsRepository(get_db())

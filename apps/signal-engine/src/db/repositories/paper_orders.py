@@ -23,7 +23,7 @@ class PaperOrdersRepository(BaseRepository):
 
     async def get_open_orders(self) -> list[dict[str, Any]]:
         cursor = self._col.find({"status": "OPEN"})
-        return await cursor.to_list(length=None)  # type: ignore[arg-type]
+        return await cursor.to_list(length=None)
 
     async def has_open_position(self, symbol: str) -> bool:
         doc = await self._col.find_one({"symbol": symbol, "status": "OPEN"})

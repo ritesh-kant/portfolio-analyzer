@@ -26,4 +26,4 @@ class StockAnalysesRepository(BaseRepository):
 
     async def get_by_run(self, run_id: str) -> list[dict[str, Any]]:
         cursor = self._col.find({"run_id": run_id})
-        return await cursor.to_list(length=None)  # type: ignore[arg-type]
+        return await cursor.to_list(length=None)

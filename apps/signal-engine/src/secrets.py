@@ -43,7 +43,7 @@ def bootstrap_secrets(stage: str = "dev") -> None:
         return  # local dev — env vars already loaded via .env
 
     try:
-        import boto3  # type: ignore[import-untyped]
+        import boto3
     except ImportError:
         logger.warning("boto3 not installed — skipping SSM secret resolution")
         return

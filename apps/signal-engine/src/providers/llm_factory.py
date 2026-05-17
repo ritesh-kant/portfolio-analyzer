@@ -38,13 +38,13 @@ def get_llm(provider: str | None = None, settings: Settings | None = None) -> ob
         return ChatOpenAI(
             model=s.openai_model,
             api_key=s.openai_api_key,  # type: ignore[arg-type]
-            max_tokens=2048,
+            model_kwargs={"max_tokens": 2048},
         )
 
     if name == "gemini":
-        return ChatGoogleGenerativeAI(  # type: ignore[call-arg]
+        return ChatGoogleGenerativeAI(
             model=s.gemini_model,
-            google_api_key=s.gemini_api_key,  # type: ignore[arg-type]
+            google_api_key=s.gemini_api_key,
         )
 
     if name == "kimi":
@@ -53,7 +53,7 @@ def get_llm(provider: str | None = None, settings: Settings | None = None) -> ob
             model=s.kimi_model,
             api_key=s.nvidia_api_key,  # type: ignore[arg-type]
             base_url=s.nvidia_base_url,
-            max_tokens=2048,
+            model_kwargs={"max_tokens": 2048},
         )
 
     if name == "deepseek":

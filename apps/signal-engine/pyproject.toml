@@ -54,6 +54,10 @@ strict = true
 python_version = "3.12"
 mypy_path = "."
 
+[[tool.mypy.overrides]]
+module = ["boto3", "feedparser", "pandas", "yfinance"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

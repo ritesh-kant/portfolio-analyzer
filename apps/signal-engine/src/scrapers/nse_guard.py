@@ -42,7 +42,9 @@ def _parse_date(raw: str | None) -> date | None:
     return None
 
 
-async def _nse_get(client: httpx.AsyncClient, url: str, params: dict | None = None) -> Any:
+async def _nse_get(
+    client: httpx.AsyncClient, url: str, params: dict[str, Any] | None = None
+) -> Any:
     """GET with NSE session; returns parsed JSON or None."""
     resp = await client.get(url, params=params)
     resp.raise_for_status()

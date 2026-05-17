@@ -18,7 +18,7 @@ class BaseRepository:
         return str(result.inserted_id)
 
     async def find_one(self, filter: dict[str, Any]) -> dict[str, Any] | None:
-        return await self._col.find_one(filter)  # type: ignore[return-value]
+        return await self._col.find_one(filter)
 
     async def update_one(
         self,

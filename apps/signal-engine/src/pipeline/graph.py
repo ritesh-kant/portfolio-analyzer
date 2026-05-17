@@ -10,6 +10,7 @@ import asyncio
 import logging
 import time
 from datetime import date as _date
+from typing import Any
 
 from langgraph.graph import StateGraph, END
 
@@ -65,7 +66,7 @@ async def _parallel_analysis(state: TradingState) -> TradingState:
     })
 
 
-def build_graph() -> StateGraph:
+def build_graph() -> Any:
     graph = StateGraph(TradingState)
 
     for agent in (news_agent, sector_agent, stock_selector, guard_agent, signal_agent, order_agent, audit_agent):
@@ -90,10 +91,10 @@ def build_graph() -> StateGraph:
     return graph.compile()
 
 
-_compiled_graph = None
+_compiled_graph: Any = None
 
 
-def _get_graph():
+def _get_graph() -> Any:
     global _compiled_graph
     if _compiled_graph is None:
         _compiled_graph = build_graph()
@@ -159,7 +160,7 @@ async def run_pipeline(run_id: str, date: str, ai_provider: str) -> TradingState
         llm=llm,
     )
 
-    graph = _get_graph()
+    graph: Any = _get_graph()
     final_state: TradingState = await graph.ainvoke(initial_state)
     return final_state
 

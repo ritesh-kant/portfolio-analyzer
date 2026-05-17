@@ -33,23 +33,25 @@ class MarketAgent(BaseAgent):
         )
         fii_dii_task = fetch_fii_dii()
 
-        nifty_vix, fii_dii = await asyncio.gather(
+        results: list[object] = await asyncio.gather(
             nifty_vix_task,
             fii_dii_task,
             return_exceptions=True,
         )
+        nifty_vix_obj = results[0]
+        fii_dii_obj = results[1]
 
         market_data: dict[str, Any] = {}
 
-        if isinstance(nifty_vix, dict):
-            market_data.update(nifty_vix)
+        if isinstance(nifty_vix_obj, dict):
+            market_data.update(nifty_vix_obj)
         else:
-            logger.warning("market_agent nifty_vix_failed error=%s", nifty_vix)
+            logger.warning("market_agent nifty_vix_failed error=%s", nifty_vix_obj)
 
-        if isinstance(fii_dii, dict):
-            market_data.update(fii_dii)
+        if isinstance(fii_dii_obj, dict):
+            market_data.update(fii_dii_obj)
         else:
-            logger.warning("market_agent fii_dii_failed error=%s", fii_dii)
+            logger.warning("market_agent fii_dii_failed error=%s", fii_dii_obj)
 
         logger.info(
             "market_agent nifty_change=%s vix=%s fii=%s dii=%s",
