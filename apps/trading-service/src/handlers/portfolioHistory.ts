@@ -1,4 +1,5 @@
 import { json } from '../lib/http.js';
+import { requireAuth } from '../lib/auth.js';
 import { getTradingDb } from '../lib/db.js';
 
 export interface PortfolioSnapshot {
@@ -12,7 +13,7 @@ export interface PortfolioSnapshot {
   avg_return_pct: number;     // average return per closed trade up to this day
 }
 
-export async function handler(): Promise<ReturnType<typeof json>> {
+export const handler = requireAuth(async (): Promise<ReturnType<typeof json>> => {
   try {
     const db = await getTradingDb();
 
@@ -88,4 +89,4 @@ export async function handler(): Promise<ReturnType<typeof json>> {
       detail: error instanceof Error ? error.message : String(error),
     });
   }
-}
+});

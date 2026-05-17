@@ -33,9 +33,12 @@ jobs:
     name: Detect changed paths
     runs-on: ubuntu-latest
     outputs:
+      infra:             ${{ steps.filter.outputs.infra }}
       portfolio-service: ${{ steps.filter.outputs.portfolio-service }}
+      analytics-service: ${{ steps.filter.outputs.analytics-service }}
       signals-service:   ${{ steps.filter.outputs.signals-service }}
       signal-engine:     ${{ steps.filter.outputs.signal-engine }}
+      trading-service:   ${{ steps.filter.outputs.trading-service }}
       web:               ${{ steps.filter.outputs.web }}
       any-backend:       ${{ steps.filter.outputs.any-backend }}
     steps:
@@ -47,22 +50,33 @@ jobs:
         id: filter
         with:
           filters: |
+            infra:
+              - 'infrastructure/serverless.yml'
             portfolio-service:
               - 'apps/portfolio-service/**'
+              - 'packages/**'
+            analytics-service:
+              - 'apps/analytics-service/**'
               - 'packages/**'
             signals-service:
               - 'apps/signals-service/**'
               - 'packages/**'
             signal-engine:
               - 'apps/signal-engine/**'
+              - 'infrastructure/serverless.yml'
+              - 'packages/**'
+            trading-service:
+              - 'apps/trading-service/**'
               - 'packages/**'
             web:
               - 'apps/web/**'
               - 'packages/**'
             any-backend:
               - 'apps/portfolio-service/**'
+              - 'apps/analytics-service/**'
               - 'apps/signals-service/**'
               - 'apps/signal-engine/**'
+              - 'apps/trading-service/**'
               - 'packages/**'
 
   # ──────────────────────────────────────────────
@@ -112,7 +126,50 @@ jobs:
           key: build-${{ github.sha }}
 
   # ──────────────────────────────────────────────
-  # 2. Deploy portfolio-service — only when its
+  # 2. Deploy shared infrastructure (ECR repo +
+  #    lifecycle policy). Must run before signal-engine
+  #    because signal-engine references the ECR repo
+  #    URL via a CloudFormation cross-stack export.
+  #    Safe to run on every infra change — CloudFormation
+  #    no-ops if nothing changed.
+  # ──────────────────────────────────────────────
+  deploy-infra:
+    name: Deploy shared infrastructure (AWS)
+    needs: [changes]
+    if: needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install root dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy infrastructure
+        working-directory: infrastructure
+        run: pnpm exec serverless deploy --stage prod --verbose
+
+  # ──────────────────────────────────────────────
+  # 3. Deploy portfolio-service — only when its
   #    files (or shared packages) changed.
   # ──────────────────────────────────────────────
   deploy-portfolio-service:
@@ -168,6 +225,8 @@ jobs:
           ZERODHA_API_KEY: ${{ secrets.ZERODHA_API_KEY }}
           ZERODHA_API_SECRET: ${{ secrets.ZERODHA_API_SECRET }}
           ZERODHA_ACCESS_TOKEN: ${{ secrets.ZERODHA_ACCESS_TOKEN }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
         run: pnpm exec serverless deploy --stage prod --verbose
 
   # ──────────────────────────────────────────────
@@ -230,21 +289,24 @@ jobs:
           ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
         run: pnpm exec serverless deploy --stage prod --verbose
 
   # ──────────────────────────────────────────────
-  # 4. Deploy signal-engine (Docker/ECR) — only when
-  #    its files changed. Runs after the Node Lambda
-  #    jobs finish (or are skipped) because Docker
-  #    builds are long and should not block them.
+  # 5. Deploy signal-engine (Docker/ECR) — only when
+  #    its files or infrastructure changed. Runs after
+  #    deploy-infra because signal-engine references the
+  #    ECR repo URL from the infra CloudFormation stack.
   # ──────────────────────────────────────────────
   deploy-signal-engine:
     name: Deploy signal-engine (AWS ECR + Lambda)
-    needs: [changes, build, deploy-portfolio-service, deploy-signals-service]
+    needs: [changes, build, deploy-infra, deploy-portfolio-service, deploy-signals-service]
     if: >
       always() &&
       needs.build.result == 'success' &&
       (inputs.force_deploy == true || needs.changes.outputs.signal-engine == 'true') &&
+      (needs.deploy-infra.result == 'success' || needs.deploy-infra.result == 'skipped') &&
       (needs.deploy-portfolio-service.result == 'success' || needs.deploy-portfolio-service.result == 'skipped') &&
       (needs.deploy-signals-service.result == 'success' || needs.deploy-signals-service.result == 'skipped')
     runs-on: ubuntu-latest
@@ -290,7 +352,141 @@ jobs:
         run: pnpm exec serverless deploy --stage prod --verbose
 
   # ──────────────────────────────────────────────
-  # 5. Deploy web (Next.js) to Vercel — only when
+  # 6. Deploy trading-service — depends on signal-engine
+  #    so we can read the Function URL from the CF stack
+  #    and inject it as SIGNAL_ENGINE_URL.
+  # ──────────────────────────────────────────────
+  deploy-trading-service:
+    name: Deploy trading-service (AWS)
+    needs: [changes, build, deploy-signal-engine]
+    if: >
+      always() &&
+      needs.changes.outputs.trading-service == 'true' &&
+      needs.build.result == 'success' &&
+      (needs.deploy-signal-engine.result == 'success' || needs.deploy-signal-engine.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Restore build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            node_modules
+            packages/*/node_modules
+            packages/*/dist
+            apps/*/node_modules
+          key: build-${{ github.sha }}
+
+      - name: Install dependencies (if cache miss)
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Fetch the signal-engine Function URL from the CloudFormation stack export
+      # so trading-service Lambda knows where to call it at runtime.
+      - name: Fetch signal-engine Function URL
+        id: signal-engine-url
+        run: |
+          URL=$(aws cloudformation list-exports \
+            --query "Exports[?Name=='prod-signal-engine-function-url'].Value" \
+            --output text)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy trading-service
+        working-directory: apps/trading-service
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          SIGNAL_ENGINE_URL: ${{ steps.signal-engine-url.outputs.url }}
+          SIGNAL_ENGINE_API_KEY: ${{ secrets.SIGNAL_ENGINE_API_KEY }}
+          TRADING_MODE: ${{ vars.TRADING_MODE }}
+          QUEUE_PROVIDER: sqs
+          VIRTUAL_PORTFOLIO_INITIAL: ${{ vars.VIRTUAL_PORTFOLIO_INITIAL }}
+          MIN_SIGNAL_CONFIDENCE: ${{ vars.MIN_SIGNAL_CONFIDENCE }}
+          MAX_POSITIONS: ${{ vars.MAX_POSITIONS }}
+          POSITION_SIZE_PCT: ${{ vars.POSITION_SIZE_PCT }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
+        run: pnpm exec serverless deploy --stage prod --verbose
+
+  # ──────────────────────────────────────────────
+  # 7. Deploy analytics-service — only when its
+  #    files (or shared packages) changed.
+  # ──────────────────────────────────────────────
+  deploy-analytics-service:
+    name: Deploy analytics-service (AWS)
+    needs: [changes, build]
+    if: >
+      always() &&
+      needs.changes.outputs.analytics-service == 'true' &&
+      needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Restore build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            node_modules
+            packages/*/node_modules
+            packages/*/dist
+            apps/*/node_modules
+          key: build-${{ github.sha }}
+
+      - name: Install dependencies (if cache miss)
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy analytics-service
+        working-directory: apps/analytics-service
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
+        run: pnpm exec serverless deploy --stage prod --verbose
+
+  # ──────────────────────────────────────────────
+  # 8. Deploy web (Next.js) to Vercel — only when
   #    its files (or shared packages) changed.
   # ──────────────────────────────────────────────
   deploy-web:

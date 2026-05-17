@@ -1,3 +1,4 @@
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 
 const MODEL_ENV_MAP: Record<string, string> = {
@@ -16,7 +17,7 @@ const MODEL_DEFAULTS: Record<string, string> = {
   ollama: 'llama3.1',
 };
 
-export async function handler(): Promise<ReturnType<typeof json>> {
+export const handler = requireAuth(async (): Promise<ReturnType<typeof json>> => {
   const provider = process.env.AI_PROVIDER ?? 'anthropic';
   const modelEnvKey = MODEL_ENV_MAP[provider];
   const model = (modelEnvKey ? process.env[modelEnvKey] : undefined) ?? MODEL_DEFAULTS[provider] ?? 'unknown';
@@ -26,4 +27,4 @@ export async function handler(): Promise<ReturnType<typeof json>> {
     model,
     isLocal: provider === 'ollama',
   });
-}
+});

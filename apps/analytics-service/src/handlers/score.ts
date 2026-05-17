@@ -1,20 +1,19 @@
 import type { Holding } from '@portfolio-analyzer/shared-types';
 import { calculateHealthScore } from '@portfolio-analyzer/analytics-core';
 
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 
-export async function handler(event: {
-  queryStringParameters?: Record<string, string | undefined> | null;
-}) {
+export const handler = requireAuth(async (event) => {
   const qs = event.queryStringParameters ?? {};
-  const alphaPct = qs.alphaPct ? parseFloat(qs.alphaPct) : 2.2;
+  const alphaPct = qs['alphaPct'] ? parseFloat(qs['alphaPct']) : 2.2;
 
   // Accept holdings as a JSON-encoded query param for stateless score computation.
   // Falls back to a minimal default set so the endpoint always returns a score.
   let holdings: Holding[];
   try {
-    holdings = qs.holdings
-      ? (JSON.parse(decodeURIComponent(qs.holdings)) as Holding[])
+    holdings = qs['holdings']
+      ? (JSON.parse(decodeURIComponent(qs['holdings'])) as Holding[])
       : defaultHoldings();
   } catch {
     holdings = defaultHoldings();
@@ -22,7 +21,7 @@ export async function handler(event: {
 
   const result = calculateHealthScore(holdings, alphaPct);
   return json(200, result);
-}
+});
 
 function defaultHoldings(): Holding[] {
   return [

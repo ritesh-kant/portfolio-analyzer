@@ -213,12 +213,25 @@ def _simulate_day(
     if nifty_chg < _NIFTY_KILL_THRESHOLD:
         logger.debug("engine global_guard nifty=%.2f%% date=%s", nifty_chg, date_str)
         global_guard_fired = True
-    # Market regime filter: skip new entries when Nifty is below its 50-day EMA.
-    # nifty_above_ema50 is already computed in market data. Being below EMA50
-    # indicates a corrective/bear phase where momentum signals produce false
-    # positives — the strategy should sit on cash until the trend recovers.
+    # Market regime filter — two-layer check for new entries:
+    #
+    # Layer 1 (slow): Nifty must be above EMA50.
+    #   Catches full bear markets (e.g. Feb–Jul 2022 correction).
+    #
+    # Layer 2 (fast): Nifty 5-day return must be > 0.
+    #   Catches "market top → early correction" transitions where price
+    #   is still above EMA50 but has been falling for 1–2 weeks
+    #   (e.g. Nov 2021 top, Nov 2022 chop, Sep 2024 sell-off).
+    #   Without this, the strategy enters trades during sharp pullbacks
+    #   and immediately hits stop-losses before momentum recovers.
+    #
+    # Together: only enter when the market is in an uptrend AND has
+    # been rising over the past trading week.
     if nifty_above is not None and not nifty_above:
         logger.debug("engine regime_filter Nifty below EMA50 — skipping entries date=%s", date_str)
+        global_guard_fired = True
+    if nifty_5d <= 0:
+        logger.debug("engine regime_filter nifty_5d=%.2f%% ≤ 0 — skipping entries date=%s", nifty_5d, date_str)
         global_guard_fired = True
 
     # ── Increment days_held ───────────────────────────────────────────────────

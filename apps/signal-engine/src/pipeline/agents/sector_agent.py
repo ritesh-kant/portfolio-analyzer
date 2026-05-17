@@ -14,6 +14,8 @@ from .base import BaseAgent
 from ..state import TradingState
 from ...providers.llm_utils import call_llm_json
 from ...scrapers.sector_stocks import normalise_sector, SECTOR_STOCKS
+from ...db.client import get_db
+from ...db.repositories.sector_snapshots import SectorSnapshotsRepository
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +152,15 @@ class SectorAgent(BaseAgent):
             "sector_agent sectors=%s",
             [(s["name"], s["direction"], s["score"]) for s in sectors],
         )
+
+        # Persist daily snapshot for future backtest replay
+        if sectors and state.date:
+            try:
+                db = get_db()
+                await SectorSnapshotsRepository(db).upsert(state.date, state.run_id, sectors)
+            except Exception as exc:
+                logger.warning("sector_agent snapshot_save_failed error=%s", exc)
+
         return state.model_copy(update={"sectors": sectors})
 
 

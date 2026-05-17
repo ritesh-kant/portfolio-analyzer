@@ -14,6 +14,8 @@ from typing import Any
 from .base import BaseAgent
 from ..state import TradingState
 from ...scrapers.nse_market import fetch_nifty_vix_sync, fetch_fii_dii
+from ...db.client import get_db
+from ...db.repositories.market_snapshots import MarketSnapshotsRepository
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,15 @@ class MarketAgent(BaseAgent):
             market_data.get("fii_net_crore"),
             market_data.get("dii_net_crore"),
         )
+
+        # Persist daily snapshot for future backtest replay
+        if market_data and state.date:
+            try:
+                db = get_db()
+                await MarketSnapshotsRepository(db).upsert(state.date, market_data)
+            except Exception as exc:
+                logger.warning("market_agent snapshot_save_failed error=%s", exc)
+
         return state.model_copy(update={"market_data": market_data})
 
 

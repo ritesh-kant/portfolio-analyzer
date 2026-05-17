@@ -1,5 +1,6 @@
 import { NseIndia } from 'stock-nse-india';
 import type { Datum } from 'stock-nse-india';
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 
 const nse = new NseIndia();
@@ -29,9 +30,7 @@ function computeMaxPain(data: Datum[]): number {
   return maxPainStrike;
 }
 
-export async function handler(event: {
-  queryStringParameters?: Record<string, string | undefined> | null;
-}): Promise<ReturnType<typeof json>> {
+export const handler = requireAuth(async (event): Promise<ReturnType<typeof json>> => {
   const symbol = (event.queryStringParameters?.symbol ?? 'NIFTY').toUpperCase();
 
   try {
@@ -104,4 +103,4 @@ export async function handler(event: {
       error: `NSE options fetch failed: ${String(err)}`,
     });
   }
-}
+});

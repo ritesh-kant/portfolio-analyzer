@@ -1,0 +1,67 @@
+service: portfolio-analyzer-infra
+frameworkVersion: '4'
+
+# Shared AWS infrastructure for portfolio-analyzer.
+# Deploy this service first, then the application services.
+#
+# Deployment order:
+#   1. Provision MongoDB Atlas — run: bash scripts/setup-atlas.sh
+#   2. Create SSM SecureString parameters — run: bash scripts/setup-ssm.sh
+#   3. Deploy this service: sls deploy --stage <stage>
+#   4. Deploy signal-engine: cd ../apps/signal-engine && sls deploy --stage <stage>
+#   5. Deploy remaining services in any order.
+#
+# NOTE: MongoDB Atlas cannot be provisioned by Serverless Framework or
+# CloudFormation — it is managed via the Atlas CLI in scripts/setup-atlas.sh.
+# The Terraform files in terraform/ remain as backup and reference.
+
+provider:
+  name: aws
+  region: ${opt:region, 'ap-south-1'}
+  stage: ${opt:stage, 'dev'}
+
+resources:
+  Resources:
+    # ── ECR repository for signal-engine container images ──────────────────
+    # Serverless Framework auto-creates an ECR repo from ecr.images config in
+    # apps/signal-engine/serverless.yml, but we define it here so we can set
+    # scan_on_push and a lifecycle policy that caps stored images at 5.
+    SignalEngineEcrRepo:
+      Type: AWS::ECR::Repository
+      Properties:
+        RepositoryName: portfolio-analyzer/signal-engine
+        ImageTagMutability: MUTABLE
+        ImageScanningConfiguration:
+          ScanOnPush: true
+        LifecyclePolicy:
+          LifecyclePolicyText: |
+            {
+              "rules": [
+                {
+                  "rulePriority": 1,
+                  "description": "Keep last 5 images",
+                  "selection": {
+                    "tagStatus": "any",
+                    "countType": "imageCountMoreThan",
+                    "countNumber": 5
+                  },
+                  "action": { "type": "expire" }
+                }
+              ]
+            }
+
+  Outputs:
+    SignalEngineEcrRepoUrl:
+      Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/portfolio-analyzer/signal-engine"
+      Export:
+        Name: ${sls:stage}-signal-engine-ecr-url
+
+    Region:
+      Value: !Ref AWS::Region
+      Export:
+        Name: ${sls:stage}-region
+
+    AccountId:
+      Value: !Ref AWS::AccountId
+      Export:
+        Name: ${sls:stage}-account-id

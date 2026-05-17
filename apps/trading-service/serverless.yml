@@ -12,6 +12,7 @@ build:
       - mongodb
       - '@portfolio-analyzer/db'
       - '@portfolio-analyzer/trading-types'
+      - '@portfolio-analyzer/auth-utils'
 
 provider:
   name: aws
@@ -30,14 +31,21 @@ provider:
     MAX_POSITIONS: ${env:MAX_POSITIONS, '8'}
     POSITION_SIZE_PCT: ${env:POSITION_SIZE_PCT, '12'}
     QUEUE_PROVIDER: ${env:QUEUE_PROVIDER, 'local'}
-    SQS_QUEUE_URL: ${env:SQS_QUEUE_URL, ''}
+    # Self-reference: resolved by CloudFormation at deploy time so CI doesn't
+    # need to pass this as an env var. Falls back to empty string for local dev.
+    SQS_QUEUE_URL: !If
+      - SqsEnabled
+      - !Ref PipelineRunQueue
+      - ''
     AI_PROVIDER: ${env:AI_PROVIDER, 'anthropic'}
     ALERT_WEBHOOK_URL: ${env:ALERT_WEBHOOK_URL, ''}
     AWS_REGION_NAME: ${env:AWS_REGION, 'ap-south-1'}
+    AUTH_SECRET: ${env:AUTH_SECRET, 'local-dev-secret-change-in-prod'}
+    ALLOWED_ORIGIN: ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
   httpApi:
     cors:
       allowedOrigins:
-        - '*'
+        - ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
       allowedHeaders:
         - Content-Type
         - Authorization
@@ -63,6 +71,8 @@ plugins:
   - serverless-offline
 
 custom:
+  dotenv:
+    path: ../../.env
   serverless-offline:
     httpPort: 6002
     lambdaPort: 6004
@@ -212,6 +222,9 @@ functions:
           enabled: ${self:custom.sqsEnabled.${env:QUEUE_PROVIDER, 'local'}, false}
 
 resources:
+  Conditions:
+    SqsEnabled: !Not [!Equals ["${env:QUEUE_PROVIDER, 'local'}", 'local']]
+
   Resources:
     PipelineRunQueue:
       Type: AWS::SQS::Queue

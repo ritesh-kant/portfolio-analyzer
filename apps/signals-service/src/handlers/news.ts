@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import type { NewsArticle } from '../lib/types.js';
 
@@ -15,9 +16,7 @@ interface NewsdataResponse {
   results?: NewsdataArticle[];
 }
 
-export async function handler(event?: {
-  queryStringParameters?: Record<string, string | undefined> | null;
-}): Promise<ReturnType<typeof json>> {
+export const handler = requireAuth(async (event): Promise<ReturnType<typeof json>> => {
   const apiKey = process.env.NEWSDATA_API_KEY;
   if (!apiKey) {
     return json(200, { articles: [], error: 'NEWSDATA_API_KEY not configured' });
@@ -63,7 +62,7 @@ export async function handler(event?: {
   } catch (err) {
     return json(200, { articles: [], error: String(err) });
   }
-}
+});
 
 function processArticles(raw: NewsdataArticle[]): NewsArticle[] {
   const seen = new Set<string>();

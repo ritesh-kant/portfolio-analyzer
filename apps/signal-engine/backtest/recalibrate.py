@@ -147,9 +147,12 @@ def compute_new_win_probs(
     """
     bucket_trades: dict[str, list[bool]] = defaultdict(list)
 
+    # Forced closures are not organic signal outcomes — exclude from calibration.
+    # FOLD_END = backtest walk-forward boundary; max_age = paper trading timeout.
+    _FORCED_EXITS = {"FOLD_END", "max_age"}
+
     for t in trades:
-        # Exclude FOLD_END closures from calibration — they are forced, not organic
-        if t.get("exit_reason") == "FOLD_END":
+        if t.get("exit_reason") in _FORCED_EXITS:
             continue
         bucket = _assign_bucket(t["confidence"])
         if bucket is not None:

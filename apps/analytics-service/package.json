@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@portfolio-analyzer/analytics-core": "workspace:*",
+    "@portfolio-analyzer/auth-utils": "workspace:*",
     "@portfolio-analyzer/shared-types": "workspace:*",
     "@portfolio-analyzer/tax-core": "workspace:*",
     "mongoose": "^8.9.2"

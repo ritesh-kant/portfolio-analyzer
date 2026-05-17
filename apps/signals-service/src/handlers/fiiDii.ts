@@ -1,4 +1,5 @@
 import { NseIndia } from 'stock-nse-india';
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import type { FlowData } from '../lib/types.js';
 
@@ -12,7 +13,7 @@ interface FiiDiiRow {
   date?: string;
 }
 
-export async function handler(): Promise<ReturnType<typeof json>> {
+export async function fetchFiiDii(): Promise<ReturnType<typeof json>> {
   try {
     const data = await nse.getDataByEndpoint('/api/fiidiiTradeReact') as unknown;
     const rows = (Array.isArray(data) ? data : []) as FiiDiiRow[];
@@ -48,3 +49,5 @@ export async function handler(): Promise<ReturnType<typeof json>> {
     });
   }
 }
+
+export const handler = requireAuth(fetchFiiDii);

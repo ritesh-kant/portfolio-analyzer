@@ -1,9 +1,10 @@
 import { ZerodhaAdapter } from '@portfolio-analyzer/broker-sdk';
 
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import { loadHoldings, saveHoldings } from '../lib/persistence.js';
 
-export async function handler() {
+export const handler = requireAuth(async () => {
   const apiKey = process.env.ZERODHA_API_KEY;
   const accessToken = process.env.ZERODHA_ACCESS_TOKEN;
 
@@ -29,4 +30,4 @@ export async function handler() {
     storage: mode,
     holdings,
   });
-}
+});

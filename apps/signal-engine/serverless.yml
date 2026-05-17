@@ -18,7 +18,10 @@ provider:
   ecr:
     images:
       signal-engine:
-        path: ./           # build context — uses Dockerfile at repo root of this app
+        # ECR repo is created by infrastructure/serverless.yml with scan_on_push
+        # and a 5-image lifecycle policy. The URI follows the naming convention set there.
+        uri: ${cf:portfolio-analyzer-infra-${sls:stage}.SignalEngineEcrRepoUrl}
+        path: ./
         platform: linux/arm64
 
   environment:
@@ -51,6 +54,11 @@ functions:
   api:
     image:
       name: signal-engine
+    # Lambda Function URL — IAM-authenticated direct HTTPS endpoint.
+    # Equivalent to the Terraform aws_lambda_function_url resource.
+    # trading-service calls this URL; sign requests with AWS SigV4.
+    url:
+      authorizer: aws_iam
     events:
       - httpApi:
           path: /health
@@ -59,7 +67,17 @@ functions:
           path: /pipeline/run
           method: post
     description: Signal-engine FastAPI (Mangum ASGI adapter)
-    # Override handler for container images — Mangum entry point
     environment:
       # Lambda sets AWS_LAMBDA_FUNCTION_NAME; secrets.py uses this to activate SSM
       AWS_SECRETS_ENABLED: 'true'
+
+resources:
+  Outputs:
+    SignalEngineFunctionName:
+      Value: !Ref ApiLambdaFunction
+      Export:
+        Name: ${sls:stage}-signal-engine-function-name
+    SignalEngineFunctionUrl:
+      Value: !GetAtt ApiUrl.FunctionUrl
+      Export:
+        Name: ${sls:stage}-signal-engine-function-url
