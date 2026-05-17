@@ -79,6 +79,19 @@ def _ensure_dirs() -> None:
     STOCKS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _cache_covers(df: pd.DataFrame, need_start: str, need_end: str) -> bool:
+    """Return True if df's DatetimeIndex spans the full [need_start, need_end] range.
+
+    Allows 5 calendar days of slack at the end to account for weekends/holidays.
+    Used to decide whether a parquet cache is fresh enough or must be re-fetched.
+    """
+    if df is None or df.empty:
+        return False
+    s = pd.Timestamp(need_start)
+    e = pd.Timestamp(need_end)
+    return df.index.min() <= s and df.index.max() >= (e - pd.Timedelta(days=5))
+
+
 def _date_range_str(start: str, end: str) -> str:
     """Format dates as dd-mm-yyyy for NSE APIs."""
     s = date.fromisoformat(start)
@@ -110,37 +123,49 @@ def load_stock_ohlcv(
     # We cache the full history; on range queries we filter afterwards.
     cache_path = STOCKS_CACHE_DIR / f"{symbol.replace('/', '_')}.parquet"
 
+    # The cache must span (start − 120 days) → end so that indicators have their
+    # full lookback on the first day of the requested window.
+    need_start = (date.fromisoformat(start) - timedelta(days=120)).isoformat()
+
     if cache_path.exists() and not refresh:
-        df = pd.read_parquet(cache_path)
-    else:
-        logger.info("data_loader fetching OHLCV symbol=%s start=%s end=%s", symbol, start, end)
-        # Fetch a generous window — extra history costs nothing and avoids re-fetching
-        fetch_start = (date.fromisoformat(start) - timedelta(days=120)).isoformat()
-        raw = yf.download(
+        df_cached = pd.read_parquet(cache_path)
+        if _cache_covers(df_cached, need_start, end):
+            return df_cached.loc[start:end].copy()
+        # Cache exists but is stale — log and fall through to re-fetch
+        logger.info(
+            "data_loader stock cache stale symbol=%s "
+            "(covers %s→%s, need %s→%s) — re-fetching",
             symbol,
-            start=fetch_start,
-            end=(date.fromisoformat(end) + timedelta(days=1)).isoformat(),
-            auto_adjust=True,
-            progress=False,
-            threads=False,
+            df_cached.index.min().date() if not df_cached.empty else "empty",
+            df_cached.index.max().date() if not df_cached.empty else "empty",
+            need_start, end,
         )
-        if isinstance(raw.columns, pd.MultiIndex):
-            raw.columns = raw.columns.get_level_values(0)
 
-        if raw.empty:
-            logger.warning("data_loader no_data symbol=%s", symbol)
-            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+    logger.info("data_loader fetching OHLCV symbol=%s start=%s end=%s", symbol, start, end)
+    # Fetch a generous window — extra history costs nothing and avoids re-fetching
+    fetch_start = (date.fromisoformat(start) - timedelta(days=120)).isoformat()
+    raw = yf.download(
+        symbol,
+        start=fetch_start,
+        end=(date.fromisoformat(end) + timedelta(days=1)).isoformat(),
+        auto_adjust=True,
+        progress=False,
+        threads=False,
+    )
+    if isinstance(raw.columns, pd.MultiIndex):
+        raw.columns = raw.columns.get_level_values(0)
 
-        # Normalise column names to lowercase
-        raw.columns = [c.lower() for c in raw.columns]
-        raw.index.name = "date"
-        raw.index = pd.to_datetime(raw.index).normalize()
-        raw.to_parquet(cache_path)
-        df = raw
+    if raw.empty:
+        logger.warning("data_loader no_data symbol=%s", symbol)
+        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
 
-    # Filter to requested date range
-    df = df.loc[start:end].copy()
-    return df
+    # Normalise column names to lowercase
+    raw.columns = [c.lower() for c in raw.columns]
+    raw.index.name = "date"
+    raw.index = pd.to_datetime(raw.index).normalize()
+    raw.to_parquet(cache_path)
+
+    return raw.loc[start:end].copy()
 
 
 async def load_stock_ohlcv_batch(
@@ -185,72 +210,82 @@ def load_market_data(
     """
     _ensure_dirs()
 
+    # Cache must cover (start − 120d) → end for EMA50 lookback on first fold day.
+    need_start = (date.fromisoformat(start) - timedelta(days=120)).isoformat()
+
     if MARKET_CACHE.exists() and not refresh:
-        df = pd.read_parquet(MARKET_CACHE)
+        df_cached = pd.read_parquet(MARKET_CACHE)
+        if _cache_covers(df_cached, need_start, end):
+            return df_cached.loc[start:end].copy()
+        logger.info(
+            "data_loader market cache stale (covers %s→%s, need %s→%s) — re-fetching",
+            df_cached.index.min().date() if not df_cached.empty else "empty",
+            df_cached.index.max().date() if not df_cached.empty else "empty",
+            need_start, end,
+        )
+
+    logger.info("data_loader fetching market data start=%s end=%s", start, end)
+    fetch_start = (date.fromisoformat(start) - timedelta(days=120)).isoformat()
+    fetch_end = (date.fromisoformat(end) + timedelta(days=1)).isoformat()
+
+    nifty = yf.download(
+        _NIFTY_SYMBOL,
+        start=fetch_start,
+        end=fetch_end,
+        auto_adjust=True,
+        progress=False,
+    )
+    vix = yf.download(
+        _VIX_SYMBOL,
+        start=fetch_start,
+        end=fetch_end,
+        auto_adjust=True,
+        progress=False,
+    )
+
+    # Handle MultiIndex
+    for raw in (nifty, vix):
+        if isinstance(raw.columns, pd.MultiIndex):
+            raw.columns = raw.columns.get_level_values(0)
+
+    if nifty.empty:
+        logger.error("data_loader nifty data empty")
+        return pd.DataFrame()
+
+    nifty.index = pd.to_datetime(nifty.index).normalize()
+    nifty.index.name = "date"
+    nifty.columns = [c.lower() for c in nifty.columns]
+
+    df = pd.DataFrame(index=nifty.index)
+    df["nifty_close"] = nifty["close"]
+
+    # Daily % change
+    df["nifty_change_pct"] = df["nifty_close"].pct_change() * 100
+
+    # EMA50 on Nifty (same pandas-ta approach as technical_agent)
+    import pandas_ta as ta  # noqa: PLC0415
+    nifty_ta = nifty.copy()
+    nifty_ta.ta.ema(length=50, append=True)
+    df["nifty_ema50"] = nifty_ta.get("EMA_50")
+    df["nifty_above_ema50"] = df["nifty_close"] > df["nifty_ema50"]
+
+    # Rolling returns
+    df["nifty_5d_return"] = df["nifty_close"].pct_change(periods=5) * 100
+    df["nifty_30d_return"] = df["nifty_close"].pct_change(periods=30) * 100
+
+    # VIX
+    if not vix.empty:
+        vix.index = pd.to_datetime(vix.index).normalize()
+        vix.index.name = "date"
+        vix.columns = [c.lower() for c in vix.columns]
+        df["vix"] = vix["close"].reindex(df.index)
     else:
-        logger.info("data_loader fetching market data start=%s end=%s", start, end)
-        fetch_start = (date.fromisoformat(start) - timedelta(days=120)).isoformat()
-        fetch_end = (date.fromisoformat(end) + timedelta(days=1)).isoformat()
+        logger.warning("data_loader vix data empty — using NaN")
+        df["vix"] = float("nan")
 
-        nifty = yf.download(
-            _NIFTY_SYMBOL,
-            start=fetch_start,
-            end=fetch_end,
-            auto_adjust=True,
-            progress=False,
-        )
-        vix = yf.download(
-            _VIX_SYMBOL,
-            start=fetch_start,
-            end=fetch_end,
-            auto_adjust=True,
-            progress=False,
-        )
+    df["vix_caution"] = (df["vix"] > 18.0) & (df["vix"] <= 22.0)
 
-        # Handle MultiIndex
-        for raw in (nifty, vix):
-            if isinstance(raw.columns, pd.MultiIndex):
-                raw.columns = raw.columns.get_level_values(0)
-
-        if nifty.empty:
-            logger.error("data_loader nifty data empty")
-            return pd.DataFrame()
-
-        nifty.index = pd.to_datetime(nifty.index).normalize()
-        nifty.index.name = "date"
-        nifty.columns = [c.lower() for c in nifty.columns]
-
-        df = pd.DataFrame(index=nifty.index)
-        df["nifty_close"] = nifty["close"]
-
-        # Daily % change
-        df["nifty_change_pct"] = df["nifty_close"].pct_change() * 100
-
-        # EMA50 on Nifty (same pandas-ta approach as technical_agent)
-        import pandas_ta as ta  # noqa: PLC0415
-        nifty_ta = nifty.copy()
-        nifty_ta.ta.ema(length=50, append=True)
-        df["nifty_ema50"] = nifty_ta.get("EMA_50")
-        df["nifty_above_ema50"] = df["nifty_close"] > df["nifty_ema50"]
-
-        # Rolling returns
-        df["nifty_5d_return"] = df["nifty_close"].pct_change(periods=5) * 100
-        df["nifty_30d_return"] = df["nifty_close"].pct_change(periods=30) * 100
-
-        # VIX
-        if not vix.empty:
-            vix.index = pd.to_datetime(vix.index).normalize()
-            vix.index.name = "date"
-            vix.columns = [c.lower() for c in vix.columns]
-            df["vix"] = vix["close"].reindex(df.index)
-        else:
-            logger.warning("data_loader vix data empty — using NaN")
-            df["vix"] = float("nan")
-
-        df["vix_caution"] = (df["vix"] > 18.0) & (df["vix"] <= 22.0)
-
-        df.to_parquet(MARKET_CACHE)
-
+    df.to_parquet(MARKET_CACHE)
     return df.loc[start:end].copy()
 
 
