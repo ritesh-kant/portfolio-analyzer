@@ -77,7 +77,7 @@ class BacktestConfig:
     test_window_months: int = 3   # out-of-sample window length
     step_months: int = 1          # how far the window steps forward per fold
     lookback_days: int = 90       # calendar days of OHLCV needed before fold start
-    min_signal_confidence: float = 70.0   # raised from 60 → only trade highest-quality signals
+    min_signal_confidence: float = 60.0
     news_mode: bool = False       # False = news-neutral (conservative baseline)
     refresh_data: bool = False    # True = re-download even if cache exists
     symbols: list[str] = field(default_factory=list)   # populated by engine from SECTOR_STOCKS
