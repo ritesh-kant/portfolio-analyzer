@@ -218,6 +218,8 @@ jobs:
           ZERODHA_API_KEY: ${{ secrets.ZERODHA_API_KEY }}
           ZERODHA_API_SECRET: ${{ secrets.ZERODHA_API_SECRET }}
           ZERODHA_ACCESS_TOKEN: ${{ secrets.ZERODHA_ACCESS_TOKEN }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
         run: pnpm exec serverless deploy --stage prod --verbose
 
   # ──────────────────────────────────────────────
@@ -280,6 +282,8 @@ jobs:
           ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
         run: pnpm exec serverless deploy --stage prod --verbose
 
   # ──────────────────────────────────────────────
@@ -414,6 +418,8 @@ jobs:
           POSITION_SIZE_PCT: ${{ vars.POSITION_SIZE_PCT }}
           AI_PROVIDER: ${{ vars.AI_PROVIDER }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
         run: pnpm exec serverless deploy --stage prod --verbose
 
   # ──────────────────────────────────────────────
@@ -468,6 +474,8 @@ jobs:
         working-directory: apps/analytics-service
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
         run: pnpm exec serverless deploy --stage prod --verbose
 
   # ──────────────────────────────────────────────
