@@ -135,8 +135,8 @@ def _news_catalyst_score(
     symbol: str,
     classified_news: list[dict[str, Any]],
     fii_net_crore: float | None = None,
-) -> tuple[int, str]:
-    """Return (pts, description) for the strongest positive news catalyst found.
+) -> tuple[int, str, str | None]:
+    """Return (pts, description, tier) for the strongest positive news catalyst found.
 
     Tier A (up to 14 pts): article directly names this stock.
     Tier B  (up to 8 pts): article explicitly tags the stock's sector.
@@ -148,7 +148,7 @@ def _news_catalyst_score(
     nse_sym = symbol.replace(".NS", "").replace(".BO", "").upper()
     stock_sector = _STOCK_TO_SECTOR.get(symbol)
 
-    pts, summary, is_tier_a = 0, "", False
+    pts, summary, tier = 0, "", None
 
     # Tier A: direct stock-specific catalyst
     for art in classified_news:
@@ -158,11 +158,11 @@ def _news_catalyst_score(
         if any(nse_sym in s for s in affected) or nse_sym in (art.get("headline") or "").upper():
             summary = art.get("summary") or art["headline"][:60]
             pts = round(14 * _news_age_decay(art))
-            is_tier_a = True
+            tier = "A"
             break
 
     # Tier B: sector-tagged article (reduced weight — indirect catalyst)
-    if not is_tier_a and stock_sector:
+    if tier is None and stock_sector:
         for art in classified_news:
             if art.get("sentiment") != "positive":
                 continue
@@ -170,6 +170,7 @@ def _news_catalyst_score(
             if any(stock_sector.upper() in s for s in art_sectors):
                 summary = art.get("summary") or art["headline"][:60]
                 pts = round(8 * _news_age_decay(art))
+                tier = "B"
                 break
 
     if pts > 0 and fii_net_crore is not None and fii_net_crore < -300:
@@ -177,7 +178,7 @@ def _news_catalyst_score(
         summary = f"{summary} [FII net selling ₹{fii_net_crore:.0f}Cr — catalyst discounted]"
         pts = discounted
 
-    return pts, summary
+    return pts, summary, tier
 
 
 def _score_base(
@@ -186,8 +187,8 @@ def _score_base(
     market_data: dict[str, Any],
     sectors: list[dict[str, Any]],
     classified_news: list[dict[str, Any]],
-) -> tuple[int, list[str], list[str]]:
-    """Compute base score, triggered signals, and near-miss weak signals."""
+) -> tuple[int, list[str], list[str], int, str | None]:
+    """Compute base score, triggered signals, near-miss weak signals, news_score, and news_tier."""
     score = 0
     triggered: list[str] = []
     weak: list[str] = []  # signals that nearly fired but didn't
@@ -235,7 +236,7 @@ def _score_base(
 
     # 6. News catalyst (FII net selling discounts points by 30% when > ₹300 Cr selling)
     fii_raw = market_data.get("fii_net_crore")
-    news_pts, news_desc = _news_catalyst_score(symbol, classified_news, fii_net_crore=fii_raw)
+    news_pts, news_desc, news_tier = _news_catalyst_score(symbol, classified_news, fii_net_crore=fii_raw)
     if news_pts > 0:
         score += news_pts
         triggered.append(f"News catalyst ({news_pts}pts): {news_desc}")
@@ -305,7 +306,7 @@ def _score_base(
     elif -0.5 <= nifty_chg <= 0:
         weak.append(f"Nifty {nifty_chg:+.2f}% (flat, market not positive)")
 
-    return score, triggered, weak
+    return score, triggered, weak, news_pts, news_tier
 
 
 async def _fetch_hist_context(signals_repo: TradingSignalsRepository, symbol: str) -> str:
@@ -482,7 +483,7 @@ class SignalAgent(BaseAgent):
                 )
                 continue
 
-            base_score, triggered, weak_signals = _score_base(
+            base_score, triggered, weak_signals, news_score, news_tier = _score_base(
                 symbol, td, state.market_data, state.sectors, state.classified_news
             )
 
@@ -525,6 +526,8 @@ class SignalAgent(BaseAgent):
                 "direction": "BUY",
                 "confidence": confidence,
                 "base_score": base_score,
+                "news_score": news_score,
+                "news_tier": news_tier,
                 "llm_bonus": bonus,
                 "triggered_signals": triggered,
                 "reasoning": reasoning,

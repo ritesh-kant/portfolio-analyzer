@@ -24,6 +24,7 @@ from ...db.repositories.paper_orders import PaperOrdersRepository
 from ...db.repositories.trading_signals import TradingSignalsRepository
 from ...db.repositories.virtual_portfolio import VirtualPortfolioRepository
 from ...db.repositories.agent_logs import AgentLogsRepository
+from ...db.repositories.intraday_bars import IntradayBarsRepository
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +35,32 @@ _MAX_POSITION_DAYS = 10   # force-close positions held longer than this
 _PRICE_FETCH_TIMEOUT_S = 10.0
 
 
-async def _fetch_price(symbol: str) -> float | None:
-    """Fetch latest trade price for a symbol. Returns None on failure or timeout."""
+async def _fetch_price(symbol: str) -> tuple[float | None, list[dict] | None]:
+    """Fetch latest trade price and full 1m bar list for a symbol.
+
+    Returns (latest_close, bars) where bars is a list of {time, open, high, low, close, volume}
+    dicts suitable for archival. Both values are None on failure or timeout.
+    """
     loop = asyncio.get_event_loop()
     try:
-        def _download() -> float | None:
+        def _download() -> tuple[float | None, list[dict] | None]:
             ticker = yf.Ticker(symbol)
             hist = ticker.history(period="1d", interval="1m")
             if hist.empty:
-                return None
-            return float(hist["Close"].iloc[-1])
+                return None, None
+            latest_close = float(hist["Close"].iloc[-1])
+            bars = [
+                {
+                    "time": idx.strftime("%H:%M"),
+                    "open": round(float(row["Open"]), 2),
+                    "high": round(float(row["High"]), 2),
+                    "low": round(float(row["Low"]), 2),
+                    "close": round(float(row["Close"]), 2),
+                    "volume": int(row["Volume"]),
+                }
+                for idx, row in hist.iterrows()
+            ]
+            return latest_close, bars
 
         return await asyncio.wait_for(
             loop.run_in_executor(None, _download),
@@ -51,10 +68,10 @@ async def _fetch_price(symbol: str) -> float | None:
         )
     except asyncio.TimeoutError:
         logger.warning("monitor price_fetch_timeout symbol=%s after %.0fs", symbol, _PRICE_FETCH_TIMEOUT_S)
-        return None
+        return None, None
     except Exception as exc:
         logger.warning("monitor price_fetch_failed symbol=%s error=%s", symbol, exc)
-        return None
+        return None, None
 
 
 _EXIT_NOTES = {
@@ -153,6 +170,7 @@ async def run_monitor() -> dict[str, Any]:
     portfolio_repo = VirtualPortfolioRepository(db)
     signals_repo = TradingSignalsRepository(db)
     logs_repo = AgentLogsRepository(db)
+    bars_repo = IntradayBarsRepository(db)
 
     open_orders = await orders_repo.get_open_orders()
     if not open_orders:
@@ -160,12 +178,18 @@ async def run_monitor() -> dict[str, Any]:
         return {"checked": 0, "closed": 0, "errors": []}
 
     symbols = list({o["symbol"] for o in open_orders})
-    prices = dict(
-        zip(
-            symbols,
-            await asyncio.gather(*[_fetch_price(s) for s in symbols]),
-        )
+    fetch_results: list[tuple[float | None, list[dict] | None]] = await asyncio.gather(
+        *[_fetch_price(s) for s in symbols]
     )
+    prices: dict[str, float | None] = {}
+    today = date.today().isoformat()
+    for symbol, (latest_close, bars) in zip(symbols, fetch_results):
+        prices[symbol] = latest_close
+        if bars:
+            try:
+                await bars_repo.upsert(symbol, today, "1m", bars)
+            except Exception as exc:
+                logger.warning("monitor bars_save_failed symbol=%s error=%s", symbol, exc)
 
     closed = 0
     errors: list[str] = []

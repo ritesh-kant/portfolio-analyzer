@@ -9,4 +9,7 @@ COLLECTION_NAMES = {
     "PIPELINE_RUNS": "trading_pipeline_runs",
     "AGENT_LOGS": "trading_agent_logs",
     "AGENT_DECISIONS": "trading_agent_decisions",
+    "MARKET_SNAPSHOTS": "trading_market_snapshots",
+    "SECTOR_SNAPSHOTS": "trading_sector_snapshots",
+    "INTRADAY_BARS": "trading_intraday_bars",
 }
