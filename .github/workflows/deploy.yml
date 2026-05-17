@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: "Force deploy all services, ignoring change detection"
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-production
@@ -81,6 +87,7 @@ jobs:
     name: Build monorepo
     needs: changes
     if: >
+      inputs.force_deploy == true ||
       needs.changes.outputs.any-backend == 'true' ||
       needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
@@ -172,8 +179,8 @@ jobs:
     # We still gate on build succeeding so a typecheck failure blocks deploy.
     if: >
       always() &&
-      needs.changes.outputs.portfolio-service == 'true' &&
-      needs.build.result == 'success'
+      needs.build.result == 'success' &&
+      (inputs.force_deploy == true || needs.changes.outputs.portfolio-service == 'true')
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -231,8 +238,8 @@ jobs:
     needs: [changes, build]
     if: >
       always() &&
-      needs.changes.outputs.signals-service == 'true' &&
-      needs.build.result == 'success'
+      needs.build.result == 'success' &&
+      (inputs.force_deploy == true || needs.changes.outputs.signals-service == 'true')
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -297,8 +304,8 @@ jobs:
     needs: [changes, build, deploy-infra, deploy-portfolio-service, deploy-signals-service]
     if: >
       always() &&
-      needs.changes.outputs.signal-engine == 'true' &&
       needs.build.result == 'success' &&
+      (inputs.force_deploy == true || needs.changes.outputs.signal-engine == 'true') &&
       (needs.deploy-infra.result == 'success' || needs.deploy-infra.result == 'skipped') &&
       (needs.deploy-portfolio-service.result == 'success' || needs.deploy-portfolio-service.result == 'skipped') &&
       (needs.deploy-signals-service.result == 'success' || needs.deploy-signals-service.result == 'skipped')
@@ -487,8 +494,8 @@ jobs:
     needs: [changes, build]
     if: >
       always() &&
-      needs.changes.outputs.web == 'true' &&
-      needs.build.result == 'success'
+      needs.build.result == 'success' &&
+      (inputs.force_deploy == true || needs.changes.outputs.web == 'true')
     runs-on: ubuntu-latest
     environment: production
     steps:
