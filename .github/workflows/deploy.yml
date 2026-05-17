@@ -16,10 +16,59 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────
-  # 1. Build & type-check the entire monorepo
+  # 0. Detect which parts of the codebase changed.
+  #    Every deploy job reads these outputs to decide
+  #    whether to run or skip itself.
+  #
+  #    packages/** is included in every filter because
+  #    shared-types changes affect all consumers.
+  # ──────────────────────────────────────────────
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      portfolio-service: ${{ steps.filter.outputs.portfolio-service }}
+      signals-service:   ${{ steps.filter.outputs.signals-service }}
+      signal-engine:     ${{ steps.filter.outputs.signal-engine }}
+      web:               ${{ steps.filter.outputs.web }}
+      any-backend:       ${{ steps.filter.outputs.any-backend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Filter changed paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            portfolio-service:
+              - 'apps/portfolio-service/**'
+              - 'packages/**'
+            signals-service:
+              - 'apps/signals-service/**'
+              - 'packages/**'
+            signal-engine:
+              - 'apps/signal-engine/**'
+              - 'packages/**'
+            web:
+              - 'apps/web/**'
+              - 'packages/**'
+            any-backend:
+              - 'apps/portfolio-service/**'
+              - 'apps/signals-service/**'
+              - 'apps/signal-engine/**'
+              - 'packages/**'
+
+  # ──────────────────────────────────────────────
+  # 1. Build & type-check the entire monorepo.
+  #    Skipped automatically when nothing relevant changed.
   # ──────────────────────────────────────────────
   build:
     name: Build monorepo
+    needs: changes
+    if: >
+      needs.changes.outputs.any-backend == 'true' ||
+      needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -45,7 +94,6 @@ jobs:
       - name: Build packages
         run: pnpm build --filter='./packages/*'
 
-      # Cache built packages so deploy jobs can reuse them
       - name: Cache build output
         uses: actions/cache/save@v4
         with:
@@ -57,11 +105,18 @@ jobs:
           key: build-${{ github.sha }}
 
   # ──────────────────────────────────────────────
-  # 2. Deploy portfolio-service to AWS Lambda
+  # 2. Deploy portfolio-service — only when its
+  #    files (or shared packages) changed.
   # ──────────────────────────────────────────────
   deploy-portfolio-service:
     name: Deploy portfolio-service (AWS)
-    needs: build
+    needs: [changes, build]
+    # always() lets us evaluate the condition even when build was skipped.
+    # We still gate on build succeeding so a typecheck failure blocks deploy.
+    if: >
+      always() &&
+      needs.changes.outputs.portfolio-service == 'true' &&
+      needs.build.result == 'success'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -109,11 +164,16 @@ jobs:
         run: pnpm exec serverless deploy --stage prod --verbose
 
   # ──────────────────────────────────────────────
-  # 3. Deploy signals-service to AWS Lambda
+  # 3. Deploy signals-service — only when its
+  #    files (or shared packages) changed.
   # ──────────────────────────────────────────────
   deploy-signals-service:
     name: Deploy signals-service (AWS)
-    needs: build
+    needs: [changes, build]
+    if: >
+      always() &&
+      needs.changes.outputs.signals-service == 'true' &&
+      needs.build.result == 'success'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -166,13 +226,20 @@ jobs:
         run: pnpm exec serverless deploy --stage prod --verbose
 
   # ──────────────────────────────────────────────
-  # 4. Deploy signal-engine to AWS Lambda (Docker/ECR)
-  #    This job is intentionally sequential — Docker
-  #    builds are slow and ECR pushes share credentials.
+  # 4. Deploy signal-engine (Docker/ECR) — only when
+  #    its files changed. Runs after the Node Lambda
+  #    jobs finish (or are skipped) because Docker
+  #    builds are long and should not block them.
   # ──────────────────────────────────────────────
   deploy-signal-engine:
     name: Deploy signal-engine (AWS ECR + Lambda)
-    needs: [deploy-portfolio-service, deploy-signals-service]
+    needs: [changes, build, deploy-portfolio-service, deploy-signals-service]
+    if: >
+      always() &&
+      needs.changes.outputs.signal-engine == 'true' &&
+      needs.build.result == 'success' &&
+      (needs.deploy-portfolio-service.result == 'success' || needs.deploy-portfolio-service.result == 'skipped') &&
+      (needs.deploy-signals-service.result == 'success' || needs.deploy-signals-service.result == 'skipped')
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -216,11 +283,16 @@ jobs:
         run: pnpm exec serverless deploy --stage prod --verbose
 
   # ──────────────────────────────────────────────
-  # 5. Deploy web (Next.js) to Vercel
+  # 5. Deploy web (Next.js) to Vercel — only when
+  #    its files (or shared packages) changed.
   # ──────────────────────────────────────────────
   deploy-web:
     name: Deploy web (Vercel)
-    needs: build
+    needs: [changes, build]
+    if: >
+      always() &&
+      needs.changes.outputs.web == 'true' &&
+      needs.build.result == 'success'
     runs-on: ubuntu-latest
     environment: production
     steps:
