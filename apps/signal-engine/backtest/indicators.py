@@ -168,6 +168,60 @@ def compute_indicators(
     }
 
 
+def derive_sector_scores(
+    indicators: dict[str, dict[str, Any]],
+    sector_stocks: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    """Derive sector bullish/bearish scores from pre-computed indicators.
+
+    Historically computable proxy for the production sector_agent. Counts
+    what fraction of a sector's stocks are currently above their EMA50 and
+    returns sector dicts in the exact format expected by
+    signal_replay.compute_signal_score().
+
+    Why this works:
+        The live sector_agent scores sectors using the same EMA-based
+        technical analysis. % stocks above EMA50 is a reliable, lag-free
+        proxy that requires only OHLCV data already in cache.
+
+    Threshold: ≥ 60% above EMA50 → "bullish" (score ≥ 60) → +12 pts.
+               ≤ 40% above EMA50 → "bearish".
+               Between 40%–60%    → "neutral" (0 pts, no penalty either).
+
+    Args:
+        indicators:    Output of compute_indicators_batch() for the current day.
+                       Must contain "above_ema50" key per symbol.
+        sector_stocks: SECTOR_STOCKS dict {sector_name: [symbol, ...]}
+
+    Returns:
+        [{"name": sector, "direction": "bullish"|"bearish"|"neutral", "score": 0–100}]
+        Only sectors with ≥ 3 available symbols are included (below that the
+        sample is too small to be meaningful).
+    """
+    results: list[dict[str, Any]] = []
+
+    for sector, symbols in sector_stocks.items():
+        available = [sym for sym in symbols if sym in indicators]
+        if len(available) < 3:
+            # Too few data points — skip rather than produce noisy signal
+            continue
+
+        above = sum(1 for sym in available if indicators[sym].get("above_ema50", False))
+        pct = above / len(available)
+        score = round(pct * 100)
+
+        if pct >= 0.6:
+            direction = "bullish"
+        elif pct <= 0.4:
+            direction = "bearish"
+        else:
+            direction = "neutral"
+
+        results.append({"name": sector, "direction": direction, "score": score})
+
+    return results
+
+
 def compute_indicators_batch(
     symbols_ohlcv: dict[str, pd.DataFrame],
     as_of_date: pd.Timestamp,

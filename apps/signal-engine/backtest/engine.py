@@ -42,7 +42,7 @@ from typing import Any
 import pandas as pd
 
 from backtest.data_loader import load_all
-from backtest.indicators import compute_indicators_batch
+from backtest.indicators import compute_indicators_batch, derive_sector_scores
 from backtest.metrics import (
     AggregateMetrics,
     FoldMetrics,
@@ -162,7 +162,7 @@ def _simulate_day(
     fii_df: pd.DataFrame,
     earnings_calendar: dict[str, list[str]],
     stock_to_sector: dict[str, str],
-    sectors: list[dict[str, Any]],
+    sector_stocks: dict[str, list[str]],
     config: BacktestConfig,
 ) -> DayResult:
     """Run one complete trading day in the simulation.
@@ -249,6 +249,11 @@ def _simulate_day(
             # Compute indicators for all symbols as of sim_date
             indicators = compute_indicators_batch(stocks_ohlcv, sim_date)
 
+            # Derive sector scores from the pre-computed EMA50 flags — this is
+            # the historical proxy for production's sector_agent. A sector is
+            # "bullish" (score ≥ 60) when ≥ 60% of its stocks are above EMA50.
+            day_sectors = derive_sector_scores(indicators, sector_stocks)
+
             for symbol, td in indicators.items():
                 if portfolio.open_position_count >= 8:
                     break
@@ -262,7 +267,7 @@ def _simulate_day(
                 sector = stock_to_sector.get(symbol, "Unknown")
 
                 confidence, triggered, _ = compute_signal_score(
-                    symbol, td, market_data, sectors, stock_to_sector,
+                    symbol, td, market_data, day_sectors, stock_to_sector,
                     earnings_days_away=earnings_days,
                     news_mode=config.news_mode,
                 )
@@ -303,6 +308,7 @@ async def run_fold(
     data: dict[str, Any],
     config: BacktestConfig,
     stock_to_sector: dict[str, str],
+    sector_stocks: dict[str, list[str]],
 ) -> FoldMetrics:
     """Simulate one walk-forward fold and return its metrics.
 
@@ -327,11 +333,6 @@ async def run_fold(
     # Fresh portfolio for this fold
     portfolio = make_portfolio(config.initial_capital)
 
-    # Sectors: in news-neutral mode we pass empty sector list (no live sector scoring)
-    # This is consistent with news_mode=False — sector bullish is a production-only signal
-    # that requires the LangGraph sector_agent which we can't replay historically.
-    sectors: list[dict[str, Any]] = []
-
     trading_days = _trading_days_in_range(market_df, fold_start, fold_end)
     logger.info("engine fold=%d trading_days=%d", fold_id, len(trading_days))
 
@@ -348,7 +349,7 @@ async def run_fold(
             fii_df=fii_df,
             earnings_calendar=earnings,
             stock_to_sector=stock_to_sector,
-            sectors=sectors,
+            sector_stocks=sector_stocks,
             config=config,
         )
         day_results.append(result)
@@ -451,6 +452,7 @@ async def run_backtest(config: BacktestConfig) -> AggregateMetrics:
             data=data,
             config=config,
             stock_to_sector=STOCK_TO_SECTOR,
+            sector_stocks=SECTOR_STOCKS,
         )
         fold_results.append(fold_metrics)
 
