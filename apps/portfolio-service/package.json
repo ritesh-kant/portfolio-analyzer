@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@portfolio-analyzer/auth-utils": "workspace:*",
     "@portfolio-analyzer/broker-sdk": "workspace:*",
     "@portfolio-analyzer/shared-types": "workspace:*",
     "mongoose": "^8.9.2"

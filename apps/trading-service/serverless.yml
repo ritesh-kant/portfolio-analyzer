@@ -34,10 +34,12 @@ provider:
     AI_PROVIDER: ${env:AI_PROVIDER, 'anthropic'}
     ALERT_WEBHOOK_URL: ${env:ALERT_WEBHOOK_URL, ''}
     AWS_REGION_NAME: ${env:AWS_REGION, 'ap-south-1'}
+    AUTH_SECRET: ${env:AUTH_SECRET}
+    ALLOWED_ORIGIN: ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
   httpApi:
     cors:
       allowedOrigins:
-        - '*'
+        - ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
       allowedHeaders:
         - Content-Type
         - Authorization

@@ -1,4 +1,5 @@
 import YahooFinance from 'yahoo-finance2';
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import { computeTechnicals } from '../lib/technicalCalculator.js';
 
@@ -32,9 +33,7 @@ async function fetchChartWithRetry(ticker: string, period1: string, maxAttempts 
   throw new Error('All retry attempts exhausted');
 }
 
-export async function handler(event: {
-  queryStringParameters?: Record<string, string | undefined> | null;
-}): Promise<ReturnType<typeof json>> {
+export const handler = requireAuth(async (event): Promise<ReturnType<typeof json>> => {
   const qs = event.queryStringParameters ?? {};
   const symbol = qs.symbol?.toUpperCase();
   const exchange = qs.exchange?.toUpperCase() ?? 'NSE';
@@ -81,4 +80,4 @@ export async function handler(event: {
   } catch (err) {
     return fallback(String(err));
   }
-}
+});

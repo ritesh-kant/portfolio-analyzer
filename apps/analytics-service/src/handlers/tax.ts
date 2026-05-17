@@ -1,6 +1,7 @@
 import type { Transaction } from '@portfolio-analyzer/shared-types';
 import { calculateTaxSummary } from '@portfolio-analyzer/tax-core';
 
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import { loadTransactionsFromMongo } from '../lib/transactions.js';
 
@@ -23,7 +24,7 @@ const sampleTransactions: Transaction[] = [
   },
 ];
 
-export async function handler() {
+export const handler = requireAuth(async () => {
   try {
     const transactions = await loadTransactionsFromMongo();
 
@@ -52,4 +53,4 @@ export async function handler() {
       message: 'MongoDB unavailable; using sample tax data.',
     });
   }
-}
+});

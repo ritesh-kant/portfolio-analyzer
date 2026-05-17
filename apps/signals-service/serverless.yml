@@ -34,10 +34,12 @@ provider:
     OLLAMA_BASE_URL: ${env:OLLAMA_BASE_URL, 'http://localhost:11434'}
     OLLAMA_MODEL: ${env:OLLAMA_MODEL, 'llama3.1'}
     OLLAMA_TIMEOUT: ${env:OLLAMA_TIMEOUT, '600000'}
+    AUTH_SECRET: ${env:AUTH_SECRET}
+    ALLOWED_ORIGIN: ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
   httpApi:
     cors:
       allowedOrigins:
-        - '*'
+        - ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
       allowedHeaders:
         - Content-Type
         - Authorization

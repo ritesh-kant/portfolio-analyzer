@@ -1,17 +1,35 @@
 const BASE = process.env.NEXT_PUBLIC_TRADING_API_BASE ?? 'http://localhost:6002';
 
+let cachedToken: string | null = null;
+
+async function getToken(): Promise<string> {
+  if (cachedToken) return cachedToken;
+  const res = await fetch('/api/token');
+  if (!res.ok) throw new Error('Not authenticated');
+  const data = (await res.json()) as { token: string };
+  cachedToken = data.token;
+  return cachedToken;
+}
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { cache: 'no-store' });
+  const token = await getToken();
+  const res = await fetch(`${BASE}${path}`, {
+    cache: 'no-store',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) { cachedToken = null; throw new Error('Session expired — please refresh'); }
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${path}`);
   return res.json() as Promise<T>;
 }
 
 async function post<T>(path: string, body: Record<string, unknown> = {}): Promise<T> {
+  const token = await getToken();
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
+  if (res.status === 401) { cachedToken = null; throw new Error('Session expired — please refresh'); }
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${path}`);
   return res.json() as Promise<T>;
 }

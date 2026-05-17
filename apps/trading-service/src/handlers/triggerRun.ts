@@ -1,7 +1,8 @@
 import { json } from '../lib/http.js';
+import { requireAuth } from '../lib/auth.js';
 import { triggerPipelineRun } from '../lib/orchestrator.js';
 
-export async function handler(event: { body?: string }): Promise<ReturnType<typeof json>> {
+export const handler = requireAuth(async (event: { body?: string }): Promise<ReturnType<typeof json>> => {
   let body: { date?: string; ai_provider?: string } = {};
   try {
     body = JSON.parse(event.body ?? '{}') as { date?: string; ai_provider?: string };
@@ -16,5 +17,4 @@ export async function handler(event: { body?: string }): Promise<ReturnType<type
   } catch (err: unknown) {
     return json(500, { error: 'Failed to trigger run', detail: err instanceof Error ? err.message : String(err) });
   }
-}
-
+});

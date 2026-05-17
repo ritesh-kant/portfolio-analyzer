@@ -1,4 +1,5 @@
 import YahooFinance from 'yahoo-finance2';
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import type { MacroIndicator } from '../lib/types.js';
 
@@ -12,7 +13,7 @@ const MACRO_SYMBOLS: { symbol: string; label: string; context: string }[] = [
   { symbol: '^N225', label: 'Nikkei 225', context: 'Asian market sentiment' },
 ];
 
-export async function handler(): Promise<ReturnType<typeof json>> {
+export async function fetchMacro(): Promise<ReturnType<typeof json>> {
   try {
     const symbols = MACRO_SYMBOLS.map((m) => m.symbol);
     const quotes = await yahooFinance.quote(symbols);
@@ -36,3 +37,5 @@ export async function handler(): Promise<ReturnType<typeof json>> {
     return json(200, { indicators: [], error: `Macro data fetch failed: ${String(err)}` });
   }
 }
+
+export const handler = requireAuth(fetchMacro);

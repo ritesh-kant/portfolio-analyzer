@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { NavLinks } from '../components/nav-links';
+import { auth, signOut } from '../auth';
 
 import './globals.css';
 
@@ -8,7 +9,9 @@ export const metadata: Metadata = {
   description: 'Portfolio analytics for Indian investors',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const session = await auth();
+
   return (
     <html lang="en">
       <body>
@@ -19,9 +22,27 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <p className="font-display text-lg tracking-tight">Portfolio Analyzer</p>
                 <p className="text-xs text-ink/70">Indian investor cockpit</p>
               </div>
-              <nav className="flex items-center gap-2 rounded-full bg-panel p-1 shadow-card">
-                <NavLinks />
-              </nav>
+              <div className="flex items-center gap-3">
+                <nav className="flex items-center gap-2 rounded-full bg-panel p-1 shadow-card">
+                  <NavLinks />
+                </nav>
+                {session?.user && (
+                  <form
+                    action={async () => {
+                      'use server';
+                      await signOut({ redirectTo: '/login' });
+                    }}
+                  >
+                    <button
+                      type="submit"
+                      className="rounded-full border border-black/10 bg-panel px-3 py-1.5 text-xs font-medium text-ink/70 shadow-card transition hover:text-ink"
+                      title={session.user.email ?? undefined}
+                    >
+                      Sign out
+                    </button>
+                  </form>
+                )}
+              </div>
             </div>
           </header>
           <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">{children}</main>
