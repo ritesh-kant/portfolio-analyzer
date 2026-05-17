@@ -1,3 +1,5 @@
+org: ritesh47
+app: portfolio-analyzer
 service: signals-service
 frameworkVersion: '4'
 
