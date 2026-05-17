@@ -77,6 +77,10 @@ resources:
       Value: !Ref ApiLambdaFunction
       Export:
         Name: ${sls:stage}-signal-engine-function-name
+    SignalEngineFunctionArn:
+      Value: !GetAtt ApiLambdaFunction.Arn
+      Export:
+        Name: ${sls:stage}-signal-engine-function-arn
     SignalEngineFunctionUrl:
       Value: !GetAtt ApiUrl.FunctionUrl
       Export:
