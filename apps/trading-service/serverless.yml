@@ -38,6 +38,7 @@ provider:
       - !Ref PipelineRunQueue
       - ''
     AI_PROVIDER: ${env:AI_PROVIDER, 'anthropic'}
+    SIGNAL_ENGINE_FUNCTION_NAME: ${cf:signal-engine-${sls:stage}.SignalEngineFunctionName, ''}
     ALERT_WEBHOOK_URL: ${env:ALERT_WEBHOOK_URL, ''}
     AWS_REGION_NAME: ${env:AWS_REGION, 'ap-south-1'}
     AUTH_SECRET: ${env:AUTH_SECRET, 'local-dev-secret-change-in-prod'}
@@ -65,6 +66,11 @@ provider:
             - sqs:GetQueueAttributes
           Resource:
             - !GetAtt PipelineRunQueue.Arn
+        - Effect: Allow
+          Action:
+            - lambda:InvokeFunction
+          Resource:
+            - ${cf:signal-engine-${sls:stage}.SignalEngineFunctionArn, '*'}
 
 plugins:
   - serverless-dotenv-plugin
@@ -213,7 +219,7 @@ functions:
   # Receives pipeline-run messages and forwards to signal-engine container.
   pipelineConsumer:
     handler: src/handlers/pipelineConsumer.handler
-    timeout: 60
+    timeout: 30
     reservedConcurrency: 1  # one pipeline at a time
     events:
       - sqs:
@@ -234,7 +240,7 @@ resources:
         FifoQueue: true
         ContentBasedDeduplication: false
         MessageRetentionPeriod: 86400  # 24 h
-        VisibilityTimeout: 120         # > pipelineConsumer timeout
+        VisibilityTimeout: 60          # > pipelineConsumer timeout (30s)
         RedrivePolicy:
           deadLetterTargetArn: !GetAtt PipelineRunDLQ.Arn
           maxReceiveCount: 3

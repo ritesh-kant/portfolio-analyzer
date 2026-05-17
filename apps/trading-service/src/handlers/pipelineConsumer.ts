@@ -1,10 +1,15 @@
 /**
  * SQS consumer Lambda — receives pipeline-run messages from the SQS FIFO queue
- * and forwards them to the signal-engine container.
+ * and dispatches them to the signal-engine Lambda via async invocation.
+ *
+ * InvocationType='Event' returns 202 immediately; signal-engine runs independently
+ * with its own 900 s timeout. This Lambda completes in ~200 ms.
  *
  * Triggered automatically by the SQS event source defined in serverless.yml.
  * Deploy condition: QUEUE_PROVIDER=sqs
  */
+
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 
 interface SqsRecord {
   messageId: string;
@@ -15,9 +20,11 @@ interface SqsEvent {
   Records: SqsRecord[];
 }
 
+const lambda = new LambdaClient({ region: process.env.AWS_REGION ?? 'ap-south-1' });
+
 export async function handler(event: SqsEvent): Promise<void> {
-  const SIGNAL_ENGINE_URL = process.env.SIGNAL_ENGINE_URL ?? 'http://localhost:8000';
-  const SIGNAL_ENGINE_API_KEY = process.env.SIGNAL_ENGINE_API_KEY ?? '';
+  const functionName = process.env.SIGNAL_ENGINE_FUNCTION_NAME;
+  if (!functionName) throw new Error('SIGNAL_ENGINE_FUNCTION_NAME is not set');
 
   for (const record of event.Records) {
     let payload: { run_id?: string; date?: string; ai_provider?: string };
@@ -28,21 +35,20 @@ export async function handler(event: SqsEvent): Promise<void> {
       continue;
     }
 
-    console.log('[pipelineConsumer] Processing run_id=%s', payload.run_id);
+    console.log('[pipelineConsumer] Async-invoking signal-engine run_id=%s', payload.run_id);
 
-    const res = await fetch(`${SIGNAL_ENGINE_URL}/pipeline/run`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': SIGNAL_ENGINE_API_KEY,
-      },
-      body: JSON.stringify(payload),
-    });
+    const response = await lambda.send(new InvokeCommand({
+      FunctionName: functionName,
+      InvocationType: 'Event', // async — Lambda returns 202, pipeline runs independently
+      Payload: Buffer.from(JSON.stringify(payload)),
+    }));
 
-    if (!res.ok) {
+    if (response.StatusCode !== 202) {
       throw new Error(
-        `[pipelineConsumer] Signal engine returned ${res.status} for run_id=${payload.run_id ?? 'unknown'}`,
+        `[pipelineConsumer] Lambda invoke returned status ${response.StatusCode} for run_id=${payload.run_id ?? 'unknown'}`,
       );
     }
+
+    console.log('[pipelineConsumer] Accepted run_id=%s status=202', payload.run_id);
   }
 }
