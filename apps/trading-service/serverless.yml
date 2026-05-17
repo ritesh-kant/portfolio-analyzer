@@ -5,7 +5,6 @@ frameworkVersion: '4'
 
 build:
   esbuild:
-    packager: pnpm
     bundle: true
     format: cjs
     platform: node
@@ -13,9 +12,6 @@ build:
     external:
       - mongoose
       - mongodb
-      - '@portfolio-analyzer/db'
-      - '@portfolio-analyzer/trading-types'
-      - '@portfolio-analyzer/auth-utils'
 
 provider:
   name: aws
