@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "make dev",
     "build": "echo 'Python: no build step required'",
-    "typecheck": "uv run mypy src",
-    "lint": "uv run ruff check src"
+    "typecheck": "uv run --extra dev mypy src",
+    "lint": "uv run --extra dev ruff check src"
   }
 }
