@@ -12,6 +12,7 @@ build:
       - mongodb
       - '@portfolio-analyzer/db'
       - '@portfolio-analyzer/trading-types'
+      - '@portfolio-analyzer/auth-utils'
 
 provider:
   name: aws
@@ -39,7 +40,7 @@ provider:
     AI_PROVIDER: ${env:AI_PROVIDER, 'anthropic'}
     ALERT_WEBHOOK_URL: ${env:ALERT_WEBHOOK_URL, ''}
     AWS_REGION_NAME: ${env:AWS_REGION, 'ap-south-1'}
-    AUTH_SECRET: ${env:AUTH_SECRET}
+    AUTH_SECRET: ${env:AUTH_SECRET, 'local-dev-secret-change-in-prod'}
     ALLOWED_ORIGIN: ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
   httpApi:
     cors:
@@ -70,6 +71,8 @@ plugins:
   - serverless-offline
 
 custom:
+  dotenv:
+    path: ../../.env
   serverless-offline:
     httpPort: 6002
     lambdaPort: 6004
@@ -220,7 +223,7 @@ functions:
 
 resources:
   Conditions:
-    SqsEnabled: !Not [!Equals ['${env:QUEUE_PROVIDER, local}', 'local']]
+    SqsEnabled: !Not [!Equals ["${env:QUEUE_PROVIDER, 'local'}", 'local']]
 
   Resources:
     PipelineRunQueue:

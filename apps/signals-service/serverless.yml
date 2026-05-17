@@ -11,6 +11,7 @@ build:
       - yahoo-finance2
       - stock-nse-india
       - technicalindicators
+      - '@portfolio-analyzer/auth-utils'
 
 provider:
   name: aws
@@ -34,7 +35,7 @@ provider:
     OLLAMA_BASE_URL: ${env:OLLAMA_BASE_URL, 'http://localhost:11434'}
     OLLAMA_MODEL: ${env:OLLAMA_MODEL, 'llama3.1'}
     OLLAMA_TIMEOUT: ${env:OLLAMA_TIMEOUT, '600000'}
-    AUTH_SECRET: ${env:AUTH_SECRET}
+    AUTH_SECRET: ${env:AUTH_SECRET, 'local-dev-secret-change-in-prod'}
     ALLOWED_ORIGIN: ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
   httpApi:
     cors:
@@ -53,6 +54,8 @@ plugins:
   - serverless-offline
 
 custom:
+  dotenv:
+    path: ../../.env
   serverless-offline:
     httpPort: 5001
     lambdaPort: 5003

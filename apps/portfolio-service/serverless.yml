@@ -10,6 +10,7 @@ build:
     external:
       - mongoose
       - mongodb
+      - '@portfolio-analyzer/auth-utils'
 
 provider:
   name: aws
@@ -24,7 +25,7 @@ provider:
     ZERODHA_API_SECRET: ${env:ZERODHA_API_SECRET, ''}
     ZERODHA_ACCESS_TOKEN: ${env:ZERODHA_ACCESS_TOKEN, ''}
     MFAPI_SCHEME_CODE: '120716'
-    AUTH_SECRET: ${env:AUTH_SECRET}
+    AUTH_SECRET: ${env:AUTH_SECRET, 'local-dev-secret-change-in-prod'}
     ALLOWED_ORIGIN: ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
   httpApi:
     cors:
@@ -45,6 +46,8 @@ plugins:
   - serverless-offline
 
 custom:
+  dotenv:
+    path: ../../.env
   serverless-offline:
     httpPort: 3001
     lambdaPort: 3003
