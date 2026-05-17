@@ -5,6 +5,7 @@ frameworkVersion: '4'
 
 build:
   esbuild:
+    packager: pnpm
     bundle: true
     format: cjs
     platform: node
