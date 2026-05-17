@@ -57,8 +57,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--step",    type=int, default=1, help="Step months between folds (default: 1)")
     p.add_argument("--symbols", nargs="+", default=None,
                    help="Symbol list (default: full Nifty ~100 universe from SECTOR_STOCKS)")
-    p.add_argument("--confidence", type=float, default=60.0,
-                   help="Minimum signal confidence to trade (default: 60)")
+    p.add_argument("--confidence", type=float, default=70.0,
+                   help="Minimum signal confidence to trade (default: 70)")
     p.add_argument("--refresh", action="store_true",
                    help="Force re-download all data even if cache exists")
     p.add_argument("--output",  default=None,

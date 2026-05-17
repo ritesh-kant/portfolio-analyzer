@@ -43,11 +43,11 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # ── Constants (must match production exactly) ──────────────────────────────────
-STOP_PCT = 0.05
-TARGET_PCT = 0.10
+STOP_PCT = 0.04         # tightened from 0.05 → faster stop-out on real losers
+TARGET_PCT = 0.08       # tightened from 0.10 → faster lock-in of gains
 REWARD_TO_RISK = 2.0
 MAX_KELLY_CAP = 0.25
-MAX_HOLD_DAYS = 10
+MAX_HOLD_DAYS = 20      # extended from 10 → give signals more time to play out
 
 # Config defaults — must mirror config.py
 MIN_SIGNAL_CONFIDENCE = 60.0

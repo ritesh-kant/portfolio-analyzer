@@ -77,7 +77,7 @@ class BacktestConfig:
     test_window_months: int = 3   # out-of-sample window length
     step_months: int = 1          # how far the window steps forward per fold
     lookback_days: int = 90       # calendar days of OHLCV needed before fold start
-    min_signal_confidence: float = 60.0
+    min_signal_confidence: float = 70.0   # raised from 60 → only trade highest-quality signals
     news_mode: bool = False       # False = news-neutral (conservative baseline)
     refresh_data: bool = False    # True = re-download even if cache exists
     symbols: list[str] = field(default_factory=list)   # populated by engine from SECTOR_STOCKS
@@ -212,6 +212,13 @@ def _simulate_day(
         global_guard_fired = True
     if nifty_chg < _NIFTY_KILL_THRESHOLD:
         logger.debug("engine global_guard nifty=%.2f%% date=%s", nifty_chg, date_str)
+        global_guard_fired = True
+    # Market regime filter: skip new entries when Nifty is below its 50-day EMA.
+    # nifty_above_ema50 is already computed in market data. Being below EMA50
+    # indicates a corrective/bear phase where momentum signals produce false
+    # positives — the strategy should sit on cash until the trend recovers.
+    if nifty_above is not None and not nifty_above:
+        logger.debug("engine regime_filter Nifty below EMA50 — skipping entries date=%s", date_str)
         global_guard_fired = True
 
     # ── Increment days_held ───────────────────────────────────────────────────
