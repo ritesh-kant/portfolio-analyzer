@@ -170,8 +170,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy infrastructure
-        working-directory: infrastructure
-        run: pnpm exec serverless deploy --stage prod --verbose
+        run: pnpm exec serverless deploy --stage prod --verbose --config infrastructure/serverless.yml
 
   # ──────────────────────────────────────────────
   # 3. Deploy portfolio-service — only when its
