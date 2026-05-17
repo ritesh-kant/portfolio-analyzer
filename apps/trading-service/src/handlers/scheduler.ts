@@ -1,3 +1,4 @@
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import { triggerPipelineRun } from '../lib/orchestrator.js';
 
@@ -17,7 +18,7 @@ export async function handler(): Promise<void> {
 }
 
 // Manual HTTP trigger for testing (same logic, returns JSON)
-export async function httpHandler(): Promise<ReturnType<typeof json>> {
+export const httpHandler = requireAuth(async (): Promise<ReturnType<typeof json>> => {
   try {
     const result = await triggerPipelineRun();
     const status = result.skipped ? 200 : 202;
@@ -25,4 +26,4 @@ export async function httpHandler(): Promise<ReturnType<typeof json>> {
   } catch (err) {
     return json(500, { error: 'Scheduler failed', detail: err instanceof Error ? err.message : String(err) });
   }
-}
+});

@@ -24,10 +24,12 @@ provider:
     ZERODHA_API_SECRET: ${env:ZERODHA_API_SECRET, ''}
     ZERODHA_ACCESS_TOKEN: ${env:ZERODHA_ACCESS_TOKEN, ''}
     MFAPI_SCHEME_CODE: '120716'
+    AUTH_SECRET: ${env:AUTH_SECRET}
+    ALLOWED_ORIGIN: ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
   httpApi:
     cors:
       allowedOrigins:
-        - '*'
+        - ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
       allowedHeaders:
         - Content-Type
         - Authorization

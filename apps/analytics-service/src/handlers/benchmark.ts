@@ -1,5 +1,6 @@
 import { calculateBenchmarkComparison } from '@portfolio-analyzer/analytics-core';
 
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 
 const NIFTY50_SCHEME_CODE = '120716'; // UTI Nifty 50 Index Fund Direct Growth
@@ -40,9 +41,7 @@ function navOnOrBefore(history: MfApiEntry[], targetDate: Date): number | null {
   return null;
 }
 
-export async function handler(event: {
-  queryStringParameters?: Record<string, string | undefined> | null;
-}) {
+export const handler = requireAuth(async (event) => {
   const qs = event.queryStringParameters ?? {};
   const portfolioCurrentValue = qs.currentValue ? parseFloat(qs.currentValue) : 160480;
   const investedAmount = qs.investedAmount ? parseFloat(qs.investedAmount) : 141209;
@@ -91,4 +90,4 @@ export async function handler(event: {
       note: error instanceof Error ? error.message : 'MFAPI unavailable',
     });
   }
-}
+});

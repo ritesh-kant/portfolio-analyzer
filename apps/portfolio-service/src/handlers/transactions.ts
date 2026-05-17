@@ -1,7 +1,8 @@
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import { loadTransactions } from '../lib/persistence.js';
 
-export async function handler() {
+export const handler = requireAuth(async () => {
   const { transactions, mode } = await loadTransactions();
 
   return json(200, {
@@ -10,4 +11,4 @@ export async function handler() {
     count: transactions.length,
     transactions,
   });
-}
+});

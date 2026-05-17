@@ -1,9 +1,10 @@
 import { GrowwCsvAdapter } from '@portfolio-analyzer/broker-sdk';
 
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import { saveHoldings } from '../lib/persistence.js';
 
-export async function handler(event: { body?: string }) {
+export const handler = requireAuth(async (event) => {
   if (!event.body) {
     return json(400, { error: 'CSV payload expected in request body' });
   }
@@ -19,4 +20,4 @@ export async function handler(event: { body?: string }) {
     count: holdings.length,
     holdings,
   });
-}
+});

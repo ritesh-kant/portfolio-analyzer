@@ -1,12 +1,11 @@
 import { json } from '../lib/http.js';
+import { requireAuth } from '../lib/auth.js';
 import { getTradingDb } from '../lib/db.js';
 import mongoose from 'mongoose';
 
 const { ObjectId } = mongoose.Types;
 
-export async function handler(event: {
-  pathParameters?: Record<string, string | undefined>;
-}): Promise<ReturnType<typeof json>> {
+export const handler = requireAuth(async (event): Promise<ReturnType<typeof json>> => {
   try {
     const id = event.pathParameters?.['id'];
     if (!id) return json(400, { error: 'id path parameter is required' });
@@ -22,4 +21,4 @@ export async function handler(event: {
   } catch (error) {
     return json(500, { error: 'Failed to fetch signal', detail: error instanceof Error ? error.message : String(error) });
   }
-}
+});

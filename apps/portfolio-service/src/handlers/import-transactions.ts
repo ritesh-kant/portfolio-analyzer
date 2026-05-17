@@ -1,9 +1,10 @@
 import type { Transaction } from '@portfolio-analyzer/shared-types';
 
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import { saveTransactions } from '../lib/persistence.js';
 
-export async function handler(event: { body?: string }) {
+export const handler = requireAuth(async (event) => {
   if (!event.body) {
     return json(400, { error: 'CSV payload expected in request body' });
   }
@@ -23,7 +24,7 @@ export async function handler(event: { body?: string }) {
       error: error instanceof Error ? error.message : 'Invalid transaction CSV',
     });
   }
-}
+});
 
 function parseTransactionsCsv(csv: string): Transaction[] {
   const [headerLine, ...lines] = csv.split(/\r?\n/).filter(Boolean);

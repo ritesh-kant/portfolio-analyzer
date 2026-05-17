@@ -1,7 +1,8 @@
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import { loadSnapshots } from '../lib/persistence.js';
 
-export async function handler() {
+export const handler = requireAuth(async () => {
   const { points, mode } = await loadSnapshots();
 
   return json(200, {
@@ -10,4 +11,4 @@ export async function handler() {
     count: points.length,
     points,
   });
-}
+});

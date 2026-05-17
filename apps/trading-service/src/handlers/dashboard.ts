@@ -1,7 +1,8 @@
 import { json } from '../lib/http.js';
+import { requireAuth } from '../lib/auth.js';
 import { getTradingDb } from '../lib/db.js';
 
-export async function handler(): Promise<ReturnType<typeof json>> {
+export const handler = requireAuth(async (): Promise<ReturnType<typeof json>> => {
   try {
     const db = await getTradingDb();
     const [latestRun, signals, openOrders, portfolio, recentNews] = await Promise.all([
@@ -16,4 +17,4 @@ export async function handler(): Promise<ReturnType<typeof json>> {
   } catch (error) {
     return json(500, { error: 'Failed to fetch dashboard', detail: error instanceof Error ? error.message : String(error) });
   }
-}
+});

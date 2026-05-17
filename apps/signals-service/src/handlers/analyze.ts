@@ -1,3 +1,4 @@
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import { callLLM } from '../lib/llm/llmProvider.js';
 import { sanitizeJson } from '../lib/llm/sanitizeJson.js';
@@ -16,9 +17,9 @@ import type {
 // Internal fetchers that call sibling handler logic directly (no HTTP round-trip)
 import { handler as newsHandler } from './news.js';
 import { handler as technicalsHandler } from './technicals.js';
-import { handler as fiiDiiHandler } from './fiiDii.js';
+import { fetchFiiDii as fiiDiiHandler } from './fiiDii.js';
 import { handler as optionsHandler } from './options.js';
-import { handler as macroHandler } from './macro.js';
+import { fetchMacro as macroHandler } from './macro.js';
 
 async function parseHandlerResponse<T>(
   handlerFn: () => Promise<ReturnType<typeof json>>,
@@ -31,7 +32,7 @@ async function parseHandlerResponse<T>(
   }
 }
 
-export async function handler(event: { body?: string }): Promise<ReturnType<typeof json>> {
+export const handler = requireAuth(async (event): Promise<ReturnType<typeof json>> => {
   let body: Partial<AnalyzeRequest>;
   try {
     body = JSON.parse(event.body ?? '{}') as Partial<AnalyzeRequest>;
@@ -115,4 +116,4 @@ export async function handler(event: { body?: string }): Promise<ReturnType<type
   }
 
   return json(200, { ...signal, sources });
-}
+});

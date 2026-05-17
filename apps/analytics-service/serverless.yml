@@ -21,10 +21,12 @@ provider:
   environment:
     MONGODB_URI: ${env:MONGODB_URI, 'mongodb://admin:admin123@localhost:27017/portfolio_analyzer?authSource=admin'}
     MFAPI_SCHEME_CODE: '120716'
+    AUTH_SECRET: ${env:AUTH_SECRET}
+    ALLOWED_ORIGIN: ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
   httpApi:
     cors:
       allowedOrigins:
-        - '*'
+        - ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
       allowedHeaders:
         - Content-Type
         - Authorization

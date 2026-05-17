@@ -1,7 +1,8 @@
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import { loadHoldings } from '../lib/persistence.js';
 
-export async function handler() {
+export const handler = requireAuth(async () => {
   const { holdings, mode } = await loadHoldings();
 
   if (holdings.length === 0) {
@@ -30,4 +31,4 @@ export async function handler() {
     storage: mode,
     holdingsCount: holdings.length,
   });
-}
+});

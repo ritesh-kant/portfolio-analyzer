@@ -1,3 +1,4 @@
+import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
 import { triggerMonitorRun } from '../lib/orchestrator.js';
 
@@ -14,11 +15,11 @@ export async function handler(): Promise<void> {
 }
 
 // Manual HTTP trigger for testing
-export async function httpHandler(): Promise<ReturnType<typeof json>> {
+export const httpHandler = requireAuth(async (): Promise<ReturnType<typeof json>> => {
   try {
     await triggerMonitorRun();
     return json(202, { status: 'accepted', message: 'Monitor run dispatched' });
   } catch (err) {
     return json(500, { error: 'Monitor dispatch failed', detail: err instanceof Error ? err.message : String(err) });
   }
-}
+});

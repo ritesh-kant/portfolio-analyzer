@@ -81,14 +81,32 @@ export async function fetchTaxSummary(): Promise<TaxDashboardSummary> {
   return fetchJson<TaxDashboardSummary>(`${ANALYTICS_API_BASE}/analytics/tax`);
 }
 
+let cachedToken: string | null = null;
+
+async function getToken(): Promise<string> {
+  if (cachedToken) return cachedToken;
+  const res = await fetch('/api/token');
+  if (!res.ok) throw new Error('Not authenticated');
+  const data = (await res.json()) as { token: string };
+  cachedToken = data.token;
+  return cachedToken;
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
+  const token = await getToken();
   const response = await fetch(url, {
     method: 'GET',
     headers: {
       'content-type': 'application/json',
+      Authorization: `Bearer ${token}`,
     },
     cache: 'no-store',
   });
+
+  if (response.status === 401) {
+    cachedToken = null;
+    throw new Error('Session expired — please refresh');
+  }
 
   if (!response.ok) {
     throw new Error(`Request failed (${response.status}) for ${url}`);

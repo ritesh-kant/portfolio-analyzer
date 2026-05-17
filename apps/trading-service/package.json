@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.1047.0",
+    "@portfolio-analyzer/auth-utils": "workspace:*",
     "@portfolio-analyzer/db": "workspace:*",
     "@portfolio-analyzer/trading-types": "workspace:*",
     "mongoose": "^8.9.2"
