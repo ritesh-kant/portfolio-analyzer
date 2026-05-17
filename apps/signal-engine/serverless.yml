@@ -20,9 +20,6 @@ provider:
   ecr:
     images:
       signal-engine:
-        # ECR repo is created by infrastructure/serverless.yml with scan_on_push
-        # and a 5-image lifecycle policy. The URI follows the naming convention set there.
-        uri: ${cf:portfolio-analyzer-infra-${sls:stage}.SignalEngineEcrRepoUrl}
         path: ./
         platform: linux/arm64
 
