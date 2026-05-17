@@ -223,6 +223,7 @@ class OrderAgent(BaseAgent):
                 "shares": shares,
                 "position_value": round(position_value, 2),
                 "confidence": confidence,
+                "llm_bonus": signal.get("llm_bonus", 0),
                 "kelly_fraction": round(kelly_frac, 4),
                 "stop_loss": stop_loss,
                 "target": target,

@@ -50,6 +50,7 @@ class PaperOrdersRepository(BaseRepository):
         actual_return_pct: float,
         was_correct: bool,
         exit_note: str = "",
+        exit_reason: str = "",
     ) -> None:
         fields: dict[str, Any] = {
             "status": "CLOSED",
@@ -61,4 +62,6 @@ class PaperOrdersRepository(BaseRepository):
         }
         if exit_note:
             fields["exit_note"] = exit_note
+        if exit_reason:
+            fields["exit_reason"] = exit_reason
         await self.update_one({"_id": order_id}, {"$set": fields})

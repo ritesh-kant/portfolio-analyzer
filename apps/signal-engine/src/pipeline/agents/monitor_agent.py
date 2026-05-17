@@ -113,7 +113,7 @@ async def _close_position(
         f"{_EXIT_NOTES.get(reason, reason)} "
         f"Entry ₹{entry_price:.2f} → Exit ₹{exit_price:.2f} ({return_pct:+.2f}%)"
     )
-    await orders_repo.close_order(order_id, exit_price, return_pct, was_correct, exit_note=exit_note)
+    await orders_repo.close_order(order_id, exit_price, return_pct, was_correct, exit_note=exit_note, exit_reason=reason)
     logger.info(
         "monitor closed symbol=%s reason=%s entry=%.2f exit=%.2f pnl=%.2f (%.2f%%)",
         order["symbol"], reason, entry_price, exit_price, pnl, return_pct,
