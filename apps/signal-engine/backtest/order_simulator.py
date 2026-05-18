@@ -52,8 +52,8 @@ MAX_HOLD_DAYS = 20      # extended from 10 → give signals more time to play ou
 # Config defaults — must mirror config.py
 MIN_SIGNAL_CONFIDENCE = 60.0
 POSITION_SIZE_PCT = 12.0
-MAX_POSITIONS = 12           # raised 8→12: captures more upside in bull regimes
-MAX_SECTOR_POSITIONS = 4    # raised 3→4: matches expanded position capacity
+MAX_POSITIONS = 8
+MAX_SECTOR_POSITIONS = 3
 DAILY_LOSS_LIMIT_PCT = 3.0    # halt if daily loss ≥ 3%
 PORTFOLIO_FLOOR_PCT = 70.0    # halt if total_value < 70% of initial
 

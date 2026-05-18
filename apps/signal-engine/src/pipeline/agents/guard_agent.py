@@ -42,8 +42,7 @@ logger = logging.getLogger(__name__)
 
 _VIX_THRESHOLD = 20.0           # hard kill: India VIX above this blocks all entries
 _VIX_CAUTION = 16.0             # soft caution: sets vix_caution flag for downstream agents
-_NIFTY_DROP_THRESHOLD = -1.5    # single-day drop kill-switch
-_NIFTY_5D_DROP_THRESHOLD = -2.0 # 5-day rolling drop kill-switch (sustained corrections)
+_NIFTY_DROP_THRESHOLD = -1.5
 _PRICE_MOVE_THRESHOLD = 5.0
 _EARNINGS_WINDOW_DAYS = 5
 _EARNINGS_NEAR_MISS_DAYS = 15   # 6-15 day window: graduated confidence penalty
@@ -99,18 +98,6 @@ class GuardAgent(BaseAgent):
         if nifty_chg is not None and nifty_chg < _NIFTY_DROP_THRESHOLD:
             reason = f"Nifty down {nifty_chg:.2f}% today — market selloff"
             logger.warning("guard_agent nifty_kill_switch change=%s", nifty_chg)
-            blocked = [{"symbol": s, "reason": reason} for s in stocks]
-            return state.model_copy(
-                update={"guard_result": {"passed": [], "blocked": blocked, "near_misses": {}}}
-            )
-
-        # 5-day sustained correction kill-switch: blocks entries when Nifty has
-        # fallen > 2% over the past 5 trading days. Catches rolling corrections
-        # that the single-day threshold misses (e.g. -0.5%/day for a week).
-        nifty_5d = md.get("nifty_5d_return")
-        if nifty_5d is not None and nifty_5d < _NIFTY_5D_DROP_THRESHOLD:
-            reason = f"Nifty 5-day return {nifty_5d:.2f}% — sustained correction, no new entries"
-            logger.warning("guard_agent nifty_5d_kill_switch 5d_return=%s", nifty_5d)
             blocked = [{"symbol": s, "reason": reason} for s in stocks]
             return state.model_copy(
                 update={"guard_result": {"passed": [], "blocked": blocked, "near_misses": {}}}
