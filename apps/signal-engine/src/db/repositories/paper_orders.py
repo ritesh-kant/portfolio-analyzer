@@ -66,6 +66,59 @@ class PaperOrdersRepository(BaseRepository):
             fields["exit_reason"] = exit_reason
         await self.update_one({"_id": order_id}, {"$set": fields})
 
+    async def update_trail(
+        self,
+        order_id: Any,
+        *,
+        highest_close: float,
+        trailing_stop: float,
+    ) -> None:
+        """Persist the ratcheted high-water close and chandelier trailing stop.
+
+        Both values move up only — the monitor computes max(prev, new) before
+        calling this so the write is unconditional from the repo's perspective.
+        """
+        await self.update_one(
+            {"_id": order_id},
+            {"$set": {
+                "highest_close": highest_close,
+                "trailing_stop": trailing_stop,
+                "updatedAt": datetime.now(timezone.utc),
+            }},
+        )
+
+    async def partial_close(
+        self,
+        order_id: Any,
+        *,
+        shares_closed: int,
+        remaining_shares: int,
+        remaining_position_value: float,
+        partial_exit: dict[str, Any],
+        new_original_stop: float,
+    ) -> None:
+        """Record a partial exit (TP1) on an open order.
+
+        The order remains OPEN with reduced shares. The closed slice is appended
+        to a `partial_exits` array on the doc for audit. The order's
+        `original_stop` is moved to breakeven (entry price), and `tp1_taken`
+        is flipped so the trailing-stop branch activates.
+        """
+        await self.update_one(
+            {"_id": order_id},
+            {
+                "$set": {
+                    "shares": remaining_shares,
+                    "position_value": remaining_position_value,
+                    "tp1_taken": True,
+                    "original_stop": new_original_stop,
+                    "trailing_stop": new_original_stop,
+                    "updatedAt": datetime.now(timezone.utc),
+                },
+                "$push": {"partial_exits": partial_exit},
+            },
+        )
+
     async def set_cooloff(self, order_id: Any, cooloff_until: str) -> None:
         """Set cooloff_until ISO date on a closed STOP order.
 

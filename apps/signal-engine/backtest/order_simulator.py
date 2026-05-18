@@ -47,7 +47,12 @@ STOP_PCT = 0.04         # tightened from 0.05 → faster stop-out on real losers
 TARGET_PCT = 0.08       # tightened from 0.10 → faster lock-in of gains
 REWARD_TO_RISK = 2.0
 MAX_KELLY_CAP = 0.25
-MAX_HOLD_DAYS = 20      # extended from 10 → give signals more time to play out
+MAX_HOLD_DAYS = 30      # extended to give chandelier trail room to ride trends
+
+# Trailing-stop / partial-profit ladder. "R" = 1.5 × ATR = initial risk per share.
+TP1_R_MULTIPLE = 1.5    # take partial profit at entry + TP1_R_MULTIPLE × R
+TP1_FRACTION = 0.5      # fraction of shares sold at TP1
+TRAIL_ATR_MULTIPLE = 3.0  # chandelier: trail = highest_close − TRAIL_ATR_MULTIPLE × ATR
 
 # Config defaults — must mirror config.py
 MIN_SIGNAL_CONFIDENCE = 60.0
@@ -126,6 +131,15 @@ class Position:
     mfe_pct: float = 0.0    # max favorable excursion: best return % seen during trade
     mae_pct: float = 0.0    # max adverse excursion: worst loss % seen (stored positive)
 
+    # Trailing-stop / partial-profit state. atr_at_entry is the ATR(14) used to
+    # derive stop/target at entry; needed for chandelier trail width post-TP1.
+    atr_at_entry: float = 0.0
+    original_stop: float = 0.0  # stop at entry; used to detect pre-TP1 stop-outs
+    tp1_price: float = 0.0      # entry + TP1_R_MULTIPLE × 1.5 × ATR
+    tp1_taken: bool = False
+    highest_close: float = 0.0  # high-water mark of close price since entry
+    trailing_stop: float = 0.0  # chandelier; only consulted once tp1_taken=True
+
 
 @dataclass
 class ClosedTrade:
@@ -140,7 +154,7 @@ class ClosedTrade:
     position_value: float
     confidence: int
     kelly_fraction: float
-    exit_reason: str         # "TARGET" | "STOP" | "MAX_AGE"
+    exit_reason: str         # "TP1" | "TRAIL" | "STOP" | "MAX_AGE" | "TARGET" (legacy)
     pnl: float               # rupee P&L net of transaction costs
     return_pct: float        # % return net of costs
     was_correct: bool        # True if return_pct > 0 (profitable exit)
@@ -369,13 +383,20 @@ def open_position(
         )
         return None
 
-    # ATR-based stop/target when available (2:1 R:R maintained), else fixed %
-    if atr is not None and atr > 0:
-        stop_loss = round(fill_price - 1.5 * atr, 2)
-        target = round(fill_price + 3.0 * atr, 2)
+    # ATR-based stop/target when available (2:1 R:R maintained), else fixed %.
+    # When ATR is present, the position uses the TP1 + chandelier-trail ladder.
+    # When not, the legacy fixed STOP_PCT / TARGET_PCT path is preserved
+    # (no TP1, no trailing — atr_at_entry=0 disables that branch in should_close).
+    atr_at_entry = float(atr) if atr is not None and atr > 0 else 0.0
+    if atr_at_entry > 0:
+        risk_per_share = 1.5 * atr_at_entry
+        stop_loss = round(fill_price - risk_per_share, 2)
+        target = round(fill_price + 3.0 * atr_at_entry, 2)
+        tp1_price = round(fill_price + TP1_R_MULTIPLE * risk_per_share, 2)
     else:
         stop_loss = round(fill_price * (1 - STOP_PCT), 2)
         target = round(fill_price * (1 + TARGET_PCT), 2)
+        tp1_price = 0.0
 
     # Entry transaction costs (stamp duty + brokerage + exchange + GST + SEBI)
     entry_cost = compute_trade_cost(position_value, "BUY")
@@ -399,6 +420,11 @@ def open_position(
         fii_net_cr_at_entry=float(sd.get("fii_net_cr_at_entry", 0.0)),
         sector_score_at_entry=int(sd.get("sector_score_at_entry", 0)),
         had_tier_a_news=bool(sd.get("had_tier_a_news", False)),
+        atr_at_entry=atr_at_entry,
+        original_stop=stop_loss,
+        tp1_price=tp1_price,
+        highest_close=fill_price,
+        trailing_stop=stop_loss,
     )
 
     # Cash reduced by position value + entry transaction costs
@@ -415,23 +441,59 @@ def open_position(
     return pos
 
 
+def update_trail(position: Position, current_price: float) -> None:
+    """Update high-water mark and chandelier trailing stop.
+
+    Called once per day per position, after MFE/MAE update, BEFORE should_close.
+    The trailing stop is only consulted (in should_close) once TP1 has been hit.
+    The stop only moves up — never down — which is the chandelier-exit invariant.
+    No-op for fallback (non-ATR) positions.
+    """
+    if position.atr_at_entry <= 0:
+        return
+    if current_price > position.highest_close:
+        position.highest_close = current_price
+    candidate = position.highest_close - TRAIL_ATR_MULTIPLE * position.atr_at_entry
+    if candidate > position.trailing_stop:
+        position.trailing_stop = round(candidate, 2)
+
+
 def should_close(
     position: Position,
     current_price: float,
 ) -> str | None:
     """Return exit reason if the position should be closed, else None.
 
-    Checks (in priority order):
-        1. TARGET   — current_price >= target
-        2. STOP     — current_price <= stop_loss
-        3. MAX_AGE  — position.days_held >= MAX_HOLD_DAYS
+    Exit ladder (ATR-based positions):
+        Pre-TP1:  STOP    — current_price <= original_stop
+                  TP1     — current_price >= tp1_price (partial close in engine)
+        Post-TP1: TRAIL   — current_price <= trailing_stop
+        Always:   MAX_AGE — position.days_held >= MAX_HOLD_DAYS
 
-    Returns: "TARGET" | "STOP" | "MAX_AGE" | None
+    Fallback (atr_at_entry == 0): legacy TARGET / STOP behaviour.
+
+    Returns: "TP1" | "TRAIL" | "STOP" | "MAX_AGE" | None
     """
-    if current_price >= position.target:
-        return "TARGET"
-    if current_price <= position.stop_loss:
-        return "STOP"
+    # Legacy fixed-pct fallback when ATR was unavailable at entry — no TP1
+    # ladder, single hard target exit (label preserved for downstream parity).
+    if position.atr_at_entry <= 0:
+        if current_price >= position.target:
+            return "TARGET"
+        if current_price <= position.stop_loss:
+            return "STOP"
+        if position.days_held >= MAX_HOLD_DAYS:
+            return "MAX_AGE"
+        return None
+
+    # ATR-based exit ladder.
+    if position.tp1_taken:
+        if current_price <= position.trailing_stop:
+            return "TRAIL"
+    else:
+        if current_price <= position.original_stop:
+            return "STOP"
+        if position.tp1_price > 0 and current_price >= position.tp1_price:
+            return "TP1"
     if position.days_held >= MAX_HOLD_DAYS:
         return "MAX_AGE"
     return None
@@ -443,28 +505,38 @@ def close_position(
     exit_date: str,
     exit_price: float,
     exit_reason: str,
+    *,
+    shares_to_close: int | None = None,
 ) -> ClosedTrade:
-    """Remove the position from the portfolio and record a ClosedTrade.
+    """Close some or all of a position; record a ClosedTrade.
 
-    Applies sell-side slippage and exit transaction costs (STT, brokerage,
-    exchange, GST, SEBI) to compute net P&L.
+    shares_to_close=None (or equal to position.shares) → full close: position is
+    removed from portfolio.open_positions.
 
-    Updates:
-        portfolio.cash       += net exit proceeds (after costs)
-        portfolio.invested   -= position_value (entry)
-        portfolio.daily_pnl  += realised_pnl (net of all costs)
-        portfolio.open_positions — removes the closed position
-        portfolio.closed_trades  — appends the ClosedTrade
+    shares_to_close < position.shares → partial close: position is mutated in
+    place (shares and position_value reduced pro-rata) and remains open. Used
+    by the TP1 ladder to take half off while letting the remainder ride.
+
+    Cost basis for the closed slice = shares_to_close × position.entry_price.
+    Applies sell-side slippage and exit transaction costs on the slice only.
     """
-    # Slippage-adjusted fill price (sell below close)
+    if shares_to_close is None or shares_to_close >= position.shares:
+        shares_to_close = position.shares
+        is_partial = False
+    else:
+        if shares_to_close <= 0:
+            raise ValueError(f"shares_to_close must be > 0, got {shares_to_close}")
+        is_partial = True
+
     fill_price = round(exit_price * (1 - SLIPPAGE_PCT), 2) if COSTS_ENABLED else exit_price
 
-    gross_exit = position.shares * fill_price
+    cost_basis = shares_to_close * position.entry_price
+    gross_exit = shares_to_close * fill_price
     exit_cost = compute_trade_cost(gross_exit, "SELL")
     net_exit = gross_exit - exit_cost
 
-    pnl = net_exit - position.position_value
-    return_pct = (pnl / position.position_value * 100) if position.position_value > 0 else 0.0
+    pnl = net_exit - cost_basis
+    return_pct = (pnl / cost_basis * 100) if cost_basis > 0 else 0.0
 
     trade = ClosedTrade(
         symbol=position.symbol,
@@ -473,15 +545,14 @@ def close_position(
         exit_date=exit_date,
         entry_price=position.entry_price,
         exit_price=round(fill_price, 2),
-        shares=position.shares,
-        position_value=position.position_value,
+        shares=shares_to_close,
+        position_value=round(cost_basis, 2),
         confidence=position.confidence,
         kelly_fraction=position.kelly_fraction,
         exit_reason=exit_reason,
         pnl=round(pnl, 2),
         return_pct=round(return_pct, 4),
         was_correct=(return_pct > 0),
-        # Attribution fields — carried from open position
         triggered_signals=list(position.triggered_signals),
         signal_score_raw=position.signal_score_raw,
         vix_at_entry=position.vix_at_entry,
@@ -494,17 +565,27 @@ def close_position(
     )
 
     portfolio.cash += net_exit
-    portfolio.invested = max(0.0, portfolio.invested - position.position_value)
+    portfolio.invested = max(0.0, portfolio.invested - cost_basis)
     portfolio.daily_pnl += pnl
-    portfolio.open_positions.remove(position)
     portfolio.closed_trades.append(trade)
 
-    logger.debug(
-        "order_sim closed symbol=%s exit=%s reason=%s fill=%.2f "
-        "pnl=₹%.0f ret=%.2f%% cost=₹%.1f mfe=%.1f%% mae=%.1f%%",
-        position.symbol, exit_reason, exit_date, fill_price,
-        pnl, return_pct, exit_cost, position.mfe_pct, position.mae_pct,
-    )
+    if is_partial:
+        position.shares -= shares_to_close
+        position.position_value = round(position.shares * position.entry_price, 2)
+        logger.debug(
+            "order_sim partial symbol=%s exit=%s reason=%s fill=%.2f "
+            "closed_shares=%d remaining=%d pnl=₹%.0f ret=%.2f%%",
+            position.symbol, exit_reason, exit_date, fill_price,
+            shares_to_close, position.shares, pnl, return_pct,
+        )
+    else:
+        portfolio.open_positions.remove(position)
+        logger.debug(
+            "order_sim closed symbol=%s exit=%s reason=%s fill=%.2f "
+            "pnl=₹%.0f ret=%.2f%% cost=₹%.1f mfe=%.1f%% mae=%.1f%%",
+            position.symbol, exit_reason, exit_date, fill_price,
+            pnl, return_pct, exit_cost, position.mfe_pct, position.mae_pct,
+        )
     return trade
 
 
