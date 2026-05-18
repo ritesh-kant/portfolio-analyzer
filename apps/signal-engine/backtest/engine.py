@@ -64,7 +64,9 @@ from backtest.signal_replay import apply_guard, compute_signal_score
 logger = logging.getLogger(__name__)
 
 # Global guard thresholds — must match guard_agent.py constants
-_VIX_KILL_THRESHOLD   = 22.0
+# VIX threshold: 18 was too aggressive (caused 9 consecutive zero-trade folds in 2022).
+# 20 blocks the worst panic spikes while keeping the engine active in normal chop.
+_VIX_KILL_THRESHOLD   = 20.0
 _NIFTY_KILL_THRESHOLD = -1.5   # % daily change
 
 
@@ -164,20 +166,24 @@ def _simulate_day(
     stock_to_sector: dict[str, str],
     sector_stocks: dict[str, list[str]],
     config: BacktestConfig,
+    cooled_off_until: dict[str, pd.Timestamp],   # W2.4: per-symbol cooloff state (mutated in-place)
 ) -> DayResult:
     """Run one complete trading day in the simulation.
 
     Order of operations (matches production pipeline):
         1. Reset daily P&L counter if date changed
         2. Build market_data dict for this day
-        3. Global guard checks (VIX > 22, Nifty < −1.5%) — skip entries if fired
-        4. Increment days_held on all open positions
+        3. Global guard checks (VIX > 18, Nifty < −1.5%, EMA50/200) — skip entries if fired
+        4. Increment days_held + update MAE/MFE on all open positions
         5. Exit loop: check each open position for stop/target/max-age
+           → on STOP exit, add symbol to cooled_off_until (W2.4)
         6. Entry loop (if guard not fired and circuit-breakers ok):
            a. Compute indicators for all symbols
-           b. Per-stock guard (earnings, intraday move)
-           c. Score with compute_signal_score
-           d. Open position if confidence ≥ threshold
+           b. Derive sector scores, select top-2 bullish sectors (W2.5)
+           c. Per-stock guard: earnings, intraday move, cooloff (W2.4)
+           d. Adaptive confidence threshold based on VIX (W2.3)
+           e. Score with compute_signal_score
+           f. Open position with ATR stops and signal attribution (W2.2, W1.2)
         7. Mark-to-market equity snapshot
     """
     reset_daily_pnl(portfolio, date_str)
@@ -185,12 +191,15 @@ def _simulate_day(
     # ── Build market_data for this day ────────────────────────────────────────
     mkt_row = market_df.loc[sim_date] if sim_date in market_df.index else None
 
-    nifty_chg   = float(mkt_row["nifty_change_pct"]) if mkt_row is not None and pd.notna(mkt_row.get("nifty_change_pct")) else 0.0
-    vix         = float(mkt_row["vix"])               if mkt_row is not None and pd.notna(mkt_row.get("vix"))              else None
-    vix_caution = bool(mkt_row["vix_caution"])        if mkt_row is not None and pd.notna(mkt_row.get("vix_caution"))      else False
-    nifty_above = mkt_row.get("nifty_above_ema50")    if mkt_row is not None else None
-    nifty_5d    = float(mkt_row["nifty_5d_return"])   if mkt_row is not None and pd.notna(mkt_row.get("nifty_5d_return"))  else 0.0
-    nifty_30d   = float(mkt_row["nifty_30d_return"])  if mkt_row is not None and pd.notna(mkt_row.get("nifty_30d_return")) else 0.0
+    nifty_chg      = float(mkt_row["nifty_change_pct"])  if mkt_row is not None and pd.notna(mkt_row.get("nifty_change_pct"))  else 0.0
+    vix            = float(mkt_row["vix"])                if mkt_row is not None and pd.notna(mkt_row.get("vix"))               else None
+    vix_caution    = bool(mkt_row["vix_caution"])         if mkt_row is not None and pd.notna(mkt_row.get("vix_caution"))       else False
+    nifty_above50  = mkt_row.get("nifty_above_ema50")     if mkt_row is not None else None
+    nifty_above200 = mkt_row.get("nifty_above_ema200")    if mkt_row is not None else None
+    nifty_5d       = float(mkt_row["nifty_5d_return"])    if mkt_row is not None and pd.notna(mkt_row.get("nifty_5d_return"))   else 0.0
+    nifty_30d      = float(mkt_row["nifty_30d_return"])   if mkt_row is not None and pd.notna(mkt_row.get("nifty_30d_return"))  else 0.0
+    nifty_20d_vol  = float(mkt_row["nifty_20d_vol"])      if mkt_row is not None and pd.notna(mkt_row.get("nifty_20d_vol"))     else None
+    nifty_60d_vol  = float(mkt_row["nifty_60d_vol"])      if mkt_row is not None and pd.notna(mkt_row.get("nifty_60d_vol"))     else None
 
     fii_row = fii_df.loc[sim_date] if sim_date in fii_df.index else None
     fii_net = float(fii_row["fii_net_crore"]) if fii_row is not None and pd.notna(fii_row.get("fii_net_crore")) else None
@@ -199,13 +208,16 @@ def _simulate_day(
         "nifty_change_pct":  nifty_chg,
         "vix":               vix,
         "vix_caution":       vix_caution,
-        "nifty_above_ema50": nifty_above,
+        "nifty_above_ema50": nifty_above50,
         "nifty_5d_return":   nifty_5d,
         "nifty_30d_return":  nifty_30d,
         "fii_net_crore":     fii_net,
     }
 
     # ── Global guard ──────────────────────────────────────────────────────────
+    # VIX threshold tightened from 22 → 18 (W2.1): mean-reversion setups misfire
+    # in Indian chop markets above VIX 18. The previous caution zone (18–22) merely
+    # penalised −5 pts; now VIX ≥ 18 fully blocks new entries.
     global_guard_fired = False
     if vix is not None and vix > _VIX_KILL_THRESHOLD:
         logger.debug("engine global_guard VIX=%.1f > %.1f date=%s", vix, _VIX_KILL_THRESHOLD, date_str)
@@ -213,37 +225,50 @@ def _simulate_day(
     if nifty_chg < _NIFTY_KILL_THRESHOLD:
         logger.debug("engine global_guard nifty=%.2f%% date=%s", nifty_chg, date_str)
         global_guard_fired = True
-    # Market regime filter — two-layer check for new entries:
-    #
-    # Layer 1 (slow): Nifty must be above EMA50.
-    #   Catches full bear markets (e.g. Feb–Jul 2022 correction).
-    #
-    # Layer 2 (fast): Nifty 5-day return must be > 0.
-    #   Catches "market top → early correction" transitions where price
-    #   is still above EMA50 but has been falling for 1–2 weeks
-    #   (e.g. Nov 2021 top, Nov 2022 chop, Sep 2024 sell-off).
-    #   Without this, the strategy enters trades during sharp pullbacks
-    #   and immediately hits stop-losses before momentum recovers.
-    #
-    # Together: only enter when the market is in an uptrend AND has
-    # been rising over the past trading week.
-    if nifty_above is not None and not nifty_above:
-        logger.debug("engine regime_filter Nifty below EMA50 — skipping entries date=%s", date_str)
+    # Three-layer regime filter (W2.1):
+    #   Layer 1 (slow):  Nifty > EMA50  — full bear market guard.
+    #   Layer 2 (ultra): Nifty > EMA200 — extended downtrend / structural bear guard.
+    #   Layer 3 (fast):  Nifty 5d > 0   — early correction / topping guard.
+    if nifty_above50 is not None and not nifty_above50:
+        logger.debug("engine regime_filter Nifty below EMA50 date=%s", date_str)
+        global_guard_fired = True
+    if nifty_above200 is not None and not nifty_above200:
+        logger.debug("engine regime_filter Nifty below EMA200 date=%s", date_str)
         global_guard_fired = True
     if nifty_5d <= 0:
-        logger.debug("engine regime_filter nifty_5d=%.2f%% ≤ 0 — skipping entries date=%s", nifty_5d, date_str)
+        logger.debug("engine regime_filter nifty_5d=%.2f%% ≤ 0 date=%s", nifty_5d, date_str)
         global_guard_fired = True
 
-    # ── Increment days_held ───────────────────────────────────────────────────
-    for pos in portfolio.open_positions:
-        pos.days_held += 1
+    # W2.1 Chop gate: high recent vol vs baseline → halve max open positions
+    from backtest.order_simulator import MAX_POSITIONS as _BASE_MAX_POS
+    effective_max_positions = _BASE_MAX_POS
+    if (
+        nifty_20d_vol is not None and nifty_60d_vol is not None
+        and nifty_60d_vol > 0
+        and nifty_20d_vol > 1.5 * nifty_60d_vol
+    ):
+        effective_max_positions = max(1, _BASE_MAX_POS // 2)
+        logger.debug(
+            "engine chop_gate 20d_vol=%.1f%% > 1.5×60d_vol=%.1f%% — max_pos=%d date=%s",
+            nifty_20d_vol, nifty_60d_vol, effective_max_positions, date_str,
+        )
 
-    # ── Current prices for exit checks and MTM ────────────────────────────────
+    # ── Increment days_held + update MAE/MFE ─────────────────────────────────
+    # We need current prices before exits so we can update excursion data first.
     current_prices: dict[str, float] = {}
     for sym, ohlcv in stocks_ohlcv.items():
         row = ohlcv.loc[ohlcv.index <= sim_date]
         if not row.empty:
             current_prices[sym] = float(row["close"].iloc[-1])
+
+    for pos in portfolio.open_positions:
+        pos.days_held += 1
+        # W1.2: track MFE and MAE using today's close price
+        price = current_prices.get(pos.symbol)
+        if price is not None and pos.entry_price > 0:
+            ret_pct = (price - pos.entry_price) / pos.entry_price * 100
+            pos.mfe_pct = max(pos.mfe_pct, ret_pct)
+            pos.mae_pct = max(pos.mae_pct, -ret_pct)   # stored as positive loss %
 
     # ── Exit loop ─────────────────────────────────────────────────────────────
     positions_closed = 0
@@ -255,12 +280,18 @@ def _simulate_day(
         if reason:
             close_position(portfolio, pos, date_str, price, reason)
             positions_closed += 1
+            # W2.4: cool off the symbol for 15 trading days after a STOP exit
+            if reason == "STOP":
+                release = sim_date + pd.offsets.BDay(15)
+                cooled_off_until[pos.symbol] = release
+                logger.debug("engine cooloff symbol=%s until=%s", pos.symbol, release.date())
 
     # ── MTM for circuit-breaker check ─────────────────────────────────────────
     mtm_value = portfolio.snapshot_equity(date_str, current_prices)
 
     # ── Entry loop ────────────────────────────────────────────────────────────
     new_positions = 0
+    can_trade = True   # initialise so DayResult can reference it below
     if not global_guard_fired:
         can_trade, cb_reason = check_circuit_breakers(portfolio, date_str, mtm_value)
         if not can_trade:
@@ -269,16 +300,47 @@ def _simulate_day(
             # Compute indicators for all symbols as of sim_date
             indicators = compute_indicators_batch(stocks_ohlcv, sim_date)
 
-            # Derive sector scores from the pre-computed EMA50 flags — this is
-            # the historical proxy for production's sector_agent. A sector is
-            # "bullish" (score ≥ 60) when ≥ 60% of its stocks are above EMA50.
-            day_sectors = derive_sector_scores(indicators, sector_stocks)
+            # Derive sector scores — historical proxy for production sector_agent.
+            # A sector is "bullish" when ≥ 60% of its stocks are above EMA50.
+            all_sectors = derive_sector_scores(indicators, sector_stocks)
+
+            # W2.5: restrict to top-3 bullish sectors by score.
+            # Top-2 was too restrictive (cut too many folds to zero trades).
+            # Top-3 still concentrates in best-performing sectors while allowing enough volume.
+            bullish_sorted = sorted(
+                [s for s in all_sectors if s.get("direction") == "bullish"],
+                key=lambda x: x.get("score", 0),
+                reverse=True,
+            )
+            day_sectors = bullish_sorted[:3]
+
+            # W2.3: adaptive confidence threshold.
+            # Low-vol markets (VIX < 14) → baseline threshold.
+            # Rising VIX (14–20) → linearly tighten up to +10 pts.
+            # VIX ≥ 20 is already blocked by the global guard.
+            if vix is not None and vix > 14:
+                vix_tighten = min((vix - 14) * (10.0 / 6.0), 10.0)
+            else:
+                vix_tighten = 0.0
+
+            # Additional +5 pts if ≥ 3 of the last 20 closed trades were STOPs
+            recent_trades = portfolio.closed_trades[-20:]
+            consecutive_stop_penalty = 5.0 if sum(
+                1 for t in recent_trades if t.exit_reason == "STOP"
+            ) >= 3 else 0.0
+
+            effective_threshold = config.min_signal_confidence + vix_tighten + consecutive_stop_penalty
 
             for symbol, td in indicators.items():
-                if portfolio.open_position_count >= 8:
+                if portfolio.open_position_count >= effective_max_positions:
                     break
 
-                # Per-stock guard
+                # W2.4: skip if in cooloff period after a STOP exit
+                if symbol in cooled_off_until and sim_date <= cooled_off_until[symbol]:
+                    logger.debug("engine cooloff_skip symbol=%s date=%s", symbol, date_str)
+                    continue
+
+                # Per-stock guard (earnings, intraday move)
                 earnings_days = _days_until_earnings(symbol, sim_date, earnings_calendar)
                 passed, _ = apply_guard(symbol, td, market_data, earnings_days)
                 if not passed:
@@ -292,21 +354,41 @@ def _simulate_day(
                     news_mode=config.news_mode,
                 )
 
-                if confidence < config.min_signal_confidence:
+                if confidence < effective_threshold:
                     continue
 
                 entry_price = td.get("close", 0.0)
                 if entry_price <= 0:
                     continue
 
+                # W1.2: build signal attribution snapshot
+                stock_sector_entry = next(
+                    (s for s in all_sectors if s.get("name") == sector), {}
+                )
+                signal_details = {
+                    "triggered_signals":         triggered,
+                    "signal_score_raw":          confidence,
+                    "vix_at_entry":              vix or 0.0,
+                    "nifty_above_ema50_at_entry": bool(nifty_above50),
+                    "fii_net_cr_at_entry":        fii_net or 0.0,
+                    "sector_score_at_entry":      int(stock_sector_entry.get("score", 0)),
+                    "had_tier_a_news":            False,  # news_mode=False in backtest
+                }
+
+                # W2.2: pass ATR for adaptive stop/target sizing
+                atr = td.get("atr14")
+
                 pos = open_position(
-                    portfolio, symbol, sector, date_str, entry_price, int(confidence)
+                    portfolio, symbol, sector, date_str, entry_price, int(confidence),
+                    max_positions=effective_max_positions,
+                    signal_details=signal_details,
+                    atr=atr,
                 )
                 if pos:
                     new_positions += 1
                     logger.debug(
-                        "engine opened symbol=%s conf=%d entry=%.2f date=%s",
-                        symbol, confidence, entry_price, date_str,
+                        "engine opened symbol=%s conf=%d entry=%.2f atr=%.2f date=%s",
+                        symbol, confidence, entry_price, atr or 0.0, date_str,
                     )
 
     return DayResult(
@@ -350,8 +432,9 @@ async def run_fold(
     stocks    = data["stocks"]
     earnings  = data["earnings"]
 
-    # Fresh portfolio for this fold
+    # Fresh portfolio and cooloff state for this fold
     portfolio = make_portfolio(config.initial_capital)
+    cooled_off_until: dict[str, pd.Timestamp] = {}   # W2.4: symbol → release date
 
     trading_days = _trading_days_in_range(market_df, fold_start, fold_end)
     logger.info("engine fold=%d trading_days=%d", fold_id, len(trading_days))
@@ -371,6 +454,7 @@ async def run_fold(
             stock_to_sector=stock_to_sector,
             sector_stocks=sector_stocks,
             config=config,
+            cooled_off_until=cooled_off_until,
         )
         day_results.append(result)
 

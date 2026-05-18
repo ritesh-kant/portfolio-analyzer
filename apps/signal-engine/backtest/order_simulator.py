@@ -57,6 +57,36 @@ MAX_SECTOR_POSITIONS = 3
 DAILY_LOSS_LIMIT_PCT = 3.0    # halt if daily loss ≥ 3%
 PORTFOLIO_FLOOR_PCT = 70.0    # halt if total_value < 70% of initial
 
+# ── Transaction costs (Indian equities — delivery trading) ───────────────────
+# Set COSTS_ENABLED=False for cost-free runs (useful for isolating strategy alpha
+# from cost drag — always run with True before evaluating live readiness).
+COSTS_ENABLED = True
+SLIPPAGE_PCT = 0.0015          # 15 bps per side — conservative for Nifty 100 liquidity
+_BROKERAGE_PCT = 0.0003        # 3 bps; ₹20 cap applies (at ₹50k–₹120k positions ≈ ₹15–₹36)
+_STAMP_DUTY_PCT = 0.00015      # 0.015% — buy-side only
+_STT_DELIVERY_PCT = 0.001      # 0.1% — sell-side only (equity delivery STT)
+_EXCHANGE_TXN_PCT = 0.0000325  # NSE/BSE transaction charge
+_SEBI_PCT = 0.000001           # SEBI turnover fee
+_GST_RATE = 0.18               # GST on brokerage + exchange charges
+
+
+def compute_trade_cost(value: float, side: str) -> float:
+    """Total Indian delivery trading costs for one side in rupees.
+
+    Args:
+        value: Gross trade value in rupees (shares × price).
+        side:  "BUY" (buy-side costs) or "SELL" (sell-side costs incl. STT).
+    """
+    if not COSTS_ENABLED or value <= 0:
+        return 0.0
+    brokerage = min(value * _BROKERAGE_PCT, 20.0)
+    exchange = value * _EXCHANGE_TXN_PCT
+    sebi = value * _SEBI_PCT
+    gst = (brokerage + exchange) * _GST_RATE
+    stamp = value * _STAMP_DUTY_PCT if side == "BUY" else 0.0
+    stt = value * _STT_DELIVERY_PCT if side == "SELL" else 0.0
+    return brokerage + exchange + sebi + gst + stamp + stt
+
 _WIN_PROB_TABLE: list[tuple[float, float]] = [
     (80.0, 0.60),
     (75.0, 0.57),
@@ -74,14 +104,27 @@ class Position:
     symbol: str
     sector: str
     entry_date: str          # ISO date string "YYYY-MM-DD"
-    entry_price: float
+    entry_price: float       # slippage-adjusted fill price
     shares: int
-    stop_loss: float         # entry_price × (1 − STOP_PCT)
-    target: float            # entry_price × (1 + TARGET_PCT)
+    stop_loss: float         # anchored to entry_price (ATR-based or fixed %)
+    target: float            # anchored to entry_price
     position_value: float    # shares × entry_price at entry
     confidence: int
     kelly_fraction: float
     days_held: int = 0       # incremented each sim day by the engine
+
+    # Signal attribution (set at entry, carried to ClosedTrade for diagnostics)
+    triggered_signals: list[str] = field(default_factory=list)
+    signal_score_raw: int = 0
+    vix_at_entry: float = 0.0
+    nifty_above_ema50_at_entry: bool = False
+    fii_net_cr_at_entry: float = 0.0
+    sector_score_at_entry: int = 0
+    had_tier_a_news: bool = False
+
+    # Excursion tracking — updated each sim day in the exit loop
+    mfe_pct: float = 0.0    # max favorable excursion: best return % seen during trade
+    mae_pct: float = 0.0    # max adverse excursion: worst loss % seen (stored positive)
 
 
 @dataclass
@@ -98,9 +141,22 @@ class ClosedTrade:
     confidence: int
     kelly_fraction: float
     exit_reason: str         # "TARGET" | "STOP" | "MAX_AGE"
-    pnl: float               # rupee P&L
-    return_pct: float        # % return
+    pnl: float               # rupee P&L net of transaction costs
+    return_pct: float        # % return net of costs
     was_correct: bool        # True if exit_reason == "TARGET"
+
+    # Signal attribution — copied from Position for trade-level analysis
+    triggered_signals: list[str] = field(default_factory=list)
+    signal_score_raw: int = 0
+    vix_at_entry: float = 0.0
+    nifty_above_ema50_at_entry: bool = False
+    fii_net_cr_at_entry: float = 0.0
+    sector_score_at_entry: int = 0
+    had_tier_a_news: bool = False
+
+    # Excursion metrics — how close did the trade get to target/stop?
+    mfe_pct: float = 0.0
+    mae_pct: float = 0.0
 
 
 @dataclass
@@ -266,11 +322,22 @@ def open_position(
     position_size_pct: float = POSITION_SIZE_PCT,
     max_positions: int = MAX_POSITIONS,
     max_sector_positions: int = MAX_SECTOR_POSITIONS,
+    signal_details: dict[str, Any] | None = None,
+    atr: float | None = None,
 ) -> Position | None:
     """Attempt to open a new position. Returns the Position on success, None if skipped.
 
     Respects max_positions, max_sector_positions, duplicate-position guard, and
     available cash — exactly as order_agent does.
+
+    Args:
+        signal_details: Optional dict with attribution fields:
+            triggered_signals, signal_score_raw, vix_at_entry,
+            nifty_above_ema50_at_entry, fii_net_cr_at_entry,
+            sector_score_at_entry, had_tier_a_news.
+        atr: ATR(14) value for the symbol. When provided, stop and target are
+             set at 1.5× and 3.0× ATR from fill price (2:1 R:R). Falls back
+             to fixed STOP_PCT / TARGET_PCT when None or zero.
     """
     if portfolio.open_position_count >= max_positions:
         logger.debug("order_sim max_positions=%d reached — skipping %s", max_positions, symbol)
@@ -287,42 +354,63 @@ def open_position(
         )
         return None
 
+    # Slippage-adjusted fill price (buy at above close)
+    fill_price = round(entry_price * (1 + SLIPPAGE_PCT), 2) if COSTS_ENABLED else entry_price
+
     mtm_value = portfolio.total_value
     shares, position_value, kelly_frac = calc_position(
-        confidence, mtm_value, entry_price, portfolio.cash,
+        confidence, mtm_value, fill_price, portfolio.cash,
         position_size_pct=position_size_pct,
     )
     if shares < 1:
         logger.debug(
             "order_sim insufficient_cash symbol=%s entry=%.2f cash=%.2f",
-            symbol, entry_price, portfolio.cash,
+            symbol, fill_price, portfolio.cash,
         )
         return None
 
-    stop_loss = round(entry_price * (1 - STOP_PCT), 2)
-    target = round(entry_price * (1 + TARGET_PCT), 2)
+    # ATR-based stop/target when available (2:1 R:R maintained), else fixed %
+    if atr is not None and atr > 0:
+        stop_loss = round(fill_price - 1.5 * atr, 2)
+        target = round(fill_price + 3.0 * atr, 2)
+    else:
+        stop_loss = round(fill_price * (1 - STOP_PCT), 2)
+        target = round(fill_price * (1 + TARGET_PCT), 2)
 
+    # Entry transaction costs (stamp duty + brokerage + exchange + GST + SEBI)
+    entry_cost = compute_trade_cost(position_value, "BUY")
+
+    sd = signal_details or {}
     pos = Position(
         symbol=symbol,
         sector=sector,
         entry_date=entry_date,
-        entry_price=entry_price,
+        entry_price=fill_price,
         shares=shares,
         stop_loss=stop_loss,
         target=target,
         position_value=position_value,
         confidence=confidence,
         kelly_fraction=round(kelly_frac, 4),
+        triggered_signals=list(sd.get("triggered_signals", [])),
+        signal_score_raw=int(sd.get("signal_score_raw", 0)),
+        vix_at_entry=float(sd.get("vix_at_entry", 0.0)),
+        nifty_above_ema50_at_entry=bool(sd.get("nifty_above_ema50_at_entry", False)),
+        fii_net_cr_at_entry=float(sd.get("fii_net_cr_at_entry", 0.0)),
+        sector_score_at_entry=int(sd.get("sector_score_at_entry", 0)),
+        had_tier_a_news=bool(sd.get("had_tier_a_news", False)),
     )
 
-    # Update portfolio state
-    portfolio.cash -= position_value
+    # Cash reduced by position value + entry transaction costs
+    portfolio.cash -= position_value + entry_cost
     portfolio.invested += position_value
     portfolio.open_positions.append(pos)
 
     logger.debug(
-        "order_sim opened symbol=%s shares=%d value=₹%.0f confidence=%d stop=%.2f target=%.2f",
-        symbol, shares, position_value, confidence, stop_loss, target,
+        "order_sim opened symbol=%s shares=%d value=₹%.0f fill=%.2f conf=%d "
+        "stop=%.2f target=%.2f cost=₹%.1f",
+        symbol, shares, position_value, fill_price, confidence,
+        stop_loss, target, entry_cost,
     )
     return pos
 
@@ -358,15 +446,24 @@ def close_position(
 ) -> ClosedTrade:
     """Remove the position from the portfolio and record a ClosedTrade.
 
+    Applies sell-side slippage and exit transaction costs (STT, brokerage,
+    exchange, GST, SEBI) to compute net P&L.
+
     Updates:
-        portfolio.cash       += exit_value
+        portfolio.cash       += net exit proceeds (after costs)
         portfolio.invested   -= position_value (entry)
-        portfolio.daily_pnl  += realised_pnl
+        portfolio.daily_pnl  += realised_pnl (net of all costs)
         portfolio.open_positions — removes the closed position
         portfolio.closed_trades  — appends the ClosedTrade
     """
-    exit_value = position.shares * exit_price
-    pnl = exit_value - position.position_value
+    # Slippage-adjusted fill price (sell below close)
+    fill_price = round(exit_price * (1 - SLIPPAGE_PCT), 2) if COSTS_ENABLED else exit_price
+
+    gross_exit = position.shares * fill_price
+    exit_cost = compute_trade_cost(gross_exit, "SELL")
+    net_exit = gross_exit - exit_cost
+
+    pnl = net_exit - position.position_value
     return_pct = (pnl / position.position_value * 100) if position.position_value > 0 else 0.0
 
     trade = ClosedTrade(
@@ -375,7 +472,7 @@ def close_position(
         entry_date=position.entry_date,
         exit_date=exit_date,
         entry_price=position.entry_price,
-        exit_price=round(exit_price, 2),
+        exit_price=round(fill_price, 2),
         shares=position.shares,
         position_value=position.position_value,
         confidence=position.confidence,
@@ -384,17 +481,29 @@ def close_position(
         pnl=round(pnl, 2),
         return_pct=round(return_pct, 4),
         was_correct=(exit_reason == "TARGET"),
+        # Attribution fields — carried from open position
+        triggered_signals=list(position.triggered_signals),
+        signal_score_raw=position.signal_score_raw,
+        vix_at_entry=position.vix_at_entry,
+        nifty_above_ema50_at_entry=position.nifty_above_ema50_at_entry,
+        fii_net_cr_at_entry=position.fii_net_cr_at_entry,
+        sector_score_at_entry=position.sector_score_at_entry,
+        had_tier_a_news=position.had_tier_a_news,
+        mfe_pct=round(position.mfe_pct, 4),
+        mae_pct=round(position.mae_pct, 4),
     )
 
-    portfolio.cash += exit_value
+    portfolio.cash += net_exit
     portfolio.invested = max(0.0, portfolio.invested - position.position_value)
     portfolio.daily_pnl += pnl
     portfolio.open_positions.remove(position)
     portfolio.closed_trades.append(trade)
 
     logger.debug(
-        "order_sim closed symbol=%s exit=%s reason=%s pnl=₹%.0f ret=%.2f%%",
-        position.symbol, exit_reason, exit_date, pnl, return_pct,
+        "order_sim closed symbol=%s exit=%s reason=%s fill=%.2f "
+        "pnl=₹%.0f ret=%.2f%% cost=₹%.1f mfe=%.1f%% mae=%.1f%%",
+        position.symbol, exit_reason, exit_date, fill_price,
+        pnl, return_pct, exit_cost, position.mfe_pct, position.mae_pct,
     )
     return trade
 

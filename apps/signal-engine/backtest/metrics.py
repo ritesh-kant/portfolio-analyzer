@@ -80,6 +80,12 @@ class FoldMetrics:
     vs_nifty_cagr: float = 0.0
     alpha_vs_nifty: float = 0.0
 
+    # Nifty buy-and-hold risk metrics over the same fold period (W1.3)
+    # Lets us compare Sharpe/DD directly — not just CAGR.
+    baseline_nifty_sharpe: float = 0.0
+    baseline_nifty_sortino: float = 0.0
+    baseline_nifty_max_dd: float = 0.0
+
     # Turnover
     annualised_turnover: float = 0.0
 
@@ -129,6 +135,11 @@ class AggregateMetrics:
 
     # Benchmark comparison over the full period
     vs_nifty_cagr: float = 0.0
+
+    # Nifty buy-and-hold risk metrics over full period (W1.3)
+    baseline_nifty_sharpe: float = 0.0
+    baseline_nifty_sortino: float = 0.0
+    baseline_nifty_max_dd: float = 0.0
 
     fold_results: list[FoldMetrics] = field(default_factory=list)
 
@@ -321,6 +332,32 @@ def compute_nifty_cagr(
         return 0.0
 
 
+def compute_nifty_risk_metrics(
+    market_df: pd.DataFrame,
+    start_date: str,
+    end_date: str,
+) -> tuple[float, float, float]:
+    """Return (sharpe, sortino, max_drawdown_pct) for Nifty buy-and-hold.
+
+    Computes an equity curve assuming ₹1 invested at start_date, scaled by
+    the Nifty daily returns, then runs the same metric functions used for the
+    strategy. Allows apples-to-apples Sharpe/DD comparison on each fold.
+    """
+    try:
+        col = "nifty_close"
+        window = market_df.loc[start_date:end_date, col].dropna()
+        if len(window) < 5:
+            return 0.0, 0.0, 0.0
+        nifty_values = (window / window.iloc[0]).tolist()  # normalised equity curve
+        rets = compute_daily_returns(nifty_values)
+        sharpe = compute_sharpe(rets)
+        sortino = compute_sortino(rets)
+        max_dd, _ = compute_max_drawdown(nifty_values)
+        return round(sharpe, 4), round(sortino, 4), round(max_dd, 4)
+    except Exception:
+        return 0.0, 0.0, 0.0
+
+
 # ── Fold-level metric assembly ─────────────────────────────────────────────────
 
 def compute_fold_metrics(
@@ -381,6 +418,11 @@ def compute_fold_metrics(
 
     m.vs_nifty_cagr = compute_nifty_cagr(market_df, start_date, end_date)
     m.alpha_vs_nifty = m.cagr - m.vs_nifty_cagr
+
+    # W1.3: Nifty buy-and-hold risk metrics for same fold period
+    m.baseline_nifty_sharpe, m.baseline_nifty_sortino, m.baseline_nifty_max_dd = (
+        compute_nifty_risk_metrics(market_df, start_date, end_date)
+    )
 
     return m
 
@@ -447,5 +489,10 @@ def aggregate_fold_metrics(
 
     agg.vs_nifty_cagr  = compute_nifty_cagr(market_df, overall_start, overall_end)
     agg.overall_alpha  = agg.overall_cagr - agg.vs_nifty_cagr
+
+    # W1.3: overall Nifty buy-and-hold risk metrics
+    agg.baseline_nifty_sharpe, agg.baseline_nifty_sortino, agg.baseline_nifty_max_dd = (
+        compute_nifty_risk_metrics(market_df, overall_start, overall_end)
+    )
 
     return agg

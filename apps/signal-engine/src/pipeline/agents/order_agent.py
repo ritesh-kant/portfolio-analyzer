@@ -45,11 +45,11 @@ MAX_KELLY_CAP = 0.25   # never risk more than 25% on a single trade
 # Update these values using recalibrate_weights.py after 150+ closed trades.
 # Bands are checked from highest to lowest; first match wins.
 _WIN_PROB_TABLE: list[tuple[float, float]] = [
-    (80.0, 0.60),
-    (75.0, 0.57),
-    (70.0, 0.54),
-    (65.0, 0.52),
-    (60.0, 0.50),
+    (80.0, 0.60),  # insufficient data (0/15 trades) — keeping default
+    (75.0, 0.57),  # insufficient data (0/15 trades) — keeping default
+    (70.0, 0.54),  # insufficient data (0/15 trades) — keeping default
+    (65.0, 0.52),  # insufficient data (0/15 trades) — keeping default
+    (60.0, 0.45),  # 150/405 trades
 ]
 
 

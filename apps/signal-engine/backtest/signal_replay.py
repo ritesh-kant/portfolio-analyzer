@@ -328,15 +328,19 @@ def compute_signal_score(
     if market_data.get("vix_caution"):
         confidence = max(0, confidence - _VIX_CAUTION_PENALTY)
 
-    # Near-miss guard: earnings in 6-10 days
-    if (
-        earnings_days_away is not None
-        and 6 <= earnings_days_away <= 10
-    ):
-        confidence = max(0, confidence - _EARNINGS_NEAR_MISS_PENALTY)
-        weak.append(
-            f"Earnings ~{earnings_days_away}d away (−{_EARNINGS_NEAR_MISS_PENALTY} pts)"
-        )
+    # Graduated earnings-proximity discount (W2.6):
+    #   ≤ 5d   → blocked entirely by guard_agent (apply_guard, not scored)
+    #   6–10d  → −10 pts  (increased from −5; pre-earnings drift is unreliable)
+    #   11–15d → −5 pts   (new tier; still close enough to affect direction)
+    if earnings_days_away is not None:
+        if 6 <= earnings_days_away <= 10:
+            penalty = 10
+            confidence = max(0, confidence - penalty)
+            weak.append(f"Earnings ~{earnings_days_away}d away (−{penalty} pts)")
+        elif 11 <= earnings_days_away <= 15:
+            penalty = 5
+            confidence = max(0, confidence - penalty)
+            weak.append(f"Earnings ~{earnings_days_away}d away (−{penalty} pts)")
 
     return confidence, triggered, weak
 

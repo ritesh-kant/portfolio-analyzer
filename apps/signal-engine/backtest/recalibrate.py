@@ -46,7 +46,9 @@ logger = logging.getLogger(__name__)
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 # Minimum number of closed trades required in a bucket before we replace the default.
-MIN_TRADES_PER_BUCKET = 30
+# Lowered from 30 → 15: the 5-bucket × 30-trade requirement never fired on real backtest
+# data (1,200 trades spread unevenly). WIN_PROB_MIN/MAX bounds protect against bad samples.
+MIN_TRADES_PER_BUCKET = 15
 
 # Win probability bounds — prevents over-sizing on lucky samples.
 WIN_PROB_MIN = 0.45

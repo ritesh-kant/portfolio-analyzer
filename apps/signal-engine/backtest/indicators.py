@@ -100,11 +100,13 @@ def compute_indicators(
     # ── Compute pandas-ta indicators on the window ────────────────────────────
     # Must match technical_agent exactly:
     #   rsi(14), macd(12,26,9), ema(20), ema(50), bbands(20,2)
+    # ATR(14) added for ATR-based stop/target sizing (backtest only).
     df.ta.rsi(length=14, append=True)
     df.ta.macd(fast=12, slow=26, signal=9, append=True)
     df.ta.ema(length=20, append=True)
     df.ta.ema(length=50, append=True)
     df.ta.bbands(length=20, std=2, append=True)
+    df.ta.atr(length=14, append=True)   # column: ATRr_14
 
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -165,6 +167,9 @@ def compute_indicators(
         "pct_from_low": round(pct_from_low, 2),
         # PCR — not available historically; caller treats None as neutral
         "pcr": None,
+        # ATR(14) — absolute ATR in rupees; used for adaptive stop/target sizing
+        # pandas_ta names the column ATRr_14 (older) or ATR_14 (newer) — try both
+        "atr14": round(_safe_float(last.get("ATRr_14") or last.get("ATR_14"), 0.0), 2),
     }
 
 
