@@ -20,8 +20,7 @@ provider:
   ecr:
     images:
       signal-engine:
-        path: ./
-        platform: linux/arm64
+        uri: ${env:SIGNAL_ENGINE_IMAGE_URI}
 
   environment:
     MONGODB_URI: ${ssm:/portfolio-analyzer/${sls:stage}/MONGODB_URI}
