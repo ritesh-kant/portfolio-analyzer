@@ -1,0 +1,17 @@
+export const config = {
+  allowedOrigin: process.env.ALLOWED_ORIGIN ?? 'http://localhost:3000',
+  aiProvider: process.env.AI_PROVIDER ?? 'anthropic',
+  newsdataApiKey: process.env.NEWSDATA_API_KEY,
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+  anthropicModel: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
+  openaiApiKey: process.env.OPENAI_API_KEY,
+  openaiModel: process.env.OPENAI_MODEL ?? 'gpt-4o',
+  geminiApiKey: process.env.GEMINI_API_KEY ?? '',
+  geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash',
+  nvidiaApiKey: process.env.NVIDIA_API_KEY,
+  nvidiaBaseUrl: process.env.NVIDIA_BASE_URL ?? 'https://integrate.api.nvidia.com/v1',
+  kimiModel: process.env.KIMI_MODEL ?? 'moonshotai/kimi-k2-instruct',
+  ollamaBaseUrl: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434',
+  ollamaModel: process.env.OLLAMA_MODEL ?? 'llama3.1',
+  ollamaTimeout: parseInt(process.env.OLLAMA_TIMEOUT ?? '600000', 10),
+};

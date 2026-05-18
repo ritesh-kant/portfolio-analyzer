@@ -7,6 +7,8 @@
  *   "sqs"             — publish JSON message to SQS_QUEUE_URL
  */
 
+import { config } from './config.js';
+
 export interface PipelineRunPayload {
   run_id: string;
   date: string;
@@ -25,8 +27,8 @@ class LocalQueueService implements QueueService {
   private readonly apiKey: string;
 
   constructor() {
-    this.url = process.env.SIGNAL_ENGINE_URL ?? 'http://localhost:8000';
-    this.apiKey = process.env.SIGNAL_ENGINE_API_KEY ?? '';
+    this.url = config.signalEngineUrl;
+    this.apiKey = config.signalEngineApiKey;
   }
 
   async dispatch(payload: PipelineRunPayload): Promise<void> {
@@ -61,7 +63,7 @@ class SqsQueueService implements QueueService {
   private readonly queueUrl: string;
 
   constructor() {
-    const queueUrl = process.env.SQS_QUEUE_URL;
+    const queueUrl = config.sqsQueueUrl;
     if (!queueUrl) throw new Error('SQS_QUEUE_URL is required when QUEUE_PROVIDER=sqs');
     this.queueUrl = queueUrl;
   }
@@ -71,7 +73,7 @@ class SqsQueueService implements QueueService {
     // Install: pnpm add @aws-sdk/client-sqs --filter trading-service
     const { SQSClient, SendMessageCommand } = await import('@aws-sdk/client-sqs');
 
-    const client = new SQSClient({ region: process.env.AWS_REGION ?? 'ap-south-1' });
+    const client = new SQSClient({ region: config.awsRegion });
     await client.send(
       new SendMessageCommand({
         QueueUrl: this.queueUrl,
@@ -87,7 +89,7 @@ class SqsQueueService implements QueueService {
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 export function createQueueService(): QueueService {
-  const provider = process.env.QUEUE_PROVIDER ?? 'local';
+  const provider = config.queueProvider;
   switch (provider) {
     case 'sqs':
       return new SqsQueueService();

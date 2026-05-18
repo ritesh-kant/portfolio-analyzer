@@ -43,6 +43,7 @@ RSS_FEEDS = [
         "url": "https://www.business-standard.com/rss/markets-106.rss",
         "source": "Business Standard",
         "tier": "tier1",
+        "headers": {"Referer": "https://www.business-standard.com/"},
     },
     {
         "url": "https://www.thehindubusinessline.com/markets/?service=rss",
@@ -73,6 +74,9 @@ _HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "application/rss+xml, application/xml, text/xml, */*",
+    "Accept-Language": "en-US,en;q=0.9,en-IN;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "no-cache",
 }
 
 
@@ -126,8 +130,10 @@ async def _fetch_one(
     """Return (source_name, articles, success_bool)."""
     source = feed_cfg["source"]
 
+    extra_headers: dict[str, str] = feed_cfg.get("headers", {})  # type: ignore[assignment]
+
     async def _do() -> list[dict[str, Any]]:
-        resp = await client.get(feed_cfg["url"])
+        resp = await client.get(feed_cfg["url"], headers=extra_headers)
         resp.raise_for_status()
         articles = _parse_feed_content(resp.text, source, feed_cfg["tier"])
         logger.info("rss_fetched source=%s count=%d", source, len(articles))

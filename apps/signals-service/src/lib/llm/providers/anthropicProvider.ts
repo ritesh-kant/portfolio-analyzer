@@ -1,10 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { timeoutPromise } from '../timeout.js';
+import { config } from '../../config.js';
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const client = new Anthropic({ apiKey: config.anthropicApiKey });
 
 export async function call(systemPrompt: string, userPrompt: string): Promise<string> {
-  const model = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5';
+  const model = config.anthropicModel;
   const result = await Promise.race([
     client.messages.create({
       model,

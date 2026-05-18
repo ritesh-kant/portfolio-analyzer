@@ -1,13 +1,14 @@
 import OpenAI from 'openai';
 import { timeoutPromise } from '../timeout.js';
+import { config } from '../../config.js';
 
 const client = new OpenAI({
-  apiKey: process.env.NVIDIA_API_KEY,
-  baseURL: process.env.NVIDIA_BASE_URL ?? 'https://integrate.api.nvidia.com/v1',
+  apiKey: config.nvidiaApiKey,
+  baseURL: config.nvidiaBaseUrl,
 });
 
 export async function call(systemPrompt: string, userPrompt: string): Promise<string> {
-  const model = process.env.KIMI_MODEL ?? 'moonshotai/kimi-k2-instruct';
+  const model = config.kimiModel;
   const result = await Promise.race([
     client.chat.completions.create({
       model,

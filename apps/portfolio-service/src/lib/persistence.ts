@@ -7,8 +7,9 @@ import {
   setHoldings as setMemoryHoldings,
   setTransactions as setMemoryTransactions,
 } from './store.js';
+import { config } from './config.js';
 
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_URI = config.mongodbUri;
 
 interface HoldingDoc {
   userKey: string;

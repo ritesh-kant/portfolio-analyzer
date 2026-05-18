@@ -9,6 +9,7 @@
 import crypto from 'crypto';
 import { getTradingDb } from './db.js';
 import { createQueueService } from './queue.js';
+import { config } from './config.js';
 
 export interface TriggerResult {
   run_id: string;
@@ -17,8 +18,6 @@ export interface TriggerResult {
   skipped: boolean;
   reason?: string;
 }
-
-const AI_PROVIDER = () => process.env.AI_PROVIDER ?? 'anthropic';
 
 /**
  * Idempotent pipeline trigger — skips if a run for the given date already
@@ -29,7 +28,7 @@ export async function triggerPipelineRun(opts?: {
   ai_provider?: string;
 }): Promise<TriggerResult> {
   const date = opts?.date ?? new Date().toISOString().slice(0, 10);
-  const aiProvider = opts?.ai_provider ?? AI_PROVIDER();
+  const aiProvider = opts?.ai_provider ?? config.aiProvider;
 
   const db = await getTradingDb();
 
@@ -94,8 +93,8 @@ export async function triggerPipelineRun(opts?: {
  * Non-fatal — logs on failure but does not throw.
  */
 export async function triggerMonitorRun(): Promise<void> {
-  const engineUrl = process.env.SIGNAL_ENGINE_URL ?? 'http://localhost:8000';
-  const apiKey = process.env.SIGNAL_ENGINE_API_KEY ?? '';
+  const engineUrl = config.signalEngineUrl;
+  const apiKey = config.signalEngineApiKey;
   try {
     const res = await fetch(`${engineUrl}/pipeline/monitor`, {
       method: 'POST',

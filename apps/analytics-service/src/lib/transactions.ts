@@ -1,7 +1,8 @@
 import type { Transaction } from '@portfolio-analyzer/shared-types';
 import mongoose from 'mongoose';
+import { config } from './config.js';
 
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_URI = config.mongodbUri;
 
 interface TransactionDoc {
   userKey: string;

@@ -1,7 +1,8 @@
 import mongoose from 'mongoose';
 import { TradingDb, ensureIndexes } from '@portfolio-analyzer/db';
+import { config } from './config.js';
 
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_URI = config.mongodbUri;
 
 let connectionPromise: Promise<typeof mongoose> | null = null;
 

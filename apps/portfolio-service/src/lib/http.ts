@@ -1,23 +1,34 @@
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? 'http://localhost:3000';
+import { config } from './config.js';
 
-const CORS_HEADERS = {
-  'access-control-allow-origin': ALLOWED_ORIGIN,
-  'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-  'access-control-allow-headers': 'content-type,authorization',
-  vary: 'Origin',
-};
+const ALLOWED_ORIGINS = new Set([
+  config.allowedOrigin,
+  'https://portfolio-analyzer-web-alpha.vercel.app',
+  'https://raptguru.in',
+  'https://www.raptguru.in',
+]);
 
-export function json(statusCode: number, body: unknown) {
+export function resolveOrigin(requestOrigin?: string): string {
+  if (requestOrigin && ALLOWED_ORIGINS.has(requestOrigin)) return requestOrigin;
+  return config.allowedOrigin;
+}
+
+function corsHeaders(requestOrigin?: string) {
+  return {
+    'access-control-allow-origin': resolveOrigin(requestOrigin),
+    'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+    'access-control-allow-headers': 'content-type,authorization',
+    vary: 'Origin',
+  };
+}
+
+export function json(statusCode: number, body: unknown, requestOrigin?: string) {
   return {
     statusCode,
-    headers: {
-      'content-type': 'application/json',
-      ...CORS_HEADERS,
-    },
+    headers: { 'content-type': 'application/json', ...corsHeaders(requestOrigin) },
     body: JSON.stringify(body),
   };
 }
 
-export function options() {
-  return { statusCode: 204, headers: CORS_HEADERS, body: '' };
+export function options(requestOrigin?: string) {
+  return { statusCode: 204, headers: corsHeaders(requestOrigin), body: '' };
 }

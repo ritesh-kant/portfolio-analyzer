@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { config } from '../../config.js';
 
 interface OllamaMessage {
   role: 'system' | 'user' | 'assistant';
@@ -10,9 +11,9 @@ interface OllamaChatResponse {
 }
 
 export async function call(systemPrompt: string, userPrompt: string): Promise<string> {
-  const baseUrl = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
-  const model = process.env.OLLAMA_MODEL ?? 'llama3.1';
-  const timeout = parseInt(process.env.OLLAMA_TIMEOUT ?? '600000', 10); // default 10 min
+  const baseUrl = config.ollamaBaseUrl;
+  const model = config.ollamaModel;
+  const timeout = config.ollamaTimeout;
 
   const response = await axios.post<OllamaChatResponse>(
     `${baseUrl}/api/chat`,

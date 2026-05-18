@@ -10,6 +10,7 @@
  */
 
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
+import { config } from '../lib/config.js';
 
 interface SqsRecord {
   messageId: string;
@@ -20,10 +21,10 @@ interface SqsEvent {
   Records: SqsRecord[];
 }
 
-const lambda = new LambdaClient({ region: process.env.AWS_REGION ?? 'ap-south-1' });
+const lambda = new LambdaClient({ region: config.awsRegion });
 
 export async function handler(event: SqsEvent): Promise<void> {
-  const functionName = process.env.SIGNAL_ENGINE_FUNCTION_NAME;
+  const functionName = config.signalEngineFunctionName;
   if (!functionName) throw new Error('SIGNAL_ENGINE_FUNCTION_NAME is not set');
 
   for (const record of event.Records) {

@@ -1,10 +1,11 @@
 import OpenAI from 'openai';
 import { timeoutPromise } from '../timeout.js';
+import { config } from '../../config.js';
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const client = new OpenAI({ apiKey: config.openaiApiKey });
 
 export async function call(systemPrompt: string, userPrompt: string): Promise<string> {
-  const model = process.env.OPENAI_MODEL ?? 'gpt-4o';
+  const model = config.openaiModel;
   const result = await Promise.race([
     client.chat.completions.create({
       model,

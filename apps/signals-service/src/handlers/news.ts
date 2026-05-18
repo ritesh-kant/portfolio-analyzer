@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { requireAuth } from '../lib/auth.js';
 import { json } from '../lib/http.js';
+import { config } from '../lib/config.js';
 import type { NewsArticle } from '../lib/types.js';
 
 interface NewsdataArticle {
@@ -17,7 +18,7 @@ interface NewsdataResponse {
 }
 
 export const handler = requireAuth(async (event): Promise<ReturnType<typeof json>> => {
-  const apiKey = process.env.NEWSDATA_API_KEY;
+  const apiKey = config.newsdataApiKey;
   if (!apiKey) {
     return json(200, { articles: [], error: 'NEWSDATA_API_KEY not configured' });
   }
