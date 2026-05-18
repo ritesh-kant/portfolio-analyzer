@@ -49,10 +49,11 @@ REWARD_TO_RISK = 2.0
 MAX_KELLY_CAP = 0.25
 MAX_HOLD_DAYS = 30      # extended to give chandelier trail room to ride trends
 
-# Trailing-stop / partial-profit ladder. "R" = 1.5 × ATR = initial risk per share.
-TP1_R_MULTIPLE = 1.5    # take partial profit at entry + TP1_R_MULTIPLE × R
-TP1_FRACTION = 0.5      # fraction of shares sold at TP1
-TRAIL_ATR_MULTIPLE = 3.0  # chandelier: trail = highest_close − TRAIL_ATR_MULTIPLE × ATR
+# Pure chandelier trailing stop ("Zerodha cover-order" style).
+# The trailing_stop starts at the initial 1.5×ATR stop and ratchets up daily as
+# `max(prev_trail, highest_close − TRAIL_ATR_MULTIPLE × ATR)`. There is no fixed
+# upside target and no partial profit-taking — winners run until the trail fires.
+TRAIL_ATR_MULTIPLE = 3.0
 
 # Config defaults — must mirror config.py
 MIN_SIGNAL_CONFIDENCE = 60.0
@@ -131,14 +132,13 @@ class Position:
     mfe_pct: float = 0.0    # max favorable excursion: best return % seen during trade
     mae_pct: float = 0.0    # max adverse excursion: worst loss % seen (stored positive)
 
-    # Trailing-stop / partial-profit state. atr_at_entry is the ATR(14) used to
-    # derive stop/target at entry; needed for chandelier trail width post-TP1.
+    # Chandelier trailing-stop state. atr_at_entry is the ATR(14) used at entry;
+    # needed for the trail width. trailing_stop ratchets up daily from
+    # original_stop (entry − 1.5×ATR) toward (highest_close − 3×ATR).
     atr_at_entry: float = 0.0
-    original_stop: float = 0.0  # stop at entry; used to detect pre-TP1 stop-outs
-    tp1_price: float = 0.0      # entry + TP1_R_MULTIPLE × 1.5 × ATR
-    tp1_taken: bool = False
+    original_stop: float = 0.0  # stop at entry; floor for the trailing stop
     highest_close: float = 0.0  # high-water mark of close price since entry
-    trailing_stop: float = 0.0  # chandelier; only consulted once tp1_taken=True
+    trailing_stop: float = 0.0  # max(original_stop, highest_close − 3×ATR)
 
 
 @dataclass
@@ -154,7 +154,7 @@ class ClosedTrade:
     position_value: float
     confidence: int
     kelly_fraction: float
-    exit_reason: str         # "TP1" | "TRAIL" | "STOP" | "MAX_AGE" | "TARGET" (legacy)
+    exit_reason: str         # "TRAIL" | "STOP" | "MAX_AGE" | "TARGET" (legacy)
     pnl: float               # rupee P&L net of transaction costs
     return_pct: float        # % return net of costs
     was_correct: bool        # True if return_pct > 0 (profitable exit)
@@ -383,20 +383,18 @@ def open_position(
         )
         return None
 
-    # ATR-based stop/target when available (2:1 R:R maintained), else fixed %.
-    # When ATR is present, the position uses the TP1 + chandelier-trail ladder.
-    # When not, the legacy fixed STOP_PCT / TARGET_PCT path is preserved
-    # (no TP1, no trailing — atr_at_entry=0 disables that branch in should_close).
+    # ATR-based stop when available, else fixed %. The ATR path uses pure
+    # chandelier trailing: initial stop at entry − 1.5×ATR, then trail ratchets
+    # up daily as max(prev, highest_close − 3×ATR). The `target` field is kept
+    # for legacy compatibility but is not consulted in the ATR path.
     atr_at_entry = float(atr) if atr is not None and atr > 0 else 0.0
     if atr_at_entry > 0:
         risk_per_share = 1.5 * atr_at_entry
         stop_loss = round(fill_price - risk_per_share, 2)
-        target = round(fill_price + 3.0 * atr_at_entry, 2)
-        tp1_price = round(fill_price + TP1_R_MULTIPLE * risk_per_share, 2)
+        target = round(fill_price + 3.0 * atr_at_entry, 2)  # legacy field; unused in trail path
     else:
         stop_loss = round(fill_price * (1 - STOP_PCT), 2)
         target = round(fill_price * (1 + TARGET_PCT), 2)
-        tp1_price = 0.0
 
     # Entry transaction costs (stamp duty + brokerage + exchange + GST + SEBI)
     entry_cost = compute_trade_cost(position_value, "BUY")
@@ -422,7 +420,6 @@ def open_position(
         had_tier_a_news=bool(sd.get("had_tier_a_news", False)),
         atr_at_entry=atr_at_entry,
         original_stop=stop_loss,
-        tp1_price=tp1_price,
         highest_close=fill_price,
         trailing_stop=stop_loss,
     )
@@ -442,20 +439,22 @@ def open_position(
 
 
 def update_trail(position: Position, current_price: float) -> None:
-    """Update high-water mark and chandelier trailing stop.
+    """Update high-water mark and chandelier trailing stop (ratchet up only).
 
     Called once per day per position, after MFE/MAE update, BEFORE should_close.
-    The trailing stop is only consulted (in should_close) once TP1 has been hit.
-    The stop only moves up — never down — which is the chandelier-exit invariant.
-    No-op for fallback (non-ATR) positions.
+    The trail is `max(prev_trail, highest_close − 3×ATR)` and never goes below
+    the initial 1.5×ATR stop (original_stop is its floor). No-op for non-ATR
+    legacy positions.
     """
     if position.atr_at_entry <= 0:
         return
     if current_price > position.highest_close:
         position.highest_close = current_price
     candidate = position.highest_close - TRAIL_ATR_MULTIPLE * position.atr_at_entry
-    if candidate > position.trailing_stop:
-        position.trailing_stop = round(candidate, 2)
+    floor = position.original_stop
+    new_trail = max(position.trailing_stop, candidate, floor)
+    if new_trail > position.trailing_stop:
+        position.trailing_stop = round(new_trail, 2)
 
 
 def should_close(
@@ -464,18 +463,18 @@ def should_close(
 ) -> str | None:
     """Return exit reason if the position should be closed, else None.
 
-    Exit ladder (ATR-based positions):
-        Pre-TP1:  STOP    — current_price <= original_stop
-                  TP1     — current_price >= tp1_price (partial close in engine)
-        Post-TP1: TRAIL   — current_price <= trailing_stop
-        Always:   MAX_AGE — position.days_held >= MAX_HOLD_DAYS
+    Pure chandelier exit (ATR-based positions):
+        STOP    — price ≤ trailing_stop AND trail still at/below entry
+                  (i.e. losing exit; subject to cooloff in engine)
+        TRAIL   — price ≤ trailing_stop AND trail has ratcheted above entry
+                  (i.e. winning trend-end exit; no cooloff)
+        MAX_AGE — position.days_held >= MAX_HOLD_DAYS
 
-    Fallback (atr_at_entry == 0): legacy TARGET / STOP behaviour.
+    Fallback (atr_at_entry == 0): legacy fixed TARGET / STOP behaviour.
 
-    Returns: "TP1" | "TRAIL" | "STOP" | "MAX_AGE" | None
+    Returns: "TRAIL" | "STOP" | "MAX_AGE" | "TARGET" (legacy) | None
     """
-    # Legacy fixed-pct fallback when ATR was unavailable at entry — no TP1
-    # ladder, single hard target exit (label preserved for downstream parity).
+    # Legacy fixed-pct fallback (no ATR at entry).
     if position.atr_at_entry <= 0:
         if current_price >= position.target:
             return "TARGET"
@@ -485,15 +484,10 @@ def should_close(
             return "MAX_AGE"
         return None
 
-    # ATR-based exit ladder.
-    if position.tp1_taken:
-        if current_price <= position.trailing_stop:
-            return "TRAIL"
-    else:
-        if current_price <= position.original_stop:
-            return "STOP"
-        if position.tp1_price > 0 and current_price >= position.tp1_price:
-            return "TP1"
+    # ATR-based pure chandelier path. Single trail line subsumes stop + target.
+    if current_price <= position.trailing_stop:
+        # Classify: trail still at/below entry → losing exit (STOP), else TRAIL.
+        return "STOP" if position.trailing_stop <= position.entry_price else "TRAIL"
     if position.days_held >= MAX_HOLD_DAYS:
         return "MAX_AGE"
     return None

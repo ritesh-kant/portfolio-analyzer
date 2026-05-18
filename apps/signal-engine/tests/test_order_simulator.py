@@ -38,8 +38,6 @@ from backtest.order_simulator import (
     MAX_SECTOR_POSITIONS,
     STOP_PCT,
     TARGET_PCT,
-    TP1_FRACTION,
-    TP1_R_MULTIPLE,
     TRAIL_ATR_MULTIPLE,
     Position,
     Portfolio,
@@ -642,13 +640,16 @@ class TestSignalScoringParity:
         )
 
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# 9. Trailing-stop + partial-profit ladder
+# 9. Pure chandelier trailing stop (v10 — Zerodha cover-order style)
 #
-# Exit ladder for ATR-equipped positions:
-#   pre-TP1  : STOP at original_stop, TP1 at entry + 1.5R (R = 1.5 × ATR)
-#   post-TP1 : TRAIL = chandelier (highest_close − TRAIL_ATR_MULTIPLE × ATR)
-#   always   : MAX_AGE at MAX_HOLD_DAYS
+# Exit rule for ATR-equipped positions:
+#   trailing_stop = max(prev_trail, highest_close − TRAIL_ATR_MULTIPLE × ATR,
+#                        original_stop)         # ratchets up only; never below 1.5×ATR stop
+#   price ≤ trailing_stop ∧ trail ≤ entry  → "STOP"  (losing exit; cooloff)
+#   price ≤ trailing_stop ∧ trail >  entry → "TRAIL" (winning trend-end exit)
+#   days_held ≥ MAX_HOLD_DAYS              → "MAX_AGE"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -658,11 +659,10 @@ def _atr_position(
     shares: int = 100,
     days: int = 0,
 ) -> Position:
-    """Build an ATR-equipped Position to exercise the new exit ladder."""
+    """Build an ATR-equipped Position with chandelier trail seeded at entry."""
     risk_per_share = 1.5 * atr
     stop = round(entry_price - risk_per_share, 2)
-    target = round(entry_price + 3.0 * atr, 2)
-    tp1 = round(entry_price + TP1_R_MULTIPLE * risk_per_share, 2)
+    target = round(entry_price + 3.0 * atr, 2)   # legacy display only
     return Position(
         symbol="TRAIL.NS",
         sector="IT",
@@ -677,109 +677,66 @@ def _atr_position(
         days_held=days,
         atr_at_entry=atr,
         original_stop=stop,
-        tp1_price=tp1,
         highest_close=entry_price,
         trailing_stop=stop,
     )
 
 
-class TestTrailingStopLadder:
-    """Trailing-stop + partial-profit exit ladder behaviour."""
+class TestChandelierTrail:
+    """Pure chandelier exit — no TP1, no fixed target."""
 
-    def test_constants_have_expected_values(self):
-        assert TP1_FRACTION == 0.5
-        assert TP1_R_MULTIPLE == 1.5
+    def test_trail_constant(self):
         assert TRAIL_ATR_MULTIPLE == 3.0
 
-    def test_pre_tp1_stop_returns_STOP(self):
+    # ── pre-ratchet (trail still at original_stop) ────────────────────────────
+    def test_initial_stop_is_original_1_5_atr_stop(self):
+        pos = _atr_position(entry_price=1000.0, atr=20.0)
+        assert pos.trailing_stop == 970.0   # 1000 − 1.5×20
+        assert pos.original_stop == 970.0
+
+    def test_breach_below_entry_returns_STOP(self):
         pos = _atr_position()
-        assert should_close(pos, pos.original_stop) == "STOP"
-        assert should_close(pos, pos.original_stop - 1) == "STOP"
+        assert should_close(pos, pos.trailing_stop) == "STOP"
+        assert should_close(pos, pos.trailing_stop - 1) == "STOP"
 
-    def test_pre_tp1_below_target_returns_None(self):
-        """Crossing the legacy target without hitting TP1 is impossible
-        (TP1 < target by construction), but verify no spurious exit
-        triggers when price sits between entry and TP1."""
+    def test_above_initial_stop_returns_None(self):
         pos = _atr_position()
-        mid = (pos.entry_price + pos.tp1_price) / 2
-        assert should_close(pos, mid) is None
+        assert should_close(pos, pos.entry_price) is None
+        assert should_close(pos, pos.entry_price + 100) is None
 
-    def test_pre_tp1_at_tp1_returns_TP1(self):
+    def test_no_upside_cap(self):
+        """Pure chandelier removes the fixed target — even at +∞ no exit unless
+        the trail fires or max-age hits."""
         pos = _atr_position()
-        assert should_close(pos, pos.tp1_price) == "TP1"
-        assert should_close(pos, pos.tp1_price + 5) == "TP1"
+        assert should_close(pos, pos.entry_price * 10) is None
 
-    def test_stop_takes_priority_over_tp1_pre_tp1(self):
-        """If both pre-TP1 stop AND tp1_price would fire on the same bar
-        (huge gap-down then immediate spike — not realistic in daily data
-        but the function must be defined), STOP fires first."""
-        pos = _atr_position()
-        # Construct an absurd price that simultaneously meets both checks
-        # by manipulating thresholds — sanity check the priority ordering.
-        pos.original_stop = pos.tp1_price + 1  # stop above tp1 (artificial)
-        assert should_close(pos, pos.tp1_price) == "STOP"
-
-    def test_post_tp1_at_trailing_stop_returns_TRAIL(self):
-        pos = _atr_position()
-        pos.tp1_taken = True
-        # Simulate the trail has ratcheted up to entry breakeven.
-        pos.trailing_stop = pos.entry_price
-        assert should_close(pos, pos.entry_price) == "TRAIL"
-        assert should_close(pos, pos.entry_price - 1) == "TRAIL"
-
-    def test_post_tp1_below_trailing_stop_returns_TRAIL(self):
-        pos = _atr_position()
-        pos.tp1_taken = True
-        pos.trailing_stop = 1050.0
-        assert should_close(pos, 1049.0) == "TRAIL"
-
-    def test_post_tp1_above_trailing_stop_returns_None(self):
-        pos = _atr_position()
-        pos.tp1_taken = True
-        pos.trailing_stop = 1050.0
-        assert should_close(pos, 1100.0) is None
-
-    def test_post_tp1_no_tp1_re_trigger(self):
-        """Once TP1 has been taken, hitting tp1_price again does not
-        re-trigger TP1 — only TRAIL applies on the remainder."""
-        pos = _atr_position()
-        pos.tp1_taken = True
-        pos.trailing_stop = pos.entry_price
-        # Price well above tp1 — must not return TP1 a second time.
-        assert should_close(pos, pos.tp1_price + 50) is None
-
-    def test_max_age_fires_post_tp1(self):
-        pos = _atr_position(days=MAX_HOLD_DAYS)
-        pos.tp1_taken = True
-        # Price above trailing stop so MAX_AGE is the only exit gate.
-        pos.trailing_stop = pos.entry_price
-        assert should_close(pos, pos.entry_price + 100) == "MAX_AGE"
-
+    # ── ratchet (trail moves up with highest_close) ───────────────────────────
     def test_update_trail_ratchets_high_water_mark(self):
         pos = _atr_position()
         update_trail(pos, 1010.0)
         assert pos.highest_close == 1010.0
-        update_trail(pos, 1005.0)  # lower → no change
+        update_trail(pos, 1005.0)
         assert pos.highest_close == 1010.0
-        update_trail(pos, 1050.0)  # higher → ratchet up
+        update_trail(pos, 1050.0)
         assert pos.highest_close == 1050.0
+
+    def test_update_trail_floors_at_original_stop(self):
+        """Until highest_close moves up enough that (highest − 3×ATR) > original_stop,
+        the trail stays at the initial 1.5×ATR stop."""
+        pos = _atr_position(entry_price=1000.0, atr=20.0)
+        update_trail(pos, pos.entry_price)
+        assert pos.trailing_stop == 970.0
 
     def test_update_trail_moves_trailing_stop_up_only(self):
         pos = _atr_position(entry_price=1000.0, atr=20.0)
-        # original stop = 1000 - 30 = 970; trail starts at 970
         update_trail(pos, 1100.0)
-        # highest=1100, candidate trail = 1100 - 3*20 = 1040 (above 970)
-        assert pos.trailing_stop == 1040.0
-        # Price drops back, but trail must not move down.
+        assert pos.trailing_stop == 1040.0   # 1100 − 60
         update_trail(pos, 1050.0)
         assert pos.trailing_stop == 1040.0
-        # Higher high → trail ratchets up.
         update_trail(pos, 1200.0)
-        assert pos.trailing_stop == 1140.0   # 1200 - 60
+        assert pos.trailing_stop == 1140.0   # 1200 − 60
 
     def test_update_trail_noop_when_no_atr(self):
-        """Legacy fallback positions (atr_at_entry == 0) must not have
-        their trailing_stop touched."""
         pos = _atr_position()
         pos.atr_at_entry = 0.0
         orig_stop = pos.trailing_stop
@@ -787,30 +744,35 @@ class TestTrailingStopLadder:
         assert pos.trailing_stop == orig_stop
         assert pos.highest_close == pos.entry_price
 
-    def test_partial_close_mutates_position_keeps_remainder_open(self):
-        """close_position with shares_to_close < total mutates in place."""
-        p = make_portfolio(1_000_000)
-        pos = _atr_position(entry_price=1000.0, atr=20.0, shares=100)
-        # Inject the position directly so we don't rely on calc_position sizing.
-        p.cash -= pos.position_value
-        p.invested += pos.position_value
-        p.open_positions.append(pos)
+    # ── post-ratchet exits (trail now above entry) ────────────────────────────
+    def test_trail_above_entry_returns_TRAIL(self):
+        """Once chandelier ratchets above entry, a breach is a profitable
+        trend-end exit (TRAIL), not a STOP — no cooloff."""
+        pos = _atr_position(entry_price=1000.0, atr=20.0)
+        update_trail(pos, 1100.0)
+        assert pos.trailing_stop == 1040.0
+        assert should_close(pos, 1040.0) == "TRAIL"
+        assert should_close(pos, 1039.0) == "TRAIL"
 
-        trade = close_position(
-            p, pos, "2024-01-15", pos.tp1_price,
-            "TP1", shares_to_close=50,
-        )
-        assert trade.shares == 50
-        assert trade.exit_reason == "TP1"
-        assert p.open_position_count == 1, "remainder must stay open"
-        assert pos.shares == 50
-        # position_value updated to remainder's cost basis.
-        assert pos.position_value == pytest.approx(50 * pos.entry_price, rel=1e-6)
-        # ClosedTrade reflects the partial slice only.
-        assert trade.position_value == pytest.approx(50 * pos.entry_price, rel=1e-6)
+    def test_trail_at_entry_classified_as_STOP(self):
+        """A breach when the trail is exactly at entry is breakeven —
+        classify as STOP (the trail hasn't yet earned 'winner' status)."""
+        pos = _atr_position(entry_price=1000.0, atr=20.0)
+        pos.trailing_stop = pos.entry_price
+        assert should_close(pos, 1000.0) == "STOP"
 
+    def test_above_ratcheted_trail_returns_None(self):
+        pos = _atr_position(entry_price=1000.0, atr=20.0)
+        update_trail(pos, 1100.0)
+        assert should_close(pos, 1080.0) is None
+
+    # ── max-age failsafe ──────────────────────────────────────────────────────
+    def test_max_age_fires_when_held_too_long(self):
+        pos = _atr_position(days=MAX_HOLD_DAYS)
+        assert should_close(pos, pos.entry_price + 100) == "MAX_AGE"
+
+    # ── close_position invariants (partial-close path still works) ────────────
     def test_full_close_removes_position(self):
-        """close_position with no shares_to_close (or all shares) removes it."""
         p = make_portfolio(1_000_000)
         pos = _atr_position(entry_price=1000.0, atr=20.0, shares=100)
         p.cash -= pos.position_value
@@ -821,38 +783,39 @@ class TestTrailingStopLadder:
         assert p.open_position_count == 0
         assert len(p.closed_trades) == 1
         assert p.closed_trades[0].shares == 100
+        assert p.closed_trades[0].exit_reason == "TRAIL"
 
-    def test_partial_close_rejects_zero_shares(self):
-        p = make_portfolio(1_000_000)
-        pos = _atr_position(shares=100)
-        p.open_positions.append(pos)
-        with pytest.raises(ValueError):
-            close_position(p, pos, "2024-01-15", 1100.0, "TP1", shares_to_close=0)
-
-    def test_partial_then_trail_two_trades_in_closed_list(self):
-        """End-to-end: partial close at TP1, then full close at TRAIL —
-        the portfolio must record two ClosedTrade rows for the same entry."""
+    def test_partial_close_still_supported(self):
+        """close_position kept partial-close capability for back-compat; not
+        used by v10 exit ladder but the API contract must hold."""
         p = make_portfolio(1_000_000)
         pos = _atr_position(entry_price=1000.0, atr=20.0, shares=100)
         p.cash -= pos.position_value
         p.invested += pos.position_value
         p.open_positions.append(pos)
 
-        # TP1 partial — simulate engine: close half + flip flag + breakeven stop
-        close_position(p, pos, "2024-01-10", pos.tp1_price, "TP1", shares_to_close=50)
-        pos.tp1_taken = True
-        pos.original_stop = pos.entry_price
-        pos.trailing_stop = pos.entry_price
+        trade = close_position(
+            p, pos, "2024-01-15", 1050.0, "TRAIL", shares_to_close=40,
+        )
+        assert trade.shares == 40
+        assert pos.shares == 60
+        assert p.open_position_count == 1
 
-        # Ratchet trail up via a strong rally
-        update_trail(pos, 1200.0)
-        assert pos.trailing_stop > pos.entry_price
+    # ── end-to-end trend simulation ───────────────────────────────────────────
+    def test_end_to_end_uptrend_exits_at_TRAIL_far_above_entry(self):
+        """Strong uptrend: trail ratchets daily, trend breaks, single TRAIL exit."""
+        p = make_portfolio(1_000_000)
+        pos = _atr_position(entry_price=1000.0, atr=20.0, shares=100)
+        p.cash -= pos.position_value
+        p.invested += pos.position_value
+        p.open_positions.append(pos)
 
-        # Trail finally hits — full close of remainder
-        close_position(p, pos, "2024-01-25", pos.trailing_stop, "TRAIL")
-        assert len(p.closed_trades) == 2
-        reasons = [t.exit_reason for t in p.closed_trades]
-        assert reasons == ["TP1", "TRAIL"]
-        share_counts = [t.shares for t in p.closed_trades]
-        assert share_counts == [50, 50]
-        assert p.open_position_count == 0
+        for price in (1050, 1100, 1150, 1200, 1250, 1300):
+            update_trail(pos, price)
+        assert pos.trailing_stop == 1240.0   # 1300 − 60
+
+        assert should_close(pos, 1240.0) == "TRAIL"
+        close_position(p, pos, "2024-02-01", 1240.0, "TRAIL")
+        assert len(p.closed_trades) == 1
+        assert p.closed_trades[0].pnl > 0
+        assert p.closed_trades[0].shares == 100   # single full-position exit

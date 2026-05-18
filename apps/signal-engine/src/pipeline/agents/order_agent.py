@@ -230,13 +230,12 @@ class OrderAgent(BaseAgent):
             if atr > 0:
                 risk_per_share = 1.5 * atr
                 stop_loss = round(entry_price - risk_per_share, 2)
+                # `target` kept for legacy display only; ATR path exits via
+                # pure chandelier trail (no fixed upside target).
                 target = round(entry_price + 3.0 * atr, 2)
-                # TP1 at +1.5R; chandelier trail (3×ATR) takes over after partial.
-                tp1_price = round(entry_price + 1.5 * risk_per_share, 2)
             else:
                 stop_loss = round(entry_price * (1 - STOP_PCT), 2)
                 target = round(entry_price * (1 + TARGET_PCT), 2)
-                tp1_price = 0.0  # legacy fallback: no TP1 ladder, fixed target only
 
             order: dict[str, Any] = {
                 "run_id": state.run_id,
@@ -254,11 +253,9 @@ class OrderAgent(BaseAgent):
                 "kelly_fraction": round(kelly_frac, 4),
                 "stop_loss": stop_loss,
                 "target": target,
-                # Trailing-stop + partial-profit ladder state (read by monitor_agent).
+                # Chandelier trailing-stop state (read by monitor_agent).
                 "atr_at_entry": round(atr, 4),
                 "original_stop": stop_loss,
-                "tp1_price": tp1_price,
-                "tp1_taken": False,
                 "highest_close": round(entry_price, 2),
                 "trailing_stop": stop_loss,
                 "date": state.date or today,

@@ -50,7 +50,6 @@ from backtest.metrics import (
     compute_fold_metrics,
 )
 from backtest.order_simulator import (
-    TP1_FRACTION,
     Portfolio,
     check_circuit_breakers,
     clone_portfolio,
@@ -275,12 +274,10 @@ def _simulate_day(
             update_trail(pos, price)
 
     # ── Exit loop ─────────────────────────────────────────────────────────────
-    # Exit ladder:
-    #   TP1      — partial close (TP1_FRACTION), move stop to breakeven, position
-    #              continues with chandelier trail on remainder.
-    #   TRAIL    — remainder hit trailing stop after TP1; full close.
-    #   STOP     — pre-TP1 initial stop hit; full close + cooloff.
-    #   MAX_AGE  — held past MAX_HOLD_DAYS; full close.
+    # Pure chandelier trail (no TP1, no fixed target):
+    #   STOP    — trailing_stop hit while still at/below entry; full close + cooloff.
+    #   TRAIL   — trailing_stop hit after ratcheting above entry; full close, no cooloff.
+    #   MAX_AGE — held past MAX_HOLD_DAYS; full close.
     positions_closed = 0
     for pos in list(portfolio.open_positions):   # iterate over copy
         price = current_prices.get(pos.symbol)
@@ -289,35 +286,14 @@ def _simulate_day(
         reason = should_close(pos, price)
         if not reason:
             continue
-        if reason == "TP1" and pos.atr_at_entry > 0 and not pos.tp1_taken:
-            shares_to_sell = max(1, int(pos.shares * TP1_FRACTION))
-            if shares_to_sell >= pos.shares:
-                # Position too small to split — full close.
-                close_position(portfolio, pos, date_str, price, "TP1")
-                positions_closed += 1
-            else:
-                close_position(
-                    portfolio, pos, date_str, price, "TP1",
-                    shares_to_close=shares_to_sell,
-                )
-                # Move stop to breakeven on remainder; trail seeded at entry.
-                pos.tp1_taken = True
-                pos.original_stop = pos.entry_price
-                pos.trailing_stop = max(pos.trailing_stop, pos.entry_price)
-                logger.debug(
-                    "engine tp1 symbol=%s sold=%d remaining=%d new_stop=%.2f",
-                    pos.symbol, shares_to_sell, pos.shares, pos.trailing_stop,
-                )
-        else:
-            close_position(portfolio, pos, date_str, price, reason)
-            positions_closed += 1
-            # W2.4: cool off the symbol for 15 trading days after a STOP exit.
-            # TRAIL exits intentionally do NOT cooloff — those are trend-end exits,
-            # often profitable, where re-entry on the next signal is acceptable.
-            if reason == "STOP":
-                release = sim_date + pd.offsets.BDay(15)
-                cooled_off_until[pos.symbol] = release
-                logger.debug("engine cooloff symbol=%s until=%s", pos.symbol, release.date())
+        close_position(portfolio, pos, date_str, price, reason)
+        positions_closed += 1
+        # W2.4: cool off the symbol for 15 trading days after a STOP (losing) exit.
+        # TRAIL exits skip cooloff — those are profitable trend-end exits.
+        if reason == "STOP":
+            release = sim_date + pd.offsets.BDay(15)
+            cooled_off_until[pos.symbol] = release
+            logger.debug("engine cooloff symbol=%s until=%s", pos.symbol, release.date())
 
     # ── MTM for circuit-breaker check ─────────────────────────────────────────
     mtm_value = portfolio.snapshot_equity(date_str, current_prices)
