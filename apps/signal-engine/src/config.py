@@ -56,7 +56,10 @@ class Settings(BaseSettings):
     signal_engine_api_key: str = _DEFAULT_API_KEY
 
     # LLM safety limits
-    llm_timeout_s: float = 30.0             # asyncio.wait_for budget per LLM call
+    # Ollama runs locally and is single-stream; 120 s gives it room on a slow box.
+    # Cloud providers (Anthropic, OpenAI) respond in <5 s so the higher ceiling is harmless.
+    # Override via LLM_TIMEOUT_S env var if needed.
+    llm_timeout_s: float = 120.0            # asyncio.wait_for budget per LLM call
     llm_daily_spend_limit_usd: float = 5.0  # halt new LLM calls when daily cost exceeds this
 
     # Observability

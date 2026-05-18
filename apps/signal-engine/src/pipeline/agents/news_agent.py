@@ -30,6 +30,10 @@ from ...scrapers.bse import fetch_bse_announcements
 logger = logging.getLogger(__name__)
 
 _CLASSIFY_BATCH = 15
+# Ollama is single-stream: keep at 1 so the timeout clock starts only when a
+# batch actually reaches the model. Set higher (e.g. 4) for cloud providers
+# that can run requests in parallel on their end.
+_CLASSIFY_CONCURRENCY = 1
 
 _SYSTEM_PROMPT = """\
 You are a financial news analyst for Indian equity markets (NSE/BSE).
@@ -97,6 +101,31 @@ async def _classify_batch(
     return result
 
 
+async def _classify_all_batches(
+    llm: Any,
+    articles: list[dict[str, Any]],
+) -> list[list[dict[str, Any]]]:
+    """Run all classification batches with bounded concurrency.
+
+    With _CLASSIFY_CONCURRENCY=1 (Ollama default) this is equivalent to a
+    sequential loop, but the timeout clock starts only when a batch acquires
+    the semaphore — so batches waiting in the queue don't burn their budget.
+
+    With _CLASSIFY_CONCURRENCY>1 (cloud providers) all batches fire together
+    and the model processes them in parallel, cutting total classification time
+    from N×T to roughly T.
+    """
+    sem = asyncio.Semaphore(_CLASSIFY_CONCURRENCY)
+    offsets = list(range(0, len(articles), _CLASSIFY_BATCH))
+
+    async def _limited(offset: int) -> tuple[int, list[dict[str, Any]]]:
+        async with sem:
+            return offset, await _classify_batch(llm, articles[offset : offset + _CLASSIFY_BATCH], offset)
+
+    results = await asyncio.gather(*[_limited(o) for o in offsets])
+    return [result for _, result in sorted(results, key=lambda x: x[0])]
+
+
 def _apply_classification(article: dict[str, Any], cls: dict[str, Any]) -> dict[str, Any]:
     return {
         **article,
@@ -140,12 +169,13 @@ class NewsAgent(BaseAgent):
 
         logger.info("news_new_after_dedup count=%d", len(new_articles))
 
-        # 3. LLM classification
+        # 3. LLM classification — batches run with bounded concurrency
         classified: list[dict[str, Any]] = []
         if state.llm is not None and new_articles:
-            for offset in range(0, len(new_articles), _CLASSIFY_BATCH):
+            batch_results = await _classify_all_batches(state.llm, new_articles)
+            for batch_idx, cls_results in enumerate(batch_results):
+                offset = batch_idx * _CLASSIFY_BATCH
                 batch = new_articles[offset : offset + _CLASSIFY_BATCH]
-                cls_results = await _classify_batch(state.llm, batch, offset)
                 cls_map = {r.get("idx"): r for r in cls_results if isinstance(r, dict)}
                 for i, article in enumerate(batch):
                     cls = cls_map.get(i, {})
