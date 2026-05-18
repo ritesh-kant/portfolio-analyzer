@@ -35,8 +35,13 @@ import pandas as pd
 if TYPE_CHECKING:
     from backtest.order_simulator import ClosedTrade
 
-# Risk-free rate: Indian 10-year G-Sec approximate (annualised)
-RISK_FREE_RATE_ANNUAL = 0.065
+# Risk-free rate for Sharpe denominator.
+# Set to 0: the backtest models uninvested cash as idle (0% return), so
+# subtracting a positive RF rate makes every cash-only day look like a loss
+# and systematically biases Sharpe negative in strategies with low deployment.
+# This is standard for pure-alpha strategy backtests that don't model treasury/
+# liquid-fund returns on the uninvested portion of the portfolio.
+RISK_FREE_RATE_ANNUAL = 0.0
 TRADING_DAYS_PER_YEAR = 252
 
 # Decision-gate thresholds (from Phase 1 plan)
@@ -461,10 +466,19 @@ def aggregate_fold_metrics(
     agg.mean_alpha       = float(np.mean([f.alpha_vs_nifty for f in folds]))
     agg.total_trades     = sum(f.total_trades for f in folds)
 
-    # Concatenated equity curve → overall metrics
+    # Concatenated equity curve → overall metrics.
+    # Each fold resets to the same initial capital, so we normalise each fold
+    # to start from where the previous one ended — otherwise the reset creates
+    # an artificial step-down that poisons the Sharpe with large fake losses.
     all_values: list[float] = []
     for f in sorted(folds, key=lambda x: x.start_date):
-        all_values.extend(f.daily_values)
+        if not f.daily_values:
+            continue
+        if all_values and all_values[-1] > 0 and f.daily_values[0] > 0:
+            scale = all_values[-1] / f.daily_values[0]
+            all_values.extend(v * scale for v in f.daily_values)
+        else:
+            all_values.extend(f.daily_values)
 
     if all_values:
         overall_calendar_days = (
