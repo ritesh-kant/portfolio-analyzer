@@ -143,7 +143,7 @@ class ClosedTrade:
     exit_reason: str         # "TARGET" | "STOP" | "MAX_AGE"
     pnl: float               # rupee P&L net of transaction costs
     return_pct: float        # % return net of costs
-    was_correct: bool        # True if exit_reason == "TARGET"
+    was_correct: bool        # True if return_pct > 0 (profitable exit)
 
     # Signal attribution — copied from Position for trade-level analysis
     triggered_signals: list[str] = field(default_factory=list)
@@ -480,7 +480,7 @@ def close_position(
         exit_reason=exit_reason,
         pnl=round(pnl, 2),
         return_pct=round(return_pct, 4),
-        was_correct=(exit_reason == "TARGET"),
+        was_correct=(return_pct > 0),
         # Attribution fields — carried from open position
         triggered_signals=list(position.triggered_signals),
         signal_score_raw=position.signal_score_raw,
