@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 _AGENT_NAME = "monitor_agent"
 _MAX_POSITION_DAYS = 30   # extended for chandelier trail to ride trends
-_TP1_FRACTION = 0.5       # fraction of shares sold at TP1
 _TRAIL_ATR_MULTIPLE = 3.0 # chandelier: trail = highest_close − N × ATR
 
 
@@ -79,8 +78,7 @@ async def _fetch_price(symbol: str) -> tuple[float | None, list[dict[str, Any]] 
 _EXIT_NOTES = {
     "stop_loss": "Stop-loss triggered — thesis failed. Price fell to stop level.",
     "target_hit": "Target hit — thesis correct. Price reached upside target.",
-    "tp1": "TP1 partial profit taken at +1.5R. Remainder rides chandelier trail.",
-    "trail": "Chandelier trailing stop hit — trend exit on remainder after TP1.",
+    "trail": "Chandelier trailing stop hit — trend exit, trail had ratcheted into profit.",
     "max_age": f"Force-closed after {_MAX_POSITION_DAYS} days — maximum hold period reached.",
 }
 
@@ -107,63 +105,6 @@ async def _log_thesis_break(
         })
     except Exception as exc:
         logger.warning("monitor thesis_break_log_failed symbol=%s error=%s", order["symbol"], exc)
-
-
-async def _partial_close_at_tp1(
-    orders_repo: PaperOrdersRepository,
-    portfolio_repo: VirtualPortfolioRepository,
-    *,
-    order: dict[str, Any],
-    exit_price: float,
-    shares_to_close: int,
-) -> None:
-    """Take half (TP1_FRACTION) off at +1.5R; mutate the order to ride remainder.
-
-    The closed slice is appended to the order's `partial_exits` array (audit
-    trail). `original_stop` is moved to breakeven on the remainder so the
-    remaining shares cannot go below entry — the worst case after TP1 is now
-    a flat trade on the remainder plus the TP1 partial gain.
-    """
-    entry_price = float(order["entry_price"])
-    total_shares = int(order["shares"])
-
-    cost_basis_closed = round(shares_to_close * entry_price, 2)
-    exit_value = round(shares_to_close * exit_price, 2)
-    pnl = round(exit_value - cost_basis_closed, 2)
-    return_pct = round((pnl / cost_basis_closed) * 100, 4) if cost_basis_closed else 0.0
-
-    remaining_shares = total_shares - shares_to_close
-    remaining_position_value = round(remaining_shares * entry_price, 2)
-
-    partial_exit = {
-        "shares_closed": shares_to_close,
-        "exit_price": round(exit_price, 2),
-        "pnl": pnl,
-        "return_pct": return_pct,
-        "reason": "tp1",
-        "exit_date": datetime.now(timezone.utc).date().isoformat(),
-        "createdAt": datetime.now(timezone.utc),
-    }
-
-    await orders_repo.partial_close(
-        order["_id"],
-        shares_closed=shares_to_close,
-        remaining_shares=remaining_shares,
-        remaining_position_value=remaining_position_value,
-        partial_exit=partial_exit,
-        new_original_stop=round(entry_price, 2),
-    )
-    # Release cash from the closed slice and book the gain. position_value
-    # passed is the cost basis of the closed slice so the portfolio repo's
-    # invested-counter decrements correctly.
-    await portfolio_repo.close_position(exit_value, cost_basis_closed, pnl > 0)
-    await portfolio_repo.record_close_pnl(pnl)
-
-    logger.info(
-        "monitor tp1_partial symbol=%s sold=%d/%d entry=%.2f exit=%.2f pnl=%.2f (%.2f%%)",
-        order["symbol"], shares_to_close, total_shares,
-        entry_price, exit_price, pnl, return_pct,
-    )
 
 
 async def _close_position(
@@ -272,28 +213,24 @@ async def run_monitor() -> dict[str, Any]:
             remaining_market_value += float(order.get("position_value", 0.0))
             continue
 
-        # Trailing-stop + partial-profit ladder state. Legacy orders (placed
-        # before this feature) will lack these fields — fall back gracefully:
-        #   tp1_price == 0  → no TP1, behave as old (stop / target / max_age).
-        #   tp1_taken absent → treated as False.
+        # Chandelier trailing-stop state. Legacy orders (placed before trailing
+        # was introduced) may lack these fields — fall back to the static stop.
         stop_loss = float(order.get("stop_loss", 0))
         target = float(order.get("target", float("inf")))
         atr_at_entry = float(order.get("atr_at_entry", 0) or 0)
         original_stop = float(order.get("original_stop", stop_loss))
-        tp1_price = float(order.get("tp1_price", 0) or 0)
-        tp1_taken = bool(order.get("tp1_taken", False))
-        highest_close = float(order.get("highest_close", float(order.get("entry_price", 0))))
+        entry_price = float(order.get("entry_price", 0))
+        highest_close = float(order.get("highest_close", entry_price))
         trailing_stop = float(order.get("trailing_stop", original_stop))
         run_id = order.get("run_id", "monitor")
 
         try:
-            # Update chandelier high-water mark + trailing stop (ratchet up only).
-            # Done daily on every cycle regardless of exit branch so the state is
-            # always fresh when TP1 fires or trail eventually triggers.
+            # Ratchet the chandelier (high-water + trail) up only. Trail floor
+            # is original_stop so we never loosen the initial 1.5×ATR stop.
             if atr_at_entry > 0:
                 new_highest = max(highest_close, current_price)
                 candidate_trail = new_highest - _TRAIL_ATR_MULTIPLE * atr_at_entry
-                new_trail = max(trailing_stop, candidate_trail)
+                new_trail = max(trailing_stop, candidate_trail, original_stop)
                 if new_highest != highest_close or new_trail != trailing_stop:
                     await orders_repo.update_trail(
                         order["_id"],
@@ -303,7 +240,7 @@ async def run_monitor() -> dict[str, Any]:
                     highest_close = new_highest
                     trailing_stop = new_trail
 
-            # Max-age check first — applies regardless of TP1 state.
+            # Max-age failsafe.
             order_date_str = order.get("date", "")
             if order_date_str:
                 try:
@@ -317,39 +254,19 @@ async def run_monitor() -> dict[str, Any]:
                 except ValueError:
                     pass
 
-            # Exit ladder. Order matters: pre-TP1 stop must be checked before
-            # TP1 to avoid promoting a stopped-out trade into a partial.
+            # Pure chandelier exit: ATR path uses trailing_stop for everything
+            # (subsumes stop and target). Legacy non-ATR path keeps the old
+            # fixed stop/target two-branch behaviour.
             exit_reason: str | None = None
-            if tp1_taken:
+            if atr_at_entry > 0:
                 if trailing_stop > 0 and current_price <= trailing_stop:
-                    exit_reason = "trail"
+                    # Classify: trail still at/below entry → losing exit (stop_loss),
+                    # else trail has ratcheted into profit → trend-end exit (trail).
+                    exit_reason = "stop_loss" if trailing_stop <= entry_price else "trail"
             else:
                 if original_stop > 0 and current_price <= original_stop:
                     exit_reason = "stop_loss"
-                elif tp1_price > 0 and current_price >= tp1_price:
-                    # TP1 partial close — halve the position, flip flags, ride remainder.
-                    shares = int(order.get("shares", 0))
-                    shares_to_close = max(1, int(shares * _TP1_FRACTION))
-                    if shares_to_close >= shares:
-                        # Position too small to split → treat as full close at TP1.
-                        await _close_position(orders_repo, portfolio_repo, signals_repo, order, current_price, "tp1", db=db)
-                        closed += 1
-                    else:
-                        await _partial_close_at_tp1(
-                            orders_repo, portfolio_repo,
-                            order=order,
-                            exit_price=current_price,
-                            shares_to_close=shares_to_close,
-                        )
-                        await logs_repo.log(
-                            run_id, _AGENT_NAME, "info",
-                            f"tp1 {symbol} sold={shares_to_close}/{shares} @ {current_price:.2f}",
-                        )
-                        # Remainder continues — accumulate at live price for MTM.
-                        remaining_market_value += current_price * (shares - shares_to_close)
-                    continue
-                elif tp1_price == 0 and current_price >= target:
-                    # Legacy path: orders without TP1 fall back to the fixed target.
+                elif current_price >= target:
                     exit_reason = "target_hit"
 
             if exit_reason:
