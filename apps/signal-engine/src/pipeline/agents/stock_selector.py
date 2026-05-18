@@ -29,9 +29,9 @@ logger = logging.getLogger(__name__)
 _RS_DAYS = 30
 _DOWNLOAD_PERIOD = f"{_RS_DAYS + 7}d"
 _MIN_VOLUME = 500_000       # avg daily shares traded
-_MAX_SECTORS = 4            # raised 3→4 to match expanded MAX_POSITIONS capacity
-_MAX_PER_SECTOR = 3         # raised 2→3 to supply enough candidates for 12 positions
-_MAX_POSITIONS = 12
+_MAX_SECTORS = 3            # only trade stocks from the top-3 bullish sectors by score
+_MAX_PER_SECTOR = 2
+_MAX_POSITIONS = 8
 _NIFTY = "^NSEI"
 _YFINANCE_TIMEOUT = 60      # seconds
 
