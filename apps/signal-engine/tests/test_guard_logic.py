@@ -22,7 +22,7 @@ from src.pipeline.state import TradingState
 
 _SYMBOLS = ["RELIANCE.NS", "TCS.NS"]
 
-_CLEAN_GUARD = AsyncMock(return_value=(set(), set(), {}))
+_CLEAN_GUARD = AsyncMock(return_value=(set(), set(), {}, {}, {}))
 
 
 def _state(
@@ -110,7 +110,7 @@ class TestNiftyKillSwitch:
 class TestPerStockKillSwitches:
     async def test_asm_stock_blocked_other_passes(self, agent: GuardAgent) -> None:
         state = _state()
-        guard_data = AsyncMock(return_value=({"RELIANCE"}, set(), {}))
+        guard_data = AsyncMock(return_value=({"RELIANCE"}, set(), {}, {}, {}))
         with patch("src.pipeline.agents.guard_agent._fetch_guard_data", guard_data):
             result = await agent._execute(state)
         blocked = [b["symbol"] for b in result.guard_result["blocked"]]
@@ -119,7 +119,7 @@ class TestPerStockKillSwitches:
 
     async def test_gsm_stock_blocked(self, agent: GuardAgent) -> None:
         state = _state()
-        guard_data = AsyncMock(return_value=(set(), {"TCS"}, {}))
+        guard_data = AsyncMock(return_value=(set(), {"TCS"}, {}, {}, {}))
         with patch("src.pipeline.agents.guard_agent._fetch_guard_data", guard_data):
             result = await agent._execute(state)
         blocked = [b["symbol"] for b in result.guard_result["blocked"]]
@@ -128,7 +128,7 @@ class TestPerStockKillSwitches:
 
     async def test_earnings_within_window_blocked(self, agent: GuardAgent) -> None:
         state = _state()
-        guard_data = AsyncMock(return_value=(set(), set(), {"RELIANCE": "2025-01-20"}))
+        guard_data = AsyncMock(return_value=(set(), set(), {"RELIANCE": "2025-01-20"}, {}, {}))
         with patch("src.pipeline.agents.guard_agent._fetch_guard_data", guard_data):
             result = await agent._execute(state)
         blocked = [b["symbol"] for b in result.guard_result["blocked"]]
