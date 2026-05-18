@@ -32,6 +32,8 @@ provider:
     cors:
       allowedOrigins:
         - ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
+        - https://portfolio-analyzer-web-alpha.vercel.app
+        - https://raptguru.in
       allowedHeaders:
         - Content-Type
         - Authorization
