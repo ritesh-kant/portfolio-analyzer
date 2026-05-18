@@ -14,8 +14,14 @@ Position value = portfolio_total_value × f½
   capped at position_size_pct% of portfolio (config: 12%)
   and capped at available cash.
 
-Stop-loss: entry × (1 - STOP_PCT)   default 5%
-Target:    entry × (1 + TARGET_PCT)  default 10%
+Stop-loss / Target (priority order):
+  1. ATR-based (preferred): stop = entry − 1.5 × ATR(14), target = entry + 3.0 × ATR(14)
+     Maintains 2:1 reward-to-risk; adapts to each stock's volatility regime.
+  2. Fixed fallback: stop = entry × (1 − STOP_PCT), target = entry × (1 + TARGET_PCT)
+     Used when atr14 is 0 or unavailable.
+
+Chop gate: when guard_agent sets market_data["chop_detected"] = True (20d realised vol >
+1.5× 60d vol), effective max_positions is halved to reduce exposure in choppy markets.
 
 Only signals meeting min_signal_confidence threshold are traded.
 """
@@ -166,6 +172,15 @@ class OrderAgent(BaseAgent):
 
         placed_orders: list[dict[str, Any]] = []
 
+        # Chop gate: halve max_positions when guard_agent detected high short-term volatility
+        effective_max_positions = settings.max_positions
+        if state.market_data.get("chop_detected"):
+            effective_max_positions = max(1, settings.max_positions // 2)
+            logger.info(
+                "order_agent chop_gate active — max_positions halved to %d",
+                effective_max_positions,
+            )
+
         # Fetch sector counts once — updated in-memory after each placement
         sector_counts = await orders_repo.get_open_sector_counts(STOCK_TO_SECTOR)
         max_sector_pos = settings.max_sector_positions
@@ -179,11 +194,11 @@ class OrderAgent(BaseAgent):
             total_value = float(portfolio.get("total_value", initial_capital))
             open_positions = int(portfolio.get("open_positions", 0))
 
-            # Respect max_positions cap
-            if open_positions >= settings.max_positions:
+            # Respect max_positions cap (effective_max_positions respects chop gate)
+            if open_positions >= effective_max_positions:
                 logger.info(
                     "order_agent max_positions=%d reached — skipping %s",
-                    settings.max_positions, symbol,
+                    effective_max_positions, symbol,
                 )
                 continue
 
@@ -211,8 +226,13 @@ class OrderAgent(BaseAgent):
                 )
                 continue
 
-            stop_loss = round(entry_price * (1 - STOP_PCT), 2)
-            target = round(entry_price * (1 + TARGET_PCT), 2)
+            atr = float(signal.get("atr14") or 0)
+            if atr > 0:
+                stop_loss = round(entry_price - 1.5 * atr, 2)
+                target = round(entry_price + 3.0 * atr, 2)
+            else:
+                stop_loss = round(entry_price * (1 - STOP_PCT), 2)
+                target = round(entry_price * (1 + TARGET_PCT), 2)
 
             order: dict[str, Any] = {
                 "run_id": state.run_id,

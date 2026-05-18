@@ -1,7 +1,9 @@
 """stock_selector — rank and select top stocks per bullish sector by relative strength.
 
 Algorithm:
-  1. Collect candidate symbols from all bullish sectors (score > 50)
+  1. Collect candidate symbols from top-3 bullish sectors by score (score > 50)
+     Limiting to top-3 focuses capital on highest-conviction sector trends
+     and prevents dilution across 8-10 marginally bullish sectors.
   2. Batch-download 35-day OHLCV from yfinance (sync, run in thread)
   3. Calculate 30-day relative strength vs Nifty 50 (^NSEI)
   4. Filter by liquidity: avg daily volume ≥ MIN_VOLUME
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 _RS_DAYS = 30
 _DOWNLOAD_PERIOD = f"{_RS_DAYS + 7}d"
 _MIN_VOLUME = 500_000       # avg daily shares traded
+_MAX_SECTORS = 3            # only trade stocks from the top-3 bullish sectors by score
 _MAX_PER_SECTOR = 2
 _MAX_POSITIONS = 8
 _NIFTY = "^NSEI"
@@ -86,10 +89,12 @@ class StockSelector(BaseAgent):
     name = "stock_selector"
 
     async def _execute(self, state: TradingState) -> TradingState:
-        bullish_sectors = [
-            s for s in state.sectors
-            if s.get("direction") == "bullish" and s.get("score", 0) > 50
-        ]
+        all_bullish = sorted(
+            [s for s in state.sectors if s.get("direction") == "bullish" and s.get("score", 0) > 50],
+            key=lambda x: x.get("score", 0),
+            reverse=True,
+        )
+        bullish_sectors = all_bullish[:_MAX_SECTORS]
         if not bullish_sectors:
             logger.info("stock_selector no bullish sectors — skipping")
             return state
