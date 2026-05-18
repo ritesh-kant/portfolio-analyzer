@@ -14,7 +14,7 @@ from src.pipeline.agents.order_agent import (
 from src.pipeline.agents.signal_agent import (
     _BASE_MAX,
     _TOTAL_MAX,
-    _has_positive_news,
+    _news_catalyst_score,
     _score_base,
 )
 
@@ -23,34 +23,34 @@ from src.pipeline.agents.signal_agent import (
 
 
 class TestHalfKelly:
-    def test_zero_confidence_returns_zero(self) -> None:
-        assert _half_kelly(0.0) == 0.0
+    def test_zero_confidence_uses_fallback_win_prob(self) -> None:
+        # confidence < 60 falls back to p=0.50 → half-Kelly = 0.125 (not zero)
+        assert abs(_half_kelly(0.0) - 0.125) < 1e-9
 
-    def test_full_confidence_capped_at_max(self) -> None:
+    def test_full_confidence_below_cap(self) -> None:
+        # confidence=100 → p=0.60, half-Kelly = (1.2-0.4)/4 = 0.2 < MAX_KELLY_CAP
         frac = _half_kelly(100.0)
-        assert frac == MAX_KELLY_CAP
+        assert 0.0 < frac < MAX_KELLY_CAP
 
     def test_fifty_percent_confidence(self) -> None:
         # p=0.5, q=0.5, r=2 → full_kelly=(0.5*2-0.5)/2=0.25 → half=0.125
         assert abs(_half_kelly(50.0) - 0.125) < 1e-9
 
-    def test_below_breakeven_returns_zero(self) -> None:
-        # With r=2.0, Kelly is negative for p < 1/3 ≈ 33.3%
-        assert _half_kelly(25.0) == 0.0
+    def test_all_bands_positive_kelly(self) -> None:
+        # Every calibrated band has p > 1/3 (breakeven for r=2), so Kelly is always > 0
+        for conf in (0.0, 60.0, 65.0, 70.0, 75.0, 80.0, 100.0):
+            assert _half_kelly(conf) > 0.0, f"Expected > 0 at confidence={conf}"
 
     def test_high_confidence_positive_fraction(self) -> None:
         frac = _half_kelly(80.0)
         assert 0.0 < frac <= MAX_KELLY_CAP
 
-    def test_fraction_increases_with_confidence(self) -> None:
-        # At confidence >= ~67%, half-Kelly hits MAX_KELLY_CAP — use values below cap
-        # p=40%: full=(0.8-0.6)/2=0.1 → half=0.05
-        # p=50%: full=(1-0.5)/2=0.25  → half=0.125
-        # p=60%: full=(1.2-0.4)/2=0.4 → half=0.2
-        f40 = _half_kelly(40.0)
-        f50 = _half_kelly(50.0)
-        f60 = _half_kelly(60.0)
-        assert f40 < f50 < f60
+    def test_fraction_increases_with_confidence_above_65(self) -> None:
+        # From 65 upward the win-prob table is monotonically increasing
+        f65 = _half_kelly(65.0)
+        f70 = _half_kelly(70.0)
+        f80 = _half_kelly(80.0)
+        assert f65 < f70 < f80
 
 
 # ─── _calc_position ───────────────────────────────────────────────────────────
@@ -131,110 +131,114 @@ def _td(**kwargs) -> dict:
 
 class TestScoreBase:
     def test_zero_when_no_signals_fired(self) -> None:
-        score, triggered = _score_base("RELIANCE.NS", _td(), _md(), [], [])
+        score, triggered, *_ = _score_base("RELIANCE.NS", _td(), _md(), [], [])
         assert score == 0
         assert triggered == []
 
     def test_rsi_below_40_adds_12(self) -> None:
-        score, triggered = _score_base("RELIANCE.NS", _td(rsi=39.9), _md(), [], [])
+        score, triggered, *_ = _score_base("RELIANCE.NS", _td(rsi=39.9), _md(), [], [])
         assert score == 12
         assert any("RSI" in t for t in triggered)
 
     def test_rsi_exactly_40_not_triggered(self) -> None:
         # condition is strict: rsi < 40
-        score, _ = _score_base("RELIANCE.NS", _td(rsi=40.0), _md(), [], [])
+        score, *_ = _score_base("RELIANCE.NS", _td(rsi=40.0), _md(), [], [])
         assert score == 0
 
     def test_macd_positive_adds_12(self) -> None:
-        score, triggered = _score_base("RELIANCE.NS", _td(macd_hist=0.001), _md(), [], [])
+        score, triggered, *_ = _score_base("RELIANCE.NS", _td(macd_hist=0.001), _md(), [], [])
         assert score == 12
         assert any("MACD" in t for t in triggered)
 
     def test_macd_zero_not_triggered(self) -> None:
-        score, _ = _score_base("RELIANCE.NS", _td(macd_hist=0.0), _md(), [], [])
+        score, *_ = _score_base("RELIANCE.NS", _td(macd_hist=0.0), _md(), [], [])
         assert score == 0
 
     def test_above_ema20_adds_10(self) -> None:
-        score, _ = _score_base("RELIANCE.NS", _td(above_ema20=True), _md(), [], [])
+        score, *_ = _score_base("RELIANCE.NS", _td(above_ema20=True), _md(), [], [])
         assert score == 10
 
     def test_above_ema50_adds_12(self) -> None:
-        score, _ = _score_base("RELIANCE.NS", _td(above_ema50=True), _md(), [], [])
+        score, *_ = _score_base("RELIANCE.NS", _td(above_ema50=True), _md(), [], [])
         assert score == 12
 
     def test_volume_above_1_5x_adds_10(self) -> None:
-        score, triggered = _score_base("RELIANCE.NS", _td(volume_ratio=1.51), _md(), [], [])
+        score, triggered, *_ = _score_base("RELIANCE.NS", _td(volume_ratio=1.51), _md(), [], [])
         assert score == 10
         assert any("Volume" in t for t in triggered)
 
     def test_volume_exactly_1_5x_not_triggered(self) -> None:
         # condition: volume_ratio > 1.5 (strict)
-        score, _ = _score_base("RELIANCE.NS", _td(volume_ratio=1.5), _md(), [], [])
+        score, *_ = _score_base("RELIANCE.NS", _td(volume_ratio=1.5), _md(), [], [])
         assert score == 0
 
     def test_market_nifty_up_and_fii_buy_adds_8(self) -> None:
-        score, triggered = _score_base("RELIANCE.NS", _td(), _md(nifty=0.5, fii=500.0), [], [])
+        score, triggered, *_ = _score_base("RELIANCE.NS", _td(), _md(nifty=0.5, fii=500.0), [], [])
         assert score == 8
         assert any("FII" in t for t in triggered)
 
     def test_market_nifty_up_fii_sell_adds_4(self) -> None:
-        score, _ = _score_base("RELIANCE.NS", _td(), _md(nifty=0.5, fii=-200.0), [], [])
+        score, *_ = _score_base("RELIANCE.NS", _td(), _md(nifty=0.5, fii=-200.0), [], [])
         assert score == 4
 
     def test_market_nifty_down_adds_nothing(self) -> None:
-        score, _ = _score_base("RELIANCE.NS", _td(), _md(nifty=-0.5, fii=500.0), [], [])
+        score, *_ = _score_base("RELIANCE.NS", _td(), _md(nifty=-0.5, fii=500.0), [], [])
         assert score == 0
 
     def test_all_base_signals_except_news_and_sector(self) -> None:
         # rsi(12) + macd(12) + ema20(10) + ema50(12) + vol(10) + market(8) = 64
         td = _td(rsi=35.0, macd_hist=0.05, above_ema20=True, above_ema50=True, volume_ratio=2.0)
-        score, _ = _score_base("RELIANCE.NS", td, _md(nifty=0.5, fii=500.0), [], [])
+        score, *_ = _score_base("RELIANCE.NS", td, _md(nifty=0.5, fii=500.0), [], [])
         assert score == 64
 
     def test_score_bounded_by_base_max(self) -> None:
         td = _td(rsi=35.0, macd_hist=0.05, above_ema20=True, above_ema50=True, volume_ratio=2.0)
         news = [{"sentiment": "positive", "affected_stocks": ["RELIANCE"], "affected_sectors": [], "headline": "x"}]
-        score, _ = _score_base("RELIANCE.NS", td, _md(nifty=0.5, fii=500.0), [], news)
+        score, *_ = _score_base("RELIANCE.NS", td, _md(nifty=0.5, fii=500.0), [], news)
         assert score <= _BASE_MAX  # 90 max without LLM bonus
 
     def test_total_confidence_bounded_by_total_max(self) -> None:
         assert _TOTAL_MAX == 100
 
 
-# ─── _has_positive_news ───────────────────────────────────────────────────────
+# ─── _news_catalyst_score ─────────────────────────────────────────────────────
 
 
 class TestHasPositiveNews:
     def _pos_news(self, stocks: list, sectors: list, headline: str = "test") -> list:
         return [{"sentiment": "positive", "affected_stocks": stocks, "affected_sectors": sectors, "headline": headline}]
 
+    def _has_news(self, symbol: str, news: list) -> bool:
+        pts, _, _ = _news_catalyst_score(symbol, news)
+        return pts > 0
+
     def test_direct_stock_mention_returns_true(self) -> None:
         news = self._pos_news(["RELIANCE"], [])
-        assert _has_positive_news("RELIANCE.NS", [], news) is True
+        assert self._has_news("RELIANCE.NS", news) is True
 
     def test_bo_suffix_stripped_correctly(self) -> None:
         news = self._pos_news(["RELIANCE"], [])
-        assert _has_positive_news("RELIANCE.BO", [], news) is True
+        assert self._has_news("RELIANCE.BO", news) is True
 
     def test_symbol_in_headline_returns_true(self) -> None:
         news = [{"sentiment": "positive", "affected_stocks": [], "affected_sectors": [], "headline": "INFY announces buyback"}]
-        assert _has_positive_news("INFY.NS", [], news) is True
+        assert self._has_news("INFY.NS", news) is True
 
     def test_negative_sentiment_ignored(self) -> None:
         news = [{"sentiment": "negative", "affected_stocks": ["RELIANCE"], "affected_sectors": [], "headline": "x"}]
-        assert _has_positive_news("RELIANCE.NS", [], news) is False
+        assert self._has_news("RELIANCE.NS", news) is False
 
     def test_neutral_sentiment_ignored(self) -> None:
         news = [{"sentiment": "neutral", "affected_stocks": ["RELIANCE"], "affected_sectors": [], "headline": "x"}]
-        assert _has_positive_news("RELIANCE.NS", [], news) is False
+        assert self._has_news("RELIANCE.NS", news) is False
 
     def test_unrelated_stock_returns_false(self) -> None:
-        news = self._pos_news(["TCS"], ["IT"])
-        assert _has_positive_news("RELIANCE.NS", [], news) is False
+        news = self._pos_news(["TCS"], [])
+        assert self._has_news("RELIANCE.NS", news) is False
 
     def test_empty_news_returns_false(self) -> None:
-        assert _has_positive_news("RELIANCE.NS", [], []) is False
+        assert self._has_news("RELIANCE.NS", []) is False
 
     def test_case_insensitive_matching(self) -> None:
         news = self._pos_news(["reliance"], [])
-        assert _has_positive_news("RELIANCE.NS", [], news) is True
+        assert self._has_news("RELIANCE.NS", news) is True
