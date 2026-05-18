@@ -21,6 +21,8 @@ import yfinance as yf
 from .base import BaseAgent
 from ..state import TradingState
 from ...scrapers.sector_stocks import SECTOR_STOCKS
+from ...db.client import get_db
+from ...db.repositories.paper_orders import PaperOrdersRepository
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,22 @@ class StockSelector(BaseAgent):
                 if sym not in seen:
                     all_symbols.append(sym)
                     seen.add(sym)
+
+        if not all_symbols:
+            return state
+
+        # Exclude symbols under post-stop-loss cooloff
+        try:
+            cooled_off = await PaperOrdersRepository(get_db()).get_cooled_off_symbols()
+        except Exception:
+            cooled_off = set()
+        if cooled_off:
+            excluded = set(all_symbols) & cooled_off
+            if excluded:
+                all_symbols = [s for s in all_symbols if s not in cooled_off]
+                for name in sector_candidates:
+                    sector_candidates[name] = [s for s in sector_candidates[name] if s not in cooled_off]
+                logger.info("stock_selector cooloff_excluded=%s", excluded)
 
         if not all_symbols:
             return state

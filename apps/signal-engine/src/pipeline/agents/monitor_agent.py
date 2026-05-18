@@ -20,7 +20,7 @@ from typing import Any
 import yfinance as yf
 
 from ...db.client import get_db
-from ...db.repositories.paper_orders import PaperOrdersRepository
+from ...db.repositories.paper_orders import PaperOrdersRepository, cooloff_until_date
 from ...db.repositories.trading_signals import TradingSignalsRepository
 from ...db.repositories.virtual_portfolio import VirtualPortfolioRepository
 from ...db.repositories.agent_logs import AgentLogsRepository
@@ -156,6 +156,13 @@ async def _close_position(
     # Log thesis breaks (stop-loss events) for future signal calibration
     if reason == "stop_loss" and db is not None:
         await _log_thesis_break(db, order, exit_price, return_pct)
+        # Set cooloff: block re-entry on this symbol for 15 business days
+        cooloff = cooloff_until_date(business_days=15)
+        await orders_repo.set_cooloff(order["_id"], cooloff)
+        logger.info(
+            "monitor cooloff_set symbol=%s cooloff_until=%s",
+            order["symbol"], cooloff,
+        )
 
     # Return cash and update portfolio stats
     await portfolio_repo.close_position(exit_value, position_value, was_correct)
