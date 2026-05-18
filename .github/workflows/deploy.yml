@@ -556,30 +556,5 @@ jobs:
           ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
         run: pnpm exec serverless deploy --stage prod --verbose
 
-  # ──────────────────────────────────────────────
-  # 8. Deploy web (Next.js) to Vercel — only when
-  #    its files (or shared packages) changed.
-  # ──────────────────────────────────────────────
-  deploy-web:
-    name: Deploy web (Vercel)
-    needs: [changes, build]
-    if: >
-      always() &&
-      needs.build.result == 'success' &&
-      (inputs.force_deploy == true || needs.changes.outputs.web == 'true')
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Vercel CLI
-        run: npm install -g vercel@latest
-
-      - name: Pull Vercel environment
-        working-directory: apps/web
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-
-      - name: Deploy to Vercel
-        working-directory: apps/web
-        run: vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }}
+  # web (Next.js) is deployed via the Vercel dashboard Git integration.
+  # No CI job needed — Vercel detects pushes to main automatically.
