@@ -686,7 +686,7 @@ class TestChandelierTrail:
     """Pure chandelier exit — no TP1, no fixed target."""
 
     def test_trail_constant(self):
-        assert TRAIL_ATR_MULTIPLE == 3.0
+        assert TRAIL_ATR_MULTIPLE == 2.5
 
     # ── pre-ratchet (trail still at original_stop) ────────────────────────────
     def test_initial_stop_is_original_1_5_atr_stop(self):
@@ -721,7 +721,7 @@ class TestChandelierTrail:
         assert pos.highest_close == 1050.0
 
     def test_update_trail_floors_at_original_stop(self):
-        """Until highest_close moves up enough that (highest − 3×ATR) > original_stop,
+        """Until highest_close moves up enough that (highest − 2.5×ATR) > original_stop,
         the trail stays at the initial 1.5×ATR stop."""
         pos = _atr_position(entry_price=1000.0, atr=20.0)
         update_trail(pos, pos.entry_price)
@@ -730,11 +730,11 @@ class TestChandelierTrail:
     def test_update_trail_moves_trailing_stop_up_only(self):
         pos = _atr_position(entry_price=1000.0, atr=20.0)
         update_trail(pos, 1100.0)
-        assert pos.trailing_stop == 1040.0   # 1100 − 60
+        assert pos.trailing_stop == 1050.0   # 1100 − 50
         update_trail(pos, 1050.0)
-        assert pos.trailing_stop == 1040.0
+        assert pos.trailing_stop == 1050.0
         update_trail(pos, 1200.0)
-        assert pos.trailing_stop == 1140.0   # 1200 − 60
+        assert pos.trailing_stop == 1150.0   # 1200 − 50
 
     def test_update_trail_noop_when_no_atr(self):
         pos = _atr_position()
@@ -750,9 +750,9 @@ class TestChandelierTrail:
         trend-end exit (TRAIL), not a STOP — no cooloff."""
         pos = _atr_position(entry_price=1000.0, atr=20.0)
         update_trail(pos, 1100.0)
-        assert pos.trailing_stop == 1040.0
-        assert should_close(pos, 1040.0) == "TRAIL"
-        assert should_close(pos, 1039.0) == "TRAIL"
+        assert pos.trailing_stop == 1050.0   # 1100 − 50
+        assert should_close(pos, 1050.0) == "TRAIL"
+        assert should_close(pos, 1049.0) == "TRAIL"
 
     def test_trail_at_entry_classified_as_STOP(self):
         """A breach when the trail is exactly at entry is breakeven —
@@ -812,10 +812,10 @@ class TestChandelierTrail:
 
         for price in (1050, 1100, 1150, 1200, 1250, 1300):
             update_trail(pos, price)
-        assert pos.trailing_stop == 1240.0   # 1300 − 60
+        assert pos.trailing_stop == 1250.0   # 1300 − 50
 
-        assert should_close(pos, 1240.0) == "TRAIL"
-        close_position(p, pos, "2024-02-01", 1240.0, "TRAIL")
+        assert should_close(pos, 1250.0) == "TRAIL"
+        close_position(p, pos, "2024-02-01", 1250.0, "TRAIL")
         assert len(p.closed_trades) == 1
         assert p.closed_trades[0].pnl > 0
         assert p.closed_trades[0].shares == 100   # single full-position exit

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 _AGENT_NAME = "monitor_agent"
 _MAX_POSITION_DAYS = 30   # extended for chandelier trail to ride trends
-_TRAIL_ATR_MULTIPLE = 3.0 # chandelier: trail = highest_close − N × ATR
+_TRAIL_ATR_MULTIPLE = 2.5 # chandelier: trail = highest_close − N × ATR
 
 
 _PRICE_FETCH_TIMEOUT_S = 10.0

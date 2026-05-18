@@ -53,7 +53,7 @@ MAX_HOLD_DAYS = 30      # extended to give chandelier trail room to ride trends
 # The trailing_stop starts at the initial 1.5×ATR stop and ratchets up daily as
 # `max(prev_trail, highest_close − TRAIL_ATR_MULTIPLE × ATR)`. There is no fixed
 # upside target and no partial profit-taking — winners run until the trail fires.
-TRAIL_ATR_MULTIPLE = 3.0
+TRAIL_ATR_MULTIPLE = 2.5
 
 # Config defaults — must mirror config.py
 MIN_SIGNAL_CONFIDENCE = 60.0
