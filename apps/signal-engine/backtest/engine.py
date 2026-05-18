@@ -235,8 +235,12 @@ def _simulate_day(
     if nifty_above200 is not None and not nifty_above200:
         logger.debug("engine regime_filter Nifty below EMA200 date=%s", date_str)
         global_guard_fired = True
-    if nifty_5d <= 0:
-        logger.debug("engine regime_filter nifty_5d=%.2f%% ≤ 0 date=%s", nifty_5d, date_str)
+    # Block when Nifty is in a sustained 5-day decline (> -2%).
+    # Previously ≤ 0 was too sensitive — it fired/cleared daily on noise,
+    # letting trades through on brief bounces during real corrections.
+    # -2% targets genuine selling pressure while allowing normal pullbacks.
+    if nifty_5d < -2.0:
+        logger.debug("engine regime_filter nifty_5d=%.2f%% < -2%% date=%s", nifty_5d, date_str)
         global_guard_fired = True
 
     # W2.1 Chop gate: high recent vol vs baseline → halve max open positions
@@ -312,7 +316,7 @@ def _simulate_day(
                 key=lambda x: x.get("score", 0),
                 reverse=True,
             )
-            day_sectors = bullish_sorted[:3]
+            day_sectors = bullish_sorted[:4]   # raised 3→4 to match expanded MAX_POSITIONS
 
             # W2.3: adaptive confidence threshold.
             # Low-vol markets (VIX < 14) → baseline threshold.
