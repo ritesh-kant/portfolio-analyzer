@@ -262,16 +262,24 @@ def load_market_data(
     # Daily % change
     df["nifty_change_pct"] = df["nifty_close"].pct_change() * 100
 
-    # EMA50 on Nifty (same pandas-ta approach as technical_agent)
+    # EMA50 + EMA200 on Nifty
     import pandas_ta as ta  # noqa: PLC0415
     nifty_ta = nifty.copy()
     nifty_ta.ta.ema(length=50, append=True)
+    nifty_ta.ta.ema(length=200, append=True)
     df["nifty_ema50"] = nifty_ta.get("EMA_50")
+    df["nifty_ema200"] = nifty_ta.get("EMA_200")
     df["nifty_above_ema50"] = df["nifty_close"] > df["nifty_ema50"]
+    df["nifty_above_ema200"] = df["nifty_close"] > df["nifty_ema200"]
 
     # Rolling returns
     df["nifty_5d_return"] = df["nifty_close"].pct_change(periods=5) * 100
     df["nifty_30d_return"] = df["nifty_close"].pct_change(periods=30) * 100
+
+    # Realised volatility (annualised) for chop-regime detection
+    _daily_ret = df["nifty_close"].pct_change()
+    df["nifty_20d_vol"] = _daily_ret.rolling(20).std() * (252 ** 0.5) * 100   # %
+    df["nifty_60d_vol"] = _daily_ret.rolling(60).std() * (252 ** 0.5) * 100   # %
 
     # VIX
     if not vix.empty:

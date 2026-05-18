@@ -95,11 +95,11 @@ def print_aggregate_summary(agg: AggregateMetrics, config_desc: str = "") -> Non
     t.align = "r"
     t.align["Metric"] = "l"
 
-    t.add_row(["Overall CAGR",         _pct(agg.overall_cagr),       _pct(agg.vs_nifty_cagr)])
-    t.add_row(["Alpha vs Nifty",        _pct(agg.overall_alpha),      "—"])
-    t.add_row(["Sharpe Ratio",          _f(agg.overall_sharpe),       "—"])
-    t.add_row(["Sortino Ratio",         _f(agg.overall_sortino),      "—"])
-    t.add_row(["Max Drawdown",          f"{agg.overall_max_drawdown:.1f}%", "—"])
+    t.add_row(["Overall CAGR",         _pct(agg.overall_cagr),             _pct(agg.vs_nifty_cagr)])
+    t.add_row(["Alpha vs Nifty",        _pct(agg.overall_alpha),            "—"])
+    t.add_row(["Sharpe Ratio",          _f(agg.overall_sharpe),             _f(agg.baseline_nifty_sharpe)])
+    t.add_row(["Sortino Ratio",         _f(agg.overall_sortino),            _f(agg.baseline_nifty_sortino)])
+    t.add_row(["Max Drawdown",          f"{agg.overall_max_drawdown:.1f}%", f"{agg.baseline_nifty_max_dd:.1f}%"])
     t.add_row(["Win Rate",              f"{agg.overall_win_rate * 100:.1f}%", "—"])
     t.add_row(["Profit Factor",         _f(agg.overall_profit_factor), "—"])
     t.add_row(["Total Trades",          str(agg.total_trades),        "—"])
@@ -148,34 +148,39 @@ def save_fold_csv(folds: list[FoldMetrics], run_id: str) -> Path:
         "win_rate_pct", "profit_factor", "total_trades", "winning_trades", "losing_trades",
         "avg_hold_days", "avg_win_pct", "avg_loss_pct", "alpha_pct",
         "vs_nifty_cagr_pct", "annualised_turnover", "passes_gate",
+        # W1.3: Nifty baseline risk metrics for apples-to-apples fold comparison
+        "baseline_nifty_sharpe", "baseline_nifty_sortino", "baseline_nifty_max_dd_pct",
     ]
     with open(out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=headers)
         w.writeheader()
         for fold in folds:
             w.writerow({
-                "fold_id":               fold.fold_id,
-                "start_date":            fold.start_date,
-                "end_date":              fold.end_date,
-                "initial_value":         round(fold.initial_value, 2),
-                "final_value":           round(fold.final_value, 2),
-                "cagr_pct":              round(fold.cagr * 100, 4),
-                "sharpe":                round(fold.sharpe_ratio, 4),
-                "sortino":               round(fold.sortino_ratio, 4),
-                "max_drawdown_pct":      round(fold.max_drawdown_pct, 4),
-                "max_dd_duration_days":  fold.max_drawdown_duration,
-                "win_rate_pct":          round(fold.win_rate * 100, 2),
-                "profit_factor":         round(fold.profit_factor, 4),
-                "total_trades":          fold.total_trades,
-                "winning_trades":        fold.winning_trades,
-                "losing_trades":         fold.losing_trades,
-                "avg_hold_days":         round(fold.avg_hold_days, 2),
-                "avg_win_pct":           round(fold.avg_win_pct, 4),
-                "avg_loss_pct":          round(fold.avg_loss_pct, 4),
-                "alpha_pct":             round(fold.alpha_vs_nifty * 100, 4),
-                "vs_nifty_cagr_pct":     round(fold.vs_nifty_cagr * 100, 4),
-                "annualised_turnover":   round(fold.annualised_turnover, 4),
-                "passes_gate":           fold.passes_gate,
+                "fold_id":                   fold.fold_id,
+                "start_date":                fold.start_date,
+                "end_date":                  fold.end_date,
+                "initial_value":             round(fold.initial_value, 2),
+                "final_value":               round(fold.final_value, 2),
+                "cagr_pct":                  round(fold.cagr * 100, 4),
+                "sharpe":                    round(fold.sharpe_ratio, 4),
+                "sortino":                   round(fold.sortino_ratio, 4),
+                "max_drawdown_pct":          round(fold.max_drawdown_pct, 4),
+                "max_dd_duration_days":      fold.max_drawdown_duration,
+                "win_rate_pct":              round(fold.win_rate * 100, 2),
+                "profit_factor":             round(fold.profit_factor, 4),
+                "total_trades":              fold.total_trades,
+                "winning_trades":            fold.winning_trades,
+                "losing_trades":             fold.losing_trades,
+                "avg_hold_days":             round(fold.avg_hold_days, 2),
+                "avg_win_pct":               round(fold.avg_win_pct, 4),
+                "avg_loss_pct":              round(fold.avg_loss_pct, 4),
+                "alpha_pct":                 round(fold.alpha_vs_nifty * 100, 4),
+                "vs_nifty_cagr_pct":         round(fold.vs_nifty_cagr * 100, 4),
+                "annualised_turnover":        round(fold.annualised_turnover, 4),
+                "passes_gate":               fold.passes_gate,
+                "baseline_nifty_sharpe":     round(fold.baseline_nifty_sharpe, 4),
+                "baseline_nifty_sortino":    round(fold.baseline_nifty_sortino, 4),
+                "baseline_nifty_max_dd_pct": round(fold.baseline_nifty_max_dd, 4),
             })
     return out
 
@@ -204,6 +209,10 @@ def save_summary_csv(agg: AggregateMetrics, run_id: str) -> Path:
         ("mean_profit_factor",      round(agg.mean_profit_factor, 4)),
         ("mean_alpha_pct",          round(agg.mean_alpha * 100, 4)),
         ("passes_gate",             agg.passes_gate),
+        # W1.3: Nifty buy-and-hold baseline risk metrics
+        ("baseline_nifty_sharpe",   round(agg.baseline_nifty_sharpe, 4)),
+        ("baseline_nifty_sortino",  round(agg.baseline_nifty_sortino, 4)),
+        ("baseline_nifty_max_dd_pct", round(agg.baseline_nifty_max_dd, 4)),
     ]
     with open(out, "w", newline="") as f:
         w = csv.writer(f)
@@ -225,13 +234,25 @@ def save_equity_csv(folds: list[FoldMetrics], run_id: str) -> Path:
 
 
 def save_trades_csv(folds: list[FoldMetrics], run_id: str) -> Path:
-    """Write all closed trades to results/<run_id>/trades.csv."""
+    """Write all closed trades to results/<run_id>/trades.csv.
+
+    Includes signal-attribution columns (W1.2) for post-run diagnostics:
+    which signals fired, regime at entry, MFE/MAE excursions.
+    """
     out = _run_dir(run_id) / "trades.csv"
     headers = [
         "fold_id", "symbol", "sector", "entry_date", "exit_date",
         "entry_price", "exit_price", "shares", "position_value",
         "confidence", "kelly_fraction", "exit_reason",
         "pnl", "return_pct", "was_correct",
+        # W1.2: signal attribution
+        "signal_score_raw",
+        "vix_at_entry", "nifty_above_ema50_at_entry", "fii_net_cr_at_entry",
+        "sector_score_at_entry", "had_tier_a_news",
+        # W1.2: excursion diagnostics
+        "mfe_pct", "mae_pct",
+        # W1.2: human-readable signal list (pipe-separated)
+        "triggered_signals",
     ]
     with open(out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=headers)
@@ -239,21 +260,30 @@ def save_trades_csv(folds: list[FoldMetrics], run_id: str) -> Path:
         for fold in sorted(folds, key=lambda x: x.start_date):
             for t in fold.trades:
                 w.writerow({
-                    "fold_id":        fold.fold_id,
-                    "symbol":         t.symbol,
-                    "sector":         t.sector,
-                    "entry_date":     t.entry_date,
-                    "exit_date":      t.exit_date,
-                    "entry_price":    t.entry_price,
-                    "exit_price":     t.exit_price,
-                    "shares":         t.shares,
-                    "position_value": t.position_value,
-                    "confidence":     t.confidence,
-                    "kelly_fraction": t.kelly_fraction,
-                    "exit_reason":    t.exit_reason,
-                    "pnl":            t.pnl,
-                    "return_pct":     t.return_pct,
-                    "was_correct":    t.was_correct,
+                    "fold_id":                    fold.fold_id,
+                    "symbol":                     t.symbol,
+                    "sector":                     t.sector,
+                    "entry_date":                 t.entry_date,
+                    "exit_date":                  t.exit_date,
+                    "entry_price":                t.entry_price,
+                    "exit_price":                 t.exit_price,
+                    "shares":                     t.shares,
+                    "position_value":             t.position_value,
+                    "confidence":                 t.confidence,
+                    "kelly_fraction":             t.kelly_fraction,
+                    "exit_reason":                t.exit_reason,
+                    "pnl":                        t.pnl,
+                    "return_pct":                 t.return_pct,
+                    "was_correct":                t.was_correct,
+                    "signal_score_raw":           t.signal_score_raw,
+                    "vix_at_entry":               t.vix_at_entry,
+                    "nifty_above_ema50_at_entry": t.nifty_above_ema50_at_entry,
+                    "fii_net_cr_at_entry":        t.fii_net_cr_at_entry,
+                    "sector_score_at_entry":      t.sector_score_at_entry,
+                    "had_tier_a_news":            t.had_tier_a_news,
+                    "mfe_pct":                    t.mfe_pct,
+                    "mae_pct":                    t.mae_pct,
+                    "triggered_signals":          " | ".join(t.triggered_signals),
                 })
     return out
 

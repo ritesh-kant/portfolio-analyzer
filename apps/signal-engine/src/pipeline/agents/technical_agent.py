@@ -80,6 +80,7 @@ def _compute_indicators(symbol: str) -> dict[str, Any]:
     df.ta.ema(length=20, append=True)
     df.ta.ema(length=50, append=True)
     df.ta.bbands(length=20, std=2, append=True)
+    df.ta.atr(length=14, append=True)   # ATRr_14 — absolute rupee ATR for adaptive stop sizing
 
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -138,6 +139,9 @@ def _compute_indicators(symbol: str) -> dict[str, Any]:
         "low_75d": round(low_75d, 2),
         "pct_from_high": round(pct_from_high, 2),
         "pct_from_low": round(pct_from_low, 2),
+        # ATR(14) — absolute rupee value; used by order_agent for adaptive stop/target sizing.
+        # pandas_ta names column ATRr_14 (older) or ATR_14 (newer) — try both.
+        "atr14": round(_safe_float(last.get("ATRr_14") or last.get("ATR_14"), 0.0), 2),
     }
 
 

@@ -1,20 +1,27 @@
 """guard_agent — deterministic kill-switch checks. No LLM involved.
 
 Global kill-switches (block ALL stocks):
-  1. India VIX > 22
+  1. India VIX > 20
   2. Nifty 50 down > 1.5% today
+  3. Nifty below its 200-day EMA (long-term bear regime)
+
+Global soft gates (set flags for downstream agents):
+  4. VIX caution zone 16–20 → market_data["vix_caution"] = True
+  5. 20d realised vol > 1.5× 60d vol → market_data["chop_detected"] = True
+     (order_agent halves max_positions when this flag is set)
 
 Per-stock kill-switches (block individual symbol):
-  3. Stock on NSE ASM (Additional Surveillance Measure) list
-  4. Stock on NSE GSM (Graded Surveillance Measure) list
-  5. Earnings / results announcement within 5 calendar days
-  6. Stock already moved > 5% today (news priced in)
+  6. Stock on NSE ASM (Additional Surveillance Measure) list
+  7. Stock on NSE GSM (Graded Surveillance Measure) list
+  8. Earnings / results announcement within 5 calendar days
+  9. Stock already moved > 5% today (news priced in)
 
 Per-stock near-misses (passed but confidence penalised downstream):
-  7. Earnings 6-10 days away (−5 pts confidence)
+  10. Earnings 6-10 days away (−10 pts confidence)
+  11. Earnings 11-15 days away (−5 pts confidence)
 
 Unimplemented (Phase 6):
-  8. Promoter pledging > 30% (requires quarterly SEBI filings)
+  12. Promoter pledging > 30% (requires quarterly SEBI filings)
 
 Populates state.guard_result = {
   passed: [...],
@@ -33,12 +40,12 @@ from ...scrapers.nse_guard import fetch_asm_gsm_symbols, fetch_earnings_within_d
 
 logger = logging.getLogger(__name__)
 
-_VIX_THRESHOLD = 22.0
-_VIX_CAUTION = 18.0
+_VIX_THRESHOLD = 20.0           # hard kill: India VIX above this blocks all entries
+_VIX_CAUTION = 16.0             # soft caution: sets vix_caution flag for downstream agents
 _NIFTY_DROP_THRESHOLD = -1.5
 _PRICE_MOVE_THRESHOLD = 5.0
 _EARNINGS_WINDOW_DAYS = 5
-_EARNINGS_NEAR_MISS_DAYS = 10   # 6-10 day window triggers a confidence penalty
+_EARNINGS_NEAR_MISS_DAYS = 15   # 6-15 day window: graduated confidence penalty
 
 
 def _nse_sym(yf_sym: str) -> str:
@@ -47,15 +54,16 @@ def _nse_sym(yf_sym: str) -> str:
 
 async def _fetch_guard_data(
     symbols: list[str],
-) -> tuple[set[str], set[str], dict[str, str], dict[str, str]]:
-    """Fetch ASM, GSM, 5-day earnings, and 10-day earnings concurrently."""
+) -> tuple[set[str], set[str], dict[str, str], dict[str, str], dict[str, str]]:
+    """Fetch ASM, GSM, 5-day earnings, 10-day earnings, and 15-day earnings concurrently."""
     asm_gsm_task = fetch_asm_gsm_symbols()
     earnings_5d_task = fetch_earnings_within_days(symbols, days=_EARNINGS_WINDOW_DAYS)
-    earnings_10d_task = fetch_earnings_within_days(symbols, days=_EARNINGS_NEAR_MISS_DAYS)
-    (asm, gsm), earnings_5d, earnings_10d = await asyncio.gather(
-        asm_gsm_task, earnings_5d_task, earnings_10d_task
+    earnings_10d_task = fetch_earnings_within_days(symbols, days=10)
+    earnings_15d_task = fetch_earnings_within_days(symbols, days=_EARNINGS_NEAR_MISS_DAYS)
+    (asm, gsm), earnings_5d, earnings_10d, earnings_15d = await asyncio.gather(
+        asm_gsm_task, earnings_5d_task, earnings_10d_task, earnings_15d_task
     )
-    return asm, gsm, earnings_5d, earnings_10d
+    return asm, gsm, earnings_5d, earnings_10d, earnings_15d
 
 
 class GuardAgent(BaseAgent):
@@ -70,6 +78,7 @@ class GuardAgent(BaseAgent):
 
         md = state.market_data
         blocked: list[dict[str, Any]] = []
+        updated_market_data = dict(md)
 
         # ── Global kill-switches ───────────────────────────────────────────
         vix = md.get("vix")
@@ -83,9 +92,7 @@ class GuardAgent(BaseAgent):
 
         if vix is not None and _VIX_CAUTION < vix <= _VIX_THRESHOLD:
             logger.info("guard_agent vix_caution vix=%.1f (%.1f–%.1f warning zone)", vix, _VIX_CAUTION, _VIX_THRESHOLD)
-            state = state.model_copy(
-                update={"market_data": {**state.market_data, "vix_caution": True}}
-            )
+            updated_market_data["vix_caution"] = True
 
         nifty_chg = md.get("nifty_change_pct")
         if nifty_chg is not None and nifty_chg < _NIFTY_DROP_THRESHOLD:
@@ -96,8 +103,34 @@ class GuardAgent(BaseAgent):
                 update={"guard_result": {"passed": [], "blocked": blocked, "near_misses": {}}}
             )
 
+        # EMA200 regime kill-switch: don't enter new longs in a long-term bear market
+        nifty_above_ema200 = md.get("nifty_above_ema200")
+        if nifty_above_ema200 is False:
+            reason = "Nifty below EMA200 — long-term bear regime, no new entries"
+            logger.warning("guard_agent ema200_kill_switch nifty_above_ema200=False")
+            blocked = [{"symbol": s, "reason": reason} for s in stocks]
+            return state.model_copy(
+                update={
+                    "market_data": updated_market_data,
+                    "guard_result": {"passed": [], "blocked": blocked, "near_misses": {}},
+                }
+            )
+
+        # Chop gate: if short-term vol > 1.5× long-term vol, flag for order_agent to halve positions
+        vol_20d = md.get("nifty_20d_vol")
+        vol_60d = md.get("nifty_60d_vol")
+        if vol_20d is not None and vol_60d is not None and vol_60d > 0:
+            if vol_20d > 1.5 * vol_60d:
+                logger.info(
+                    "guard_agent chop_detected 20d_vol=%.1f%% > 1.5× 60d_vol=%.1f%%",
+                    vol_20d, vol_60d,
+                )
+                updated_market_data["chop_detected"] = True
+
+        state = state.model_copy(update={"market_data": updated_market_data})
+
         # ── Per-stock kill-switches ────────────────────────────────────────
-        asm, gsm, earnings_5d, earnings_10d = await _fetch_guard_data(stocks)
+        asm, gsm, earnings_5d, earnings_10d, earnings_15d = await _fetch_guard_data(stocks)
 
         # Warn if earnings calendar fetch failed — guard is operating blind
         if "_FETCH_FAILED" in earnings_5d:
@@ -134,12 +167,20 @@ class GuardAgent(BaseAgent):
                 logger.info("guard_agent blocked symbol=%s reason=%s", sym, block_reason)
             else:
                 passed.append(sym)
-                # Near-miss: earnings in 6-10 days — passed guard but reduce confidence
+                # Graduated earnings near-miss penalty
+                # 6-10 days away → −10 pts (pre-earnings uncertainty is high)
+                # 11-15 days away → −5 pts (moderate pre-earnings drift risk)
                 stock_near_misses: list[dict[str, Any]] = []
                 if nse_sym in earnings_10d and nse_sym not in earnings_5d:
                     stock_near_misses.append({
                         "type": "earnings_near",
                         "detail": f"Earnings on {earnings_10d[nse_sym]} (6-10d away)",
+                        "confidence_penalty": 10,
+                    })
+                elif nse_sym in earnings_15d and nse_sym not in earnings_10d:
+                    stock_near_misses.append({
+                        "type": "earnings_near",
+                        "detail": f"Earnings on {earnings_15d[nse_sym]} (11-15d away)",
                         "confidence_penalty": 5,
                     })
                 if stock_near_misses:

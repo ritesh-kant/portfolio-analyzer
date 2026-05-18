@@ -37,13 +37,14 @@ def _strip_commas(val: Any) -> float:
 def fetch_nifty_vix_sync() -> dict[str, Any]:
     """Fetch Nifty 50 and India VIX via yfinance. Returns {} on failure.
 
-    Downloads 55 days so we can compute: today's change, 5-day return,
-    30-day return, and whether Nifty is above its 50-day EMA (regime context).
+    Downloads 250 days so we can compute: today's change, 5-day return,
+    30-day return, EMA50, EMA200 (regime), and 20d/60d realised volatility
+    for the chop gate.
     """
     try:
         data = yf.download(
             ["^NSEI", "^INDIAVIX"],
-            period="55d",
+            period="250d",
             auto_adjust=True,
             progress=False,
             threads=False,
@@ -69,12 +70,29 @@ def fetch_nifty_vix_sync() -> dict[str, Any]:
         nifty_30d_start = float(nifty.iloc[-30]) if len(nifty) >= 30 else float(nifty.iloc[0])
         nifty_30d_return = (nifty_close - nifty_30d_start) / nifty_30d_start * 100
 
-        # 50-day EMA to classify bull/bear regime
+        # 50-day EMA — short-term trend
         nifty_ema50: float | None = None
         nifty_above_ema50: bool | None = None
         if len(nifty) >= 50:
             nifty_ema50 = float(nifty.ewm(span=50, adjust=False).mean().iloc[-1])
             nifty_above_ema50 = nifty_close > nifty_ema50
+
+        # 200-day EMA — long-term regime (bull vs bear market)
+        nifty_ema200: float | None = None
+        nifty_above_ema200: bool | None = None
+        if len(nifty) >= 200:
+            nifty_ema200 = float(nifty.ewm(span=200, adjust=False).mean().iloc[-1])
+            nifty_above_ema200 = nifty_close > nifty_ema200
+
+        # Realised volatility for chop gate: 20d and 60d annualised vol
+        nifty_20d_vol: float | None = None
+        nifty_60d_vol: float | None = None
+        rets = nifty.pct_change().dropna()
+        if len(rets) >= 60:
+            nifty_20d_vol = round(float(rets.tail(20).std() * (252 ** 0.5) * 100), 2)
+            nifty_60d_vol = round(float(rets.tail(60).std() * (252 ** 0.5) * 100), 2)
+        elif len(rets) >= 20:
+            nifty_20d_vol = round(float(rets.tail(20).std() * (252 ** 0.5) * 100), 2)
 
         return {
             "nifty_close": round(nifty_close, 2),
@@ -84,6 +102,10 @@ def fetch_nifty_vix_sync() -> dict[str, Any]:
             "nifty_30d_return": round(nifty_30d_return, 3),
             "nifty_ema50": round(nifty_ema50, 2) if nifty_ema50 is not None else None,
             "nifty_above_ema50": nifty_above_ema50,
+            "nifty_ema200": round(nifty_ema200, 2) if nifty_ema200 is not None else None,
+            "nifty_above_ema200": nifty_above_ema200,
+            "nifty_20d_vol": nifty_20d_vol,
+            "nifty_60d_vol": nifty_60d_vol,
             "vix": round(float(vix.iloc[-1]), 2) if not vix.empty else None,
         }
     except Exception as exc:

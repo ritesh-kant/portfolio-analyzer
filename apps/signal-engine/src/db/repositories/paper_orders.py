@@ -1,6 +1,6 @@
 """Repository for trading_paper_orders collection."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -65,3 +65,33 @@ class PaperOrdersRepository(BaseRepository):
         if exit_reason:
             fields["exit_reason"] = exit_reason
         await self.update_one({"_id": order_id}, {"$set": fields})
+
+    async def set_cooloff(self, order_id: Any, cooloff_until: str) -> None:
+        """Set cooloff_until ISO date on a closed STOP order.
+
+        stock_selector reads this to skip re-entry on recently stopped-out symbols.
+        """
+        await self.update_one(
+            {"_id": order_id},
+            {"$set": {"cooloff_until": cooloff_until}},
+        )
+
+    async def get_cooled_off_symbols(self) -> set[str]:
+        """Return symbols whose cooloff_until date is today or in the future."""
+        today = date.today().isoformat()
+        cursor = self._col.find(
+            {"cooloff_until": {"$gte": today}},
+            projection={"symbol": 1},
+        )
+        return {doc["symbol"] async for doc in cursor}
+
+
+def cooloff_until_date(business_days: int = 15) -> str:
+    """Return the ISO date that is `business_days` trading days from today."""
+    current = date.today()
+    added = 0
+    while added < business_days:
+        current += timedelta(days=1)
+        if current.weekday() < 5:   # Mon–Fri only
+            added += 1
+    return current.isoformat()

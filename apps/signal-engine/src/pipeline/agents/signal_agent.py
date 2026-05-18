@@ -532,6 +532,7 @@ class SignalAgent(BaseAgent):
                 "triggered_signals": triggered,
                 "reasoning": reasoning,
                 "entry_price": td.get("close", 0),
+                "atr14": td.get("atr14", 0),
                 "rsi": td.get("rsi"),
                 "macd_hist": td.get("macd_hist"),
                 "above_ema20": td.get("above_ema20"),
