@@ -130,28 +130,52 @@ def fetch_results_page(
     return []
 
 
-def _parse_record(rec: dict, announcement_date: date) -> dict | None:
-    """Parse a raw NSE API record into our parquet schema."""
+def _parse_record(rec: dict, fallback_announcement_date: date) -> dict | None:
+    """Parse a raw NSE API record into our parquet schema.
+
+    NSE API fields used:
+      seDate   — actual stock-exchange submission date (DD-MMM-YYYY or similar)
+      toDate   — period end date (DD-MM-YYYY)
+      reInr    — EPS in ₹ per share (rupees, face-value adjusted)
+      profit   — net profit in ₹ crore
+      income   — total revenue in ₹ crore
+      xbrl     — XBRL URL (also signals annual vs quarterly via URL path)
+    """
     symbol = rec.get("symbol", "").strip().upper()
     if not symbol:
         return None
 
-    result_type = rec.get("xbrl", "").lower()
-    if "annual" in result_type:
-        result_type = "annual"
-    else:
-        result_type = "quarterly"
+    # Actual announcement date: prefer seDate from the record over the chunk's fallback
+    se_date_str = rec.get("seDate", "") or rec.get("date", "")
+    announcement_date: date = fallback_announcement_date
+    if se_date_str:
+        try:
+            announcement_date = pd.Timestamp(se_date_str).date()
+        except Exception:
+            pass
 
-    # NSE provides period_end as "MMM YYYY" (e.g. "Mar 2023") or "YYYY-MM-DD"
+    # Determine quarterly vs annual from XBRL URL or period length
+    xbrl_url = rec.get("xbrl", "") or ""
     period_str = rec.get("toDate", "") or rec.get("period", "")
+    from_str = rec.get("fromDate", "") or ""
+
+    result_type = "annual" if "annual" in xbrl_url.lower() else "quarterly"
+    if from_str and period_str:
+        try:
+            span_days = (pd.Timestamp(period_str) - pd.Timestamp(from_str)).days
+            if span_days > 200:
+                result_type = "annual"
+        except Exception:
+            pass
+
+    # Period end
     try:
-        period_end = pd.Timestamp(period_str).date()
+        period_end = pd.Timestamp(period_str).date() if period_str else None
     except Exception:
         period_end = None
 
     fiscal_quarter, fiscal_year = None, None
     if period_end is not None:
-        # Indian fiscal year: April–March.  Q1 = Apr-Jun, Q2 = Jul-Sep, etc.
         m = period_end.month
         if m in (4, 5, 6):
             fiscal_quarter = 1
@@ -163,7 +187,7 @@ def _parse_record(rec: dict, announcement_date: date) -> dict | None:
             fiscal_quarter = 4
         fiscal_year = period_end.year if m <= 3 else period_end.year + 1
 
-    # Conservative PIT: as_of = announcement_date + 18:00 IST (12:30 UTC)
+    # PIT: as_of = actual announcement date at 18:00 IST (12:30 UTC)
     as_of = datetime(
         announcement_date.year,
         announcement_date.month,
@@ -172,7 +196,20 @@ def _parse_record(rec: dict, announcement_date: date) -> dict | None:
         tzinfo=timezone.utc,
     )
 
-    source_url = rec.get("xbrl", "") or ""
+    # ── Extract financials from NSE API response ──────────────────────────────
+    # NSE returns these directly in the JSON — no filing parser needed.
+    # Field names: reInr = EPS in ₹, profit = net profit ₹cr, income = revenue ₹cr
+    eps_reported = _safe_float(rec.get("reInr") or rec.get("eps") or rec.get("basicEps"))
+    net_profit_cr = _safe_float(rec.get("profit") or rec.get("netProfit"))
+    revenue_cr = _safe_float(rec.get("income") or rec.get("totalIncome") or rec.get("revenue"))
+
+    # Sanity bounds
+    if eps_reported is not None and (eps_reported < -50_000 or eps_reported > 100_000):
+        eps_reported = None
+    if net_profit_cr is not None and abs(net_profit_cr) > 500_000:
+        net_profit_cr = None
+    if revenue_cr is not None and (revenue_cr < 0 or revenue_cr > 2_000_000):
+        revenue_cr = None
 
     return {
         "symbol": symbol,
@@ -181,14 +218,27 @@ def _parse_record(rec: dict, announcement_date: date) -> dict | None:
         "fiscal_quarter": fiscal_quarter,
         "fiscal_year": fiscal_year,
         "period_end": period_end,
-        "revenue_cr": None,        # populated separately via filing parser
-        "net_profit_cr": None,
-        "eps_reported": None,
-        "yoy_eps_prev": None,
+        "revenue_cr": revenue_cr,
+        "net_profit_cr": net_profit_cr,
+        "eps_reported": eps_reported,
+        "yoy_eps_prev": None,   # computed post-hoc after full dataset is built
         "yoy_revenue_prev": None,
         "result_type": result_type,
-        "source_url": source_url,
+        "source_url": xbrl_url,
     }
+
+
+def _safe_float(val: object) -> float | None:
+    """Convert a value to float, returning None on failure or empty string."""
+    if val is None:
+        return None
+    try:
+        s = str(val).strip()
+        if not s or s.lower() in ("na", "nan", "null", "-", ""):
+            return None
+        return float(s.replace(",", ""))
+    except (ValueError, TypeError):
+        return None
 
 
 def ingest_date_range(
@@ -225,10 +275,11 @@ def ingest_date_range(
         logger.info("No NSE results found for %s → %s", from_date, to_date)
         return _empty_df()
 
-    announcement_date = pd.Timestamp(to_date).date()
+    # Use to_date as the fallback; _parse_record prefers seDate from each record.
+    fallback_date = pd.Timestamp(to_date).date()
     rows = []
     for rec in raw:
-        parsed = _parse_record(rec, announcement_date)
+        parsed = _parse_record(rec, fallback_date)
         if parsed is None:
             continue
         if symbol_filter and parsed["symbol"] not in symbol_filter:
@@ -296,7 +347,9 @@ def build_historical_dataset(
 
     combined = pd.concat(chunks, ignore_index=True)
     combined = combined.drop_duplicates(subset=["symbol", "business_date", "period_end"])
-    return combined.sort_values(["symbol", "business_date"]).reset_index(drop=True)
+    combined = combined.sort_values(["symbol", "business_date"]).reset_index(drop=True)
+    combined = compute_yoy_columns(combined)
+    return combined
 
 
 def save_parquet(df: pd.DataFrame) -> Path:
@@ -362,5 +415,90 @@ def load_earnings(
     return df.reset_index(drop=True)
 
 
+def compute_yoy_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Fill yoy_eps_prev and yoy_revenue_prev for the full dataset.
+
+    Matches each row with the same (symbol, fiscal_quarter) from fiscal_year - 1.
+    Call this after the full dataset is assembled so cross-year lookups work.
+    """
+    if df.empty:
+        return df
+
+    df = df.sort_values(["symbol", "fiscal_year", "fiscal_quarter"]).copy()
+    lookup = df.set_index(["symbol", "fiscal_quarter", "fiscal_year"])
+
+    yoy_eps, yoy_rev = [], []
+    for _, row in df.iterrows():
+        sym = row["symbol"]
+        q = row["fiscal_quarter"]
+        fy = row["fiscal_year"]
+        if pd.isna(q) or pd.isna(fy):
+            yoy_eps.append(None)
+            yoy_rev.append(None)
+            continue
+        try:
+            prev = lookup.loc[(sym, q, fy - 1)]
+            prev_eps = float(prev["eps_reported"]) if prev["eps_reported"] is not None and not pd.isna(prev["eps_reported"]) else None
+            prev_rev = float(prev["revenue_cr"]) if prev["revenue_cr"] is not None and not pd.isna(prev["revenue_cr"]) else None
+        except KeyError:
+            prev_eps, prev_rev = None, None
+        yoy_eps.append(prev_eps)
+        yoy_rev.append(prev_rev)
+
+    df["yoy_eps_prev"] = yoy_eps
+    df["yoy_revenue_prev"] = yoy_rev
+    return df
+
+
 def _empty_df() -> pd.DataFrame:
     return pd.DataFrame(columns=_PARQUET_SCHEMA)
+
+
+def main() -> None:
+    import argparse
+    import sys
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    parser = argparse.ArgumentParser(description="NSE earnings ingest")
+    parser.add_argument("--start", default="2015-01-01", help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--end", default="2024-06-30", help="End date (YYYY-MM-DD)")
+    parser.add_argument(
+        "--universe-file",
+        default="data/lake/midcap150_constituents.csv",
+        help="CSV with 'symbol' column",
+    )
+    parser.add_argument("--chunk-days", type=int, default=30)
+    parser.add_argument("--rate-limit", type=float, default=1.5)
+    args = parser.parse_args()
+
+    universe: list[str] | None = None
+    import os
+    if os.path.exists(args.universe_file):
+        universe = pd.read_csv(args.universe_file)["symbol"].str.upper().tolist()
+        logger.info("Universe: %d symbols from %s", len(universe), args.universe_file)
+    else:
+        logger.info("No universe file — ingesting all equities")
+
+    df = build_historical_dataset(
+        start=args.start,
+        end=args.end,
+        universe=universe,
+        chunk_days=args.chunk_days,
+        rate_limit_secs=args.rate_limit,
+    )
+
+    if df.empty:
+        logger.error("No data collected — check NSE API connectivity")
+        sys.exit(1)
+
+    df = compute_yoy_columns(df)
+    path = save_parquet(df)
+    logger.info("Done. Saved to %s (%d rows, %d symbols)", path, len(df), df["symbol"].nunique())
+
+
+if __name__ == "__main__":
+    main()
