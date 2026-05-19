@@ -26,6 +26,9 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "prettytable>=3.10.0",
     "pyarrow>=15.0.0",
+    "scipy>=1.13.0",
+    "lightgbm>=4.3.0",
+    "mlflow>=2.14.0",
 ]
 
 [project.optional-dependencies]
@@ -61,3 +64,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = [
+    # LGBMClassifier OOF folds are fit on numpy slices; sklearn warns about
+    # feature-name presence mismatch between train/predict. Benign — the
+    # final model is fit with a DataFrame and predict_proba uses one too.
+    "ignore:X does not have valid feature names:UserWarning",
+]
