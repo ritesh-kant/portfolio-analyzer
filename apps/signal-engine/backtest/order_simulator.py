@@ -30,7 +30,7 @@ EXACT VALUES FROM PRODUCTION CODE (src/pipeline/agents/order_agent.py + config.p
     max_sector_positions  = 3      (config.py line 51 — code says 3, not 2)
     daily_loss_limit_pct  = 3.0    (config.py line 52 — halt if daily loss ≥ 3%)
     portfolio_floor_pct   = 70.0   (config.py line 53 — halt if value < 70% of initial)
-    MAX_HOLD_DAYS         = 10     (monitor_agent.py — force-close after 10 days)
+    MAX_HOLD_DAYS         = 10     (monitor_agent._MAX_POSITION_DAYS — force-close after 10 days)
 """
 
 from __future__ import annotations
@@ -43,17 +43,11 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # ── Constants (must match production exactly) ──────────────────────────────────
-STOP_PCT = 0.04         # tightened from 0.05 → faster stop-out on real losers
-TARGET_PCT = 0.08       # tightened from 0.10 → faster lock-in of gains
+STOP_PCT = 0.05         # 5% below entry (fixed fallback when no ATR)
+TARGET_PCT = 0.10       # 10% above entry (fixed fallback when no ATR)
 REWARD_TO_RISK = 2.0
 MAX_KELLY_CAP = 0.25
-MAX_HOLD_DAYS = 30      # extended to give chandelier trail room to ride trends
-
-# Pure chandelier trailing stop ("Zerodha cover-order" style).
-# The trailing_stop starts at the initial 1.5×ATR stop and ratchets up daily as
-# `max(prev_trail, highest_close − TRAIL_ATR_MULTIPLE × ATR)`. There is no fixed
-# upside target and no partial profit-taking — winners run until the trail fires.
-TRAIL_ATR_MULTIPLE = 2.5
+MAX_HOLD_DAYS = 10      # force-close after 10 trading days (matches monitor_agent)
 
 # Config defaults — must mirror config.py
 MIN_SIGNAL_CONFIDENCE = 60.0
@@ -98,7 +92,7 @@ _WIN_PROB_TABLE: list[tuple[float, float]] = [
     (75.0, 0.57),
     (70.0, 0.54),
     (65.0, 0.52),
-    (60.0, 0.50),
+    (60.0, 0.45),  # empirically calibrated from closed-trade history
 ]
 
 
@@ -154,7 +148,7 @@ class ClosedTrade:
     position_value: float
     confidence: int
     kelly_fraction: float
-    exit_reason: str         # "TRAIL" | "STOP" | "MAX_AGE" | "TARGET" (legacy)
+    exit_reason: str         # "TARGET" | "STOP" | "MAX_AGE" | "FOLD_END"
     pnl: float               # rupee P&L net of transaction costs
     return_pct: float        # % return net of costs
     was_correct: bool        # True if return_pct > 0 (profitable exit)
@@ -383,15 +377,14 @@ def open_position(
         )
         return None
 
-    # ATR-based stop when available, else fixed %. The ATR path uses pure
-    # chandelier trailing: initial stop at entry − 1.5×ATR, then trail ratchets
-    # up daily as max(prev, highest_close − 3×ATR). The `target` field is kept
-    # for legacy compatibility but is not consulted in the ATR path.
+    # ATR-based stop/target when available, else fixed %.
+    # stop  = entry − 1.5×ATR   (risk = 1R)
+    # target = entry + 3.0×ATR   (reward = 2R → 2:1 R:R)
     atr_at_entry = float(atr) if atr is not None and atr > 0 else 0.0
     if atr_at_entry > 0:
         risk_per_share = 1.5 * atr_at_entry
         stop_loss = round(fill_price - risk_per_share, 2)
-        target = round(fill_price + 3.0 * atr_at_entry, 2)  # legacy field; unused in trail path
+        target = round(fill_price + 3.0 * atr_at_entry, 2)
     else:
         stop_loss = round(fill_price * (1 - STOP_PCT), 2)
         target = round(fill_price * (1 + TARGET_PCT), 2)
@@ -439,22 +432,8 @@ def open_position(
 
 
 def update_trail(position: Position, current_price: float) -> None:
-    """Update high-water mark and chandelier trailing stop (ratchet up only).
-
-    Called once per day per position, after MFE/MAE update, BEFORE should_close.
-    The trail is `max(prev_trail, highest_close − 3×ATR)` and never goes below
-    the initial 1.5×ATR stop (original_stop is its floor). No-op for non-ATR
-    legacy positions.
-    """
-    if position.atr_at_entry <= 0:
-        return
-    if current_price > position.highest_close:
-        position.highest_close = current_price
-    candidate = position.highest_close - TRAIL_ATR_MULTIPLE * position.atr_at_entry
-    floor = position.original_stop
-    new_trail = max(position.trailing_stop, candidate, floor)
-    if new_trail > position.trailing_stop:
-        position.trailing_stop = round(new_trail, 2)
+    """No-op — v7 uses hard ATR targets, not a trailing stop."""
+    pass
 
 
 def should_close(
@@ -463,31 +442,17 @@ def should_close(
 ) -> str | None:
     """Return exit reason if the position should be closed, else None.
 
-    Pure chandelier exit (ATR-based positions):
-        STOP    — price ≤ trailing_stop AND trail still at/below entry
-                  (i.e. losing exit; subject to cooloff in engine)
-        TRAIL   — price ≤ trailing_stop AND trail has ratcheted above entry
-                  (i.e. winning trend-end exit; no cooloff)
-        MAX_AGE — position.days_held >= MAX_HOLD_DAYS
+    Hard ATR exits (v7):
+        TARGET  — price ≥ target  (entry + 3.0×ATR, or entry × 1.10 fallback)
+        STOP    — price ≤ stop_loss (entry − 1.5×ATR, or entry × 0.95 fallback)
+        MAX_AGE — days_held ≥ MAX_HOLD_DAYS (10 trading days)
 
-    Fallback (atr_at_entry == 0): legacy fixed TARGET / STOP behaviour.
-
-    Returns: "TRAIL" | "STOP" | "MAX_AGE" | "TARGET" (legacy) | None
+    Returns: "TARGET" | "STOP" | "MAX_AGE" | None
     """
-    # Legacy fixed-pct fallback (no ATR at entry).
-    if position.atr_at_entry <= 0:
-        if current_price >= position.target:
-            return "TARGET"
-        if current_price <= position.stop_loss:
-            return "STOP"
-        if position.days_held >= MAX_HOLD_DAYS:
-            return "MAX_AGE"
-        return None
-
-    # ATR-based pure chandelier path. Single trail line subsumes stop + target.
-    if current_price <= position.trailing_stop:
-        # Classify: trail still at/below entry → losing exit (STOP), else TRAIL.
-        return "STOP" if position.trailing_stop <= position.entry_price else "TRAIL"
+    if current_price >= position.target:
+        return "TARGET"
+    if current_price <= position.stop_loss:
+        return "STOP"
     if position.days_held >= MAX_HOLD_DAYS:
         return "MAX_AGE"
     return None

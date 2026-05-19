@@ -253,11 +253,7 @@ class OrderAgent(BaseAgent):
                 "kelly_fraction": round(kelly_frac, 4),
                 "stop_loss": stop_loss,
                 "target": target,
-                # Chandelier trailing-stop state (read by monitor_agent).
                 "atr_at_entry": round(atr, 4),
-                "original_stop": stop_loss,
-                "highest_close": round(entry_price, 2),
-                "trailing_stop": stop_loss,
                 "date": state.date or today,
                 "status": "OPEN",
                 "reasoning": signal.get("reasoning", ""),

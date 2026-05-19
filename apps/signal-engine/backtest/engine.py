@@ -270,14 +270,14 @@ def _simulate_day(
             ret_pct = (price - pos.entry_price) / pos.entry_price * 100
             pos.mfe_pct = max(pos.mfe_pct, ret_pct)
             pos.mae_pct = max(pos.mae_pct, -ret_pct)   # stored as positive loss %
-            # Chandelier high-water mark + trailing stop, ratcheting up only.
+            # update_trail is a no-op in v7 (hard ATR targets used instead).
             update_trail(pos, price)
 
     # ── Exit loop ─────────────────────────────────────────────────────────────
-    # Pure chandelier trail (no TP1, no fixed target):
-    #   STOP    — trailing_stop hit while still at/below entry; full close + cooloff.
-    #   TRAIL   — trailing_stop hit after ratcheting above entry; full close, no cooloff.
-    #   MAX_AGE — held past MAX_HOLD_DAYS; full close.
+    # Hard ATR exits (v7):
+    #   TARGET  — price ≥ entry + 3.0×ATR; full close.
+    #   STOP    — price ≤ entry − 1.5×ATR; full close + 15-day cooloff.
+    #   MAX_AGE — held past MAX_HOLD_DAYS (10 days); full close.
     positions_closed = 0
     for pos in list(portfolio.open_positions):   # iterate over copy
         price = current_prices.get(pos.symbol)
@@ -289,7 +289,6 @@ def _simulate_day(
         close_position(portfolio, pos, date_str, price, reason)
         positions_closed += 1
         # W2.4: cool off the symbol for 15 trading days after a STOP (losing) exit.
-        # TRAIL exits skip cooloff — those are profitable trend-end exits.
         if reason == "STOP":
             release = sim_date + pd.offsets.BDay(15)
             cooled_off_until[pos.symbol] = release

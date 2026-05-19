@@ -29,8 +29,7 @@ from ...db.repositories.intraday_bars import IntradayBarsRepository
 logger = logging.getLogger(__name__)
 
 _AGENT_NAME = "monitor_agent"
-_MAX_POSITION_DAYS = 30   # extended for chandelier trail to ride trends
-_TRAIL_ATR_MULTIPLE = 2.5 # chandelier: trail = highest_close − N × ATR
+_MAX_POSITION_DAYS = 10   # force-close after 10 calendar days
 
 
 _PRICE_FETCH_TIMEOUT_S = 10.0
@@ -78,7 +77,6 @@ async def _fetch_price(symbol: str) -> tuple[float | None, list[dict[str, Any]] 
 _EXIT_NOTES = {
     "stop_loss": "Stop-loss triggered — thesis failed. Price fell to stop level.",
     "target_hit": "Target hit — thesis correct. Price reached upside target.",
-    "trail": "Chandelier trailing stop hit — trend exit, trail had ratcheted into profit.",
     "max_age": f"Force-closed after {_MAX_POSITION_DAYS} days — maximum hold period reached.",
 }
 
@@ -213,33 +211,11 @@ async def run_monitor() -> dict[str, Any]:
             remaining_market_value += float(order.get("position_value", 0.0))
             continue
 
-        # Chandelier trailing-stop state. Legacy orders (placed before trailing
-        # was introduced) may lack these fields — fall back to the static stop.
         stop_loss = float(order.get("stop_loss", 0))
         target = float(order.get("target", float("inf")))
-        atr_at_entry = float(order.get("atr_at_entry", 0) or 0)
-        original_stop = float(order.get("original_stop", stop_loss))
-        entry_price = float(order.get("entry_price", 0))
-        highest_close = float(order.get("highest_close", entry_price))
-        trailing_stop = float(order.get("trailing_stop", original_stop))
         run_id = order.get("run_id", "monitor")
 
         try:
-            # Ratchet the chandelier (high-water + trail) up only. Trail floor
-            # is original_stop so we never loosen the initial 1.5×ATR stop.
-            if atr_at_entry > 0:
-                new_highest = max(highest_close, current_price)
-                candidate_trail = new_highest - _TRAIL_ATR_MULTIPLE * atr_at_entry
-                new_trail = max(trailing_stop, candidate_trail, original_stop)
-                if new_highest != highest_close or new_trail != trailing_stop:
-                    await orders_repo.update_trail(
-                        order["_id"],
-                        highest_close=round(new_highest, 2),
-                        trailing_stop=round(new_trail, 2),
-                    )
-                    highest_close = new_highest
-                    trailing_stop = new_trail
-
             # Max-age failsafe.
             order_date_str = order.get("date", "")
             if order_date_str:
@@ -254,20 +230,12 @@ async def run_monitor() -> dict[str, Any]:
                 except ValueError:
                     pass
 
-            # Pure chandelier exit: ATR path uses trailing_stop for everything
-            # (subsumes stop and target). Legacy non-ATR path keeps the old
-            # fixed stop/target two-branch behaviour.
+            # Hard stop / target exits (v7 — ATR-based values set at entry).
             exit_reason: str | None = None
-            if atr_at_entry > 0:
-                if trailing_stop > 0 and current_price <= trailing_stop:
-                    # Classify: trail still at/below entry → losing exit (stop_loss),
-                    # else trail has ratcheted into profit → trend-end exit (trail).
-                    exit_reason = "stop_loss" if trailing_stop <= entry_price else "trail"
-            else:
-                if original_stop > 0 and current_price <= original_stop:
-                    exit_reason = "stop_loss"
-                elif current_price >= target:
-                    exit_reason = "target_hit"
+            if stop_loss > 0 and current_price <= stop_loss:
+                exit_reason = "stop_loss"
+            elif current_price >= target:
+                exit_reason = "target_hit"
 
             if exit_reason:
                 await _close_position(orders_repo, portfolio_repo, signals_repo, order, current_price, exit_reason, db=db)
