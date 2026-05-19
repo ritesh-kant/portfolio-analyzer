@@ -2,7 +2,7 @@
 
 | Slug | Strategy | Status | Registered | Finalized | Decision |
 |------|----------|--------|------------|-----------|----------|
-| _(none yet)_ | | | | | |
+| [pead-midcap](2026-05-19-pead-midcap.md) | pead_midcap | registered | 2026-05-19 | — | — |
 
 ## Status legend
 

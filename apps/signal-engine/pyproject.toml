@@ -64,3 +64,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = [
+    # LGBMClassifier OOF folds are fit on numpy slices; sklearn warns about
+    # feature-name presence mismatch between train/predict. Benign — the
+    # final model is fit with a DataFrame and predict_proba uses one too.
+    "ignore:X does not have valid feature names:UserWarning",
+]
