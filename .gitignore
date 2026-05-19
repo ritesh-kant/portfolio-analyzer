@@ -9,3 +9,4 @@ coverage
 **/.serverless/
 **/__pycache__
 .claude
+.archive/
