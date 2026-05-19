@@ -1,36 +1,31 @@
-"""order_simulator — replicate order_agent.py sizing and portfolio management.
+"""order_simulator — portfolio bookkeeping + Indian transaction costs.
 
-This module ports the production order_agent's position sizing and circuit-breaker
-logic into a pure, synchronous, in-memory simulator for use by the backtest engine.
+Surviving from the demolition phase. The original module ported the production
+order_agent's position sizing into a pure synchronous simulator. The sizing
+chain (_WIN_PROB_TABLE → _conservative_win_prob → _half_kelly → calc_position)
+was deleted because the win probabilities were hardcoded constants, never
+updated from realized outcomes. Stubs raising NotImplementedError remain so
+callers fail loudly until quant/portfolio/posterior_kelly.py lands in Month 3.
 
-EXACT VALUES FROM PRODUCTION CODE (src/pipeline/agents/order_agent.py + config.py):
+What still works and is reused:
+    compute_trade_cost — Indian delivery cost model (slippage + brokerage +
+                         STT + stamp + exchange + SEBI + GST). Correct as-is.
+    Position / ClosedTrade / Portfolio dataclasses — bookkeeping schema.
+    open_position / close_position / should_close — order lifecycle
+                         (currently break because calc_position raises; will
+                         be unblocked when posterior_kelly is wired in).
+    check_circuit_breakers — daily-loss + portfolio-floor halt logic.
+    compute_trade_cost — Indian delivery cost model.
 
-    STOP_PCT              = 0.05   (5% below entry)
-    TARGET_PCT            = 0.10   (10% above entry)
-    REWARD_TO_RISK        = 2.0
-    MAX_KELLY_CAP         = 0.25   (never risk > 25% of portfolio on one trade)
-
-    _WIN_PROB_TABLE (conservative, intentionally below confidence/100):
-        ≥80 → 0.60
-        ≥75 → 0.57
-        ≥70 → 0.54
-        ≥65 → 0.52
-        ≥60 → 0.50
-        <60 → 0.50  (Kelly returns 0 at r=2 when p=0.50 — no position)
-
-    _confidence_scale (graduated multiplier):
-        <65%  → ×0.50
-        65–70 → ×0.65
-        70–75 → ×0.80
-        75–80 → ×0.90
-        ≥80%  → ×1.00
-
-    position_size_pct     = 12.0   (max 12% of portfolio per position)
-    max_positions         = 8
-    max_sector_positions  = 3      (config.py line 51 — code says 3, not 2)
-    daily_loss_limit_pct  = 3.0    (config.py line 52 — halt if daily loss ≥ 3%)
-    portfolio_floor_pct   = 70.0   (config.py line 53 — halt if value < 70% of initial)
-    MAX_HOLD_DAYS         = 10     (monitor_agent.py — force-close after 10 days)
+Constants kept for the new pipeline to consume:
+    REWARD_TO_RISK    = 2.0
+    MAX_KELLY_CAP     = 0.25
+    MAX_HOLD_DAYS     — TBD per strategy; default 20 stays for now
+    POSITION_SIZE_PCT = 12.0
+    MAX_POSITIONS     = 8
+    MAX_SECTOR_POSITIONS = 3
+    DAILY_LOSS_LIMIT_PCT = 3.0
+    PORTFOLIO_FLOOR_PCT  = 70.0
 """
 
 from __future__ import annotations
@@ -87,13 +82,10 @@ def compute_trade_cost(value: float, side: str) -> float:
     stt = value * _STT_DELIVERY_PCT if side == "SELL" else 0.0
     return brokerage + exchange + sebi + gst + stamp + stt
 
-_WIN_PROB_TABLE: list[tuple[float, float]] = [
-    (80.0, 0.60),
-    (75.0, 0.57),
-    (70.0, 0.54),
-    (65.0, 0.52),
-    (60.0, 0.50),
-]
+# NOTE: The static _WIN_PROB_TABLE was removed during the rebuild's demolition
+# phase. Win probabilities will be estimated online from realized trade outcomes
+# via a Bayesian Beta-Bernoulli posterior, stratified by (strategy, regime,
+# model_decile). See quant/portfolio/posterior_kelly.py (to be built Month 3).
 
 
 # ── Data structures ────────────────────────────────────────────────────────────
@@ -205,36 +197,20 @@ class Portfolio:
         return total
 
 
-# ── Core sizing functions (must match order_agent.py exactly) ──────────────────
-
-def _conservative_win_prob(confidence: float) -> float:
-    """Port of order_agent._conservative_win_prob()."""
-    for min_conf, win_prob in _WIN_PROB_TABLE:
-        if confidence >= min_conf:
-            return win_prob
-    return 0.50
+# ── Core sizing functions (STUBBED — to be replaced in Month 3) ────────────────
+#
+# The old confidence → win_prob → half-Kelly → confidence-scale chain was based
+# on hardcoded values that were never updated from realized trade outcomes.
+# These stubs raise NotImplementedError so any caller fails loudly until the
+# Bayesian posterior-Kelly sizer lands in quant/portfolio/posterior_kelly.py.
 
 
 def _half_kelly(confidence: float, r: float = REWARD_TO_RISK) -> float:
-    """Port of order_agent._half_kelly()."""
-    p = _conservative_win_prob(confidence)
-    q = 1.0 - p
-    full_kelly = (p * r - q) / r
-    half = max(0.0, full_kelly / 2.0)
-    return min(half, MAX_KELLY_CAP)
-
-
-def _confidence_scale(confidence: float) -> float:
-    """Port of order_agent._confidence_scale()."""
-    if confidence < 65:
-        return 0.50
-    if confidence < 70:
-        return 0.65
-    if confidence < 75:
-        return 0.80
-    if confidence < 80:
-        return 0.90
-    return 1.00
+    raise NotImplementedError(
+        "Static Kelly was removed in the rebuild's demolition phase. "
+        "Wire in quant.portfolio.posterior_kelly.kelly_from_posterior() "
+        "once Month 3 lands."
+    )
 
 
 def calc_position(
@@ -245,25 +221,10 @@ def calc_position(
     *,
     position_size_pct: float = POSITION_SIZE_PCT,
 ) -> tuple[int, float, float]:
-    """Return (shares, position_value, kelly_fraction). Port of order_agent._calc_position().
-
-    Returns (0, 0.0, kf) when the position is not feasible (price <= 0, no cash,
-    or Kelly fraction rounds to zero shares).
-    """
-    if entry_price <= 0 or portfolio_value <= 0:
-        return 0, 0.0, 0.0
-
-    kf = _half_kelly(confidence)
-    scale = _confidence_scale(confidence)
-    max_pct_value = portfolio_value * (position_size_pct / 100.0) * scale
-    target_value = min(portfolio_value * kf, max_pct_value, available_cash)
-
-    shares = int(target_value // entry_price)
-    if shares < 1:
-        return 0, 0.0, kf
-
-    actual_value = shares * entry_price
-    return shares, actual_value, kf
+    raise NotImplementedError(
+        "calc_position depended on the deleted _half_kelly + _confidence_scale. "
+        "Use quant.portfolio.posterior_kelly.size_position() once Month 3 lands."
+    )
 
 
 # ── Circuit breakers ───────────────────────────────────────────────────────────
@@ -358,6 +319,9 @@ def open_position(
     fill_price = round(entry_price * (1 + SLIPPAGE_PCT), 2) if COSTS_ENABLED else entry_price
 
     mtm_value = portfolio.total_value
+    # NOTE: calc_position raises NotImplementedError until quant/portfolio/
+    # posterior_kelly.py replaces the deleted static-Kelly chain (Month 3).
+    # Until then, open_position is intentionally non-functional.
     shares, position_value, kelly_frac = calc_position(
         confidence, mtm_value, fill_price, portfolio.cash,
         position_size_pct=position_size_pct,
