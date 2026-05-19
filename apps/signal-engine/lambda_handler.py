@@ -1,14 +1,10 @@
 """AWS Lambda entry point.
 
-Two invocation paths:
-  1. HTTP (API Gateway / Function URL) — routed through Mangum → FastAPI.
-  2. Direct async invocation (from pipelineConsumer via InvocationType='Event') —
-     detected by the presence of a "run_id" key and executed without HTTP overhead.
-     pipelineConsumer uses InvocationType='Event' so it gets 202 immediately and
-     this Lambda runs the full pipeline independently.
+The direct-invocation path (pipelineConsumer → run_pipeline) was removed during
+the demolition phase of the signal-engine rebuild. Only the HTTP path remains;
+the new pipeline will expose new endpoints from quant/ in Month 3.
 """
 
-import asyncio
 import logging
 
 from mangum import Mangum
@@ -20,32 +16,11 @@ logger = logging.getLogger(__name__)
 _http_handler = Mangum(app, lifespan="off")
 
 
-async def _run_direct(run_id: str, date: str, ai_provider: str) -> None:
-    from datetime import datetime, timezone
-
-    from src.db.client import get_db
-    from src.db.repositories.pipeline_runs import PipelineRunsRepository
-    from src.pipeline.graph import run_pipeline
-
-    repo = PipelineRunsRepository(get_db())
-    await repo.update_one(
-        {"run_id": run_id},
-        {"$set": {"status": "running", "updatedAt": datetime.now(timezone.utc)}},
-    )
-    try:
-        await run_pipeline(run_id, date, ai_provider)
-    except Exception as exc:
-        logger.exception("direct invoke pipeline run_id=%s failed: %s", run_id, exc)
-        await repo.finalize(run_id, "failed", error_summary=str(exc))
-        raise
-
-
 def handler(event: dict, context: object) -> object:
     if "run_id" in event:
-        asyncio.run(_run_direct(
-            run_id=event["run_id"],
-            date=event["date"],
-            ai_provider=event.get("ai_provider", "anthropic"),
-        ))
-        return {"status": "ok"}
+        logger.warning(
+            "direct invoke received run_id=%s but pipeline is under reconstruction; ignoring",
+            event.get("run_id"),
+        )
+        return {"status": "pipeline_under_reconstruction"}
     return _http_handler(event, context)
