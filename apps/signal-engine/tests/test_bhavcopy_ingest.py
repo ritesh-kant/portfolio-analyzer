@@ -44,13 +44,19 @@ OLD_FORMAT_CSV = (
     "01-JAN-2020,50,INE009A01021\n"
 )
 
+# Actual 2024+ NSE BhavCopy format (verified against real file 2024-01-02).
+# TtlTrfVal is in rupees — ingest.py divides by 100_000 to produce lacs.
 NEW_FORMAT_CSV = (
-    "SYMBOL,SERIES,DATE1,PREV_CLOSE,OPEN_PRICE,HIGH_PRICE,LOW_PRICE,LAST_PRICE,"
-    "CLOSE_PRICE,AVG_PRICE,TTL_TRD_QNTY,TURNOVER_LACS,NO_OF_TRADES,DELIV_QTY,DELIV_PER\n"
-    "TCS,EQ,01-JAN-2024,3900.00,3920.00,3950.00,3890.00,3930.00,3935.00,3920.00,"
-    "800000,31480.00,4500,400000,50.00\n"
-    "WIPRO,EQ,01-JAN-2024,450.00,455.00,460.00,448.00,457.00,458.00,455.00,"
-    "2000000,9160.00,8000,1000000,50.00\n"
+    "TradDt,BizDt,Sgmt,Src,FinInstrmTp,FinInstrmId,ISIN,TckrSymb,SctySrs,XpryDt,"
+    "FininstrmActlXpryDt,StrkPric,OptnTp,FinInstrmNm,OpnPric,HghPric,LwPric,ClsPric,"
+    "LastPric,PrvsClsgPric,UndrlygPric,SttlmPric,OpnIntrst,ChngInOpnIntrst,"
+    "TtlTradgVol,TtlTrfVal,TtlNbOfTxsExctd,SsnId,NewBrdLotQty,Rmks,Rsvd01,Rsvd02,Rsvd03,Rsvd04\n"
+    "2024-01-02,2024-01-02,CM,NSE,STK,13620,INE242C01024,TCS,EQ,,,,,TCS LTD,"
+    "3920.00,3950.00,3890.00,3935.00,3930.00,3900.00,,3935.00,,,800000,3148000000.00,4500,F1,1,,,,,\n"
+    "2024-01-02,2024-01-02,CM,NSE,STK,20372,INE00Y201027,WIPRO,EQ,,,,,WIPRO LTD,"
+    "455.00,460.00,448.00,458.00,457.00,450.00,,458.00,,,2000000,916000000.00,8000,F1,1,,,,,\n"
+    "2024-01-02,2024-01-02,CM,NSE,STK,20373,INE00Y201028,WIPRO,BE,,,,,WIPRO LTD BE,"
+    "455.00,460.00,448.00,458.00,457.00,450.00,,458.00,,,1000,458000000.00,10,F1,1,,,,,\n"
 )
 
 BUSINESS_DATE = date(2020, 1, 1)
@@ -88,7 +94,13 @@ class TestParseZip:
         zip_bytes = _make_zip(NEW_FORMAT_CSV, "BhavCopy_NSE_CM.csv")
         df = parse_zip(zip_bytes, BUSINESS_DATE_2024)
         assert df is not None
-        assert "close" in df.columns  # mapped from CLOSE_PRICE
+        assert "close" in df.columns  # mapped from ClsPric
+
+    def test_new_format_row_count(self):
+        zip_bytes = _make_zip(NEW_FORMAT_CSV, "BhavCopy_NSE_CM.csv")
+        df = parse_zip(zip_bytes, BUSINESS_DATE_2024)
+        assert df is not None
+        assert len(df) == 3  # TCS EQ + WIPRO EQ + WIPRO BE
 
     def test_new_format_values(self):
         zip_bytes = _make_zip(NEW_FORMAT_CSV, "BhavCopy_NSE_CM.csv")
@@ -97,7 +109,8 @@ class TestParseZip:
         tcs = df[df["symbol"] == "TCS"].iloc[0]
         assert tcs["close"] == pytest.approx(3935.00)
         assert tcs["prev_close"] == pytest.approx(3900.00)
-        assert tcs["turnover_lacs"] == pytest.approx(31480.00)
+        # TtlTrfVal=3_148_000_000 rupees → 31_480 lacs
+        assert tcs["turnover_lacs"] == pytest.approx(31_480.00)
 
     def test_empty_zip_returns_none(self):
         buf = io.BytesIO()

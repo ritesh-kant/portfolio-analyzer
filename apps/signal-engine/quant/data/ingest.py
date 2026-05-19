@@ -150,32 +150,40 @@ def _parse_old_format(df_raw: pd.DataFrame, business_date: date) -> pd.DataFrame
     })
 
 
-def _parse_new_format(df_raw: pd.DataFrame, business_date: date) -> pd.DataFrame:
-    """Normalise new BhavCopy CSV (2024+).
+def _parse_new_nse_format(df_raw: pd.DataFrame, business_date: date) -> pd.DataFrame:
+    """Normalise new NSE BhavCopy CSV (2024+).
 
-    Columns: SYMBOL, SERIES, DATE1, PREV_CLOSE, OPEN_PRICE, HIGH_PRICE,
-             LOW_PRICE, LAST_PRICE, CLOSE_PRICE, AVG_PRICE, TTL_TRD_QNTY,
-             TURNOVER_LACS, NO_OF_TRADES, DELIV_QTY, DELIV_PER
+    Actual columns (verified 2024-01-02):
+        TradDt, BizDt, Sgmt, Src, FinInstrmTp, FinInstrmId, ISIN, TckrSymb,
+        SctySrs, XpryDt, ..., OpnPric, HghPric, LwPric, ClsPric, LastPric,
+        PrvsClsgPric, ..., TtlTradgVol, TtlTrfVal, TtlNbOfTxsExctd, ...
+    TtlTrfVal is in rupees — converted to lacs (÷100,000) for consistency.
     """
-    df_raw.columns = [c.strip().upper() for c in df_raw.columns]
+    # strip + preserve original casing for lookup (columns are mixed-case)
+    df_raw.columns = [c.strip() for c in df_raw.columns]
+    col_map = {c.upper(): c for c in df_raw.columns}
+
+    def _get(name: str) -> pd.Series:
+        return df_raw[col_map[name]]
+
     return pd.DataFrame({
-        "symbol": df_raw["SYMBOL"].str.strip(),
-        "series": df_raw["SERIES"].str.strip(),
+        "symbol": _get("TCKRSYMB").str.strip(),
+        "series": _get("SCTYSRS").str.strip(),
         "business_date": business_date,
-        "open": pd.to_numeric(df_raw["OPEN_PRICE"], errors="coerce"),
-        "high": pd.to_numeric(df_raw["HIGH_PRICE"], errors="coerce"),
-        "low": pd.to_numeric(df_raw["LOW_PRICE"], errors="coerce"),
-        "close": pd.to_numeric(df_raw["CLOSE_PRICE"], errors="coerce"),
-        "prev_close": pd.to_numeric(df_raw["PREV_CLOSE"], errors="coerce"),
-        "volume": pd.to_numeric(df_raw["TTL_TRD_QNTY"], errors="coerce").fillna(0).astype("int64"),
-        "turnover_lacs": pd.to_numeric(df_raw["TURNOVER_LACS"], errors="coerce"),
+        "open": pd.to_numeric(_get("OPNPRIC"), errors="coerce"),
+        "high": pd.to_numeric(_get("HGHPRIC"), errors="coerce"),
+        "low": pd.to_numeric(_get("LWPRIC"), errors="coerce"),
+        "close": pd.to_numeric(_get("CLSPRIC"), errors="coerce"),
+        "prev_close": pd.to_numeric(_get("PRVSCLSGPRIC"), errors="coerce"),
+        "volume": pd.to_numeric(_get("TTLTRADGVOL"), errors="coerce").fillna(0).astype("int64"),
+        "turnover_lacs": pd.to_numeric(_get("TTLTRFVAL"), errors="coerce") / 100_000,
     })
 
 
 def _detect_and_parse(df_raw: pd.DataFrame, business_date: date) -> pd.DataFrame:
     cols = {c.strip().upper() for c in df_raw.columns}
-    if "CLOSE_PRICE" in cols:
-        return _parse_new_format(df_raw, business_date)
+    if "TCKRSYMB" in cols:
+        return _parse_new_nse_format(df_raw, business_date)
     return _parse_old_format(df_raw, business_date)
 
 
