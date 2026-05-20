@@ -46,16 +46,35 @@ logger = logging.getLogger(__name__)
 
 _NSE_BASE = "https://www.nseindia.com"
 _RESULTS_API = f"{_NSE_BASE}/api/corporates-financial-results"
+
+# NSE uses Akamai Bot Manager.  These headers are required to pass the
+# bot challenge.  The session warmup (hitting 3 pages before the API call)
+# is also required to build up the right cookie set (nsit, nseappid, etc.).
 _HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
+        "Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-results",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "DNT": "1",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
 }
+
+# Pages to visit in order before hitting the API — each sets additional cookies
+_WARMUP_PAGES = [
+    _NSE_BASE,
+    f"{_NSE_BASE}/market-data/live-equity-market",
+    f"{_NSE_BASE}/companies-listing/corporate-filings-results",
+]
 
 _PARQUET_SCHEMA = [
     "symbol", "business_date", "as_of_timestamp",
@@ -76,14 +95,35 @@ def _parquet_path() -> Path:
 
 
 def _nse_session() -> requests.Session:
-    """Create a session with cookies from the NSE home page (required for API access)."""
+    """Create a session that passes NSE's Akamai Bot Manager.
+
+    NSE requires visiting 3 pages in order to accumulate the full cookie set
+    (nsit, nseappid, ak_bmsc, bm_sv, etc.) before the API will return data.
+    A single homepage GET is not enough — the API returns empty lists silently.
+    """
     sess = requests.Session()
     sess.headers.update(_HEADERS)
-    try:
-        sess.get(_NSE_BASE, timeout=10)  # sets cookies
-        time.sleep(0.5)
-    except requests.RequestException as exc:
-        logger.warning("Failed to initialise NSE session: %s", exc)
+
+    for i, url in enumerate(_WARMUP_PAGES):
+        try:
+            resp = sess.get(url, timeout=15)
+            logger.debug("warmup page=%d status=%d cookies=%s", i, resp.status_code, list(sess.cookies.keys()))
+        except requests.RequestException as exc:
+            logger.warning("NSE warmup page %d failed: %s", i, exc)
+        # Human-like delay between page loads (Akamai checks timing)
+        time.sleep(1.5 if i < len(_WARMUP_PAGES) - 1 else 2.0)
+
+    cookie_keys = list(sess.cookies.keys())
+    if not any(k in cookie_keys for k in ("nsit", "nseappid", "bm_sv", "ak_bmsc")):
+        logger.warning(
+            "NSE session cookies look incomplete: %s — API may still return empty responses. "
+            "If the ingest returns no data, NSE may be blocking automated access. "
+            "Try running during off-peak hours (before 9am or after 6pm IST).",
+            cookie_keys,
+        )
+    else:
+        logger.info("NSE session ready. Cookies: %s", cookie_keys)
+
     return sess
 
 
@@ -473,7 +513,31 @@ def main() -> None:
     )
     parser.add_argument("--chunk-days", type=int, default=30)
     parser.add_argument("--rate-limit", type=float, default=1.5)
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Smoke-test: fetch one chunk (Oct 2023) and print results without saving",
+    )
     args = parser.parse_args()
+
+    if args.test:
+        logger.info("--- SMOKE TEST: fetching Oct 2023 chunk ---")
+        sess = _nse_session()
+        raw = fetch_results_page("01-10-2023", "31-10-2023", session=sess)
+        logger.info("Raw records returned: %d", len(raw))
+        if raw:
+            logger.info("Sample record: %s", raw[0])
+            df_test = ingest_date_range("2023-10-01", "2023-10-31")
+            logger.info("Parsed rows: %d", len(df_test))
+            if not df_test.empty:
+                logger.info("Columns with data:\n%s", df_test.notna().sum().to_string())
+        else:
+            logger.warning(
+                "NSE API returned 0 records for Oct 2023 — session not authenticated.\n"
+                "Try running between 6pm–9am IST when NSE Bot Manager is less aggressive,\n"
+                "or see docs/nse_session_fix.md for cookie injection workaround."
+            )
+        return
 
     universe: list[str] | None = None
     import os
