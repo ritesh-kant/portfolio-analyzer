@@ -132,7 +132,10 @@ def read_holdout(strategy_name: str, hypothesis_path: str | Path) -> None:
             "final before running hold-out evaluation.  See plan §8.2."
         )
 
-    # ── Precondition 3: log the unlock ─────────────────────────────────────────
+    # ── Precondition 3: one-run-only guard ────────────────────────────────────
+    # If a hold-out run already exists in MLflow for this strategy, refuse.
+    _assert_no_prior_holdout_run(strategy_name)
+
     h_hash = _file_hash(path)
     git_sha = _git_sha()
 
@@ -144,7 +147,9 @@ def read_holdout(strategy_name: str, hypothesis_path: str | Path) -> None:
         h_hash[-4:],
         git_sha,
     )
-    # TODO(Month 4): log to MLflow with is_final=True immutable tag
+
+    # Log the unlock event to MLflow with an immutable tag
+    _log_unlock_to_mlflow(strategy_name, path, h_hash, git_sha)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -166,3 +171,66 @@ def _git_sha() -> str:
         return result.stdout.strip() if result.returncode == 0 else "unknown"
     except Exception:  # noqa: BLE001
         return "unknown"
+
+
+def _assert_no_prior_holdout_run(strategy_name: str) -> None:
+    """Raise PermissionError if a hold-out run already exists in MLflow.
+
+    This enforces the "single shot" rule: once you run the hold-out, you
+    cannot run it again.  If the first run fails the gate, the strategy is
+    dead.  There is no re-run.
+    """
+    try:
+        import mlflow
+        client = mlflow.tracking.MlflowClient()
+        exp = client.get_experiment_by_name(strategy_name)
+        if exp is None:
+            return  # no experiment yet, first run allowed
+
+        runs = client.search_runs(
+            experiment_ids=[exp.experiment_id],
+            filter_string="tags.is_holdout_run = 'true'",
+            max_results=1,
+        )
+        if runs:
+            prior_run_id = runs[0].info.run_id
+            raise PermissionError(
+                f"Hold-out unlock refused: a hold-out run already exists for "
+                f"strategy {strategy_name!r} (MLflow run_id={prior_run_id!r}).  "
+                "The hold-out is a single-shot evaluation.  "
+                "If the strategy failed, it is dead.  See plan §3.1 + §14."
+            )
+    except PermissionError:
+        raise
+    except Exception as exc:
+        logger.warning("MLflow check for prior hold-out run failed (non-fatal): %s", exc)
+
+
+def _log_unlock_to_mlflow(
+    strategy_name: str,
+    hypothesis_path: Path,
+    h_hash: str,
+    git_sha: str,
+) -> None:
+    """Log the hold-out unlock event to MLflow with immutable tags."""
+    try:
+        import mlflow
+        mlflow.set_experiment(strategy_name)
+        with mlflow.start_run(
+            tags={
+                "is_holdout_run": "true",      # used by _assert_no_prior_holdout_run
+                "stage": "holdout",
+                "strategy": strategy_name,
+                "hypothesis_sha256": h_hash,
+                "git_sha": git_sha,
+                "hypothesis_file": hypothesis_path.name,
+            }
+        ) as active_run:
+            mlflow.log_param("holdout_start", HOLDOUT_START)
+            mlflow.log_param("strategy_name", strategy_name)
+            logger.info(
+                "Holdout unlock logged to MLflow run_id=%s",
+                active_run.info.run_id,
+            )
+    except Exception as exc:
+        logger.warning("MLflow holdout logging failed (non-fatal): %s", exc)
