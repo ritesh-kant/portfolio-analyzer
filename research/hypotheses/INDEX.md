@@ -2,7 +2,8 @@
 
 | Slug | Strategy | Status | Registered | Finalized | Decision |
 |------|----------|--------|------------|-----------|----------|
-| [pead-midcap](2026-05-19-pead-midcap.md) | pead_midcap | registered | 2026-05-19 | — | — |
+| [pead-midcap](2026-05-19-pead-midcap.md) | pead_midcap | killed | 2026-05-19 | 2026-05-20 | KILL — Sharpe 0.077, DSR 0.392 (TTM EPS proxy too noisy) |
+| [pead-midcap-v2](2026-05-20-pead-midcap-v2.md) | pead_midcap | registered | 2026-05-20 | — | — |
 
 ## Status legend
 

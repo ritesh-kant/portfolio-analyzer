@@ -42,6 +42,26 @@ from quant.research.holdout_lock import (
 
 logger = logging.getLogger(__name__)
 
+# ── Election regime filter (pre-registered in hypothesis 2026-05-20-pead-midcap-v2.md §5) ──
+# Skip all announcement dates within ±45 calendar days of a Lok Sabha general election.
+# Fold 3 in v1 (Feb–May 2024, pre-election) showed mean drift of −138 bps — a clear
+# regime break that the model cannot learn.  Filtering is pre-processing, not a feature.
+#
+# Windows: [election_start − 45 days, election_end + 45 days]
+#   2019: first phase 2019-04-11, results 2019-05-23 → window 2019-02-25 → 2019-07-07
+#   2024: first phase 2024-04-19, results 2024-06-04 → window 2024-03-05 → 2024-07-19
+_ELECTION_WINDOWS: list[tuple[pd.Timestamp, pd.Timestamp]] = [
+    (pd.Timestamp("2019-02-25"), pd.Timestamp("2019-07-07")),
+    (pd.Timestamp("2024-03-05"), pd.Timestamp("2024-07-19")),
+]
+
+
+def is_election_period(date: str | pd.Timestamp) -> bool:
+    """Return True if date falls within a pre-registered election filter window."""
+    ts = pd.Timestamp(date)
+    return any(start <= ts <= end for start, end in _ELECTION_WINDOWS)
+
+
 # ── Entry filter (pre-registered in hypothesis §1) ────────────────────────────
 
 # Only take a trade if:
@@ -184,6 +204,8 @@ def select_candidates(
     return candidates
 
 
+_MODEL_SCORE_THRESHOLD = 0.50  # calibrated P(5d return > 40bps) — natural binary threshold
+
 def simulate_trades(
     announcement_dates: list[str],
     earnings_df: pd.DataFrame,
@@ -192,6 +214,7 @@ def simulate_trades(
     hold_days: int = 5,
     slippage_scale: float = 1.0,
     rng: np.random.Generator | None = None,
+    model_scores: dict[tuple[str, str], float] | None = None,
 ) -> list[TradeRecord]:
     """Simulate PEAD trades across a set of announcement dates.
 
@@ -212,6 +235,12 @@ def simulate_trades(
         Multiplier on nominal slippage (1.0 = nominal; 2.0 = cost-stress).
     rng : np.random.Generator | None
         For stochastic slippage draws (cost-stress simulation).
+    model_scores : dict[(symbol, date_str) -> p_win] | None
+        Calibrated model probabilities from CalibratedLGBM.  When provided,
+        only trades where p_win >= _MODEL_SCORE_THRESHOLD are taken.  The
+        1-std EPS gate in select_candidates() still runs as a first pass;
+        model_scores is a second filter on the surviving candidates.
+        When None the 1-std EPS gate alone decides trade selection (v1 behaviour).
 
     Returns
     -------
@@ -219,6 +248,7 @@ def simulate_trades(
     """
     trades: list[TradeRecord] = []
 
+    election_skipped = 0
     for ann_date in announcement_dates:
         try:
             assert_no_holdout_access(ann_date)
@@ -226,11 +256,21 @@ def simulate_trades(
             logger.warning("Skipping hold-out date %s in simulate_trades", ann_date)
             continue
 
+        if is_election_period(ann_date):
+            election_skipped += 1
+            continue
+
         candidates = select_candidates(
             ann_date, earnings_df, ohlcv, midcap150_universe
         )
 
         for sym in candidates:
+            # Second filter: model score gate (if model was trained)
+            if model_scores is not None:
+                p_win = model_scores.get((sym, ann_date), 0.0)
+                if p_win < _MODEL_SCORE_THRESHOLD:
+                    continue
+
             ann_ts = pd.Timestamp(ann_date)
 
             if isinstance(ohlcv.index, pd.MultiIndex):
@@ -270,6 +310,10 @@ def simulate_trades(
 
             net_return = gross_return - total_cost
 
+            p_win = (
+                model_scores.get((sym, ann_date), 0.5)
+                if model_scores is not None else 0.5
+            )
             trades.append(TradeRecord(
                 symbol=sym,
                 entry_date=ann_date,
@@ -279,8 +323,11 @@ def simulate_trades(
                 gross_return=gross_return,
                 net_return=net_return,
                 slippage_draw=slip_draw,
+                p_win=p_win,
             ))
 
+    if election_skipped:
+        logger.info("Election filter: skipped %d announcement dates", election_skipped)
     return trades
 
 
@@ -349,6 +396,7 @@ def run_anti_strategy(
     ohlcv: pd.DataFrame,
     midcap150_universe: list[str],
     n_trials: int = 1,
+    model_scores: dict | None = None,
 ) -> dict:
     """Backtest the inverse of the PEAD signal (plan §3.1, rule 5).
 
@@ -360,7 +408,8 @@ def run_anti_strategy(
     for the original strategy to pass.
     """
     trades = simulate_trades(
-        announcement_dates, earnings_df, ohlcv, midcap150_universe
+        announcement_dates, earnings_df, ohlcv, midcap150_universe,
+        model_scores=model_scores,
     )
 
     # Invert returns (short position)
@@ -380,6 +429,7 @@ def run_cost_stress(
     midcap150_universe: list[str],
     n_trials: int = 1,
     seed: int = 42,
+    model_scores: dict | None = None,
 ) -> dict:
     """Re-simulate with slippage from t-dist(df=4, scale=2× nominal) (plan §3.1, rule 5).
 
@@ -389,7 +439,7 @@ def run_cost_stress(
     rng = np.random.default_rng(seed)
     trades = simulate_trades(
         announcement_dates, earnings_df, ohlcv, midcap150_universe,
-        slippage_scale=2.0, rng=rng,
+        slippage_scale=2.0, rng=rng, model_scores=model_scores,
     )
     metrics = compute_gate_metrics(trades, n_trials=n_trials)
     metrics["is_cost_stress"] = True
