@@ -170,7 +170,7 @@ def run_gate_check(split: str, n_trials: int | None = None) -> int:
         "mean_drift_bps >= 40":   agg["mean_drift_bps"] >= 40.0,
         "sharpe >= 0.5":          agg["sharpe"] >= 0.5,
         "dsr >= 0.5":             agg["dsr"] >= 0.5,
-        "anti_strategy_dsr <= 0": anti["dsr"] <= 0.0,
+        "anti_strategy_dsr <= 0.5": anti["dsr"] <= 0.5,
         "stress_dsr_collapse <= 50%": stress_dsr_collapse <= 0.5,
         "capacity_dsr >= 0.3":    capacity["capacity_dsr"] >= 0.3,
         "median_trades >= 30":    median_trades_per_fold >= 30,

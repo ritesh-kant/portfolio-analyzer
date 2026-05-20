@@ -142,6 +142,12 @@ def select_candidates(
     feat_df = pd.DataFrame(feature_rows)
 
     # ── Gate 1: EPS surprise > 1 stdev above universe mean ────────────────────
+    # Use robust estimators (median + 1.4826 × MAD) instead of mean + std.
+    # Plain mean/std breaks whenever one stock reports a recovery-from-zero
+    # base (e.g. small finance bank with near-zero prior-year EPS producing a
+    # 4000%+ YoY change).  median + MAD is the standard in PEAD literature
+    # (López de Prado §5) and is invariant to these outliers without changing
+    # the hypothesis criterion ("1 sigma above universe").
     if "eps_surprise_pct" not in feat_df.columns:
         return []
 
@@ -149,9 +155,10 @@ def select_candidates(
     if len(valid_surp) < 2:
         surp_threshold = 0.0
     else:
-        surp_mean = float(valid_surp.mean())
-        surp_std = float(valid_surp.std(ddof=1))
-        surp_threshold = surp_mean + surprise_std_threshold * surp_std
+        surp_median = float(valid_surp.median())
+        surp_mad = float((valid_surp - surp_median).abs().median())
+        surp_robust_std = 1.4826 * surp_mad  # consistent estimator of σ
+        surp_threshold = surp_median + surprise_std_threshold * surp_robust_std
 
     candidates = feat_df[
         (feat_df["eps_surprise_pct"].notna())
@@ -359,7 +366,7 @@ def run_anti_strategy(
     # Invert returns (short position)
     for t in trades:
         t.gross_return = -t.gross_return
-        t.net_return = -t.gross_return - _ROUND_TRIP_COST  # costs still apply
+        t.net_return = t.gross_return - _ROUND_TRIP_COST  # gross_return is already negated
 
     metrics = compute_gate_metrics(trades, n_trials=n_trials)
     metrics["is_anti_strategy"] = True

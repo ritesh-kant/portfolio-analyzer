@@ -87,53 +87,74 @@ def compute_naive_surprise(
         return None, None
 
     sym_df = sym_df.sort_values("business_date")
-    # Only use records available before this announcement
-    sym_df = sym_df[pd.to_datetime(sym_df["business_date"]) < pd.Timestamp(announcement_date)]
 
-    current = sym_df[
-        pd.to_datetime(sym_df["business_date"]) == pd.Timestamp(announcement_date)
+    # Find the announcement row (search the full earnings_df, not the pre-filtered one)
+    all_on_date = earnings_df[
+        (earnings_df["symbol"] == symbol)
+        & (pd.to_datetime(earnings_df["business_date"]) == pd.Timestamp(announcement_date))
     ]
-    if current.empty:
-        # Try looser match: find the row for this announcement
-        all_on_date = earnings_df[
-            (earnings_df["symbol"] == symbol)
-            & (pd.to_datetime(earnings_df["business_date"]) == pd.Timestamp(announcement_date))
-        ]
-        if all_on_date.empty:
-            return None, None
-        current = all_on_date
+    if all_on_date.empty:
+        return None, None
 
-    current_row = current.iloc[-1]
-    cur_q = current_row.get("fiscal_quarter")
-    cur_fy = current_row.get("fiscal_year")
+    current_row = all_on_date.iloc[-1]
     cur_eps = current_row.get("eps_reported")
     cur_rev = current_row.get("revenue_cr")
 
-    # Find same quarter one fiscal year ago
-    prev_fy = (cur_fy - 1) if cur_fy is not None else None
-    if cur_q is None or prev_fy is None:
-        return None, None
-
-    prev_mask = (
-        (sym_df["symbol"] == symbol)
-        & (sym_df["fiscal_quarter"] == cur_q)
-        & (sym_df["fiscal_year"] == prev_fy)
-    )
-    prev_rows = sym_df[prev_mask]
-    if prev_rows.empty:
-        return None, None
-
-    prev_row = prev_rows.iloc[-1]
-    prev_eps = prev_row.get("eps_reported")
-    prev_rev = prev_row.get("revenue_cr")
+    # Fast path: use pre-computed yoy columns from the parquet (always PIT-correct)
+    yoy_eps_prev = current_row.get("yoy_eps_prev")
+    yoy_rev_prev = current_row.get("yoy_revenue_prev")
 
     eps_surprise = None
-    if cur_eps is not None and prev_eps is not None and abs(float(prev_eps)) > 1e-6:
-        eps_surprise = (float(cur_eps) - float(prev_eps)) / abs(float(prev_eps))
+    if cur_eps is not None and yoy_eps_prev is not None:
+        try:
+            denom = abs(float(yoy_eps_prev))
+            if denom > 1e-6:
+                eps_surprise = (float(cur_eps) - float(yoy_eps_prev)) / denom
+        except (TypeError, ValueError):
+            pass
 
     rev_surprise = None
-    if cur_rev is not None and prev_rev is not None and abs(float(prev_rev)) > 1e-6:
-        rev_surprise = (float(cur_rev) - float(prev_rev)) / abs(float(prev_rev))
+    if cur_rev is not None and yoy_rev_prev is not None:
+        try:
+            denom = abs(float(yoy_rev_prev))
+            if denom > 1e-6:
+                rev_surprise = (float(cur_rev) - float(yoy_rev_prev)) / denom
+        except (TypeError, ValueError):
+            pass
+
+    # Fallback: derive from prior-year rows in earnings_df if pre-computed columns missing
+    if eps_surprise is None or rev_surprise is None:
+        # Only use records available before this announcement (PIT-safe)
+        hist = sym_df[pd.to_datetime(sym_df["business_date"]) < pd.Timestamp(announcement_date)]
+        cur_q = current_row.get("fiscal_quarter")
+        cur_fy = current_row.get("fiscal_year")
+        prev_fy = (cur_fy - 1) if cur_fy is not None else None
+
+        if cur_q is not None and prev_fy is not None:
+            prev_mask = (
+                (hist["symbol"] == symbol)
+                & (hist["fiscal_quarter"] == cur_q)
+                & (hist["fiscal_year"] == prev_fy)
+            )
+            prev_rows = hist[prev_mask]
+            if not prev_rows.empty:
+                prev_row = prev_rows.iloc[-1]
+                prev_eps = prev_row.get("eps_reported")
+                prev_rev = prev_row.get("revenue_cr")
+                if eps_surprise is None and cur_eps is not None and prev_eps is not None:
+                    try:
+                        denom = abs(float(prev_eps))
+                        if denom > 1e-6:
+                            eps_surprise = (float(cur_eps) - float(prev_eps)) / denom
+                    except (TypeError, ValueError):
+                        pass
+                if rev_surprise is None and cur_rev is not None and prev_rev is not None:
+                    try:
+                        denom = abs(float(prev_rev))
+                        if denom > 1e-6:
+                            rev_surprise = (float(cur_rev) - float(prev_rev)) / denom
+                    except (TypeError, ValueError):
+                        pass
 
     return eps_surprise, rev_surprise
 

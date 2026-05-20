@@ -140,10 +140,12 @@ class TestReadHoldout:
             read_holdout("pead_midcap", tmp_path / "nonexistent.md")
 
     def test_succeeds_with_correct_env_and_final_hypothesis(
-        self, valid_hypothesis: Path, monkeypatch
+        self, valid_hypothesis: Path, tmp_path: Path, monkeypatch
     ):
         """With correct env var and final hypothesis, read_holdout must succeed."""
         monkeypatch.setenv("QUANT_HOLDOUT_UNLOCK", "pead_midcap")
+        # Isolate from the real MLflow store so no prior run is visible
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path}/mlflow.db")
 
         # Should not raise
         read_holdout("pead_midcap", valid_hypothesis)
@@ -153,6 +155,8 @@ class TestReadHoldout:
         f = tmp_path / "hyp.md"
         f.write_text("Final: True\n\nSome hypothesis content.", encoding="utf-8")
         monkeypatch.setenv("QUANT_HOLDOUT_UNLOCK", "strategy_x")
+        # Isolate from the real MLflow store
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path}/mlflow2.db")
 
         # Should not raise
         read_holdout("strategy_x", f)

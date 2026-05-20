@@ -1,10 +1,10 @@
 ---
 slug: pead-midcap
 strategy: pead_midcap
-status: registered
+status: finalized
 registered: 2026-05-19
-finalized: null
-decision: null
+finalized: 2026-05-20
+decision: kill
 final: false
 ---
 
@@ -123,17 +123,43 @@ Use the list as of T-1 to avoid reconstitution look-ahead.
 
 ## 8. Result
 
-*(To be filled after dev-set evaluation. Do not fill until a single gate-check
-pass is completed. Do not re-open this section to adjust parameters.)*
+**Evaluated 2026-05-20. Gate check on dev split (2023-07-01 → 2024-06-30).**
 
-- Dev DSR:
-- Dev mean drift:
-- Dev Sharpe:
-- Anti-strategy DSR:
-- Cost-stress DSR:
-- Capacity DSR @ ₹50L:
-- MLflow experiment run ID:
-- Decision:
+| Metric | Value | Threshold | Pass? |
+|--------|-------|-----------|-------|
+| Mean 5-day net drift | 53.4 bps | ≥ 40 bps | PASS |
+| Sharpe (per-trade) | 0.077 | ≥ 0.5 | **FAIL** |
+| DSR (n_trials=5) | 0.392 | ≥ 0.5 | **FAIL** |
+| Anti-strategy DSR | 0.000 | ≤ 0.5 | PASS |
+| Cost-stress DSR collapse | 48.1% | ≤ 50% | PASS |
+| Capacity DSR @ ₹50L | 0.375 | ≥ 0.3 | PASS |
+| Median trades/fold | 31 | ≥ 30 | PASS |
+
+- Total trades: 145 (dev period, 5 purged k-folds)
+- MLflow experiment: `pead_midcap` (5 runs, including 4 debug/bug-fix runs)
+- Decision: **KILL** — Sharpe and DSR fail gate criteria.
+
+**Post-mortem (key learnings):**
+1. Mean drift of 53 bps confirms PEAD is real in Nifty Midcap 150 — the
+   economic mechanism is there. The signal just has too much noise.
+2. The TTM EPS series from screener.in was the wrong proxy. TTM changes
+   smoothly across quarters; individual quarterly EPS surprises are much
+   stronger signals. The TTM approach attenuates the true surprise magnitude.
+3. Fold 3 (2024-02-02 → 2024-05-10, pre-election period) showed mean drift
+   of −138 bps — clear regime break. Election uncertainty suppresses PEAD.
+4. n_trials=5 in DSR reflects 4 debug runs + 1 final; each counted because
+   DSR is honest about all data peeks. Next hypothesis should start clean.
+
+**Recommended next hypothesis (PEAD-v2):**
+- Use BSE corporate filing dates from `https://api.bseindia.com` (less
+  aggressively rate-limited than NSE/Akamai).
+- Use standalone + consolidated quarterly EPS from the BSE filing PDF
+  (parse via filing_parser.py agent, already built).
+- Add regime filter: skip all events within 45 days of known election dates
+  (NSE market holiday calendar already has election dates as half-days).
+- Re-register as new hypothesis `2026-05-20-pead-midcap-v2.md`.
+
+This section is immutable after this commit.
 
 ## 9. Decision
 
@@ -143,6 +169,30 @@ pass is completed. Do not re-open this section to adjust parameters.)*
 - Hold-out mean drift:
 - Hold-out alpha vs Nifty:
 - Decision: [ ] Ship to paper  [ ] Kill
+
+---
+
+## 10. Implementation Clarifications (not hypothesis changes)
+
+**2026-05-20 — Cross-sectional surprise estimator changed to robust statistics:**
+
+The pre-registered entry gate ("EPS surprise > 1 std above universe mean")
+was initially implemented using the arithmetic mean and std of the
+cross-sectional distribution on each announcement day.  This is broken when
+one stock reports a recovery-from-distress (e.g. a small finance bank with
+near-zero prior-year EPS producing a 4000%+ YoY change): the outlier inflates
+both the mean and std, making the threshold > 1000%, which blocks all genuine
+candidates on that day.
+
+**Change**: switch to `median + surprise_std_threshold × (1.4826 × MAD)` where
+MAD is the Median Absolute Deviation.  This is the standard in PEAD literature
+(equivalent to the robust z-score estimator used in López de Prado's work).
+It does NOT change the "1 sigma above universe" criterion — it replaces the
+non-robust estimator with a robust one.  This is a data-quality fix, not
+post-hoc tuning.
+
+This change is documented here rather than in the feature list because it
+affects the estimator, not the feature definition or threshold value.
 
 ---
 

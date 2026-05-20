@@ -452,6 +452,19 @@ def load_earnings(
         snap_ts = pd.Timestamp(snapshot_at)
         df = df[pd.to_datetime(df["as_of_timestamp"]).dt.tz_localize(None) <= snap_ts.tz_localize(None)]
 
+    # Deduplicate per quarter: keep the LAST announcement for each
+    # (symbol, fiscal_quarter, fiscal_year).  screener.in TTM series can
+    # register 2 dates for the same quarter (preliminary + revised), which
+    # would generate two PEAD signals on the same underlying event.  Keeping
+    # only the final announcement is correct PIT behaviour (the market observed
+    # the most recent version).
+    if not df.empty and {"fiscal_quarter", "fiscal_year"}.issubset(df.columns):
+        df = (
+            df.sort_values("business_date")
+              .drop_duplicates(subset=["symbol", "fiscal_quarter", "fiscal_year"], keep="last")
+              .reset_index(drop=True)
+        )
+
     return df.reset_index(drop=True)
 
 
