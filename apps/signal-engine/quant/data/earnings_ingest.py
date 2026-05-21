@@ -478,7 +478,12 @@ def compute_yoy_columns(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     df = df.sort_values(["symbol", "fiscal_year", "fiscal_quarter"]).copy()
-    lookup = df.set_index(["symbol", "fiscal_quarter", "fiscal_year"])
+    # Build lookup deduped on the key so loc returns a Series, not a DataFrame.
+    # Keep last (most recently patched row wins — e.g. quarterly HTML over TTM).
+    lookup = (
+        df.drop_duplicates(subset=["symbol", "fiscal_quarter", "fiscal_year"], keep="last")
+        .set_index(["symbol", "fiscal_quarter", "fiscal_year"])
+    )
 
     yoy_eps, yoy_rev = [], []
     for _, row in df.iterrows():
@@ -491,8 +496,13 @@ def compute_yoy_columns(df: pd.DataFrame) -> pd.DataFrame:
             continue
         try:
             prev = lookup.loc[(sym, q, fy - 1)]
-            prev_eps = float(prev["eps_reported"]) if prev["eps_reported"] is not None and not pd.isna(prev["eps_reported"]) else None
-            prev_rev = float(prev["revenue_cr"]) if prev["revenue_cr"] is not None and not pd.isna(prev["revenue_cr"]) else None
+            # loc returns a DataFrame when multiple rows share the key; take the last
+            if isinstance(prev, pd.DataFrame):
+                prev = prev.iloc[-1]
+            eps_val = prev["eps_reported"]
+            rev_val = prev["revenue_cr"]
+            prev_eps = float(eps_val) if eps_val is not None and not pd.isna(eps_val) else None
+            prev_rev = float(rev_val) if rev_val is not None and not pd.isna(rev_val) else None
         except KeyError:
             prev_eps, prev_rev = None, None
         yoy_eps.append(prev_eps)
