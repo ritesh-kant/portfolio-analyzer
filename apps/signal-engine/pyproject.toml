@@ -29,6 +29,7 @@ dependencies = [
     "scipy>=1.13.0",
     "lightgbm>=4.3.0",
     "mlflow>=2.14.0",
+    "pdfplumber>=0.11.9",
 ]
 
 [project.optional-dependencies]

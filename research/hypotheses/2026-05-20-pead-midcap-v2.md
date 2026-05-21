@@ -1,10 +1,10 @@
 ---
 slug: pead-midcap-v2
 strategy: pead_midcap
-status: registered
+status: killed
 registered: 2026-05-20
-finalized: ~
-decision: ~
+finalized: 2026-05-21
+decision: killed — dev gate failure (6 of 7 criteria failed)
 supercedes: pead-midcap (2026-05-19)
 ---
 
@@ -178,26 +178,45 @@ _ELECTION_WINDOWS = [
 
 ## 9. Result
 
-*(To be filled after dev gate evaluation)*
+Dev gate run: 2026-05-21. Split: 2023-07-01 → 2024-06-30.
+Trade selection: LightGBM (oof_brier=0.2471, n_trials=4).
+Data state: 31.5% BSE quarterly EPS in training window, 65.3% TTM remaining.
 
 | Metric | Value | Threshold | Pass? |
 |--------|-------|-----------|-------|
-| Mean 5-day net drift | — | ≥ 40 bps | — |
-| Sharpe (per-trade) | — | ≥ 0.5 | — |
-| DSR (n_trials=?) | — | ≥ 0.5 | — |
-| Anti-strategy DSR | — | ≤ 0 | — |
-| Cost-stress DSR collapse | — | ≤ 50% | — |
-| Capacity DSR @ ₹50L | — | ≥ 0.3 | — |
-| Median trades/fold | — | ≥ 25 | — |
+| Total trades | 3 | — | — |
+| Mean 5-day net drift | −71.4 bps | ≥ 40 bps | FAIL |
+| Sharpe (per-trade) | −0.336 | ≥ 0.5 | FAIL |
+| DSR (n_trials=4) | 0.000 | ≥ 0.5 | FAIL |
+| Anti-strategy DSR | 0.000 | ≤ 0.5 | PASS |
+| Cost-stress DSR collapse | 100.0% | ≤ 50% | FAIL |
+| Capacity DSR @ ₹50L | 0.000 | ≥ 0.3 | FAIL |
+| Median trades/fold | 1 | ≥ 25 | FAIL |
+
+**Root cause — training data quality failure:**
+
+The LightGBM model trained on a parquet where 65.3% of training events still
+had TTM EPS (not quarterly). BSE PDF ingest achieved only 31.5% quarterly
+coverage for the 2015–2023 training window. The model's oof_brier (0.2471)
+is barely better than random (0.25), confirming it learned no signal from
+the mixed-distribution training set. It selected 3 dev events with negative
+mean drift (−71.4 bps) — opposite of the predicted direction.
+
+**Infrastructure notes (for next strategy):**
+- `merge_with_existing_parquet` has a `drop_duplicates(symbol,fq,fy)` at write
+  time that collapsed 4,128 preliminary/revised announcement pairs, losing 2,018
+  rows from the parquet. Fix before Strategy B.
+- BSE PDF format is inconsistent pre-2018; extraction rate drops below 30%.
+  Coverage was insufficient to retrain the model on quarterly features.
 
 ## 10. Decision
 
-*(Filled after hold-out, if and only if all dev gate criteria pass)*
+**KILLED — dev gate triggered on 2026-05-21.**
+6 of 7 gate criteria failed. Hold-out not evaluated (protocol prohibits peeking
+after a kill).
 
-- Hold-out DSR:
-- Hold-out mean drift:
-- Hold-out alpha vs Nifty:
-- Decision: [ ] Ship to paper  [ ] Kill
+Per §4 of the registered hypothesis: *"killed without appeal."*
+Next: Strategy B — Index Reconstitution Arbitrage (plan §5.2).
 
 ---
 
