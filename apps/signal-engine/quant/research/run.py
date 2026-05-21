@@ -1,7 +1,8 @@
-"""Gate-check CLI for Strategy A (PEAD).  Month 3.
+"""Gate-check CLI for quantitative strategies.
 
 Usage:
   python -m quant.research.run --strategy pead_midcap --split dev
+  python -m quant.research.run --strategy index_recon --split dev
   python -m quant.research.run --strategy pead_midcap --split train
 
 The --split argument must be "train" or "dev".  The hold-out split is
@@ -225,7 +226,7 @@ def _build_model_scores(
     return scores
 
 
-def run_gate_check(split: str, n_trials: int | None = None) -> int:
+def run_gate_check(split: str, n_trials: int | None = None, no_model: bool = False) -> int:
     """Run the full gate-check sequence for the PEAD strategy on a data split.
 
     Returns
@@ -285,7 +286,7 @@ def run_gate_check(split: str, n_trials: int | None = None) -> int:
     model: CalibratedLGBM | None = None
     model_scores: dict | None = None
 
-    if split == "dev":
+    if split == "dev" and not no_model:
         train_start, train_end = SPLIT_DATES["train"]
         logger.info("Building training dataset (%s → %s) for LightGBM ...", train_start, train_end)
         try:
@@ -389,7 +390,9 @@ def run_gate_check(split: str, n_trials: int | None = None) -> int:
 
     # ── Print gate report ──────────────────────────────────────────────────────
     model_desc = (
-        f"LightGBM oof_brier={model.oof_brier:.4f}" if model else "rule-based (no model)"
+        f"LightGBM oof_brier={model.oof_brier:.4f}"
+        if model else
+        ("rule-based (--no-model)" if no_model else "rule-based (model training failed/skipped)")
     )
 
     print("\n" + "=" * 60)
@@ -445,16 +448,156 @@ def run_gate_check(split: str, n_trials: int | None = None) -> int:
     return 0 if all_pass else 1
 
 
+def run_gate_check_index_recon(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check sequence for the Index Reconstitution strategy.
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.nse_index_changes import load_events
+    from quant.strategies.index_recon import (
+        compute_gate_metrics as recon_gate_metrics,
+        run_anti_strategy as recon_anti,
+        run_cost_stress as recon_stress,
+        simulate_trades as recon_simulate,
+    )
+
+    _RECON_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-21-index-recon-arb.md"
+    )
+    _RECON_EXPERIMENT = "index_recon_v1"
+
+    if split not in SPLIT_DATES:
+        logger.error("Invalid split: %r. Choose 'train' or 'dev'.", split)
+        return 2
+
+    start, end = SPLIT_DATES[split]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_RECON_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="",
+                    max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=index_recon split=%s trials=%d", split, n_trials)
+
+    try:
+        events = load_events(start=start, end=end, event_type="inclusion")
+    except FileNotFoundError as exc:
+        logger.error("Recon events file missing: %s", exc)
+        return 2
+
+    if events.empty:
+        logger.error(
+            "No inclusion events for %s → %s.  Populate nse_recon_events.csv first.",
+            start, end,
+        )
+        return 2
+
+    try:
+        ohlcv = pit_load(symbol=None, start=start, end=end)
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv.empty:
+        logger.error("No OHLCV data for %s → %s.", start, end)
+        return 2
+
+    # ── Simulate trades ────────────────────────────────────────────────────────
+    trades = recon_simulate(events, ohlcv)
+    agg = recon_gate_metrics(trades, n_trials=n_trials)
+
+    # ── Anti-strategy ──────────────────────────────────────────────────────────
+    anti = recon_anti(events, ohlcv, n_trials=n_trials)
+
+    # ── Cost-stress ────────────────────────────────────────────────────────────
+    stress = recon_stress(events, ohlcv, n_trials=n_trials)
+    stress_dsr_collapse = (
+        (agg["dsr"] - stress["dsr"]) / agg["dsr"]
+        if agg["dsr"] > 1e-6
+        else 1.0
+    )
+
+    # ── Gate evaluation ────────────────────────────────────────────────────────
+    gates = {
+        "mean_return_bps >= 100":     agg["mean_return_bps"] >= 100.0,
+        "win_rate >= 50%":            agg["win_rate"] >= 0.5,
+        "sharpe >= 0.5":              agg["sharpe"] >= 0.5,
+        "dsr >= 0.5":                 agg["dsr"] >= 0.5,
+        "anti_strategy_return <= 0":  anti["mean_return_bps"] <= 0.0,
+        "stress_dsr_collapse <= 50%": stress_dsr_collapse <= 0.5,
+        "total_dev_events >= 15":     agg["n_trades"] >= 15,
+    }
+    all_pass = all(gates.values())
+
+    # ── Gate report ────────────────────────────────────────────────────────────
+    print("\n" + "=" * 60)
+    print(f"Index Recon v1 Gate Report — split={split}")
+    print("=" * 60)
+    print(f"  Total trades:          {agg['n_trades']}")
+    print(f"  Mean return (bps):     {agg['mean_return_bps']:.1f}")
+    print(f"  Win rate:              {agg['win_rate']:.1%}")
+    print(f"  Sharpe:                {agg['sharpe']:.3f}")
+    print(f"  DSR (n_trials={n_trials}):    {agg['dsr']:.3f}")
+    print(f"  Anti-strategy return:  {anti['mean_return_bps']:.1f} bps")
+    print(f"  Cost-stress DSR:       {stress['dsr']:.3f} (collapse {stress_dsr_collapse:.1%})")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 60 + "\n")
+
+    # ── MLflow logging ─────────────────────────────────────────────────────────
+    try:
+        mlflow.set_experiment(_RECON_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "index_recon_v1"}):
+            mlflow.log_metrics({
+                "mean_return_bps":      agg["mean_return_bps"],
+                "win_rate":             agg["win_rate"],
+                "sharpe":               agg["sharpe"],
+                "dsr":                  agg["dsr"],
+                "anti_mean_return_bps": anti["mean_return_bps"],
+                "stress_dsr":           stress["dsr"],
+                "stress_dsr_collapse":  stress_dsr_collapse,
+                "n_trials":             float(n_trials),
+                "gate_all_pass":        float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    parser = argparse.ArgumentParser(description="PEAD strategy gate-check runner")
+    parser = argparse.ArgumentParser(description="Strategy gate-check runner")
     parser.add_argument(
         "--strategy",
-        choices=["pead_midcap"],
+        choices=["pead_midcap", "index_recon"],
         required=True,
         help="Strategy to evaluate",
     )
@@ -470,9 +613,20 @@ def main() -> None:
         default=None,
         help="MLflow trial count for DSR (auto-detected from MLflow if not set)",
     )
+    parser.add_argument(
+        "--no-model",
+        action="store_true",
+        help=(
+            "Skip LightGBM training and use the 1-std quarterly EPS gate alone. "
+            "(pead_midcap only)"
+        ),
+    )
     args = parser.parse_args()
 
-    exit_code = run_gate_check(args.split, n_trials=args.n_trials)
+    if args.strategy == "pead_midcap":
+        exit_code = run_gate_check(args.split, n_trials=args.n_trials, no_model=args.no_model)
+    else:
+        exit_code = run_gate_check_index_recon(args.split, n_trials=args.n_trials)
     sys.exit(exit_code)
 
 
