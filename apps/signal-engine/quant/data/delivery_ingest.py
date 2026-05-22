@@ -139,10 +139,15 @@ def _parse_raw(csv_text: str, trading_date: date) -> pd.DataFrame | None:
     Returns None if the CSV is empty or malformed.
     """
     try:
-        df = pd.read_csv(io.StringIO(csv_text), sep=",")
+        df = pd.read_csv(io.StringIO(csv_text), sep=",", on_bad_lines="skip")
     except Exception as exc:
-        logger.warning("CSV parse error for %s: %s", trading_date, exc)
-        return None
+        # Fallback for older pandas (< 1.3) that uses error_bad_lines
+        try:
+            df = pd.read_csv(io.StringIO(csv_text), sep=",", error_bad_lines=False,
+                             warn_bad_lines=False)
+        except Exception:
+            logger.warning("CSV parse error for %s: %s", trading_date, exc)
+            return None
 
     # Strip leading/trailing whitespace from column names
     df.columns = [c.strip() for c in df.columns]
