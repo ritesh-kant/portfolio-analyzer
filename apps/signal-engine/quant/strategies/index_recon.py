@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from quant.data.promoter_pledge import is_pledge_flagged
 from quant.research.holdout_lock import assert_no_holdout_access
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,7 @@ def simulate_trades(
 
     trades: list[TradeRecord] = []
     election_skipped = 0
+    pledge_skipped = 0
     no_entry_skipped = 0
     no_exit_skipped = 0
 
@@ -135,6 +137,13 @@ def simulate_trades(
 
         if is_election_period(ann_ts):
             election_skipped += 1
+            continue
+
+        # ── Strategy C: promoter pledge filter ────────────────────────────────
+        # Fail-open: if pledge data not available, allow the trade.
+        if is_pledge_flagged(sym, ann_ts.date()):
+            pledge_skipped += 1
+            logger.debug("Pledge filter: excluded %s on %s", sym, ann_ts.date())
             continue
 
         # ── Entry: T+1 open ────────────────────────────────────────────────────
@@ -205,6 +214,8 @@ def simulate_trades(
 
     if election_skipped:
         logger.info("Election filter: skipped %d events", election_skipped)
+    if pledge_skipped:
+        logger.info("Pledge filter (Strategy C): skipped %d events", pledge_skipped)
     if no_entry_skipped:
         logger.info("No T+1 entry price: skipped %d events", no_entry_skipped)
     if no_exit_skipped:
