@@ -10,3 +10,7 @@ coverage
 **/__pycache__
 .claude
 .archive/
+
+# Data lake — binary parquet/CSV files; managed outside git
+**/data/lake/
+apps/data/
