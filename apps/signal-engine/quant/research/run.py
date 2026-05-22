@@ -603,6 +603,179 @@ def run_gate_check_index_recon(split: str, n_trials: int | None = None) -> int:
     return 0 if all_pass else 1
 
 
+def run_gate_check_idi(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check sequence for the IDI (Strategy E) strategy.
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.delivery_ingest import load_delivery
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.idi import (
+        compute_gate_metrics as idi_gate_metrics,
+        compute_signals,
+        run_anti_strategy as idi_anti,
+        run_cost_stress as idi_stress,
+        simulate_trades as idi_simulate,
+    )
+
+    _IDI_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-22-institutional-delivery-impulse.md"
+    )
+    _IDI_EXPERIMENT = "idi_v1"
+
+    _IDI_SPLIT_DATES = {
+        "train": ("2020-01-01", "2023-06-30"),
+        "dev":   (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _IDI_SPLIT_DATES:
+        logger.error("Invalid split: %r. Choose 'train', 'dev', or 'holdout'.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout("idi_v1", _IDI_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _IDI_SPLIT_DATES[split]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_IDI_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="",
+                    max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=idi split=%s trials=%d", split, n_trials)
+
+    # ── Load delivery data ────────────────────────────────────────────────────
+    try:
+        delivery = load_delivery(start=start, end=end, series="EQ")
+    except Exception as exc:
+        logger.error("Delivery data load failed: %s", exc)
+        return 2
+
+    if delivery.empty:
+        logger.error(
+            "No delivery data for %s → %s.  Run delivery_ingest first:\n"
+            "  python -m quant.data.delivery_ingest --start %s --end %s",
+            start, end, start, end,
+        )
+        return 2
+
+    # ── Load OHLCV for entry/exit pricing ─────────────────────────────────────
+    try:
+        ohlcv = pit_load(symbol=None, start=start, end=end)
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv.empty:
+        logger.error("No OHLCV data for %s → %s.", start, end)
+        return 2
+
+    # ── Compute signals ────────────────────────────────────────────────────────
+    signals = compute_signals(delivery)
+    n_raw_signals = int(signals["signal"].sum())
+    logger.info("Raw signal events in %s → %s: %d", start, end, n_raw_signals)
+
+    if n_raw_signals == 0:
+        logger.error(
+            "Zero signals computed for %s → %s.  "
+            "Check delivery data coverage and signal thresholds.",
+            start, end,
+        )
+        return 2
+
+    # ── Simulate trades ────────────────────────────────────────────────────────
+    trades = idi_simulate(signals, ohlcv)
+    agg = idi_gate_metrics(trades, n_trials=n_trials)
+
+    # ── Anti-strategy ──────────────────────────────────────────────────────────
+    anti = idi_anti(signals, ohlcv, n_trials=n_trials)
+
+    # ── Cost-stress ────────────────────────────────────────────────────────────
+    stress = idi_stress(signals, ohlcv, n_trials=n_trials)
+    stress_dsr_collapse = (
+        (agg["dsr"] - stress["dsr"]) / agg["dsr"]
+        if agg["dsr"] > 1e-6
+        else 1.0
+    )
+
+    # ── Gate evaluation ────────────────────────────────────────────────────────
+    gates = {
+        "mean_return_bps >= 80":      agg["mean_return_bps"] >= 80.0,
+        "win_rate >= 52%":            agg["win_rate"] >= 0.52,
+        "sharpe >= 0.5":              agg["sharpe"] >= 0.5,
+        "dsr >= 0.5":                 agg["dsr"] >= 0.5,
+        "anti_strategy_return <= 0":  anti["mean_return_bps"] <= 0.0,
+        "stress_dsr_collapse <= 50%": stress_dsr_collapse <= 0.5,
+        "total_dev_events >= 80":     agg["n_trades"] >= 80,
+    }
+    all_pass = all(gates.values())
+
+    # ── Gate report ────────────────────────────────────────────────────────────
+    print("\n" + "=" * 60)
+    print(f"IDI v1 Gate Report — split={split}")
+    print("=" * 60)
+    print(f"  Raw signals:           {n_raw_signals}")
+    print(f"  Executed trades:       {agg['n_trades']}")
+    print(f"  Mean return (bps):     {agg['mean_return_bps']:.1f}")
+    print(f"  Win rate:              {agg['win_rate']:.1%}")
+    print(f"  Sharpe:                {agg['sharpe']:.3f}")
+    print(f"  DSR (n_trials={n_trials}):    {agg['dsr']:.3f}")
+    print(f"  Anti-strategy return:  {anti['mean_return_bps']:.1f} bps")
+    print(f"  Cost-stress DSR:       {stress['dsr']:.3f} (collapse {stress_dsr_collapse:.1%})")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 60 + "\n")
+
+    # ── MLflow logging ─────────────────────────────────────────────────────────
+    try:
+        mlflow.set_experiment(_IDI_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "idi_v1"}):
+            mlflow.log_metrics({
+                "raw_signals":          float(n_raw_signals),
+                "mean_return_bps":      agg["mean_return_bps"],
+                "win_rate":             agg["win_rate"],
+                "sharpe":               agg["sharpe"],
+                "dsr":                  agg["dsr"],
+                "anti_mean_return_bps": anti["mean_return_bps"],
+                "stress_dsr":           stress["dsr"],
+                "stress_dsr_collapse":  stress_dsr_collapse,
+                "n_trials":             float(n_trials),
+                "gate_all_pass":        float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -612,7 +785,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Strategy gate-check runner")
     parser.add_argument(
         "--strategy",
-        choices=["pead_midcap", "index_recon"],
+        choices=["pead_midcap", "index_recon", "idi"],
         required=True,
         help="Strategy to evaluate",
     )
@@ -622,9 +795,9 @@ def main() -> None:
         required=True,
         help=(
             "Data split to evaluate on.  "
-            "'holdout' requires: (1) QUANT_HOLDOUT_UNLOCK=index_recon_v1 env var, "
-            "(2) hypothesis file with 'final: true', (3) no prior holdout run in MLflow. "
-            "See holdout_lock.py and plan §3.1 + §14."
+            "'holdout' requires the hold-out lock ceremony: "
+            "QUANT_HOLDOUT_UNLOCK=<strategy_name> env var, "
+            "hypothesis file with 'final: true', and no prior holdout run in MLflow."
         ),
     )
     parser.add_argument(
@@ -645,8 +818,10 @@ def main() -> None:
 
     if args.strategy == "pead_midcap":
         exit_code = run_gate_check(args.split, n_trials=args.n_trials, no_model=args.no_model)
-    else:
+    elif args.strategy == "index_recon":
         exit_code = run_gate_check_index_recon(args.split, n_trials=args.n_trials)
+    else:
+        exit_code = run_gate_check_idi(args.split, n_trials=args.n_trials)
     sys.exit(exit_code)
 
 
