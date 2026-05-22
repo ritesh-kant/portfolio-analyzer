@@ -1,11 +1,13 @@
 ---
 slug: index-recon-arb
 strategy: index_recon
-status: registered
+status: killed
 registered: 2026-05-21
-finalized: ~
-decision: ~
+finalized: 2026-05-22
+holdout_run: 2026-05-22
+decision: killed
 hypothesis_hash: ""
+final: true
 ---
 
 # Hypothesis: Index Reconstitution Arbitrage — Nifty Index Front-Running
@@ -199,26 +201,44 @@ The single trading rule:
 
 ## 10. Result
 
-*(To be filled after dev gate evaluation)*
+*Dev gate evaluated 2026-05-22 on corrected nse_recon_events.csv (36 dev trades)*
 
 | Metric | Value | Threshold | Pass? |
 |--------|-------|-----------|-------|
-| Mean net return | — | ≥ 100 bps | — |
-| Win rate | — | ≥ 50% | — |
-| Sharpe (per-trade) | — | ≥ 0.5 | — |
-| DSR (n_trials=?) | — | ≥ 0.5 | — |
-| Anti-strategy return | — | ≤ 0 | — |
-| Cost-stress DSR collapse | — | ≤ 50% | — |
-| Total dev events | — | ≥ 15 | — |
+| Mean net return | 572.9 bps | ≥ 100 bps | ✓ PASS |
+| Win rate | 63.9% | ≥ 50% | ✓ PASS |
+| Sharpe (per-trade) | 0.526 | ≥ 0.5 | ✓ PASS |
+| DSR (n_trials=6) | 0.971 | ≥ 0.5 | ✓ PASS |
+| Anti-strategy return | −682.9 bps | ≤ 0 | ✓ PASS |
+| Cost-stress DSR collapse | 1.5% | ≤ 50% | ✓ PASS |
+| Total dev events | 36 | ≥ 15 | ✓ PASS |
+
+**ALL 7 GATE CRITERIA PASS** — proceeding to single hold-out evaluation.
 
 ## 11. Decision
 
-*(Filled after hold-out, if and only if all dev gate criteria pass)*
+*Hold-out run: 2026-05-22 — single shot, irreversible.*
 
-- Hold-out DSR:
-- Hold-out mean return:
-- Hold-out alpha vs Nifty:
-- Decision: [ ] Ship to paper  [ ] Kill
+**KILLED — hold-out gate failed on 4 of 7 criteria.**
+
+| Metric | Hold-out value | Threshold | Result |
+|--------|----------------|-----------|--------|
+| Mean net return | 23.5 bps | ≥ 100 bps | ✗ FAIL |
+| Win rate | 60.0% | ≥ 50% | ✓ PASS |
+| Sharpe | 0.065 | ≥ 0.5 | ✗ FAIL |
+| DSR (n_trials=9) | 0.081 | ≥ 0.5 | ✗ FAIL |
+| Anti-strategy return | −133.5 bps | ≤ 0 | ✓ PASS |
+| Cost-stress DSR collapse | 22.0% | ≤ 50% | ✓ PASS |
+| Total hold-out events | 5 | ≥ 15 | ✗ FAIL |
+
+**Root cause analysis (post-mortem, not grounds for revival):**
+1. Hold-out data was Nifty 50-only (6 events, 1 skipped for missing T+1 price). The Sep 2024, Mar 2025, Sep 2025 Nifty Next 50 and Nifty Midcap 150 reconstitution data was never populated into nse_recon_events.csv. The ≥15 events threshold was missed purely due to data incompleteness.
+2. Even the 5 Nifty 50 events that did execute returned only 23.5 bps — below the 100 bps threshold. This is a genuine signal weakness on the highest-cap index, likely reflecting increased front-running by sophisticated participants.
+3. Dev mean return of 572.9 bps was driven largely by Midcap 150 inclusions (higher per-event return due to lower liquidity and less crowded trade). The hold-out tested a degraded version of the strategy.
+
+**Decision: [✗] Kill — per §4, no re-runs, no parameter adjustments.**
+
+*The strategy died partly from data incompleteness and partly from genuine Nifty 50 signal decay. Even a fully-populated hold-out might have passed on Sharpe if Midcap 150 events showed the same dev-period returns — but we cannot know, and the hold-out is spent.*
 
 ---
 

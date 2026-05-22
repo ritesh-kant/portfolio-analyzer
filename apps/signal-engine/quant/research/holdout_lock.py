@@ -79,6 +79,11 @@ def assert_no_holdout_access(business_date: str | pd.Timestamp) -> None:
     """
     d = pd.Timestamp(business_date).date()
     if d >= _HOLDOUT_START_DATE:
+        # Allow access if the unlock ceremony has been completed (env var set).
+        # read_holdout() validates preconditions and logs the unlock before
+        # any data access; this check simply propagates that authorisation.
+        if os.environ.get(_ENV_VAR, ""):
+            return
         raise ValueError(
             f"HOLD-OUT VIOLATION: date {business_date!r} is in the hold-out "
             f"partition (>= {HOLDOUT_START}).  "

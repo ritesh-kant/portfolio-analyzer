@@ -467,11 +467,26 @@ def run_gate_check_index_recon(split: str, n_trials: int | None = None) -> int:
     )
     _RECON_EXPERIMENT = "index_recon_v1"
 
-    if split not in SPLIT_DATES:
-        logger.error("Invalid split: %r. Choose 'train' or 'dev'.", split)
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+
+    _RECON_SPLIT_DATES = {
+        **SPLIT_DATES,
+        "holdout": (HOLDOUT_START, "2026-05-22"),  # present day
+    }
+
+    if split not in _RECON_SPLIT_DATES:
+        logger.error("Invalid split: %r. Choose 'train', 'dev', or 'holdout'.", split)
         return 2
 
-    start, end = SPLIT_DATES[split]
+    # ── Hold-out ceremony (must happen before any data access) ────────────────
+    if split == "holdout":
+        try:
+            read_holdout("index_recon_v1", _RECON_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _RECON_SPLIT_DATES[split]
 
     if n_trials is None:
         try:
@@ -603,9 +618,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--split",
-        choices=["train", "dev"],
+        choices=["train", "dev", "holdout"],
         required=True,
-        help="Data split to evaluate on (hold-out requires a separate ceremony)",
+        help=(
+            "Data split to evaluate on.  "
+            "'holdout' requires: (1) QUANT_HOLDOUT_UNLOCK=index_recon_v1 env var, "
+            "(2) hypothesis file with 'final: true', (3) no prior holdout run in MLflow. "
+            "See holdout_lock.py and plan §3.1 + §14."
+        ),
     )
     parser.add_argument(
         "--n-trials",

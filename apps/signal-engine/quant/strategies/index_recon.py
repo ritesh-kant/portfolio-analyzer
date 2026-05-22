@@ -108,9 +108,13 @@ def simulate_trades(
     if events.empty or ohlcv.empty:
         return []
 
-    # Pre-compute the sorted unique trading days once
+    # Pre-compute the sorted unique trading days once.
+    # business_date in the pit_loader index is datetime.date, not pd.Timestamp,
+    # so we keep them as Timestamps only for comparison then convert back for .loc.
     all_biz_dates = pd.DatetimeIndex(
-        sorted(ohlcv.index.get_level_values("business_date").unique())
+        pd.to_datetime(
+            sorted(ohlcv.index.get_level_values("business_date").unique())
+        )
     )
 
     trades: list[TradeRecord] = []
@@ -139,8 +143,10 @@ def simulate_trades(
             no_entry_skipped += 1
             continue
 
+        # Convert to date for .loc[] — pit_loader indexes by datetime.date
+        entry_key = entry_ts.date()
         try:
-            entry_price = float(ohlcv.loc[(entry_ts, sym), "open"])
+            entry_price = float(ohlcv.loc[(entry_key, sym), "open"])
         except KeyError:
             no_entry_skipped += 1
             continue
@@ -160,8 +166,9 @@ def simulate_trades(
                 continue
             exit_ts = prior[-1]
 
+        exit_key = exit_ts.date()
         try:
-            exit_price = float(ohlcv.loc[(exit_ts, sym), "close"])
+            exit_price = float(ohlcv.loc[(exit_key, sym), "close"])
         except KeyError:
             no_exit_skipped += 1
             continue
@@ -186,8 +193,8 @@ def simulate_trades(
             symbol=sym,
             index_name=str(ev["index_name"]),
             announcement_date=str(ann_ts.date()),
-            effective_date=str(eff_ts.date()),
-            entry_date=str(entry_ts.date()),
+            effective_date=str(exit_key),
+            entry_date=str(entry_key),
             entry_price=entry_price,
             exit_price=exit_price,
             gross_return=gross_return,
