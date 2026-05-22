@@ -776,6 +776,188 @@ def run_gate_check_idi(split: str, n_trials: int | None = None) -> int:
     return 0 if all_pass else 1
 
 
+def run_gate_check_bdm(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check sequence for the BDM (Strategy F) strategy.
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.bulk_deals import load_bulk_deals
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.bdm import (
+        build_events,
+        compute_gate_metrics as bdm_gate_metrics,
+        run_anti_strategy as bdm_anti,
+        run_cost_stress as bdm_stress,
+        simulate_trades as bdm_simulate,
+    )
+
+    _BDM_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-22-bulk-deal-momentum.md"
+    )
+    _BDM_EXPERIMENT = "bdm_v1"
+
+    _BDM_SPLIT_DATES = {
+        "train": ("2015-01-01", "2023-06-30"),
+        "dev":   (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _BDM_SPLIT_DATES:
+        logger.error("Invalid split: %r. Choose 'train', 'dev', or 'holdout'.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout("bdm_v1", _BDM_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _BDM_SPLIT_DATES[split]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_BDM_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="",
+                    max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=bdm split=%s trials=%d", split, n_trials)
+
+    # ── Load bulk deal data ───────────────────────────────────────────────────
+    try:
+        raw_deals = load_bulk_deals(start=start, end=end, side="BUY",
+                                    min_value_cr=1.0)
+    except Exception as exc:
+        logger.error("Bulk deal data load failed: %s", exc)
+        return 2
+
+    if raw_deals.empty:
+        logger.error(
+            "No bulk deal data for %s → %s.  Run bulk_deals ingest first:\n"
+            "  python -m quant.data.bulk_deals --start %s --end %s",
+            start, end, start, end,
+        )
+        return 2
+
+    # ── Load Midcap 150 universe ──────────────────────────────────────────────
+    midcap150 = _load_midcap150()
+    if not midcap150:
+        logger.warning(
+            "midcap150_constituents.csv not found — running on full bulk deal "
+            "universe (no Midcap 150 filter).  Results may overstate edge."
+        )
+
+    # ── Build signal events ───────────────────────────────────────────────────
+    events = build_events(raw_deals, midcap150=midcap150 if midcap150 else None)
+    n_raw_events = len(events)
+    logger.info("Raw BDM signal events in %s → %s: %d", start, end, n_raw_events)
+
+    if n_raw_events == 0:
+        logger.error(
+            "Zero events built for %s → %s.  "
+            "Check bulk deal data coverage and Midcap 150 constituent list.",
+            start, end,
+        )
+        return 2
+
+    # ── Load OHLCV ────────────────────────────────────────────────────────────
+    try:
+        ohlcv = pit_load(symbol=None, start=start, end=end)
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv.empty:
+        logger.error("No OHLCV data for %s → %s.", start, end)
+        return 2
+
+    # ── Simulate trades ───────────────────────────────────────────────────────
+    trades = bdm_simulate(events, ohlcv)
+    agg = bdm_gate_metrics(trades, n_trials=n_trials)
+
+    # ── Anti-strategy ─────────────────────────────────────────────────────────
+    anti = bdm_anti(events, ohlcv, n_trials=n_trials)
+
+    # ── Cost-stress ───────────────────────────────────────────────────────────
+    stress = bdm_stress(events, ohlcv, n_trials=n_trials)
+    stress_dsr_collapse = (
+        (agg["dsr"] - stress["dsr"]) / agg["dsr"]
+        if agg["dsr"] > 1e-6
+        else 1.0
+    )
+
+    # ── Gate evaluation ───────────────────────────────────────────────────────
+    gates = {
+        "mean_return_bps >= 100":     agg["mean_return_bps"] >= 100.0,
+        "win_rate >= 52%":            agg["win_rate"] >= 0.52,
+        "sharpe >= 0.5":              agg["sharpe"] >= 0.5,
+        "dsr >= 0.5":                 agg["dsr"] >= 0.5,
+        "anti_strategy_return <= 0":  anti["mean_return_bps"] <= 0.0,
+        "stress_dsr_collapse <= 50%": stress_dsr_collapse <= 0.5,
+        "total_dev_events >= 40":     agg["n_trades"] >= 40,
+    }
+    all_pass = all(gates.values())
+
+    # ── Gate report ───────────────────────────────────────────────────────────
+    print("\n" + "=" * 60)
+    print(f"BDM v1 Gate Report — split={split}")
+    print("=" * 60)
+    print(f"  Raw events:            {n_raw_events}")
+    print(f"  Executed trades:       {agg['n_trades']}")
+    print(f"  Mean return (bps):     {agg['mean_return_bps']:.1f}")
+    print(f"  Win rate:              {agg['win_rate']:.1%}")
+    print(f"  Sharpe:                {agg['sharpe']:.3f}")
+    print(f"  DSR (n_trials={n_trials}):    {agg['dsr']:.3f}")
+    print(f"  Anti-strategy return:  {anti['mean_return_bps']:.1f} bps")
+    print(f"  Cost-stress DSR:       {stress['dsr']:.3f} (collapse {stress_dsr_collapse:.1%})")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 60 + "\n")
+
+    # ── MLflow logging ────────────────────────────────────────────────────────
+    try:
+        mlflow.set_experiment(_BDM_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "bdm_v1"}):
+            mlflow.log_metrics({
+                "raw_events":           float(n_raw_events),
+                "mean_return_bps":      agg["mean_return_bps"],
+                "win_rate":             agg["win_rate"],
+                "sharpe":               agg["sharpe"],
+                "dsr":                  agg["dsr"],
+                "anti_mean_return_bps": anti["mean_return_bps"],
+                "stress_dsr":           stress["dsr"],
+                "stress_dsr_collapse":  stress_dsr_collapse,
+                "n_trials":             float(n_trials),
+                "gate_all_pass":        float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -785,7 +967,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Strategy gate-check runner")
     parser.add_argument(
         "--strategy",
-        choices=["pead_midcap", "index_recon", "idi"],
+        choices=["pead_midcap", "index_recon", "idi", "bdm"],
         required=True,
         help="Strategy to evaluate",
     )
@@ -820,8 +1002,10 @@ def main() -> None:
         exit_code = run_gate_check(args.split, n_trials=args.n_trials, no_model=args.no_model)
     elif args.strategy == "index_recon":
         exit_code = run_gate_check_index_recon(args.split, n_trials=args.n_trials)
-    else:
+    elif args.strategy == "idi":
         exit_code = run_gate_check_idi(args.split, n_trials=args.n_trials)
+    else:
+        exit_code = run_gate_check_bdm(args.split, n_trials=args.n_trials)
     sys.exit(exit_code)
 
 
