@@ -1,11 +1,11 @@
 ---
 slug: institutional-delivery-impulse
 strategy: idi
-status: active
+status: killed
 registered: 2026-05-22
-finalized: ~
-decision: ~
-final: false
+finalized: 2026-05-22
+decision: killed
+final: true
 type: quantitative_signal
 standalone: true
 ---
@@ -349,11 +349,59 @@ except ValueError:
 
 ## 12. Result
 
-*(To be filled after dev gate run)*
+*Dev gate evaluated 2026-05-22 (577 executed trades from 925 raw signals, dev period 2023-07-01 → 2024-06-30)*
+
+| Metric | Value | Threshold | Pass? |
+|--------|-------|-----------|-------|
+| Mean net return | −43.9 bps | ≥ 80 bps | ✗ FAIL |
+| Win rate | 43.8% | ≥ 52% | ✗ FAIL |
+| Sharpe (per-trade) | −0.053 | ≥ 0.5 | ✗ FAIL |
+| DSR (n_trials=1) | 0.087 | ≥ 0.5 | ✗ FAIL |
+| Anti-strategy return | −66.1 bps | ≤ 0 | ✓ PASS |
+| Cost-stress DSR collapse | 90.7% | ≤ 50% | ✗ FAIL |
+| Total dev events | 577 | ≥ 80 | ✓ PASS |
+
+**5 of 7 gate criteria fail. Strategy killed on dev gate.**
 
 ## 13. Decision
 
-*(To be filled after hold-out run)*
+*Dev gate run: 2026-05-22 — single evaluation, irreversible.*
+
+**KILLED — dev gate failed on 5 of 7 criteria.**
+
+**Root cause analysis (post-mortem, not grounds for revival):**
+
+1. **Signal has no directional edge.** Both the long strategy (−43.9 bps) and the short
+   anti-strategy (−66.1 bps) lose money. When both directions lose, transaction costs
+   dominate and the gross signal is effectively noise — the delivery % spike has no
+   predictive power over T+1 to T+5 in this universe and period.
+
+2. **Win rate below coin-flip (43.8%).** Not merely below the 52% gate — the signal
+   slightly anti-predicts 5-day direction. This is consistent with the short-term
+   reversal pattern identified in earlier exploratory work: Midcap 150 shows mean
+   reversion at 5-day horizons regardless of delivery confirmation.
+
+3. **Cost model too punishing for 5-day hold.** 55 bps round-trip over 5 trading days
+   = ~11 bps/day drag. A signal with near-zero gross edge cannot survive this cost
+   regardless of threshold tuning.
+
+4. **Kannan et al. (2018) does not replicate in this sub-universe/period.** The
+   academic evidence was on the BSE 500 universe (2010–2018). Midcap 150 in the
+   post-COVID regime (2020–2024) appears to have different microstructure — likely
+   higher retail participation and lower institutional block-trade prevalence,
+   making delivery % a noisier signal.
+
+**Decision: [✗] Kill — per §4, no re-runs, no parameter adjustments.**
+
+*The signal idea was sound in theory but did not survive empirical validation.
+A future hypothesis could explore delivery % at longer exit horizons (T+10, T+20)
+where the short-term reversal subsides — but that would require a new pre-registered
+hypothesis with a new falsification criterion, registered before any experiment begins.*
+
+---
+
+*Registered: 2026-05-22 by Ritesh Kant. Immutable after this commit.
+Changes to §4 (falsification criteria) after this commit are process violations (plan §3.3).*
 
 ---
 
