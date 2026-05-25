@@ -2475,6 +2475,150 @@ def run_gate_check_n(split: str, n_trials: int | None = None) -> int:
     return 0 if all_pass else 1
 
 
+def run_gate_check_o(split: str) -> int:
+    """Run the portfolio-level gate check for Strategy O (BDM Portfolio).
+
+    Evaluates the equal-weight portfolio of all concurrent bulk deal momentum
+    trades.  The primary metric is annualised portfolio Sharpe from the daily
+    return series — NOT per-trade Sharpe.
+
+    n_trials for DSR is pre-registered as 13 (floor(260 dev days / 20 hold days)).
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.bulk_deals import load_bulk_deals
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.bdm import build_events, simulate_trades
+    from quant.strategies.bdm_portfolio import (
+        compute_anti_strategy_metrics,
+        compute_portfolio_metrics,
+        compute_stress_metrics,
+    )
+
+    _O_EXPERIMENT = "bdm_portfolio_v1"
+    _N_TRIALS = 13   # floor(260 / 20) — pre-registered
+
+    _O_SPLIT_DATES = {
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _O_SPLIT_DATES:
+        logger.error("Strategy O only supports splits: %s", list(_O_SPLIT_DATES))
+        return 2
+
+    if split == "holdout":
+        read_holdout()
+
+    eval_start, eval_end = _O_SPLIT_DATES[split]
+
+    # ── Load data ─────────────────────────────────────────────────────────────
+    logger.info("[O] Loading bulk deals...")
+    try:
+        bulk = load_bulk_deals(side="BUY")
+    except Exception as exc:
+        logger.error("[O] Failed to load bulk deals: %s", exc)
+        return 2
+
+    midcap = _load_midcap150()
+    ohlcv  = pit_load(symbol=None, start="2022-01-01", end=eval_end)
+    if ohlcv.empty:
+        logger.error("[O] No OHLCV data.")
+        return 2
+
+    # ── Build & simulate ──────────────────────────────────────────────────────
+    all_events  = build_events(bulk, midcap)
+    eval_events = all_events[
+        (pd.to_datetime(all_events.event_date) >= eval_start) &
+        (pd.to_datetime(all_events.event_date) <= eval_end)
+    ]
+    logger.info("[O] Eval events: %d", len(eval_events))
+
+    trades = simulate_trades(eval_events, ohlcv)
+    logger.info("[O] Trades executed: %d", len(trades))
+
+    if not trades:
+        logger.error("[O] No trades — cannot compute portfolio metrics.")
+        return 2
+
+    # ── Portfolio metrics ─────────────────────────────────────────────────────
+    port  = compute_portfolio_metrics(trades, eval_start, eval_end, n_trials=_N_TRIALS)
+    anti  = compute_anti_strategy_metrics(trades, eval_start, eval_end, n_trials=1)
+    stress = compute_stress_metrics(trades, eval_start, eval_end,
+                                    n_trials=_N_TRIALS, cost_multiplier=2.0)
+
+    stress_collapse = (
+        (port.annualised_sharpe - stress.annualised_sharpe) / port.annualised_sharpe
+        if port.annualised_sharpe > 1e-6 else 1.0
+    )
+
+    gates = {
+        "portfolio_sharpe >= 0.5":      port.annualised_sharpe >= 0.5,
+        "mean_daily_return > 0":        port.mean_daily_return > 0.0,
+        "dsr >= 0.5":                   port.dsr >= 0.5,
+        "active_days >= 50% of period": port.active_fraction >= 0.5,
+        "anti_sharpe <= 0":             anti.annualised_sharpe <= 0.0,
+        "stress_collapse <= 50%":       stress_collapse <= 0.5,
+    }
+    all_pass = all(gates.values())
+
+    # ── Report ────────────────────────────────────────────────────────────────
+    print("\n" + "=" * 60)
+    print(f"BDM Portfolio (O) Gate Report — split={split}")
+    print("=" * 60)
+    print(f"  Eval events:               {len(eval_events)}")
+    print(f"  Trades executed:           {len(trades)}")
+    print(f"  Active portfolio days:     {port.active_days} / {port.total_days} "
+          f"({port.active_fraction:.1%})")
+    print(f"  Mean concurrent positions: {port.mean_concurrent_positions:.1f}")
+    print(f"  Max concurrent positions:  {port.max_concurrent_positions}")
+    print()
+    print(f"  Mean daily portfolio return: {port.mean_daily_return*10000:.2f} bps/day")
+    print(f"  Annualised return:           {port.annualised_return*100:.1f}%")
+    print(f"  Annualised vol:              {port.annualised_vol*100:.1f}%")
+    print(f"  Annualised Sharpe:           {port.annualised_sharpe:.3f}")
+    print(f"  DSR (n_trials={_N_TRIALS}):       {port.dsr:.3f}")
+    print(f"  Anti-strategy Sharpe:        {anti.annualised_sharpe:.3f}")
+    print(f"  Stress Sharpe (2× cost):     {stress.annualised_sharpe:.3f} "
+          f"(collapse {stress_collapse:.1%})")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 60 + "\n")
+
+    try:
+        mlflow.set_experiment(_O_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "bdm_portfolio_v1"}):
+            mlflow.log_metrics({
+                "n_trades":              float(len(trades)),
+                "active_fraction":       port.active_fraction,
+                "mean_concurrent":       port.mean_concurrent_positions,
+                "mean_daily_return_bps": port.mean_daily_return * 10000,
+                "ann_return":            port.annualised_return,
+                "ann_vol":               port.annualised_vol,
+                "ann_sharpe":            port.annualised_sharpe,
+                "dsr":                   port.dsr,
+                "anti_sharpe":           anti.annualised_sharpe,
+                "stress_sharpe":         stress.annualised_sharpe,
+                "stress_collapse":       stress_collapse,
+                "gate_all_pass":         float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -2484,7 +2628,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Strategy gate-check runner")
     parser.add_argument(
         "--strategy",
-        choices=["pead_midcap", "index_recon", "idi", "bdm", "g", "h", "i", "j", "k", "l", "m", "n"],
+        choices=["pead_midcap", "index_recon", "idi", "bdm", "g", "h", "i", "j", "k", "l", "m", "n", "o"],
         required=True,
         help="Strategy to evaluate",
     )
@@ -2537,8 +2681,10 @@ def main() -> None:
         exit_code = run_gate_check_l(args.split, n_trials=args.n_trials)
     elif args.strategy == "m":
         exit_code = run_gate_check_m(args.split, n_trials=args.n_trials)
-    else:  # "n"
+    elif args.strategy == "n":
         exit_code = run_gate_check_n(args.split, n_trials=args.n_trials)
+    else:  # "o"
+        exit_code = run_gate_check_o(args.split)
     sys.exit(exit_code)
 
 
