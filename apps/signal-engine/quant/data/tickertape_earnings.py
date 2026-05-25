@@ -382,6 +382,7 @@ def parse_wide_col_csv(path: Path, symbol: str) -> pd.DataFrame:
 
     eps_row = _find_row(["eps", "earnings per share", "basic eps", "diluted eps"])
     rev_row = _find_row(["total revenue", "net sales", "revenue", "total income", "sales"])
+    net_row = _find_row(["net income", "net profit", "profit after tax", "pat", "= net income"])
 
     if eps_row is None:
         logger.warning("%s (wide_col): no EPS row found. Rows: %s", path.name, list(df.index))
@@ -395,12 +396,14 @@ def parse_wide_col_csv(path: Path, symbol: str) -> pd.DataFrame:
         fq, fy = period
         eps = _safe_float(df.at[eps_row, col])
         rev = _safe_float(df.at[rev_row, col]) if rev_row else None
+        net = _safe_float(df.at[net_row, col]) if net_row else None
         rows.append({
             "symbol": resolved_symbol,
             "fiscal_quarter": fq,
             "fiscal_year": fy,
             "eps_quarterly": eps,
             "revenue_quarterly_cr": rev,
+            "net_profit_quarterly_cr": net,
         })
 
     return pd.DataFrame(rows) if rows else pd.DataFrame()
@@ -680,7 +683,7 @@ def _build_from_tickertape_only(tt_df: pd.DataFrame) -> pd.DataFrame:
             "fiscal_year": fy,
             "period_end": period_end,
             "revenue_cr": _safe_float(r.get("revenue_quarterly_cr")),
-            "net_profit_cr": None,
+            "net_profit_cr": _safe_float(r.get("net_profit_quarterly_cr")),
             "eps_reported": _safe_float(r.get("eps_quarterly")),
             "yoy_eps_prev": None,
             "yoy_revenue_prev": None,
