@@ -52,35 +52,55 @@ MAX_SECTOR_POSITIONS = 3
 DAILY_LOSS_LIMIT_PCT = 3.0    # halt if daily loss ≥ 3%
 PORTFOLIO_FLOOR_PCT = 70.0    # halt if total_value < 70% of initial
 
-# ── Transaction costs (Indian equities — delivery trading) ───────────────────
+# ── Transaction costs (Indian equities — delivery trading, Zerodha 2026) ─────
 # Set COSTS_ENABLED=False for cost-free runs (useful for isolating strategy alpha
 # from cost drag — always run with True before evaluating live readiness).
+#
+# Zerodha delivery breakdown (verified zerodha.com/charges, May 2026):
+#   Brokerage:       ₹0 (FREE for equity delivery — NOT 0.03%)
+#   STT:             0.1% on SELL side only
+#   Stamp duty:      0.015% on BUY side only
+#   Exchange charge: 0.00325% per side (NSE)
+#   SEBI charge:     ₹10/Cr (≈ 0.0001%)
+#   GST:             18% on (brokerage + exchange charges)
+#   DP charge:       ₹15.34 flat per ISIN per SELL day (Zerodha CDSL debit)
+#
+# Slippage (separate from statutory costs):
+#   15 bps per side is conservative for Nifty Midcap 150 at ₹50K–₹2L positions.
+#   For cost-stress test: re-run with 30 bps per side (2× nominal).
 COSTS_ENABLED = True
-SLIPPAGE_PCT = 0.0015          # 15 bps per side — conservative for Nifty 100 liquidity
-_BROKERAGE_PCT = 0.0003        # 3 bps; ₹20 cap applies (at ₹50k–₹120k positions ≈ ₹15–₹36)
+SLIPPAGE_PCT = 0.0015          # 15 bps per side — conservative for Midcap 150 liquidity
+_BROKERAGE_PCT = 0.0          # ₹0 for equity delivery (Zerodha free delivery)
 _STAMP_DUTY_PCT = 0.00015      # 0.015% — buy-side only
 _STT_DELIVERY_PCT = 0.001      # 0.1% — sell-side only (equity delivery STT)
-_EXCHANGE_TXN_PCT = 0.0000325  # NSE/BSE transaction charge
-_SEBI_PCT = 0.000001           # SEBI turnover fee
+_EXCHANGE_TXN_PCT = 0.0000325  # NSE transaction charge (0.00325%) per side
+_SEBI_PCT = 0.000001           # SEBI turnover fee (~₹10/Cr)
 _GST_RATE = 0.18               # GST on brokerage + exchange charges
+_DP_CHARGE = 15.34             # ₹15.34 flat per ISIN per sell day (CDSL debit)
 
 
 def compute_trade_cost(value: float, side: str) -> float:
-    """Total Indian delivery trading costs for one side in rupees.
+    """Total Indian delivery trading costs for one side in rupees (Zerodha 2026).
 
     Args:
         value: Gross trade value in rupees (shares × price).
-        side:  "BUY" (buy-side costs) or "SELL" (sell-side costs incl. STT).
+        side:  "BUY" (buy-side costs) or "SELL" (sell-side costs incl. STT + DP).
+
+    Cost breakdown for a ₹50,000 delivery trade:
+        BUY side:  stamp ₹7.50 + exchange ₹1.63 + SEBI ₹0.05 + GST ₹0.29 ≈ ₹9.50 (1.9 bps)
+        SELL side: STT ₹50 + DP ₹15.34 + exchange ₹1.63 + SEBI ₹0.05 + GST ₹0.29 ≈ ₹67.31 (13.5 bps)
+        Round-trip: ≈ 15 bps fees + ~30 bps slippage = ~45 bps total
     """
     if not COSTS_ENABLED or value <= 0:
         return 0.0
-    brokerage = min(value * _BROKERAGE_PCT, 20.0)
+    brokerage = value * _BROKERAGE_PCT          # ₹0 for delivery
     exchange = value * _EXCHANGE_TXN_PCT
     sebi = value * _SEBI_PCT
     gst = (brokerage + exchange) * _GST_RATE
     stamp = value * _STAMP_DUTY_PCT if side == "BUY" else 0.0
     stt = value * _STT_DELIVERY_PCT if side == "SELL" else 0.0
-    return brokerage + exchange + sebi + gst + stamp + stt
+    dp = _DP_CHARGE if side == "SELL" else 0.0  # flat ₹15.34 per ISIN per sell day
+    return brokerage + exchange + sebi + gst + stamp + stt + dp
 
 # NOTE: The static _WIN_PROB_TABLE was removed during the rebuild's demolition
 # phase. Win probabilities will be estimated online from realized trade outcomes
