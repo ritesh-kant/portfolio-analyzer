@@ -1,11 +1,11 @@
 ---
 slug: bdm-portfolio
 strategy: o
-status: passed_dev
+status: killed
 registered: 2026-05-25
 finalized: 2026-05-25
-decision: passed_dev
-final: false
+decision: killed
+final: true
 type: quantitative_signal
 standalone: true
 parent_strategy: bdm-momentum
@@ -134,7 +134,51 @@ Election-period filter removed 53 of 231 eval events (23%). Cost stress has zero
 
 The portfolio Sharpe of 4.054 vs per-trade Sharpe of ~0.174 confirms the hypothesis: diversification across 18.4 mean concurrent positions reduces daily portfolio vol from ~16% (per-trade) to ~5.2% annualised, while preserving the positive expected return.
 
-**→ Hold-out gate pending (2024-07-01 → present). Single-shot, not yet run.**
+---
+
+**Hold-out gate run: 2026-05-25**
+
+| Metric | Result | Gate | Status |
+|--------|--------|------|--------|
+| Eval events | 247 | — | — |
+| Trades executed | 227 | — | — |
+| Active portfolio days | 467 / 654 (71.4%) | ≥ 50% | ✅ PASS |
+| Mean concurrent positions | 10.7 | — | — |
+| Max concurrent positions | 25 | — | — |
+| Mean daily portfolio return | **−11.83 bps/day** | > 0 | ❌ FAIL |
+| Annualised return | −29.8% | — | — |
+| Annualised vol | 4.2% | — | — |
+| Annualised portfolio Sharpe | **−7.032** | ≥ 0.5 | ❌ FAIL |
+| DSR (n_trials=13) | **0.000** | ≥ 0.5 | ❌ FAIL |
+| Anti-strategy Sharpe | 4.921 | ≤ 0 | ❌ FAIL |
+| Stress collapse (2× cost) | 100.0% | ≤ 50% | ❌ FAIL |
+
+**5 of 6 gates fail. STRATEGY KILLED.**
+
+**Root cause analysis:**
+
+Dev (2023-07-01 → 2024-06-30): Sharpe +4.054, mean +8.38 bps/day  
+Holdout (2024-07-01 → 2026-05-18): Sharpe −7.032, mean −11.83 bps/day
+
+The signal completely reverses in the holdout. Several candidate explanations:
+
+1. **Data mining**: The dev period (1 year) is short. An annualised Sharpe of 4 from 260 daily return observations has large estimation error. The signal almost certainly did not generalise.
+2. **Regime change**: Post-July 2024 Indian midcap market entered a different regime. Bulk deal momentum that worked in a bull market (2023-2024) reversed in a sideways/corrective market.
+3. **Crowding**: If institutional bulk deal following became crowded after the signal was identified in the literature, subsequent returns would deteriorate.
+
+The anti-strategy Sharpe of 4.921 (holding all positions short) confirms the signal literally inverted — buying bulk deals in the holdout destroyed value, and the short would have been highly profitable. This is not random noise; it is a systematic regime reversal.
+
+**The BDM signal family (F–O) is now definitively closed.**
+
+| Strategy | Dev result | Holdout result | Verdict |
+|----------|------------|----------------|---------|
+| F (per-trade) | Sharpe 0.174 | — | Killed in dev |
+| G–K (variants) | Sharpe < 0.5 | — | Killed in dev |
+| O (portfolio) | Sharpe 4.054 | Sharpe −7.032 | **Killed in holdout** |
+
+## 9. Decision
+
+**KILLED — 2026-05-25.** Strategy failed all primary holdout gates. Signal inverted completely (anti-strategy Sharpe 4.921). Do NOT re-run, do NOT adjust parameters. The strategy is permanently dead per plan §3.1 + §14.
 
 ---
 *Registered: 2026-05-25 by Ritesh Kant. Signal (§3), portfolio construction (§4),

@@ -2507,8 +2507,13 @@ def run_gate_check_o(split: str) -> int:
         logger.error("Strategy O only supports splits: %s", list(_O_SPLIT_DATES))
         return 2
 
+    _O_HYPOTHESIS = (
+        Path(__file__).parents[4]
+        / "research" / "hypotheses" / "2026-05-25-bdm-portfolio.md"
+    )
+
     if split == "holdout":
-        read_holdout()
+        read_holdout("bdm_portfolio_v1", _O_HYPOTHESIS)
 
     eval_start, eval_end = _O_SPLIT_DATES[split]
 
