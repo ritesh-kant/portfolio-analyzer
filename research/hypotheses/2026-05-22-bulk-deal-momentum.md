@@ -1,11 +1,11 @@
 ---
 slug: bulk-deal-momentum
 strategy: bdm
-status: active
+status: killed
 registered: 2026-05-22
-finalized: ~
-decision: ~
-final: false
+finalized: 2026-05-23
+decision: killed
+final: true
 type: quantitative_signal
 standalone: true
 ---
@@ -313,11 +313,54 @@ The key failure of IDI was zero directional edge — both long and short lost. T
 
 ## 12. Result
 
-*(To be filled after dev gate run)*
+**Dev gate run: 2026-05-23**
+**Dev period: 2023-07-01 → 2024-06-30**
+
+| Metric | Result | Gate | Status |
+|--------|--------|------|--------|
+| Raw signal events | 231 | — | — |
+| Executed trades | 173 | ≥ 40 | ✅ PASS |
+| Mean net return | +277.8 bps | ≥ 100 bps | ✅ PASS |
+| Win rate | 49.1% | ≥ 52% | ❌ FAIL |
+| Sharpe (per-trade) | 0.173 | ≥ 0.5 | ❌ FAIL |
+| DSR (n_trials=1) | 0.992 | ≥ 0.5 | ✅ PASS |
+| Anti-strategy return | −387.8 bps | ≤ 0 | ✅ PASS |
+| Cost-stress DSR collapse | 0.8% | ≤ 50% | ✅ PASS |
+
+**5/7 gates pass, 2/7 fail → KILLED**
+
+**Root cause:** The bulk deal signal produces a strongly positive mean return (277.8 bps)
+with a directional edge confirmed by the anti-strategy (−387.8 bps), but the return
+distribution is highly right-skewed: a minority of large winners dominate the mean while
+49.1% of trades close negative.  The mechanism (institutional continuation buying) is
+real but unevenly distributed across events — not all bulk deal disclosures precede
+sustained accumulation programmes.  The Sharpe of 0.173 reflects this noise: the edge
+exists in aggregate but is not reliably repeatable at the per-trade level.
+
+The 2024 election period filter removed 53/231 events (23%) from the dev period due to
+the 2024 Lok Sabha election window (2024-03-20 → 2024-07-04) overlapping heavily with
+the dev period (2023-07-01 → 2024-06-30).  This significantly reduces the effective
+sample size and may have skewed the win-rate downward by removing a large block of
+structurally different events.
 
 ## 13. Decision
 
-*(To be filled after hold-out run)*
+**KILLED — 2026-05-23**
+
+Win rate (49.1%) and Sharpe (0.173) fail pre-registered thresholds.  Per §4, the
+strategy is killed without appeal.  Parameters may not be adjusted to attempt a re-run.
+
+**Post-mortem for Strategy G design:**
+- Mean return is high → the *signal is directional* but noisy
+- Win rate < 50% → need a filter to select only the continuation-likely subset
+- Candidate improvements for a new hypothesis (not re-runs of this one):
+  1. **Entity quality filter**: classify buyer as institutional (FII/MF/insurance) vs
+     retail/HNI.  Institutional bulk deals likely have stronger continuation.
+  2. **Momentum pre-condition**: require stock to be in positive momentum regime
+     (e.g., above 50-day MA, or Patel & Vaidya §2.3 pre-condition) before entry.
+  3. **Multiple disclosure filter**: require ≥ 2 bulk deal disclosures within a rolling
+     window (herding signal) rather than single events.
+  These are hypotheses for Strategy G — they must be pre-registered before any run.
 
 ---
 

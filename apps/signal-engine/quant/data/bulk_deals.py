@@ -4,16 +4,32 @@ NSE mandates that any entity buying or selling ≥ 0.5% of a listed company's
 equity outstanding in a single exchange session must report the transaction to
 NSE by 16:00 that day.  NSE discloses the data publicly the same evening.
 
-Historical bulk deal data is available from NSE archives.
+Data acquisition — two paths
+-----------------------------
 
-Download URLs
--------------
-Current day:
-  https://archives.nseindia.com/content/equities/bulk.csv
+**Daily update (programmatic, works automatically):**
+  Today's bulk deal file is freely available (no bot protection):
+    https://archives.nseindia.com/content/equities/bulk.csv
+  Run after 16:30 IST each trading day:
+    python -m quant.data.bulk_deals --today
 
-Historical (individual daily files archived on NSE):
-  https://archives.nseindia.com/content/equities/bulk_{DDMMYYYY}.csv
-  (Availability: approximately 2004-01-01 onwards)
+**Historical backfill (one-time, manual browser download):**
+  NSE's historical bulk deal API (www.nseindia.com/api/historical/bulk-deals)
+  and archive files (archives.nseindia.com/content/historical/equities/bulk/)
+  are both blocked for non-browser access (Akamai bot protection / IP restriction).
+
+  To backfill 2015-2024:
+  1. Open Chrome → https://www.nseindia.com/market-data/bulk-deals
+  2. Set "From" and "To" dates (NSE allows up to 3 months per download)
+  3. Click the download icon (Excel/CSV)
+  4. Save to a single directory, e.g. ~/Downloads/nse_bulk_deals/
+  5. Repeat in ~quarterly chunks until 2015-01-01 → 2024-06-30 is covered
+     (~38 downloads × ~10 seconds each ≈ 6–8 minutes total)
+  6. Import all at once:
+     python -m quant.data.bulk_deals --ingest-dir ~/Downloads/nse_bulk_deals/
+
+  The downloaded files are named like "Bulk-Deal.csv" or "Bulk-Deal (1).csv";
+  the ingest-dir mode reads all .csv/.xls/.xlsx files in the directory.
 
 Storage
 -------
@@ -32,17 +48,14 @@ Schema
 
 Usage
 -----
-  # Bulk historical download (run once):
-  python -m quant.data.bulk_deals --start 2015-01-01 --end 2024-06-30
+  # Import manually downloaded NSE bulk deal CSV/Excel files:
+  python -m quant.data.bulk_deals --ingest-dir ~/Downloads/nse_bulk_deals/
 
-  # Incremental daily update (run after 16:00 IST each trading day):
-  python -m quant.data.bulk_deals --start 2024-07-01
+  # Fetch today's file (run after 16:30 IST):
+  python -m quant.data.bulk_deals --today
 
   # Validate what's on disk:
   python -m quant.data.bulk_deals --validate
-
-  # Check events for a specific date range:
-  python -m quant.data.bulk_deals --validate --start 2023-07-01 --end 2024-06-30
 """
 
 from __future__ import annotations
@@ -50,8 +63,7 @@ from __future__ import annotations
 import argparse
 import io
 import logging
-import time
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -61,216 +73,264 @@ logger = logging.getLogger(__name__)
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_DATA_DIR = _REPO_ROOT / "data" / "lake" / "bulk_deals"
-_PARQUET = _DATA_DIR / "nse_bulk_deals.parquet"
+_DATA_DIR  = _REPO_ROOT / "data" / "lake" / "bulk_deals"
+_PARQUET   = _DATA_DIR / "nse_bulk_deals.parquet"
 
-# ── NSE URL templates ─────────────────────────────────────────────────────────
-_URL_CURRENT = "https://archives.nseindia.com/content/equities/bulk.csv"
-_URL_HISTORICAL = "https://archives.nseindia.com/content/equities/bulk_{date}.csv"
+# ── Today's bulk deal file (no bot protection, freely accessible) ──────────────
+_TODAY_URL = "https://archives.nseindia.com/content/equities/bulk.csv"
 
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Referer": "https://www.nseindia.com/",
+# ── NSE downloaded CSV column names (exact headers from NSE website export) ───
+# NSE exports have these exact column names; we also handle minor variants.
+_COL_DATE     = "Date"
+_COL_SYMBOL   = "Symbol"
+_COL_CLIENT   = "Client Name"
+_COL_SIDE     = "Buy / Sell"
+_COL_QTY      = "Quantity Traded"
+_COL_PRICE    = "Trade Price / Wght. Avg. Price"
+
+# Alternate column names seen in different NSE export formats
+_COL_ALIASES: dict[str, list[str]] = {
+    "date":   [_COL_DATE, "date", "DATE", "Trade Date"],
+    "symbol": [_COL_SYMBOL, "symbol", "SYMBOL", "Ticker"],
+    "client": [_COL_CLIENT, "client_name", "CLIENT NAME", "Client"],
+    "side":   [_COL_SIDE, "Buy/Sell", "BUY_SELL", "Type"],
+    "qty":    [_COL_QTY, "quantity", "QUANTITY", "Qty", "No. of Shares"],
+    "price":  [_COL_PRICE, "price", "PRICE", "Trade Price", "Avg Price"],
 }
 
-# ── NSE known trading holidays (weekdays only; weekends auto-filtered) ─────────
-# Same list used in delivery_ingest.py — keep in sync.
-_KNOWN_HOLIDAYS: frozenset[date] = frozenset({
-    # 2015
-    date(2015, 1, 26), date(2015, 2, 19), date(2015, 3, 6), date(2015, 4, 2),
-    date(2015, 4, 3), date(2015, 4, 14), date(2015, 5, 1), date(2015, 7, 17),
-    date(2015, 8, 28), date(2015, 9, 17), date(2015, 10, 2), date(2015, 10, 22),
-    date(2015, 11, 11), date(2015, 11, 12), date(2015, 12, 25),
-    # 2016
-    date(2016, 1, 26), date(2016, 3, 7), date(2016, 3, 24), date(2016, 3, 25),
-    date(2016, 4, 14), date(2016, 4, 15), date(2016, 4, 19), date(2016, 5, 6),
-    date(2016, 7, 6), date(2016, 8, 15), date(2016, 9, 5), date(2016, 9, 13),
-    date(2016, 10, 2), date(2016, 10, 11), date(2016, 10, 31), date(2016, 11, 14),
-    date(2016, 12, 26),
-    # 2017
-    date(2017, 1, 26), date(2017, 2, 24), date(2017, 3, 13), date(2017, 4, 4),
-    date(2017, 4, 14), date(2017, 5, 1), date(2017, 6, 26), date(2017, 8, 15),
-    date(2017, 8, 25), date(2017, 9, 2), date(2017, 10, 2), date(2017, 10, 19),
-    date(2017, 10, 20), date(2017, 12, 25),
-    # 2018
-    date(2018, 1, 26), date(2018, 2, 13), date(2018, 3, 2), date(2018, 3, 29),
-    date(2018, 3, 30), date(2018, 4, 2), date(2018, 5, 1), date(2018, 8, 15),
-    date(2018, 8, 22), date(2018, 9, 13), date(2018, 9, 20), date(2018, 10, 2),
-    date(2018, 11, 7), date(2018, 11, 8), date(2018, 11, 21), date(2018, 12, 25),
-    # 2019
-    date(2019, 1, 26), date(2019, 3, 4), date(2019, 3, 21), date(2019, 4, 17),
-    date(2019, 4, 19), date(2019, 4, 29), date(2019, 5, 18), date(2019, 6, 5),
-    date(2019, 8, 12), date(2019, 8, 15), date(2019, 9, 2), date(2019, 9, 10),
-    date(2019, 10, 2), date(2019, 10, 7), date(2019, 10, 8), date(2019, 10, 28),
-    date(2019, 11, 12), date(2019, 12, 25),
-    # 2020–2024: same as delivery_ingest.py
-    date(2020, 2, 21), date(2020, 3, 10), date(2020, 4, 2), date(2020, 4, 6),
-    date(2020, 4, 10), date(2020, 4, 14), date(2020, 5, 25), date(2020, 10, 2),
-    date(2020, 11, 16), date(2020, 11, 30),
-    date(2021, 1, 26), date(2021, 3, 11), date(2021, 3, 29), date(2021, 4, 2),
-    date(2021, 4, 14), date(2021, 4, 21), date(2021, 5, 13), date(2021, 7, 21),
-    date(2021, 8, 19), date(2021, 9, 10), date(2021, 10, 2), date(2021, 10, 15),
-    date(2021, 11, 4), date(2021, 11, 5), date(2021, 11, 19),
-    date(2022, 1, 26), date(2022, 3, 1), date(2022, 3, 18), date(2022, 4, 14),
-    date(2022, 4, 15), date(2022, 5, 3), date(2022, 8, 9), date(2022, 8, 15),
-    date(2022, 8, 31), date(2022, 10, 2), date(2022, 10, 5), date(2022, 10, 24),
-    date(2022, 10, 26), date(2022, 11, 8),
-    date(2023, 1, 26), date(2023, 3, 7), date(2023, 3, 30), date(2023, 4, 4),
-    date(2023, 4, 7), date(2023, 4, 14), date(2023, 4, 22), date(2023, 5, 1),
-    date(2023, 6, 28), date(2023, 8, 15), date(2023, 9, 19), date(2023, 10, 2),
-    date(2023, 10, 24), date(2023, 11, 14), date(2023, 11, 27), date(2023, 12, 25),
-    date(2024, 1, 22), date(2024, 1, 26), date(2024, 3, 8), date(2024, 3, 25),
-    date(2024, 3, 29), date(2024, 4, 11), date(2024, 4, 14), date(2024, 4, 17),
-    date(2024, 4, 21), date(2024, 5, 23), date(2024, 6, 17),
-})
 
-
-def _is_trading_day(d: date) -> bool:
-    return d.weekday() < 5 and d not in _KNOWN_HOLIDAYS
-
-
-def _date_str(d: date) -> str:
-    """Format date as DDMMYYYY for NSE URL."""
-    return d.strftime("%d%m%Y")
-
-
-# ── Raw column normalisation ──────────────────────────────────────────────────
-# NSE bulk deal CSV has inconsistent column names across years.  Try multiple
-# variants and map to our canonical schema.
-
-_SYMBOL_VARIANTS = ["Symbol", "SYMBOL", "symbol"]
-_DATE_VARIANTS = ["Date", "DATE", "date", "Trade Date"]
-_CLIENT_VARIANTS = ["Client Name", "CLIENT NAME", "Client", "Acquiror/Seller Name"]
-_SIDE_VARIANTS = ["Buy / Sell", "BUY/SELL", "Buy/Sell", "Transaction Type"]
-_QTY_VARIANTS = ["Quantity Traded", "QUANTITY", "Qty", "Quantity"]
-_PRICE_VARIANTS = [
-    "Trade Price / Wght. Avg. Price",
-    "Wght. Avg. Price",
-    "PRICE",
-    "Price",
-    "Trade Price",
-]
-
-
-def _find_col(df: pd.DataFrame, variants: list[str]) -> str | None:
-    """Return the first matching column name, or None."""
-    for v in variants:
-        if v in df.columns:
-            return v
-    # Case-insensitive fallback
-    lower_map = {c.lower(): c for c in df.columns}
-    for v in variants:
-        if v.lower() in lower_map:
-            return lower_map[v.lower()]
-    return None
-
-
-def _normalise_side(val: str) -> str:
-    """Normalise buy/sell strings to 'BUY' or 'SELL'."""
+def _normalise_side(val) -> str:
     v = str(val).strip().upper()
     if v in ("B", "BUY", "BUY*"):
         return "BUY"
     if v in ("S", "SELL", "SELL*"):
         return "SELL"
-    return v  # keep unknown values for inspection
+    return v
 
 
-def _parse_raw(csv_text: str, trading_date: date) -> pd.DataFrame | None:
-    """Parse a raw NSE bulk deal CSV string into a clean DataFrame.
-
-    Returns None if empty or unparseable.
-    """
+def _parse_nse_date(val) -> date | None:
+    """Parse NSE date strings: '01-Jan-2023', '2023-01-01', '01/01/2023'."""
+    val = str(val).strip()
+    for fmt in ("%d-%b-%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%b %d, %Y"):
+        try:
+            return pd.to_datetime(val, format=fmt).date()
+        except (ValueError, TypeError):
+            continue
     try:
-        df = pd.read_csv(io.StringIO(csv_text), sep=",", on_bad_lines="skip")
-    except Exception as exc:
-        try:
-            df = pd.read_csv(io.StringIO(csv_text), sep=",",
-                             error_bad_lines=False, warn_bad_lines=False)
-        except Exception:
-            logger.warning("CSV parse error for %s: %s", trading_date, exc)
-            return None
-
-    if df.empty or len(df.columns) < 4:
-        logger.debug("Empty or malformed file for %s", trading_date)
+        return pd.to_datetime(val).date()
+    except Exception:
         return None
 
-    df.columns = [c.strip() for c in df.columns]
 
-    # Map to canonical columns
-    sym_col    = _find_col(df, _SYMBOL_VARIANTS)
-    side_col   = _find_col(df, _SIDE_VARIANTS)
-    qty_col    = _find_col(df, _QTY_VARIANTS)
-    price_col  = _find_col(df, _PRICE_VARIANTS)
-    client_col = _find_col(df, _CLIENT_VARIANTS)
-
-    if not all([sym_col, side_col, qty_col, price_col]):
-        logger.warning("Missing required columns in %s (got: %s)",
-                       trading_date, list(df.columns))
-        return None
-
-    rows = pd.DataFrame()
-    rows["symbol"]      = df[sym_col].astype(str).str.strip().str.upper()
-    rows["side"]        = df[side_col].astype(str).apply(_normalise_side)
-    rows["quantity"]    = pd.to_numeric(df[qty_col], errors="coerce")
-    rows["price"]       = pd.to_numeric(df[price_col], errors="coerce")
-    rows["client_name"] = df[client_col].astype(str).str.strip() if client_col else ""
-
-    rows["business_date"] = trading_date
-    rows["value_cr"] = rows["quantity"] * rows["price"] / 1e7
-    rows["as_of_timestamp"] = pd.Timestamp(trading_date) + pd.Timedelta(hours=16)
-
-    # Drop rows with invalid numeric values
-    rows = rows.dropna(subset=["quantity", "price"])
-    rows = rows[rows["quantity"] > 0]
-    rows = rows[rows["price"] > 0]
-    rows = rows[rows["symbol"].str.len() > 0]
-
-    return rows[[
-        "symbol", "business_date", "client_name", "side",
-        "quantity", "price", "value_cr", "as_of_timestamp",
-    ]].copy()
-
-
-def fetch_day(
-    trading_date: date,
-    session: requests.Session,
-    retry: int = 2,
-    sleep_s: float = 1.5,
-) -> pd.DataFrame | None:
-    """Fetch and parse bulk deals for a single trading date.
-
-    Returns a clean DataFrame or None on error/no data.
-    """
-    url = _URL_HISTORICAL.format(date=_date_str(trading_date))
-    for attempt in range(retry + 1):
-        try:
-            resp = session.get(url, headers=_HEADERS, timeout=30)
-        except requests.RequestException as exc:
-            logger.warning("[%s] Request error (attempt %d): %s",
-                           trading_date, attempt + 1, exc)
-            if attempt < retry:
-                time.sleep(sleep_s)
-            continue
-
-        if resp.status_code == 404:
-            logger.debug("[%s] 404 — no bulk deals or non-trading day", trading_date)
-            return None
-
-        if resp.status_code != 200:
-            logger.warning("[%s] HTTP %s (attempt %d)",
-                           trading_date, resp.status_code, attempt + 1)
-            if attempt < retry:
-                time.sleep(sleep_s)
-            continue
-
-        return _parse_raw(resp.text, trading_date)
-
+def _find_col(df: pd.DataFrame, key: str) -> str | None:
+    """Return the first column name from _COL_ALIASES[key] that exists in df."""
+    for alias in _COL_ALIASES.get(key, []):
+        if alias in df.columns:
+            return alias
+    # Case-insensitive fallback
+    lower_map = {c.lower(): c for c in df.columns}
+    for alias in _COL_ALIASES.get(key, []):
+        if alias.lower() in lower_map:
+            return lower_map[alias.lower()]
     return None
+
+
+def _parse_nse_df(raw: pd.DataFrame) -> pd.DataFrame:
+    """Normalise a raw NSE bulk-deal DataFrame into our schema.
+
+    Handles both the direct CSV download format and the NSE website export.
+    Returns empty DataFrame if required columns are missing.
+    """
+    if raw.empty:
+        return pd.DataFrame()
+
+    col_date   = _find_col(raw, "date")
+    col_symbol = _find_col(raw, "symbol")
+    col_client = _find_col(raw, "client")
+    col_side   = _find_col(raw, "side")
+    col_qty    = _find_col(raw, "qty")
+    col_price  = _find_col(raw, "price")
+
+    missing = [k for k, v in [
+        ("date", col_date), ("symbol", col_symbol),
+        ("side", col_side), ("qty", col_qty), ("price", col_price),
+    ] if v is None]
+    if missing:
+        logger.warning("Missing required columns: %s.  Available: %s",
+                       missing, list(raw.columns))
+        return pd.DataFrame()
+
+    rows = []
+    for _, row in raw.iterrows():
+        sym    = str(row[col_symbol]).strip().upper()
+        dt_raw = row[col_date]
+        client = str(row[col_client]).strip() if col_client and pd.notna(row[col_client]) else ""
+        side   = _normalise_side(row[col_side])
+        qty    = row[col_qty]
+        price  = row[col_price]
+
+        if not sym or sym == "NAN":
+            continue
+
+        business_date = _parse_nse_date(dt_raw)
+        if business_date is None:
+            continue
+
+        try:
+            qty_int   = int(str(qty).replace(",", "").split(".")[0])
+            price_flt = float(str(price).replace(",", ""))
+        except (ValueError, TypeError):
+            continue
+
+        if qty_int <= 0 or price_flt <= 0:
+            continue
+
+        rows.append({
+            "symbol":          sym,
+            "business_date":   business_date,
+            "client_name":     client,
+            "side":            side,
+            "quantity":        qty_int,
+            "price":           price_flt,
+            "value_cr":        qty_int * price_flt / 1e7,
+            "as_of_timestamp": pd.Timestamp(business_date) + pd.Timedelta(hours=16),
+        })
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df = df[df["symbol"].str.len() > 0]
+    return df
+
+
+def _read_file(path: Path) -> pd.DataFrame:
+    """Read a single NSE bulk-deal file (CSV or Excel) and return normalised df."""
+    suffix = path.suffix.lower()
+    try:
+        if suffix in (".xls", ".xlsx"):
+            raw = pd.read_excel(path, dtype=str)
+        else:
+            # Try comma-separated first; NSE sometimes uses tab
+            try:
+                raw = pd.read_csv(path, dtype=str, on_bad_lines="skip")
+            except TypeError:
+                # pandas < 1.3 fallback
+                raw = pd.read_csv(path, dtype=str,
+                                  error_bad_lines=False, warn_bad_lines=False)  # type: ignore[call-arg]
+    except Exception as exc:
+        logger.warning("Could not read %s: %s", path.name, exc)
+        return pd.DataFrame()
+
+    # Drop blank/all-NaN rows that NSE sometimes includes as footers
+    raw = raw.dropna(how="all").reset_index(drop=True)
+
+    df = _parse_nse_df(raw)
+    if not df.empty:
+        logger.info("  %s → %d records", path.name, len(df))
+    else:
+        logger.warning("  %s → 0 records (columns not recognised)", path.name)
+    return df
+
+
+def fetch_today() -> dict[str, int]:
+    """Download today's NSE bulk deal file and merge into the parquet store.
+
+    URL: https://archives.nseindia.com/content/equities/bulk.csv
+    This file is freely accessible (no bot protection) and updated by ~16:30 IST.
+
+    Returns
+    -------
+    dict with keys: rows_fetched, rows_written.
+    """
+    logger.info("Fetching today's bulk deal file from %s", _TODAY_URL)
+    try:
+        resp = requests.get(_TODAY_URL, timeout=30)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        logger.error("Failed to fetch today's bulk deal file: %s", exc)
+        return {"rows_fetched": 0, "rows_written": 0}
+
+    try:
+        raw = pd.read_csv(io.StringIO(resp.text), dtype=str, on_bad_lines="skip")
+    except TypeError:
+        raw = pd.read_csv(io.StringIO(resp.text), dtype=str,
+                          error_bad_lines=False, warn_bad_lines=False)  # type: ignore[call-arg]
+
+    raw = raw.dropna(how="all").reset_index(drop=True)
+    df = _parse_nse_df(raw)
+
+    if df.empty:
+        logger.warning("Today's bulk deal file parsed to 0 rows.")
+        return {"rows_fetched": 0, "rows_written": 0}
+
+    rows_fetched = len(df)
+    existing = _load_existing()
+    combined = _merge(existing, df)
+    _write(combined)
+    rows_written = len(df)
+    logger.info("Fetched %d rows; parquet now has %d total rows",
+                rows_fetched, len(combined))
+    return {"rows_fetched": rows_fetched, "rows_written": rows_written}
+
+
+def ingest_dir(directory: str | Path) -> dict[str, int]:
+    """Read all bulk-deal CSV/Excel files from a local directory and merge into parquet.
+
+    Designed for historical backfill from manually downloaded NSE website exports.
+    NSE website: https://www.nseindia.com/market-data/bulk-deals
+    (download in quarterly chunks, save all files to one directory)
+
+    Parameters
+    ----------
+    directory : str or Path
+        Local directory containing downloaded NSE bulk deal files.
+        All *.csv, *.xls, *.xlsx files are processed.
+
+    Returns
+    -------
+    dict with keys: files_found, files_parsed, rows_ingested.
+    """
+    dir_path = Path(directory).expanduser().resolve()
+    if not dir_path.is_dir():
+        logger.error("Directory not found: %s", dir_path)
+        return {"files_found": 0, "files_parsed": 0, "rows_ingested": 0}
+
+    files = sorted([
+        f for f in dir_path.iterdir()
+        if f.suffix.lower() in (".csv", ".xls", ".xlsx") and f.is_file()
+    ])
+
+    if not files:
+        logger.warning("No CSV/Excel files found in %s", dir_path)
+        return {"files_found": 0, "files_parsed": 0, "rows_ingested": 0}
+
+    logger.info("Found %d files in %s", len(files), dir_path)
+    stats = {"files_found": len(files), "files_parsed": 0, "rows_ingested": 0}
+    frames: list[pd.DataFrame] = []
+
+    for f in files:
+        df = _read_file(f)
+        if not df.empty:
+            frames.append(df)
+            stats["files_parsed"] += 1
+            stats["rows_ingested"] += len(df)
+
+    if not frames:
+        logger.warning("No valid records found in any file.")
+        return stats
+
+    new_data = pd.concat(frames, ignore_index=True)
+    existing = _load_existing()
+    combined = _merge(existing, new_data)
+    _write(combined)
+
+    logger.info(
+        "Ingested %d rows from %d/%d files; parquet total: %d rows",
+        stats["rows_ingested"], stats["files_parsed"], stats["files_found"],
+        len(combined),
+    )
+    return stats
 
 
 def _load_existing() -> pd.DataFrame:
@@ -284,6 +344,14 @@ def _load_existing() -> pd.DataFrame:
     ])
 
 
+def _merge(existing: pd.DataFrame, new: pd.DataFrame) -> pd.DataFrame:
+    """Concatenate existing + new data, dedup, sort."""
+    frames = [f for f in (existing, new) if not f.empty]
+    if not frames:
+        return existing
+    return pd.concat(frames, ignore_index=True)
+
+
 def _write(df: pd.DataFrame) -> None:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     df["business_date"] = pd.to_datetime(df["business_date"]).dt.date
@@ -292,69 +360,6 @@ def _write(df: pd.DataFrame) -> None:
     ).reset_index(drop=True)
     df.sort_values(["business_date", "symbol"], inplace=True)
     df.to_parquet(_PARQUET, index=False)
-
-
-def ingest(
-    start: str | date,
-    end: str | date | None = None,
-    delay_s: float = 0.3,
-) -> dict[str, int]:
-    """Download and store NSE bulk deals for date range [start, end].
-
-    Parameters
-    ----------
-    start : str or date
-        First date to fetch (inclusive).
-    end : str or date or None
-        Last date to fetch (inclusive).  Defaults to yesterday.
-    delay_s : float
-        Polite delay between requests.
-
-    Returns
-    -------
-    dict with keys: dates_attempted, dates_fetched, rows_written, errors.
-    """
-    start_d = pd.Timestamp(start).date() if isinstance(start, str) else start
-    if end is None:
-        end_d = date.today() - timedelta(days=1)
-    else:
-        end_d = pd.Timestamp(end).date() if isinstance(end, str) else end
-
-    dates = [
-        start_d + timedelta(days=i)
-        for i in range((end_d - start_d).days + 1)
-        if _is_trading_day(start_d + timedelta(days=i))
-    ]
-
-    logger.info("Fetching bulk deals for %d trading days: %s → %s",
-                len(dates), start_d, end_d)
-
-    stats = {"dates_attempted": len(dates), "dates_fetched": 0,
-             "rows_written": 0, "errors": 0}
-
-    frames: list[pd.DataFrame] = []
-    session = requests.Session()
-    session.headers.update(_HEADERS)
-
-    for d in dates:
-        df = fetch_day(d, session, retry=2, sleep_s=delay_s * 3)
-        if df is not None and not df.empty:
-            frames.append(df)
-            stats["dates_fetched"] += 1
-            stats["rows_written"] += len(df)
-        else:
-            # 404 on non-trading days is normal; treat as non-error
-            stats["errors"] += 1
-
-        time.sleep(delay_s)
-
-    if frames:
-        existing = _load_existing()
-        combined = pd.concat([existing] + frames, ignore_index=True)
-        _write(combined)
-        logger.info("Wrote %d total rows to %s", len(combined), _PARQUET)
-
-    return stats
 
 
 def load_bulk_deals(
@@ -369,13 +374,11 @@ def load_bulk_deals(
     Parameters
     ----------
     symbol : str or None
-        Filter to single symbol.  None = all symbols.
     start, end : str or date or None
-        Date range filter.
     side : str or None
         "BUY", "SELL", or None for both.  Default "BUY".
     min_value_cr : float
-        Minimum deal value in crore.  Default 0 (no filter).
+        Minimum deal value in crore.
 
     Returns
     -------
@@ -408,7 +411,7 @@ def load_bulk_deals(
 
 
 def validate(start: str | None = None, end: str | None = None) -> dict:
-    """Print a summary of what's on disk and return a stats dict."""
+    """Print a summary of what's on disk."""
     if not _PARQUET.exists():
         print("No bulk deal parquet found at", _PARQUET)
         return {"exists": False}
@@ -421,16 +424,12 @@ def validate(start: str | None = None, end: str | None = None) -> dict:
     if end:
         df = df[df["business_date"] <= pd.Timestamp(end).date()]
 
-    buy_df  = df[df["side"] == "BUY"]
-    sell_df = df[df["side"] == "SELL"]
-
-    first = df["business_date"].min() if not df.empty else None
-    last  = df["business_date"].max() if not df.empty else None
+    buy_df = df[df["side"] == "BUY"]
+    first  = df["business_date"].min() if not df.empty else None
+    last   = df["business_date"].max() if not df.empty else None
 
     print("=" * 60)
     print("NSE Bulk Deal Data Summary")
-    if start or end:
-        print(f"  Filter: {start or '(all)'} → {end or '(all)'}")
     print("=" * 60)
     print(f"  File         : {_PARQUET}")
     print(f"  Date range   : {first} → {last}")
@@ -438,7 +437,7 @@ def validate(start: str | None = None, end: str | None = None) -> dict:
     print(f"  Symbols      : {df['symbol'].nunique()}")
     print(f"  Total rows   : {len(df):,}")
     print(f"  BUY rows     : {len(buy_df):,}")
-    print(f"  SELL rows    : {len(sell_df):,}")
+    print(f"  SELL rows    : {len(df) - len(buy_df):,}")
     if not buy_df.empty:
         print(f"  BUY value    : ₹{buy_df['value_cr'].sum():,.1f} Cr total")
         print(f"  Avg BUY value: ₹{buy_df['value_cr'].mean():.1f} Cr/deal")
@@ -452,7 +451,6 @@ def validate(start: str | None = None, end: str | None = None) -> dict:
         "symbols": int(df["symbol"].nunique()),
         "total_rows": len(df),
         "buy_rows": len(buy_df),
-        "sell_rows": len(sell_df),
     }
 
 
@@ -460,16 +458,38 @@ def validate(start: str | None = None, end: str | None = None) -> dict:
 
 def _cli() -> None:
     parser = argparse.ArgumentParser(
-        description="Download NSE bulk deal historical data.",
+        description=(
+            "NSE Bulk Deal data pipeline for Strategy F (BDM).\n\n"
+            "Two modes:\n"
+            "  --today        Download today's bulk.csv (run after 16:30 IST)\n"
+            "  --ingest-dir   Import manually downloaded CSV/Excel files\n"
+            "  --validate     Print summary of what's on disk"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--start", default="2015-01-01",
-                        help="Start date YYYY-MM-DD (default: 2015-01-01)")
-    parser.add_argument("--end", default=None,
-                        help="End date YYYY-MM-DD (default: yesterday)")
-    parser.add_argument("--delay", type=float, default=0.3,
-                        help="Polite delay between HTTP requests in seconds (default: 0.3)")
-    parser.add_argument("--validate", action="store_true",
-                        help="Print summary of what's on disk and exit.")
+    parser.add_argument(
+        "--today", action="store_true",
+        help="Fetch today's bulk deal file from NSE archives.",
+    )
+    parser.add_argument(
+        "--ingest-dir", metavar="DIR",
+        help=(
+            "Directory containing manually downloaded NSE bulk deal files "
+            "(CSV or Excel). All files are merged into the parquet store."
+        ),
+    )
+    parser.add_argument(
+        "--validate", action="store_true",
+        help="Print summary of what's on disk and exit.",
+    )
+    parser.add_argument(
+        "--start", default=None,
+        help="(--validate only) Filter from date YYYY-MM-DD.",
+    )
+    parser.add_argument(
+        "--end", default=None,
+        help="(--validate only) Filter to date YYYY-MM-DD.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -478,14 +498,30 @@ def _cli() -> None:
     )
 
     if args.validate:
-        validate(start=args.start if args.start != "2015-01-01" else None,
-                 end=args.end)
+        validate(start=args.start, end=args.end)
         return
 
-    stats = ingest(start=args.start, end=args.end, delay_s=args.delay)
-    print("\nIngest complete:")
-    for k, v in stats.items():
-        print(f"  {k}: {v}")
+    if args.today:
+        stats = fetch_today()
+        print("\nToday's fetch complete:")
+        for k, v in stats.items():
+            print(f"  {k}: {v}")
+        return
+
+    if args.ingest_dir:
+        stats = ingest_dir(args.ingest_dir)
+        print("\nDirectory ingest complete:")
+        for k, v in stats.items():
+            print(f"  {k}: {v}")
+        return
+
+    parser.print_help()
+    print(
+        "\nTip: to backfill historical data, manually download from:\n"
+        "  https://www.nseindia.com/market-data/bulk-deals\n"
+        "Then run:\n"
+        "  python -m quant.data.bulk_deals --ingest-dir ~/Downloads/nse_bulk_deals/"
+    )
 
 
 if __name__ == "__main__":

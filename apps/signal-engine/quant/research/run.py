@@ -958,6 +958,1295 @@ def run_gate_check_bdm(split: str, n_trials: int | None = None) -> int:
     return 0 if all_pass else 1
 
 
+def run_gate_check_g(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check sequence for Strategy G (BDM-Momentum).
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.bulk_deals import load_bulk_deals
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.bdm_momentum import (
+        build_events,
+        compute_ema50,
+        compute_gate_metrics as g_gate_metrics,
+        run_anti_strategy as g_anti,
+        run_cost_stress as g_stress,
+        simulate_trades as g_simulate,
+    )
+
+    _G_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-23-bdm-momentum.md"
+    )
+    _G_EXPERIMENT = "bdm_momentum_v1"
+
+    _G_SPLIT_DATES = {
+        "train":   ("2015-01-01", "2023-06-30"),
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _G_SPLIT_DATES:
+        logger.error("Invalid split: %r. Choose 'train', 'dev', or 'holdout'.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout("bdm_momentum_v1", _G_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _G_SPLIT_DATES[split]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_G_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="",
+                    max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=g split=%s trials=%d", split, n_trials)
+
+    # ── Load bulk deal data ───────────────────────────────────────────────────
+    try:
+        raw_deals = load_bulk_deals(start=start, end=end, side="BUY",
+                                    min_value_cr=1.0)
+    except Exception as exc:
+        logger.error("Bulk deal data load failed: %s", exc)
+        return 2
+
+    if raw_deals.empty:
+        logger.error(
+            "No bulk deal data for %s → %s.  Run bulk_deals ingest first.",
+            start, end,
+        )
+        return 2
+
+    # ── Load Midcap 150 universe ──────────────────────────────────────────────
+    midcap150 = _load_midcap150()
+    if not midcap150:
+        logger.warning(
+            "midcap150_constituents.csv not found — running on full bulk deal "
+            "universe (no Midcap 150 filter).  Results may overstate edge."
+        )
+
+    # ── Build signal events (same as BDM; momentum filter applied in simulate) ─
+    events = build_events(raw_deals, midcap150=midcap150 if midcap150 else None)
+    n_raw_events = len(events)
+    logger.info("Raw BDM-M signal events in %s → %s: %d", start, end, n_raw_events)
+
+    if n_raw_events == 0:
+        logger.error("Zero events built for %s → %s.", start, end)
+        return 2
+
+    # ── Load OHLCV with EMA warmup lookback (~100 calendar days before start) ──
+    from datetime import timedelta
+    ohlcv_start = (pd.Timestamp(start) - pd.Timedelta(days=100)).strftime("%Y-%m-%d")
+    try:
+        ohlcv = pit_load(symbol=None, start=ohlcv_start, end=end)
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv.empty:
+        logger.error("No OHLCV data for %s → %s.", ohlcv_start, end)
+        return 2
+
+    # ── Pre-compute EMA50 once (shared across simulate / anti / stress) ────────
+    logger.info("Computing 50-day EMA for all symbols...")
+    ema50 = compute_ema50(ohlcv)
+
+    # ── Simulate trades ───────────────────────────────────────────────────────
+    trades = g_simulate(events, ohlcv, ema50=ema50)
+    agg    = g_gate_metrics(trades, n_trials=n_trials)
+
+    # ── Anti-strategy ─────────────────────────────────────────────────────────
+    anti = g_anti(events, ohlcv, n_trials=n_trials, ema50=ema50)
+
+    # ── Cost-stress ───────────────────────────────────────────────────────────
+    stress = g_stress(events, ohlcv, n_trials=n_trials, seed=42, ema50=ema50)
+    stress_dsr_collapse = (
+        (agg["dsr"] - stress["dsr"]) / agg["dsr"]
+        if agg["dsr"] > 1e-6
+        else 1.0
+    )
+
+    # ── Gate evaluation ───────────────────────────────────────────────────────
+    gates = {
+        "mean_return_bps >= 100":     agg["mean_return_bps"] >= 100.0,
+        "win_rate >= 52%":            agg["win_rate"] >= 0.52,
+        "sharpe >= 0.5":              agg["sharpe"] >= 0.5,
+        "dsr >= 0.5":                 agg["dsr"] >= 0.5,
+        "anti_strategy_return <= 0":  anti["mean_return_bps"] <= 0.0,
+        "stress_dsr_collapse <= 50%": stress_dsr_collapse <= 0.5,
+        "total_dev_events >= 30":     agg["n_trades"] >= 30,
+    }
+    all_pass = all(gates.values())
+
+    # ── Gate report ───────────────────────────────────────────────────────────
+    print("\n" + "=" * 60)
+    print(f"BDM-Momentum (G) v1 Gate Report — split={split}")
+    print("=" * 60)
+    print(f"  Raw events (pre-momentum): {n_raw_events}")
+    print(f"  Executed trades:           {agg['n_trades']}")
+    print(f"  Mean return (bps):         {agg['mean_return_bps']:.1f}")
+    print(f"  Win rate:                  {agg['win_rate']:.1%}")
+    print(f"  Sharpe:                    {agg['sharpe']:.3f}")
+    print(f"  DSR (n_trials={n_trials}):      {agg['dsr']:.3f}")
+    print(f"  Anti-strategy return:      {anti['mean_return_bps']:.1f} bps")
+    print(f"  Cost-stress DSR:           {stress['dsr']:.3f} "
+          f"(collapse {stress_dsr_collapse:.1%})")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 60 + "\n")
+
+    # ── MLflow logging ────────────────────────────────────────────────────────
+    try:
+        mlflow.set_experiment(_G_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "bdm_momentum_v1"}):
+            mlflow.log_metrics({
+                "raw_events":           float(n_raw_events),
+                "mean_return_bps":      agg["mean_return_bps"],
+                "win_rate":             agg["win_rate"],
+                "sharpe":               agg["sharpe"],
+                "dsr":                  agg["dsr"],
+                "anti_mean_return_bps": anti["mean_return_bps"],
+                "stress_dsr":           stress["dsr"],
+                "stress_dsr_collapse":  stress_dsr_collapse,
+                "n_trials":             float(n_trials),
+                "gate_all_pass":        float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
+def run_gate_check_h(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check sequence for Strategy H (BDM-Institutional).
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.bulk_deals import load_bulk_deals
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.bdm_institutional import (
+        build_events,
+        compute_ema50,
+        compute_gate_metrics as h_gate_metrics,
+        run_anti_strategy as h_anti,
+        run_cost_stress as h_stress,
+        simulate_trades as h_simulate,
+    )
+
+    _H_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-23-bdm-institutional.md"
+    )
+    _H_EXPERIMENT = "bdm_institutional_v1"
+
+    _H_SPLIT_DATES = {
+        "train":   ("2015-01-01", "2023-06-30"),
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _H_SPLIT_DATES:
+        logger.error("Invalid split: %r. Choose 'train', 'dev', or 'holdout'.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout("bdm_institutional_v1", _H_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _H_SPLIT_DATES[split]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_H_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="",
+                    max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=h split=%s trials=%d", split, n_trials)
+
+    # ── Load bulk deal data ───────────────────────────────────────────────────
+    try:
+        raw_deals = load_bulk_deals(start=start, end=end, side="BUY",
+                                    min_value_cr=1.0)
+    except Exception as exc:
+        logger.error("Bulk deal data load failed: %s", exc)
+        return 2
+
+    if raw_deals.empty:
+        logger.error(
+            "No bulk deal data for %s → %s.  Run bulk_deals ingest first.",
+            start, end,
+        )
+        return 2
+
+    midcap150 = _load_midcap150()
+    if not midcap150:
+        logger.warning(
+            "midcap150_constituents.csv not found — running on full universe."
+        )
+
+    events = build_events(raw_deals, midcap150=midcap150 if midcap150 else None)
+    n_raw_events = len(events)
+    logger.info("Raw BDM-I signal events in %s → %s: %d", start, end, n_raw_events)
+
+    if n_raw_events == 0:
+        logger.error("Zero events built for %s → %s.", start, end)
+        return 2
+
+    # ── Load OHLCV with EMA warmup lookback ───────────────────────────────────
+    ohlcv_start = (pd.Timestamp(start) - pd.Timedelta(days=100)).strftime("%Y-%m-%d")
+    try:
+        ohlcv = pit_load(symbol=None, start=ohlcv_start, end=end)
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv.empty:
+        logger.error("No OHLCV data for %s → %s.", ohlcv_start, end)
+        return 2
+
+    logger.info("Computing 50-day EMA for all symbols...")
+    ema50 = compute_ema50(ohlcv)
+
+    trades = h_simulate(events, ohlcv, ema50=ema50)
+    agg    = h_gate_metrics(trades, n_trials=n_trials)
+    anti   = h_anti(events, ohlcv, n_trials=n_trials, ema50=ema50)
+    stress = h_stress(events, ohlcv, n_trials=n_trials, seed=42, ema50=ema50)
+    stress_dsr_collapse = (
+        (agg["dsr"] - stress["dsr"]) / agg["dsr"]
+        if agg["dsr"] > 1e-6
+        else 1.0
+    )
+
+    gates = {
+        "mean_return_bps >= 100":     agg["mean_return_bps"] >= 100.0,
+        "win_rate >= 52%":            agg["win_rate"] >= 0.52,
+        "sharpe >= 0.5":              agg["sharpe"] >= 0.5,
+        "dsr >= 0.5":                 agg["dsr"] >= 0.5,
+        "anti_strategy_return <= 0":  anti["mean_return_bps"] <= 0.0,
+        "stress_dsr_collapse <= 50%": stress_dsr_collapse <= 0.5,
+        "total_dev_events >= 20":     agg["n_trades"] >= 20,
+    }
+    all_pass = all(gates.values())
+
+    print("\n" + "=" * 60)
+    print(f"BDM-Institutional (H) v1 Gate Report — split={split}")
+    print("=" * 60)
+    print(f"  Raw events (pre-filters):  {n_raw_events}")
+    print(f"  Executed trades:           {agg['n_trades']}")
+    print(f"  Mean return (bps):         {agg['mean_return_bps']:.1f}")
+    print(f"  Win rate:                  {agg['win_rate']:.1%}")
+    print(f"  Sharpe:                    {agg['sharpe']:.3f}")
+    print(f"  DSR (n_trials={n_trials}):      {agg['dsr']:.3f}")
+    print(f"  Anti-strategy return:      {anti['mean_return_bps']:.1f} bps")
+    print(f"  Cost-stress DSR:           {stress['dsr']:.3f} "
+          f"(collapse {stress_dsr_collapse:.1%})")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 60 + "\n")
+
+    try:
+        mlflow.set_experiment(_H_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "bdm_institutional_v1"}):
+            mlflow.log_metrics({
+                "raw_events":           float(n_raw_events),
+                "mean_return_bps":      agg["mean_return_bps"],
+                "win_rate":             agg["win_rate"],
+                "sharpe":               agg["sharpe"],
+                "dsr":                  agg["dsr"],
+                "anti_mean_return_bps": anti["mean_return_bps"],
+                "stress_dsr":           stress["dsr"],
+                "stress_dsr_collapse":  stress_dsr_collapse,
+                "n_trials":             float(n_trials),
+                "gate_all_pass":        float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
+def run_gate_check_i(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check sequence for Strategy I (Block Deal Momentum).
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.block_deals import load_block_deals
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.block_momentum import (
+        build_events,
+        compute_ema50,
+        compute_gate_metrics as i_gate_metrics,
+        run_anti_strategy as i_anti,
+        run_cost_stress as i_stress,
+        simulate_trades as i_simulate,
+    )
+
+    _I_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-23-block-deal-momentum.md"
+    )
+    _I_EXPERIMENT = "block_momentum_v1"
+
+    _I_SPLIT_DATES = {
+        "train":   ("2015-01-01", "2023-06-30"),
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _I_SPLIT_DATES:
+        logger.error("Invalid split: %r.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout("block_momentum_v1", _I_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _I_SPLIT_DATES[split]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_I_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="", max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=i split=%s trials=%d", split, n_trials)
+
+    try:
+        raw_deals = load_block_deals(start=start, end=end, side="BUY")
+    except Exception as exc:
+        logger.error("Block deal data load failed: %s", exc)
+        return 2
+
+    if raw_deals.empty:
+        logger.error("No block deal data for %s → %s.", start, end)
+        return 2
+
+    midcap150 = _load_midcap150()
+    if not midcap150:
+        logger.warning("midcap150_constituents.csv not found — running on full universe.")
+
+    events = build_events(raw_deals, midcap150=midcap150 if midcap150 else None)
+    n_raw_events = len(events)
+    logger.info("Raw block deal events in %s → %s: %d", start, end, n_raw_events)
+
+    if n_raw_events == 0:
+        logger.error("Zero block deal events for %s → %s.", start, end)
+        return 2
+
+    ohlcv_start = (pd.Timestamp(start) - pd.Timedelta(days=100)).strftime("%Y-%m-%d")
+    try:
+        ohlcv = pit_load(symbol=None, start=ohlcv_start, end=end)
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv.empty:
+        logger.error("No OHLCV data for %s → %s.", ohlcv_start, end)
+        return 2
+
+    logger.info("Computing 50-day EMA for all symbols...")
+    ema50 = compute_ema50(ohlcv)
+
+    trades = i_simulate(events, ohlcv, ema50=ema50)
+    agg    = i_gate_metrics(trades, n_trials=n_trials)
+    anti   = i_anti(events, ohlcv, n_trials=n_trials, ema50=ema50)
+    stress = i_stress(events, ohlcv, n_trials=n_trials, seed=42, ema50=ema50)
+    stress_dsr_collapse = (
+        (agg["dsr"] - stress["dsr"]) / agg["dsr"]
+        if agg["dsr"] > 1e-6 else 1.0
+    )
+
+    gates = {
+        "mean_return_bps >= 100":     agg["mean_return_bps"] >= 100.0,
+        "win_rate >= 52%":            agg["win_rate"] >= 0.52,
+        "sharpe >= 0.5":              agg["sharpe"] >= 0.5,
+        "dsr >= 0.5":                 agg["dsr"] >= 0.5,
+        "anti_strategy_return <= 0":  anti["mean_return_bps"] <= 0.0,
+        "stress_dsr_collapse <= 50%": stress_dsr_collapse <= 0.5,
+        "total_dev_events >= 15":     agg["n_trades"] >= 15,
+    }
+    all_pass = all(gates.values())
+
+    print("\n" + "=" * 60)
+    print(f"Block Deal Momentum (I) v1 Gate Report — split={split}")
+    print("=" * 60)
+    print(f"  Raw events (pre-momentum): {n_raw_events}")
+    print(f"  Executed trades:           {agg['n_trades']}")
+    print(f"  Mean return (bps):         {agg['mean_return_bps']:.1f}")
+    print(f"  Win rate:                  {agg['win_rate']:.1%}")
+    print(f"  Sharpe:                    {agg['sharpe']:.3f}")
+    print(f"  DSR (n_trials={n_trials}):      {agg['dsr']:.3f}")
+    print(f"  Anti-strategy return:      {anti['mean_return_bps']:.1f} bps")
+    print(f"  Cost-stress DSR:           {stress['dsr']:.3f} "
+          f"(collapse {stress_dsr_collapse:.1%})")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 60 + "\n")
+
+    try:
+        mlflow.set_experiment(_I_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "block_momentum_v1"}):
+            mlflow.log_metrics({
+                "raw_events":           float(n_raw_events),
+                "mean_return_bps":      agg["mean_return_bps"],
+                "win_rate":             agg["win_rate"],
+                "sharpe":               agg["sharpe"],
+                "dsr":                  agg["dsr"],
+                "anti_mean_return_bps": anti["mean_return_bps"],
+                "stress_dsr":           stress["dsr"],
+                "stress_dsr_collapse":  stress_dsr_collapse,
+                "n_trials":             float(n_trials),
+                "gate_all_pass":        float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
+def run_gate_check_j(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check sequence for Strategy J (Block Deal Stop).
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.block_deals import load_block_deals
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.bdm_momentum import compute_ema50
+    from quant.strategies.block_momentum import build_events
+    from quant.strategies.block_momentum_stop import (
+        compute_gate_metrics as j_gate_metrics,
+        run_anti_strategy as j_anti,
+        run_cost_stress as j_stress,
+        simulate_trades as j_simulate,
+    )
+
+    _J_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-23-block-deal-stop.md"
+    )
+    _J_EXPERIMENT = "block_deal_stop_v1"
+
+    _J_SPLIT_DATES = {
+        "train":   ("2015-01-01", "2023-06-30"),
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _J_SPLIT_DATES:
+        logger.error("Invalid split: %r.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout("block_deal_stop_v1", _J_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _J_SPLIT_DATES[split]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_J_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="", max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=j split=%s trials=%d", split, n_trials)
+
+    try:
+        raw_deals = load_block_deals(start=start, end=end, side="BUY")
+    except Exception as exc:
+        logger.error("Block deal data load failed: %s", exc)
+        return 2
+
+    if raw_deals.empty:
+        logger.error("No block deal data for %s → %s.", start, end)
+        return 2
+
+    midcap150 = _load_midcap150()
+    if not midcap150:
+        logger.warning("midcap150_constituents.csv not found — running on full universe.")
+
+    events = build_events(raw_deals, midcap150=midcap150 if midcap150 else None)
+    n_raw_events = len(events)
+    logger.info("Raw block deal events in %s → %s: %d", start, end, n_raw_events)
+
+    if n_raw_events == 0:
+        logger.error("Zero block deal events for %s → %s.", start, end)
+        return 2
+
+    # EMA warmup lookback: 100 calendar days before start
+    ohlcv_start = (pd.Timestamp(start) - pd.Timedelta(days=100)).strftime("%Y-%m-%d")
+    try:
+        ohlcv = pit_load(symbol=None, start=ohlcv_start, end=end)
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv.empty:
+        logger.error("No OHLCV data for %s → %s.", ohlcv_start, end)
+        return 2
+
+    logger.info("Computing 50-day EMA for all symbols...")
+    ema50 = compute_ema50(ohlcv)
+
+    trades = j_simulate(events, ohlcv, ema50=ema50)
+    agg    = j_gate_metrics(trades, n_trials=n_trials)
+    anti   = j_anti(events, ohlcv, n_trials=n_trials, ema50=ema50)
+    stress = j_stress(events, ohlcv, n_trials=n_trials, seed=42, ema50=ema50)
+    stress_dsr_collapse = (
+        (agg["dsr"] - stress["dsr"]) / agg["dsr"]
+        if agg["dsr"] > 1e-6 else 1.0
+    )
+
+    gates = {
+        "mean_return_bps >= 100":     agg["mean_return_bps"] >= 100.0,
+        "win_rate >= 52%":            agg["win_rate"] >= 0.52,
+        "sharpe >= 0.5":              agg["sharpe"] >= 0.5,
+        "dsr >= 0.5":                 agg["dsr"] >= 0.5,
+        "anti_strategy_return <= 0":  anti["mean_return_bps"] <= 0.0,
+        "stress_dsr_collapse <= 50%": stress_dsr_collapse <= 0.5,
+        "total_dev_events >= 15":     agg["n_trades"] >= 15,
+    }
+    all_pass = all(gates.values())
+
+    n_stops = agg.get("n_stops", 0)
+
+    print("\n" + "=" * 60)
+    print(f"Block Deal Stop (J) v1 Gate Report — split={split}")
+    print("=" * 60)
+    print(f"  Raw events (pre-momentum): {n_raw_events}")
+    print(f"  Executed trades:           {agg['n_trades']}")
+    print(f"  Stop-loss exits:           {n_stops} "
+          f"({n_stops / max(agg['n_trades'], 1):.0%} of trades)")
+    print(f"  Mean return (bps):         {agg['mean_return_bps']:.1f}")
+    print(f"  Win rate:                  {agg['win_rate']:.1%}")
+    print(f"  Sharpe:                    {agg['sharpe']:.3f}")
+    print(f"  DSR (n_trials={n_trials}):      {agg['dsr']:.3f}")
+    print(f"  Anti-strategy return:      {anti['mean_return_bps']:.1f} bps")
+    print(f"  Cost-stress DSR:           {stress['dsr']:.3f} "
+          f"(collapse {stress_dsr_collapse:.1%})")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 60 + "\n")
+
+    try:
+        mlflow.set_experiment(_J_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "block_deal_stop_v1"}):
+            mlflow.log_metrics({
+                "raw_events":           float(n_raw_events),
+                "n_stops":              float(n_stops),
+                "mean_return_bps":      agg["mean_return_bps"],
+                "win_rate":             agg["win_rate"],
+                "sharpe":               agg["sharpe"],
+                "dsr":                  agg["dsr"],
+                "anti_mean_return_bps": anti["mean_return_bps"],
+                "stress_dsr":           stress["dsr"],
+                "stress_dsr_collapse":  stress_dsr_collapse,
+                "n_trials":             float(n_trials),
+                "gate_all_pass":        float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
+def run_gate_check_k(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check sequence for Strategy K (Block Deal 5-Day Hold).
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.block_deals import load_block_deals
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.bdm_momentum import compute_ema50
+    from quant.strategies.block_momentum import build_events
+    from quant.strategies.block_momentum_5day import (
+        compute_gate_metrics as k_gate_metrics,
+        run_anti_strategy as k_anti,
+        run_cost_stress as k_stress,
+        simulate_trades as k_simulate,
+    )
+
+    _K_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-24-block-deal-5day.md"
+    )
+    _K_EXPERIMENT = "block_deal_5day_v1"
+
+    _K_SPLIT_DATES = {
+        "train":   ("2015-01-01", "2023-06-30"),
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _K_SPLIT_DATES:
+        logger.error("Invalid split: %r.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout("block_deal_5day_v1", _K_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _K_SPLIT_DATES[split]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_K_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="", max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=k split=%s trials=%d", split, n_trials)
+
+    try:
+        raw_deals = load_block_deals(start=start, end=end, side="BUY")
+    except Exception as exc:
+        logger.error("Block deal data load failed: %s", exc)
+        return 2
+
+    if raw_deals.empty:
+        logger.error("No block deal data for %s → %s.", start, end)
+        return 2
+
+    midcap150 = _load_midcap150()
+    if not midcap150:
+        logger.warning("midcap150_constituents.csv not found — running on full universe.")
+
+    events = build_events(raw_deals, midcap150=midcap150 if midcap150 else None)
+    n_raw_events = len(events)
+    logger.info("Raw block deal events in %s → %s: %d", start, end, n_raw_events)
+
+    if n_raw_events == 0:
+        logger.error("Zero block deal events for %s → %s.", start, end)
+        return 2
+
+    ohlcv_start = (pd.Timestamp(start) - pd.Timedelta(days=100)).strftime("%Y-%m-%d")
+    try:
+        ohlcv = pit_load(symbol=None, start=ohlcv_start, end=end)
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv.empty:
+        logger.error("No OHLCV data for %s → %s.", ohlcv_start, end)
+        return 2
+
+    logger.info("Computing 50-day EMA for all symbols...")
+    ema50 = compute_ema50(ohlcv)
+
+    trades = k_simulate(events, ohlcv, ema50=ema50)
+    agg    = k_gate_metrics(trades, n_trials=n_trials)
+    anti   = k_anti(events, ohlcv, n_trials=n_trials, ema50=ema50)
+    stress = k_stress(events, ohlcv, n_trials=n_trials, seed=42, ema50=ema50)
+    stress_dsr_collapse = (
+        (agg["dsr"] - stress["dsr"]) / agg["dsr"]
+        if agg["dsr"] > 1e-6 else 1.0
+    )
+
+    gates = {
+        "mean_return_bps >= 100":     agg["mean_return_bps"] >= 100.0,
+        "win_rate >= 52%":            agg["win_rate"] >= 0.52,
+        "sharpe >= 0.5":              agg["sharpe"] >= 0.5,
+        "dsr >= 0.5":                 agg["dsr"] >= 0.5,
+        "anti_strategy_return <= 0":  anti["mean_return_bps"] <= 0.0,
+        "stress_dsr_collapse <= 50%": stress_dsr_collapse <= 0.5,
+        "total_dev_events >= 15":     agg["n_trades"] >= 15,
+    }
+    all_pass = all(gates.values())
+
+    print("\n" + "=" * 60)
+    print(f"Block Deal 5-Day (K) v1 Gate Report — split={split}")
+    print("=" * 60)
+    print(f"  Raw events (pre-momentum): {n_raw_events}")
+    print(f"  Executed trades:           {agg['n_trades']}")
+    print(f"  Mean return (bps):         {agg['mean_return_bps']:.1f}")
+    print(f"  Win rate:                  {agg['win_rate']:.1%}")
+    print(f"  Sharpe:                    {agg['sharpe']:.3f}")
+    print(f"  DSR (n_trials={n_trials}):      {agg['dsr']:.3f}")
+    print(f"  Anti-strategy return:      {anti['mean_return_bps']:.1f} bps")
+    print(f"  Cost-stress DSR:           {stress['dsr']:.3f} "
+          f"(collapse {stress_dsr_collapse:.1%})")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 60 + "\n")
+
+    try:
+        mlflow.set_experiment(_K_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "block_deal_5day_v1"}):
+            mlflow.log_metrics({
+                "raw_events":           float(n_raw_events),
+                "mean_return_bps":      agg["mean_return_bps"],
+                "win_rate":             agg["win_rate"],
+                "sharpe":               agg["sharpe"],
+                "dsr":                  agg["dsr"],
+                "anti_mean_return_bps": anti["mean_return_bps"],
+                "stress_dsr":           stress["dsr"],
+                "stress_dsr_collapse":  stress_dsr_collapse,
+                "n_trials":             float(n_trials),
+                "gate_all_pass":        float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
+def run_gate_check_l(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check sequence for Strategy L (PEAD YoY v3).
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.earnings_ingest import load_earnings
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.pead_yoy import (
+        build_events,
+        compute_gate_metrics as l_gate_metrics,
+        run_anti_strategy as l_anti,
+        run_cost_stress as l_stress,
+        simulate_trades as l_simulate,
+    )
+
+    _L_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-24-pead-yoy.md"
+    )
+    _L_EXPERIMENT = "pead_yoy_v1"
+
+    _L_SPLIT_DATES = {
+        "train":   ("2015-01-01", "2023-06-30"),
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _L_SPLIT_DATES:
+        logger.error("Invalid split: %r.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout("pead_yoy_v1", _L_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _L_SPLIT_DATES[split]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_L_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="", max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=l split=%s trials=%d", split, n_trials)
+
+    # ── Load earnings data ────────────────────────────────────────────────────
+    try:
+        earnings = load_earnings(start=start, end=end)
+    except Exception as exc:
+        logger.error("Earnings data load failed: %s", exc)
+        return 2
+
+    if earnings.empty:
+        logger.error(
+            "No earnings data for %s → %s.  Run earnings ingest first.",
+            start, end,
+        )
+        return 2
+
+    # ── Load Midcap 150 universe ──────────────────────────────────────────────
+    midcap150 = _load_midcap150()
+    if not midcap150:
+        logger.warning("midcap150_constituents.csv not found — running on full universe.")
+
+    # ── Build signal events ───────────────────────────────────────────────────
+    events = build_events(earnings, midcap150=midcap150 if midcap150 else None)
+    n_raw_events = len(events)
+    logger.info(
+        "YoY EPS signal events (>=25%% growth) in %s → %s: %d",
+        start, end, n_raw_events,
+    )
+
+    if n_raw_events == 0:
+        logger.error(
+            "Zero signal events for %s → %s.  "
+            "Check earnings data and Midcap 150 constituent list.",
+            start, end,
+        )
+        return 2
+
+    # ── Load OHLCV ────────────────────────────────────────────────────────────
+    try:
+        ohlcv = pit_load(symbol=None, start=start, end=end)
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv.empty:
+        logger.error("No OHLCV data for %s → %s.", start, end)
+        return 2
+
+    # ── Simulate trades ───────────────────────────────────────────────────────
+    trades = l_simulate(events, ohlcv)
+    agg    = l_gate_metrics(trades, n_trials=n_trials)
+    anti   = l_anti(events, ohlcv, n_trials=n_trials)
+    stress = l_stress(events, ohlcv, n_trials=n_trials, seed=42)
+    stress_dsr_collapse = (
+        (agg["dsr"] - stress["dsr"]) / agg["dsr"]
+        if agg["dsr"] > 1e-6 else 1.0
+    )
+
+    gates = {
+        "mean_return_bps >= 100":     agg["mean_return_bps"] >= 100.0,
+        "win_rate >= 52%":            agg["win_rate"] >= 0.52,
+        "sharpe >= 0.5":              agg["sharpe"] >= 0.5,
+        "dsr >= 0.5":                 agg["dsr"] >= 0.5,
+        "anti_strategy_return <= 0":  anti["mean_return_bps"] <= 0.0,
+        "stress_dsr_collapse <= 50%": stress_dsr_collapse <= 0.5,
+        "total_dev_events >= 15":     agg["n_trades"] >= 15,
+    }
+    all_pass = all(gates.values())
+
+    print("\n" + "=" * 60)
+    print(f"PEAD YoY v3 (L) Gate Report — split={split}")
+    print("=" * 60)
+    print(f"  Signal events (raw):       {n_raw_events}")
+    print(f"  Executed trades:           {agg['n_trades']}")
+    print(f"  Mean return (bps):         {agg['mean_return_bps']:.1f}")
+    print(f"  Win rate:                  {agg['win_rate']:.1%}")
+    print(f"  Sharpe:                    {agg['sharpe']:.3f}")
+    print(f"  DSR (n_trials={n_trials}):      {agg['dsr']:.3f}")
+    print(f"  Anti-strategy return:      {anti['mean_return_bps']:.1f} bps")
+    print(f"  Cost-stress DSR:           {stress['dsr']:.3f} "
+          f"(collapse {stress_dsr_collapse:.1%})")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 60 + "\n")
+
+    try:
+        mlflow.set_experiment(_L_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "pead_yoy_v1"}):
+            mlflow.log_metrics({
+                "raw_events":           float(n_raw_events),
+                "mean_return_bps":      agg["mean_return_bps"],
+                "win_rate":             agg["win_rate"],
+                "sharpe":               agg["sharpe"],
+                "dsr":                  agg["dsr"],
+                "anti_mean_return_bps": anti["mean_return_bps"],
+                "stress_dsr":           stress["dsr"],
+                "stress_dsr_collapse":  stress_dsr_collapse,
+                "n_trials":             float(n_trials),
+                "gate_all_pass":        float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
+def run_gate_check_m(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check sequence for Strategy M (PEAD ML v4).
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.earnings_ingest import load_earnings
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.pead_ml import (
+        _PEADModel,
+        build_events,
+        build_feature_matrix,
+        compute_gate_metrics as m_gate_metrics,
+        compute_ohlcv_features,
+        compute_targets,
+        simulate_trades as m_simulate,
+    )
+
+    _M_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-24-pead-ml.md"
+    )
+    _M_EXPERIMENT = "pead_ml_v1"
+
+    _M_SPLIT_DATES = {
+        "train":   ("2015-01-01", "2023-06-30"),
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _M_SPLIT_DATES:
+        logger.error("Invalid split: %r.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout("pead_ml_v1", _M_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _M_SPLIT_DATES[split]
+    train_start, train_end = _M_SPLIT_DATES["train"]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_M_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="", max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=m split=%s trials=%d", split, n_trials)
+
+    # ── Load earnings ─────────────────────────────────────────────────────────
+    logger.info("Loading earnings data (train + eval)...")
+    try:
+        # Load full history including train for YoY feature computation
+        all_earnings = load_earnings(start=train_start, end=end)
+        eval_earnings = all_earnings[
+            (pd.to_datetime(all_earnings["business_date"]) >= pd.Timestamp(start))
+            & (pd.to_datetime(all_earnings["business_date"]) <= pd.Timestamp(end))
+        ].copy()
+    except Exception as exc:
+        logger.error("Earnings load failed: %s", exc)
+        return 2
+
+    if all_earnings.empty:
+        logger.error("No earnings data for %s → %s.", train_start, end)
+        return 2
+
+    # ── Load Midcap 150 ───────────────────────────────────────────────────────
+    midcap150 = _load_midcap150()
+    if not midcap150:
+        logger.warning("midcap150_constituents.csv not found — running on full universe.")
+
+    mc150 = midcap150 if midcap150 else None
+
+    # ── Build event universes ─────────────────────────────────────────────────
+    train_events = build_events(
+        all_earnings[
+            (pd.to_datetime(all_earnings["business_date"]) >= pd.Timestamp(train_start))
+            & (pd.to_datetime(all_earnings["business_date"]) <= pd.Timestamp(train_end))
+        ],
+        midcap150=mc150,
+    )
+    eval_events = build_events(eval_earnings, midcap150=mc150)
+
+    logger.info(
+        "Events — train: %d, eval (%s→%s): %d",
+        len(train_events), start, end, len(eval_events),
+    )
+
+    if len(train_events) < 50:
+        logger.error(
+            "Too few training events (%d < 50). Cannot fit LightGBM.",
+            len(train_events),
+        )
+        return 2
+
+    if eval_events.empty:
+        logger.error("No eval events for %s → %s.", start, end)
+        return 2
+
+    # ── Load OHLCV (EMA warmup + full eval period) ────────────────────────────
+    ohlcv_start = (pd.Timestamp(train_start) - pd.Timedelta(days=100)).strftime("%Y-%m-%d")
+    logger.info("Loading OHLCV from %s to %s...", ohlcv_start, end)
+    try:
+        ohlcv_full = pit_load(symbol=None, start=ohlcv_start, end=end)
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv_full.empty:
+        logger.error("No OHLCV data for %s → %s.", ohlcv_start, end)
+        return 2
+
+    # ── Compute OHLCV features (vectorized over all symbols/dates) ────────────
+    logger.info("Computing OHLCV features (vectorized)...")
+    ohlcv_feats = compute_ohlcv_features(ohlcv_full)
+
+    # ── Build feature matrices ────────────────────────────────────────────────
+    logger.info("Building feature matrices...")
+    X_train = build_feature_matrix(train_events, ohlcv_feats)
+    X_eval  = build_feature_matrix(eval_events,  ohlcv_feats)
+
+    # ── Compute targets for training ──────────────────────────────────────────
+    logger.info("Computing training targets...")
+    train_ohlcv = ohlcv_full[
+        ohlcv_full.index.get_level_values("business_date") <= pd.Timestamp(train_end).date()
+    ]
+    y_train_raw = compute_targets(train_events, train_ohlcv)
+
+    valid_mask = ~np.isnan(y_train_raw)
+    if valid_mask.sum() < 50:
+        logger.error(
+            "Too few training examples with valid targets (%d < 50).",
+            valid_mask.sum(),
+        )
+        return 2
+
+    X_tr_valid   = X_train[valid_mask]
+    y_tr_valid   = y_train_raw[valid_mask]
+    dates_train  = pd.DatetimeIndex(
+        pd.to_datetime(train_events[valid_mask]["event_date"])
+    )
+
+    base_rate = float(y_tr_valid.mean())
+    logger.info(
+        "Training: n=%d, base_rate=%.1f%% (target: >100 bps net)",
+        len(y_tr_valid), base_rate * 100,
+    )
+
+    # ── Fit model ─────────────────────────────────────────────────────────────
+    logger.info("Fitting PEAD ML model (LightGBM + isotonic calibration)...")
+    model = _PEADModel()
+    try:
+        model.fit(
+            X_tr_valid, y_tr_valid, dates_train,
+            n_trials=n_trials,
+            experiment_name=_M_EXPERIMENT,
+        )
+    except Exception as exc:
+        logger.error("Model fit failed: %s", exc)
+        return 2
+
+    logger.info(
+        "Model fitted: oof_brier=%.4f (random baseline=%.4f)",
+        model.oof_brier,
+        float(2 * base_rate * (1 - base_rate)),
+    )
+
+    # ── Simulate trades on eval period ────────────────────────────────────────
+    eval_ohlcv = ohlcv_full  # need full range for T+5 exit prices
+    trades = m_simulate(eval_events, eval_ohlcv, model, X_eval)
+    agg    = m_gate_metrics(trades, n_trials=n_trials)
+
+    # ── Anti-strategy ─────────────────────────────────────────────────────────
+    anti_trades = m_simulate(eval_events, eval_ohlcv, model, X_eval)
+    for t in anti_trades:
+        t.gross_return = -t.gross_return
+        t.net_return   = t.gross_return - _ROUND_TRIP_COST
+    from quant.strategies.bdm import _ROUND_TRIP_COST
+    anti = m_gate_metrics(anti_trades, n_trials=n_trials)
+    anti["is_anti_strategy"] = True
+
+    # ── Cost-stress ───────────────────────────────────────────────────────────
+    rng = np.random.default_rng(42)
+    stress_trades = m_simulate(eval_events, eval_ohlcv, model, X_eval, slippage_scale=2.0, rng=rng)
+    stress = m_gate_metrics(stress_trades, n_trials=n_trials)
+    stress["is_cost_stress"] = True
+    stress_dsr_collapse = (
+        (agg["dsr"] - stress["dsr"]) / agg["dsr"]
+        if agg["dsr"] > 1e-6 else 1.0
+    )
+
+    gates = {
+        "mean_return_bps >= 100":     agg["mean_return_bps"] >= 100.0,
+        "win_rate >= 52%":            agg["win_rate"] >= 0.52,
+        "sharpe >= 0.5":              agg["sharpe"] >= 0.5,
+        "dsr >= 0.5":                 agg["dsr"] >= 0.5,
+        "anti_strategy_return <= 0":  anti["mean_return_bps"] <= 0.0,
+        "stress_dsr_collapse <= 50%": stress_dsr_collapse <= 0.5,
+        "total_dev_trades >= 10":     agg["n_trades"] >= 10,
+    }
+    all_pass = all(gates.values())
+
+    print("\n" + "=" * 60)
+    print(f"PEAD ML v4 (M) Gate Report — split={split}")
+    print("=" * 60)
+    print(f"  Training events:           {len(y_tr_valid)}")
+    print(f"  Training base rate:        {base_rate:.1%} (events with >155bps gross)")
+    print(f"  OOF Brier score:           {model.oof_brier:.4f}  "
+          f"(random={2*base_rate*(1-base_rate):.4f})")
+    print(f"  Eval signal events:        {len(eval_events)}")
+    print(f"  Executed trades (P≥0.5):   {agg['n_trades']}")
+    print(f"  Mean return (bps):         {agg['mean_return_bps']:.1f}")
+    print(f"  Win rate:                  {agg['win_rate']:.1%}")
+    print(f"  Sharpe:                    {agg['sharpe']:.3f}")
+    print(f"  DSR (n_trials={n_trials}):      {agg['dsr']:.3f}")
+    print(f"  Anti-strategy return:      {anti['mean_return_bps']:.1f} bps")
+    print(f"  Cost-stress DSR:           {stress['dsr']:.3f} "
+          f"(collapse {stress_dsr_collapse:.1%})")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 60 + "\n")
+
+    try:
+        mlflow.set_experiment(_M_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "pead_ml_v1"}):
+            mlflow.log_metrics({
+                "n_train_events":       float(len(y_tr_valid)),
+                "train_base_rate":      base_rate,
+                "oof_brier":            model.oof_brier,
+                "eval_raw_events":      float(len(eval_events)),
+                "mean_return_bps":      agg["mean_return_bps"],
+                "win_rate":             agg["win_rate"],
+                "sharpe":               agg["sharpe"],
+                "dsr":                  agg["dsr"],
+                "anti_mean_return_bps": anti["mean_return_bps"],
+                "stress_dsr":           stress["dsr"],
+                "stress_dsr_collapse":  stress_dsr_collapse,
+                "n_trials":             float(n_trials),
+                "gate_all_pass":        float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -967,7 +2256,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Strategy gate-check runner")
     parser.add_argument(
         "--strategy",
-        choices=["pead_midcap", "index_recon", "idi", "bdm"],
+        choices=["pead_midcap", "index_recon", "idi", "bdm", "g", "h", "i", "j", "k", "l", "m"],
         required=True,
         help="Strategy to evaluate",
     )
@@ -1004,8 +2293,22 @@ def main() -> None:
         exit_code = run_gate_check_index_recon(args.split, n_trials=args.n_trials)
     elif args.strategy == "idi":
         exit_code = run_gate_check_idi(args.split, n_trials=args.n_trials)
-    else:
+    elif args.strategy == "bdm":
         exit_code = run_gate_check_bdm(args.split, n_trials=args.n_trials)
+    elif args.strategy == "g":
+        exit_code = run_gate_check_g(args.split, n_trials=args.n_trials)
+    elif args.strategy == "h":
+        exit_code = run_gate_check_h(args.split, n_trials=args.n_trials)
+    elif args.strategy == "i":
+        exit_code = run_gate_check_i(args.split, n_trials=args.n_trials)
+    elif args.strategy == "j":
+        exit_code = run_gate_check_j(args.split, n_trials=args.n_trials)
+    elif args.strategy == "k":
+        exit_code = run_gate_check_k(args.split, n_trials=args.n_trials)
+    elif args.strategy == "l":
+        exit_code = run_gate_check_l(args.split, n_trials=args.n_trials)
+    else:  # "m"
+        exit_code = run_gate_check_m(args.split, n_trials=args.n_trials)
     sys.exit(exit_code)
 
 
