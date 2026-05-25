@@ -788,7 +788,9 @@ def run_gate_check_momentum(split: str, n_trials: int | None = None) -> int:
     from quant.research.holdout_lock import HOLDOUT_START, read_holdout
     from quant.strategies.cs_momentum import (
         build_anti_portfolios,
+        build_close_pivot,
         build_monthly_portfolios,
+        build_open_pivot,
         compute_gate_metrics as mom_gate_metrics,
         load_constituents,
         run_cost_stress as mom_cost_stress,
@@ -870,17 +872,33 @@ def run_gate_check_momentum(split: str, n_trials: int | None = None) -> int:
 
     logger.info("Universe: %d symbols | OHLCV rows: %d", len(symbols), len(ohlcv))
 
+    # ── Build pivots ONCE — reused for scoring, simulation, anti + stress ─────
+    logger.info("Building price pivots (one-time, ~5–10 seconds)...")
+    close_piv = build_close_pivot(ohlcv, symbols)
+    open_piv  = build_open_pivot(ohlcv, symbols)
+    logger.info("Pivots ready: close %s | open %s", close_piv.shape, open_piv.shape)
+
     # ── Build portfolios (signal + anti-signal) ───────────────────────────────
-    portfolios = build_monthly_portfolios(ohlcv, symbols, start=start, end=end)
+    portfolios = build_monthly_portfolios(
+        ohlcv, symbols, start=start, end=end, close_pivot=close_piv
+    )
     if len(portfolios) < 2:
         logger.error("Fewer than 2 monthly portfolios built for %s → %s.", start, end)
         return 2
 
-    anti_ports = build_anti_portfolios(ohlcv, symbols, start=start, end=end)
+    anti_ports = build_anti_portfolios(
+        ohlcv, symbols, start=start, end=end, close_pivot=close_piv
+    )
 
     # ── Simulate ──────────────────────────────────────────────────────────────
-    result_df   = simulate_portfolio(portfolios, ohlcv, costs_enabled=True)
-    anti_df     = simulate_portfolio(anti_ports, ohlcv, costs_enabled=True)
+    result_df = simulate_portfolio(
+        portfolios, ohlcv, costs_enabled=True,
+        open_pivot=open_piv, close_pivot=close_piv,
+    )
+    anti_df = simulate_portfolio(
+        anti_ports, ohlcv, costs_enabled=True,
+        open_pivot=open_piv, close_pivot=close_piv,
+    )
 
     if result_df.empty:
         logger.error("Simulation produced no monthly return records.")
@@ -896,8 +914,11 @@ def run_gate_check_momentum(split: str, n_trials: int | None = None) -> int:
     metrics  = mom_gate_metrics(result_df, benchmark_df=benchmark_df, n_trials=n_trials)
     anti_met = mom_gate_metrics(anti_df, benchmark_df=benchmark_df, n_trials=n_trials)
 
-    # Cost-stress test (200 runs with t-dist slippage)
-    stress = mom_cost_stress(portfolios, ohlcv, n_trials=n_trials)
+    # Cost-stress test (200 runs with t-dist slippage) — pass pivots to avoid rebuild
+    stress = mom_cost_stress(
+        portfolios, ohlcv, n_trials=n_trials,
+        open_pivot=open_piv, close_pivot=close_piv,
+    )
     stress_collapse = (
         (metrics["dsr"] - stress["dsr_median"]) / metrics["dsr"]
         if metrics["dsr"] and metrics["dsr"] > 1e-6

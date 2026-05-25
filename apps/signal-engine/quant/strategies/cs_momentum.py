@@ -96,67 +96,81 @@ def load_constituents(path: str | None = None) -> list[str]:
     return df[col].str.upper().str.strip().tolist()
 
 
+def build_close_pivot(ohlcv: pd.DataFrame, symbols: list[str]) -> pd.DataFrame:
+    """Build a (date × symbol) close-price pivot — built once, used for all scoring.
+
+    This is the key performance fix: instead of filtering the 3.6M-row DataFrame
+    per symbol per month, we pivot once into a matrix and do O(1) date lookups.
+
+    Returns a DataFrame with DatetimeIndex (sorted ascending) and symbol columns.
+    Symbols with no data are absent from the columns.
+    """
+    logger.info("Building close-price pivot for %d symbols...", len(symbols))
+    # Filter to universe symbols only to reduce memory
+    mask = ohlcv["symbol"].isin(set(symbols))
+    sub  = ohlcv[mask][["date", "symbol", "close"]].copy()
+    sub["date"] = pd.to_datetime(sub["date"])
+    # If there are duplicate (date, symbol) rows keep the last
+    sub = sub.drop_duplicates(subset=["date", "symbol"], keep="last")
+    pivot = sub.pivot(index="date", columns="symbol", values="close").sort_index()
+    logger.info("Close pivot shape: %s", pivot.shape)
+    return pivot
+
+
+def build_open_pivot(ohlcv: pd.DataFrame, symbols: list[str]) -> pd.DataFrame:
+    """Same as build_close_pivot but for open prices (used at entry/exit)."""
+    mask = ohlcv["symbol"].isin(set(symbols))
+    sub  = ohlcv[mask][["date", "symbol", "open"]].copy()
+    sub["date"] = pd.to_datetime(sub["date"])
+    sub = sub.drop_duplicates(subset=["date", "symbol"], keep="last")
+    return sub.pivot(index="date", columns="symbol", values="open").sort_index()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# 2.  Momentum score per symbol per date
+# 2.  Vectorised momentum scoring via pivot
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _momentum_score(
-    ohlcv: pd.DataFrame,
-    symbol: str,
+def score_universe_from_pivot(
+    close_pivot: pd.DataFrame,
     signal_date: pd.Timestamp,
     lookback: int = _LOOKBACK_DAYS,
     skip: int = _SKIP_DAYS,
-) -> float | None:
-    """Compute 12-1 momentum score for one symbol at one date.
-
-    Returns None if the required price history is unavailable (e.g., IPO
-    too recent, trading halt, data gap).
-
-    The score is (price_skip_ago / price_lookback_ago) - 1.
-    Both prices must exist; no interpolation.
-    """
-    sym_df = ohlcv[ohlcv["symbol"] == symbol].copy()
-    sym_df = sym_df[sym_df["date"] <= signal_date].sort_values("date")
-
-    # Need at least lookback+10 rows to reliably get t_start and t_skip
-    if len(sym_df) < lookback + 10:
-        return None
-
-    dates = sym_df["date"].values
-    closes = sym_df["close"].values
-
-    # t_skip index: the row that is `skip` trading days before signal_date
-    if len(dates) < skip + 1:
-        return None
-    t_skip_price = closes[-(skip + 1)]   # price `skip` days before signal_date
-
-    # t_start index: the row that is `lookback` trading days before signal_date
-    if len(dates) < lookback + 1:
-        return None
-    t_start_price = closes[-(lookback + 1)]
-
-    if t_start_price <= 0 or t_skip_price <= 0:
-        return None
-
-    return float(t_skip_price / t_start_price) - 1.0
-
-
-def score_universe(
-    ohlcv: pd.DataFrame,
-    symbols: list[str],
-    signal_date: pd.Timestamp,
 ) -> pd.Series:
-    """Return a Series of 12-1 momentum scores for all eligible symbols.
+    """Score all symbols at once using the pre-built close pivot.
 
-    Index = symbol, value = score (float).  Symbols with insufficient
-    history are excluded (not present in the result).
+    This is O(1) in terms of DataFrame filtering — just integer-index lookups
+    on the sorted pivot.
+
+    Returns a Series (symbol → score) sorted descending.
+    Symbols without enough history (IPO, halt) are excluded automatically
+    (they'll have NaN at the required dates → dropped by dropna).
     """
-    scores: dict[str, float] = {}
-    for sym in symbols:
-        s = _momentum_score(ohlcv, sym, signal_date)
-        if s is not None:
-            scores[sym] = s
-    return pd.Series(scores, name="momentum_score").sort_values(ascending=False)
+    dates_before = close_pivot.index[close_pivot.index <= signal_date]
+    n = len(dates_before)
+
+    if n < lookback + 1:
+        return pd.Series(dtype=float, name="momentum_score")
+
+    # iloc positions counting backward from signal_date
+    # -(skip+1)     → price `skip` trading days before signal_date
+    # -(lookback+1) → price `lookback` trading days before signal_date
+    t_skip_idx    = n - skip - 1
+    t_lookback_idx = n - lookback - 1
+
+    if t_skip_idx < 0 or t_lookback_idx < 0:
+        return pd.Series(dtype=float, name="momentum_score")
+
+    price_skip    = close_pivot.iloc[t_skip_idx]      # Series: symbol → price
+    price_lookback = close_pivot.iloc[t_lookback_idx]  # Series: symbol → price
+
+    # Vectorised score: all symbols at once
+    scores = (price_skip / price_lookback) - 1.0
+
+    # Drop symbols with NaN (missing data at either date) or non-positive prices
+    scores = scores.dropna()
+    scores = scores[scores.notna() & (price_skip > 0) & (price_lookback > 0)]
+
+    return scores.sort_values(ascending=False).rename("momentum_score")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -168,83 +182,81 @@ def build_monthly_portfolios(
     symbols: list[str],
     start: str,
     end: str,
+    close_pivot: pd.DataFrame | None = None,
 ) -> list[MonthlyPort]:
     """Build the sequence of monthly portfolios from start to end.
 
     For each calendar month whose last trading day falls in [start, end]:
-      1. Score all symbols → rank by 12-1 momentum
+      1. Score all symbols via the close pivot → rank by 12-1 momentum
       2. Select top TOP_PCT (with BUFFER_PCT retention for existing positions)
       3. Record the entry date (first trading day of next month)
       4. Compute turnover vs prior month's portfolio
 
+    Args:
+        ohlcv:       Flat DataFrame with columns date, symbol, open, close.
+        symbols:     Universe symbol list.
+        start, end:  Date range for signal dates (inclusive).
+        close_pivot: Optional pre-built close pivot.  If None, built here.
+                     Pass it in from the caller to avoid rebuilding.
+
     Returns a list of MonthlyPort objects in chronological order.
     """
-    dates_df = ohlcv[["date"]].drop_duplicates().sort_values("date")
-    trading_days = dates_df["date"].dt.to_pydatetime()
+    if close_pivot is None:
+        close_pivot = build_close_pivot(ohlcv, symbols)
 
+    ohlcv_dates = pd.to_datetime(ohlcv["date"].drop_duplicates().sort_values())
     start_ts = pd.Timestamp(start)
     end_ts   = pd.Timestamp(end)
 
-    # Find month-end signal dates (last trading day of each month)
+    # Month-end signal dates: last trading day of each calendar month in range
     all_signal_dates: list[pd.Timestamp] = []
-    month_groups = dates_df.copy()
-    month_groups["ym"] = pd.to_datetime(month_groups["date"]).dt.to_period("M")
-    for _, grp in month_groups.groupby("ym"):
-        last_day = pd.Timestamp(grp["date"].max())
+    for period, grp in ohlcv_dates.groupby(ohlcv_dates.dt.to_period("M")):
+        last_day = grp.max()
         if start_ts <= last_day <= end_ts:
             all_signal_dates.append(last_day)
-
     all_signal_dates.sort()
 
-    # Need the next month's first trading day for each signal date
-    all_td = sorted(pd.Timestamp(d) for d in trading_days)
+    # Fast next-trading-day lookup: sorted array of all trading days
+    all_td = ohlcv_dates.sort_values().values
 
-    def _next_month_open(sig_date: pd.Timestamp) -> pd.Timestamp:
-        """Return first trading day after sig_date."""
-        for d in all_td:
-            if d > sig_date:
-                return d
-        return sig_date  # fallback (shouldn't happen)
+    def _next_open(sig: pd.Timestamp) -> pd.Timestamp:
+        after = all_td[all_td > sig.to_numpy()]
+        return pd.Timestamp(after[0]) if len(after) else sig
+
+    top_n    = max(1, int(len(symbols) * _TOP_PCT))
+    buffer_n = max(top_n, int(len(symbols) * _BUFFER_PCT))
 
     portfolios: list[MonthlyPort] = []
     prev_symbols: set[str] = set()
-    top_n = max(1, int(len(symbols) * _TOP_PCT))
-    buffer_n = max(top_n, int(len(symbols) * _BUFFER_PCT))
 
     for sig_date in all_signal_dates:
-        scores = score_universe(ohlcv, symbols, sig_date)
+        scores = score_universe_from_pivot(close_pivot, sig_date)
         if scores.empty:
             logger.warning("No scores on %s — skipping month", sig_date.date())
             continue
 
-        n_eligible = len(scores)
         ranked_symbols = list(scores.index)
+        n_eligible     = len(ranked_symbols)
 
-        # Apply buffer: keep existing positions until they drop below buffer_n
+        # Apply buffer: keep existing positions until they fall below buffer_n rank
         top_symbols_set = set(ranked_symbols[:top_n])
-        retained = {s for s in prev_symbols if s in set(ranked_symbols[:buffer_n])}
-        new_entries = top_symbols_set - retained
+        retained        = {s for s in prev_symbols if s in set(ranked_symbols[:buffer_n])}
+        new_entries     = top_symbols_set - retained
 
-        # Final portfolio: retained + new entries up to top_n
         final_port = list(retained | new_entries)
-        # If somehow over top_n after retention, trim lowest-ranked
         if len(final_port) > top_n:
             rank_map = {s: i for i, s in enumerate(ranked_symbols)}
             final_port.sort(key=lambda s: rank_map.get(s, 9999))
             final_port = final_port[:top_n]
 
-        # Compute turnover
-        if prev_symbols:
-            dropped = prev_symbols - set(final_port)
-            turnover = len(dropped) / max(len(prev_symbols), 1)
-        else:
-            turnover = 1.0  # first month: full deployment
-
-        entry_date = _next_month_open(sig_date)
+        turnover = (
+            len(prev_symbols - set(final_port)) / max(len(prev_symbols), 1)
+            if prev_symbols else 1.0
+        )
 
         portfolios.append(MonthlyPort(
             signal_date=sig_date,
-            entry_date=entry_date,
+            entry_date=_next_open(sig_date),
             symbols=final_port,
             n_eligible=n_eligible,
             turnover=turnover,
@@ -273,6 +285,8 @@ def simulate_portfolio(
     vol_target: float = _VOL_TARGET,
     cost_bps_round_trip: float = _ROUND_TRIP_BPS,
     costs_enabled: bool = True,
+    open_pivot: pd.DataFrame | None = None,
+    close_pivot: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Simulate monthly portfolio returns with vol-target overlay.
 
@@ -282,7 +296,12 @@ def simulate_portfolio(
       - Gross return: equal-weight average of constituent returns
       - Cost deduction: turnover × cost_bps_round_trip / 10000
       - Vol-target scalar: applied to the PRIOR month's realised vol
-        (we only know last month's vol at the time of the new entry)
+
+    Args:
+        portfolios:          Output of build_monthly_portfolios().
+        ohlcv:               Flat OHLCV DataFrame (used only if pivots not provided).
+        open_pivot:          Pre-built date×symbol open price pivot (recommended).
+        close_pivot:         Pre-built date×symbol close price pivot (fallback exit).
 
     Returns a DataFrame with columns:
       date, gross_return, cost, net_return, scalar, turnover, n_positions
@@ -290,17 +309,14 @@ def simulate_portfolio(
     if not portfolios:
         return pd.DataFrame()
 
-    # Build a fast (symbol, date) → price lookup dict for open/close
-    logger.info("Building price lookup (this may take a moment)...")
-    ohlcv_indexed = ohlcv.copy()
-    ohlcv_indexed["date"] = pd.to_datetime(ohlcv_indexed["date"])
-    # pivot open and close for speed: date × symbol
-    open_pivot = (
-        ohlcv_indexed.pivot_table(index="date", columns="symbol", values="open")
-    )
-    close_pivot = (
-        ohlcv_indexed.pivot_table(index="date", columns="symbol", values="close")
-    )
+    # Build pivots if not provided (expensive — pass them in when calling repeatedly)
+    all_symbols = list({s for p in portfolios for s in p.symbols})
+    if open_pivot is None:
+        logger.info("Building open-price pivot...")
+        open_pivot = build_open_pivot(ohlcv, all_symbols)
+    if close_pivot is None:
+        logger.info("Building close-price pivot...")
+        close_pivot = build_close_pivot(ohlcv, all_symbols)
 
     records: list[dict] = []
     daily_returns_history: list[float] = []  # rolling 20-day buffer for vol estimate
@@ -464,55 +480,55 @@ def build_anti_portfolios(
     symbols: list[str],
     start: str,
     end: str,
+    close_pivot: pd.DataFrame | None = None,
 ) -> list[MonthlyPort]:
     """Same as build_monthly_portfolios but selects BOTTOM decile instead of top.
 
     If this also makes money → the momentum signal is just a broad long bias,
     not a cross-sectional signal → KILL the strategy.
     """
-    # Temporarily monkey-patch top/buffer pct to select bottom decile
-    # (we rank ascending and select "top" of that = actual bottom of momentum)
-    dates_df = ohlcv[["date"]].drop_duplicates().sort_values("date")
+    if close_pivot is None:
+        close_pivot = build_close_pivot(ohlcv, symbols)
+
+    ohlcv_dates = pd.to_datetime(ohlcv["date"].drop_duplicates().sort_values())
     start_ts = pd.Timestamp(start)
     end_ts   = pd.Timestamp(end)
 
-    month_groups = dates_df.copy()
-    month_groups["ym"] = pd.to_datetime(month_groups["date"]).dt.to_period("M")
     all_signal_dates: list[pd.Timestamp] = []
-    for _, grp in month_groups.groupby("ym"):
-        last_day = pd.Timestamp(grp["date"].max())
+    for _, grp in ohlcv_dates.groupby(ohlcv_dates.dt.to_period("M")):
+        last_day = grp.max()
         if start_ts <= last_day <= end_ts:
             all_signal_dates.append(last_day)
     all_signal_dates.sort()
 
-    all_td = sorted(pd.Timestamp(d) for d in ohlcv["date"].drop_duplicates().values)
+    all_td = ohlcv_dates.sort_values().values
 
     def _next(sig: pd.Timestamp) -> pd.Timestamp:
-        for d in all_td:
-            if d > sig:
-                return d
-        return sig
+        after = all_td[all_td > sig.to_numpy()]
+        return pd.Timestamp(after[0]) if len(after) else sig
 
     top_n = max(1, int(len(symbols) * _TOP_PCT))
     portfolios: list[MonthlyPort] = []
+    prev_symbols: set[str] = set()
 
-    for i, sig_date in enumerate(all_signal_dates):
-        scores = score_universe(ohlcv, symbols, sig_date)
+    for sig_date in all_signal_dates:
+        scores = score_universe_from_pivot(close_pivot, sig_date)
         if scores.empty:
             continue
-        # Bottom decile: last `top_n` in descending score → worst performers
+        # Bottom decile: last `top_n` entries in descending scores = worst performers
         worst = list(scores.index[-top_n:])
-        entry_date = _next(sig_date)
-        turnover = 1.0 if i == 0 else float(
-            len(set(worst) - set(portfolios[-1].symbols)) / max(len(portfolios[-1].symbols), 1)
+        turnover = (
+            len(prev_symbols - set(worst)) / max(len(prev_symbols), 1)
+            if prev_symbols else 1.0
         )
         portfolios.append(MonthlyPort(
             signal_date=sig_date,
-            entry_date=entry_date,
+            entry_date=_next(sig_date),
             symbols=worst,
             n_eligible=len(scores),
             turnover=turnover,
         ))
+        prev_symbols = set(worst)
 
     return portfolios
 
@@ -527,26 +543,37 @@ def run_cost_stress(
     n_trials: int = 1,
     n_stress_runs: int = 200,
     rng_seed: int = 42,
+    open_pivot: pd.DataFrame | None = None,
+    close_pivot: pd.DataFrame | None = None,
 ) -> dict:
     """Re-simulate with slippage drawn from t-dist(df=4, scale=2×nominal).
 
     Per plan §3.1 rule 5: strategy is killed if median DSR collapses > 50%
     under this stress model.
 
-    Returns dict with keys: dsr_median, dsr_p10, dsr_p90, collapse_threshold
+    Pass open_pivot and close_pivot to avoid rebuilding them 200 times.
+    Returns dict with keys: dsr_median, dsr_p10, dsr_p90
     """
     rng = np.random.default_rng(rng_seed)
     from scipy.stats import t as t_dist  # type: ignore[import]
 
+    # Build pivots once if not provided
+    all_symbols = list({s for p in portfolios for s in p.symbols})
+    if open_pivot is None:
+        open_pivot = build_open_pivot(ohlcv, all_symbols)
+    if close_pivot is None:
+        close_pivot = build_close_pivot(ohlcv, all_symbols)
+
     stressed_dsrs: list[float] = []
     for _ in range(n_stress_runs):
-        # Draw slippage multiplier: t(df=4) with scale=2, floor at 0
         slip_mult = float(max(0.0, t_dist.rvs(df=4, scale=2.0, random_state=rng)))
         stressed_bps = (_COST_BPS_BUY + _COST_BPS_SELL) + 2 * _SLIP_BPS * slip_mult
         result_df = simulate_portfolio(
             portfolios, ohlcv,
             cost_bps_round_trip=stressed_bps,
             costs_enabled=True,
+            open_pivot=open_pivot,
+            close_pivot=close_pivot,
         )
         metrics = compute_gate_metrics(result_df, n_trials=n_trials)
         if metrics["dsr"] is not None:
