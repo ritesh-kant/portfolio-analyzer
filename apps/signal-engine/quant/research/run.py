@@ -2247,6 +2247,234 @@ def run_gate_check_m(split: str, n_trials: int | None = None) -> int:
     return 0 if all_pass else 1
 
 
+def run_gate_check_n(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check sequence for Strategy N (PEAD ML v5 — repaired data).
+
+    Identical to Strategy M in model architecture, features, threshold (P≥0.50),
+    and falsification criteria.  The only difference is the earnings parquet now
+    has net_profit_cr and revenue_cr patched from 132 Tickertape income-statement
+    CSVs (DEC 2023 → MAR 2026).
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.earnings_ingest import load_earnings
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.pead_ml import (
+        _PEADModel,
+        build_events,
+        build_feature_matrix,
+        compute_gate_metrics as m_gate_metrics,
+        compute_ohlcv_features,
+        compute_targets,
+        simulate_trades as m_simulate,
+    )
+
+    _N_EXPERIMENT = "pead_ml_v2"
+
+    _N_SPLIT_DATES = {
+        "train":   ("2015-01-01", "2023-06-30"),
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _N_SPLIT_DATES:
+        logger.error("Unknown split %r for strategy N", split)
+        return 2
+
+    if split == "holdout":
+        read_holdout()
+
+    train_start, train_end = _N_SPLIT_DATES["train"]
+    eval_start, eval_end   = _N_SPLIT_DATES[split]
+    end = eval_end  # alias used below
+
+    # ── Load earnings ────────────────────────────────────────────────────────
+    logger.info("[N] Loading earnings parquet...")
+    try:
+        earnings = load_earnings()
+    except Exception as exc:
+        logger.error("[N] Failed to load earnings: %s", exc)
+        return 2
+
+    # ── Load OHLCV ───────────────────────────────────────────────────────────
+    ohlcv_start = (pd.Timestamp(train_start) - pd.Timedelta(days=100)).strftime("%Y-%m-%d")
+    logger.info("[N] Loading OHLCV from %s to %s...", ohlcv_start, end)
+    try:
+        ohlcv_full = pit_load(symbol=None, start=ohlcv_start, end=end)
+    except Exception as exc:
+        logger.error("[N] OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv_full.empty:
+        logger.error("[N] No OHLCV data for %s → %s.", ohlcv_start, end)
+        return 2
+
+    logger.info("[N] Computing OHLCV features (vectorized)...")
+    ohlcv_feats = compute_ohlcv_features(ohlcv_full)
+
+    midcap = _load_midcap150()
+
+    # ── Build events ─────────────────────────────────────────────────────────
+    logger.info("[N] Building events...")
+    all_events = build_events(earnings, midcap)
+    all_events_dates = pd.to_datetime(all_events.event_date)
+    train_events = all_events[
+        (all_events_dates >= pd.Timestamp(train_start)) &
+        (all_events_dates <= pd.Timestamp(train_end))
+    ]
+    eval_events = all_events[
+        (all_events_dates >= pd.Timestamp(eval_start)) &
+        (all_events_dates <= pd.Timestamp(eval_end))
+    ]
+    logger.info("[N] Train events: %d | Eval events: %d", len(train_events), len(eval_events))
+
+    # ── Feature matrices ─────────────────────────────────────────────────────
+    logger.info("[N] Building feature matrices...")
+    X_train = build_feature_matrix(train_events, ohlcv_feats)
+    X_eval  = build_feature_matrix(eval_events,  ohlcv_feats)
+
+    # ── Training targets ─────────────────────────────────────────────────────
+    logger.info("[N] Computing training targets...")
+    train_ohlcv = ohlcv_full[
+        ohlcv_full.index.get_level_values("business_date") <= pd.Timestamp(train_end).date()
+    ]
+    y_train_raw = compute_targets(train_events, train_ohlcv)
+
+    valid_mask = ~np.isnan(y_train_raw)
+    if valid_mask.sum() < 50:
+        logger.error("[N] Too few training examples (%d < 50).", valid_mask.sum())
+        return 2
+
+    X_tr_valid  = X_train[valid_mask]
+    y_tr_valid  = y_train_raw[valid_mask]
+    dates_train = pd.DatetimeIndex(pd.to_datetime(train_events[valid_mask]["event_date"]))
+    base_rate   = float(y_tr_valid.mean())
+    logger.info("[N] Training: n=%d, base_rate=%.1f%%", len(y_tr_valid), base_rate * 100)
+
+    # ── Fit model ─────────────────────────────────────────────────────────────
+    logger.info("[N] Fitting LightGBM + isotonic calibration...")
+    model = _PEADModel()
+    try:
+        model.fit(X_tr_valid, y_tr_valid, dates_train,
+                  n_trials=n_trials or 1, experiment_name=_N_EXPERIMENT)
+    except Exception as exc:
+        logger.error("[N] Model fit failed: %s", exc)
+        return 2
+    logger.info("[N] OOF Brier=%.4f (random=%.4f)",
+                model.oof_brier, float(2 * base_rate * (1 - base_rate)))
+
+    # ── Simulate trades on eval period ────────────────────────────────────────
+    eval_ohlcv = ohlcv_full
+    trades = m_simulate(eval_events, eval_ohlcv, model, X_eval)
+    agg    = m_gate_metrics(trades, n_trials=n_trials)
+
+    # Diagnostics: P-score distribution
+    p_scores = model.predict_proba(X_eval)
+    p_max  = float(p_scores.max()) if len(p_scores) else 0.0
+    p_uniq = int(pd.Series(p_scores).round(4).nunique())
+
+    # Spearman ρ (informational)
+    from scipy.stats import spearmanr
+    ev_targets = compute_targets(eval_events, eval_ohlcv)
+    valid_both = ~np.isnan(ev_targets)
+    if valid_both.sum() > 1:
+        rho, pval = spearmanr(p_scores[valid_both], ev_targets[valid_both])
+    else:
+        rho, pval = 0.0, 1.0
+    logger.info("[N] Dev max_p=%.4f unique_p=%d Spearman_rho=%.3f p=%.3f",
+                p_max, p_uniq, rho, pval)
+
+    # ── Anti-strategy ─────────────────────────────────────────────────────────
+    from quant.strategies.bdm import _ROUND_TRIP_COST as _N_ROUND_TRIP_COST
+    anti_trades = m_simulate(eval_events, eval_ohlcv, model, X_eval)
+    for t in anti_trades:
+        t.gross_return = -t.gross_return
+        t.net_return   = t.gross_return - _N_ROUND_TRIP_COST
+    anti = m_gate_metrics(anti_trades, n_trials=n_trials)
+
+    # ── Cost-stress ───────────────────────────────────────────────────────────
+    rng = np.random.default_rng(42)
+    stress_trades = m_simulate(eval_events, eval_ohlcv, model, X_eval,
+                               slippage_scale=2.0, rng=rng)
+    stress = m_gate_metrics(stress_trades, n_trials=n_trials)
+    stress_dsr_collapse = (
+        (agg["dsr"] - stress["dsr"]) / agg["dsr"]
+        if agg["dsr"] > 1e-6 else 1.0
+    )
+
+    gates = {
+        "mean_return_bps >= 100":     agg["mean_return_bps"] >= 100.0,
+        "win_rate >= 52%":            agg["win_rate"] >= 0.52,
+        "sharpe >= 0.5":              agg["sharpe"] >= 0.5,
+        "dsr >= 0.5":                 agg["dsr"] >= 0.5,
+        "anti_strategy_return <= 0":  anti["mean_return_bps"] <= 0.0,
+        "stress_dsr_collapse <= 50%": stress_dsr_collapse <= 0.5,
+        "total_dev_trades >= 10":     agg["n_trades"] >= 10,
+    }
+    all_pass = all(gates.values())
+
+    print("\n" + "=" * 60)
+    print(f"PEAD ML v5 (N) Gate Report — split={split}")
+    print("=" * 60)
+    print(f"  Training events:           {len(y_tr_valid)}")
+    print(f"  Training base rate:        {base_rate:.1%}")
+    print(f"  OOF Brier score:           {model.oof_brier:.4f}  "
+          f"(random={2*base_rate*(1-base_rate):.4f})")
+    print(f"  Eval signal events:        {len(eval_events)}")
+    print(f"  Max dev P-score:           {p_max:.4f}")
+    print(f"  Unique P values (dev):     {p_uniq}")
+    print(f"  Spearman rho:              {rho:.3f} (p={pval:.3f})")
+    print(f"  Executed trades (P≥0.5):   {agg['n_trades']}")
+    print(f"  Mean return (bps):         {agg['mean_return_bps']:.1f}")
+    print(f"  Win rate:                  {agg['win_rate']:.1%}")
+    print(f"  Sharpe:                    {agg['sharpe']:.3f}")
+    print(f"  DSR (n_trials={n_trials}):      {agg['dsr']:.3f}")
+    print(f"  Anti-strategy return:      {anti['mean_return_bps']:.1f} bps")
+    print(f"  Cost-stress DSR:           {stress['dsr']:.3f} "
+          f"(collapse {stress_dsr_collapse:.1%})")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 60 + "\n")
+
+    try:
+        mlflow.set_experiment(_N_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "pead_ml_v2"}):
+            mlflow.log_metrics({
+                "n_train_events":       float(len(y_tr_valid)),
+                "train_base_rate":      base_rate,
+                "oof_brier":            model.oof_brier,
+                "eval_raw_events":      float(len(eval_events)),
+                "max_p_score":          p_max,
+                "unique_p":             float(p_uniq),
+                "spearman_rho":         rho,
+                "spearman_pval":        pval,
+                "mean_return_bps":      agg["mean_return_bps"],
+                "win_rate":             agg["win_rate"],
+                "sharpe":               agg["sharpe"],
+                "dsr":                  agg["dsr"],
+                "anti_mean_return_bps": anti["mean_return_bps"],
+                "stress_dsr":           stress["dsr"],
+                "stress_dsr_collapse":  stress_dsr_collapse,
+                "n_trials":             float(n_trials) if n_trials else 0.0,
+                "gate_all_pass":        float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -2256,7 +2484,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Strategy gate-check runner")
     parser.add_argument(
         "--strategy",
-        choices=["pead_midcap", "index_recon", "idi", "bdm", "g", "h", "i", "j", "k", "l", "m"],
+        choices=["pead_midcap", "index_recon", "idi", "bdm", "g", "h", "i", "j", "k", "l", "m", "n"],
         required=True,
         help="Strategy to evaluate",
     )
@@ -2307,8 +2535,10 @@ def main() -> None:
         exit_code = run_gate_check_k(args.split, n_trials=args.n_trials)
     elif args.strategy == "l":
         exit_code = run_gate_check_l(args.split, n_trials=args.n_trials)
-    else:  # "m"
+    elif args.strategy == "m":
         exit_code = run_gate_check_m(args.split, n_trials=args.n_trials)
+    else:  # "n"
+        exit_code = run_gate_check_n(args.split, n_trials=args.n_trials)
     sys.exit(exit_code)
 
 

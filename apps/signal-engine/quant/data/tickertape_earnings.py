@@ -553,7 +553,10 @@ def merge_with_existing_parquet(
     patched = 0
     eps_col = existing["eps_reported"].copy()
     rev_col = existing["revenue_cr"].copy()
+    net_col = existing["net_profit_cr"].copy()
     src_col = existing["source_url"].copy()
+
+    has_net = "net_profit_quarterly_cr" in tt_df.columns
 
     for idx, row in existing.iterrows():
         key = (row["symbol"], row["fiscal_quarter"], row["fiscal_year"])
@@ -564,6 +567,7 @@ def merge_with_existing_parquet(
             tt_row = tt_lookup.loc[key_int]
             eps_q = tt_row["eps_quarterly"] if hasattr(tt_row, "__getitem__") else tt_row.iloc[0]["eps_quarterly"]
             rev_q = tt_row["revenue_quarterly_cr"] if hasattr(tt_row, "__getitem__") else tt_row.iloc[0]["revenue_quarterly_cr"]
+            net_q = (tt_row["net_profit_quarterly_cr"] if hasattr(tt_row, "__getitem__") else tt_row.iloc[0]["net_profit_quarterly_cr"]) if has_net else None
         except KeyError:
             continue
 
@@ -572,22 +576,27 @@ def merge_with_existing_parquet(
             eps_q = eps_q.iloc[0]
         if isinstance(rev_q, pd.Series):
             rev_q = rev_q.iloc[0]
+        if isinstance(net_q, pd.Series):
+            net_q = net_q.iloc[0]
 
         new_eps = _safe_float(eps_q)
         if new_eps is not None:
             eps_col.at[idx] = new_eps
-            if rev_q is not None:
-                rv = _safe_float(rev_q)
-                if rv is not None:
-                    rev_col.at[idx] = rv
+            rv = _safe_float(rev_q)
+            if rv is not None:
+                rev_col.at[idx] = rv
+            nv = _safe_float(net_q)
+            if nv is not None:
+                net_col.at[idx] = nv
             src_col.at[idx] = "tickertape:quarterly"
             patched += 1
 
     existing["eps_reported"] = eps_col
     existing["revenue_cr"] = rev_col
+    existing["net_profit_cr"] = net_col
     existing["source_url"] = src_col
 
-    logger.info("Patched %d / %d rows with Tickertape quarterly EPS", patched, len(existing))
+    logger.info("Patched %d / %d rows with Tickertape quarterly EPS+revenue+net_profit", patched, len(existing))
 
     # Check for Tickertape rows that have NO match in the existing parquet
     # (i.e., new symbols or new quarters not captured by screener)
