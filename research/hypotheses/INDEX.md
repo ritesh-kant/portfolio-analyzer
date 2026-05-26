@@ -9,6 +9,8 @@
 | [quality-filtered-momentum](2026-05-26-quality-filtered-momentum.md) | qf_momentum | killed | 2026-05-26 | 2026-05-26 | KILL — Anti-strategy DSR 0.777 > 0; gate design error (absolute-return criterion wrong for long-only factor) |
 | [qf-momentum-spread](2026-05-26-qf-momentum-spread.md) | qf_momentum_r | killed | 2026-05-26 | 2026-05-26 | KILL (holdout) — Sharpe −0.325, MaxDD −36.4%; cross-sectional spread survived (DSR 0.598) but absolute return inverted |
 
+| [low-volatility](2026-05-26-low-volatility.md) | low_vol | killed | 2026-05-26 | 2026-05-26 | KILL — Strategy Sharpe 2.175 < Anti Sharpe 3.201; high-vol beats low-vol in bull-market dev period by design |
+
 ## Status legend
 
 - **draft** — being written; experiments not allowed yet
