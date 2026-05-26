@@ -21,14 +21,6 @@ env:
   PNPM_VERSION: "9.12.3"
 
 jobs:
-  # ──────────────────────────────────────────────
-  # 0. Detect which parts of the codebase changed.
-  #    Every deploy job reads these outputs to decide
-  #    whether to run or skip itself.
-  #
-  #    packages/** is included in every filter because
-  #    shared-types changes affect all consumers.
-  # ──────────────────────────────────────────────
   changes:
     name: Detect changed paths
     runs-on: ubuntu-latest
@@ -38,7 +30,6 @@ jobs:
       analytics-service: ${{ steps.filter.outputs.analytics-service }}
       signals-service:   ${{ steps.filter.outputs.signals-service }}
       signal-engine:     ${{ steps.filter.outputs.signal-engine }}
-      trading-service:   ${{ steps.filter.outputs.trading-service }}
       web:               ${{ steps.filter.outputs.web }}
       any-backend:       ${{ steps.filter.outputs.any-backend }}
     steps:
@@ -65,9 +56,6 @@ jobs:
               - 'apps/signal-engine/**'
               - 'infrastructure/serverless.yml'
               - 'packages/**'
-            trading-service:
-              - 'apps/trading-service/**'
-              - 'packages/**'
             web:
               - 'apps/web/**'
               - 'packages/**'
@@ -76,13 +64,8 @@ jobs:
               - 'apps/analytics-service/**'
               - 'apps/signals-service/**'
               - 'apps/signal-engine/**'
-              - 'apps/trading-service/**'
               - 'packages/**'
 
-  # ──────────────────────────────────────────────
-  # 1. Build & type-check the entire monorepo.
-  #    Skipped automatically when nothing relevant changed.
-  # ──────────────────────────────────────────────
   build:
     name: Build monorepo
     needs: changes
@@ -137,14 +120,6 @@ jobs:
             apps/*/node_modules
           key: build-${{ github.sha }}
 
-  # ──────────────────────────────────────────────
-  # 2. Deploy shared infrastructure (ECR repo +
-  #    lifecycle policy). Must run before signal-engine
-  #    because signal-engine references the ECR repo
-  #    URL via a CloudFormation cross-stack export.
-  #    Safe to run on every infra change — CloudFormation
-  #    no-ops if nothing changed.
-  # ──────────────────────────────────────────────
   deploy-infra:
     name: Deploy shared infrastructure (AWS)
     needs: [changes]
@@ -181,15 +156,9 @@ jobs:
           SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
         run: pnpm exec serverless deploy --stage prod --verbose --config infrastructure/serverless.yml
 
-  # ──────────────────────────────────────────────
-  # 3. Deploy portfolio-service — only when its
-  #    files (or shared packages) changed.
-  # ──────────────────────────────────────────────
   deploy-portfolio-service:
     name: Deploy portfolio-service (AWS)
     needs: [changes, build]
-    # always() lets us evaluate the condition even when build was skipped.
-    # We still gate on build succeeding so a typecheck failure blocks deploy.
     if: >
       always() &&
       needs.build.result == 'success' &&
@@ -245,10 +214,6 @@ jobs:
           ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
         run: pnpm exec serverless deploy --stage prod --verbose
 
-  # ──────────────────────────────────────────────
-  # 4. Deploy signals-service — only when its
-  #    files (or shared packages) changed.
-  # ──────────────────────────────────────────────
   deploy-signals-service:
     name: Deploy signals-service (AWS)
     needs: [changes, build]
@@ -312,17 +277,6 @@ jobs:
           ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
         run: pnpm exec serverless deploy --stage prod --verbose
 
-  # ──────────────────────────────────────────────
-  # 5. Deploy signal-engine (Docker/ECR) — only when
-  #    its files or infrastructure changed. Runs after
-  #    deploy-infra because signal-engine references the
-  #    ECR repo URL from the infra CloudFormation stack.
-  #
-  #    The Docker image is built here (with GHA layer
-  #    caching) and pushed to ECR before Serverless
-  #    deploys the Lambda — Serverless uses the pre-built
-  #    URI so Docker layers are reused across runs.
-  # ──────────────────────────────────────────────
   deploy-signal-engine:
     name: Deploy signal-engine (AWS ECR + Lambda)
     needs: [changes, build, deploy-infra, deploy-portfolio-service, deploy-signals-service]
@@ -414,93 +368,10 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TRADING_MODE: ${{ vars.TRADING_MODE }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: pnpm exec serverless deploy --stage prod --verbose
 
-  # ──────────────────────────────────────────────
-  # 6. Deploy trading-service — depends on signal-engine
-  #    so we can read the Function URL from the CF stack
-  #    and inject it as SIGNAL_ENGINE_URL.
-  # ──────────────────────────────────────────────
-  deploy-trading-service:
-    name: Deploy trading-service (AWS)
-    needs: [changes, build, deploy-signal-engine]
-    if: >
-      always() &&
-      needs.changes.outputs.trading-service == 'true' &&
-      needs.build.result == 'success' &&
-      (needs.deploy-signal-engine.result == 'success' || needs.deploy-signal-engine.result == 'skipped')
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Restore build cache
-        id: build-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            node_modules
-            packages/*/node_modules
-            packages/*/dist
-            apps/*/node_modules
-          key: build-${{ github.sha }}
-
-      - name: Install dependencies (if cache miss)
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: pnpm install --frozen-lockfile
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      # Fetch the signal-engine Function URL from the CloudFormation stack export
-      # so trading-service Lambda knows where to call it at runtime.
-      - name: Fetch signal-engine Function URL
-        id: signal-engine-url
-        run: |
-          URL=$(aws cloudformation list-exports \
-            --query "Exports[?Name=='prod-signal-engine-function-url'].Value" \
-            --output text)
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy trading-service
-        working-directory: apps/trading-service
-        env:
-          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
-          MONGODB_URI: ${{ secrets.MONGODB_URI }}
-          SIGNAL_ENGINE_URL: ${{ steps.signal-engine-url.outputs.url }}
-          SIGNAL_ENGINE_API_KEY: ${{ secrets.SIGNAL_ENGINE_API_KEY }}
-          TRADING_MODE: ${{ vars.TRADING_MODE }}
-          QUEUE_PROVIDER: sqs
-          VIRTUAL_PORTFOLIO_INITIAL: ${{ vars.VIRTUAL_PORTFOLIO_INITIAL }}
-          MIN_SIGNAL_CONFIDENCE: ${{ vars.MIN_SIGNAL_CONFIDENCE }}
-          MAX_POSITIONS: ${{ vars.MAX_POSITIONS }}
-          POSITION_SIZE_PCT: ${{ vars.POSITION_SIZE_PCT }}
-          AI_PROVIDER: ${{ vars.AI_PROVIDER }}
-          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
-          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
-          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
-        run: pnpm exec serverless deploy --stage prod --verbose
-
-  # ──────────────────────────────────────────────
-  # 7. Deploy analytics-service — only when its
-  #    files (or shared packages) changed.
-  # ──────────────────────────────────────────────
   deploy-analytics-service:
     name: Deploy analytics-service (AWS)
     needs: [changes, build]

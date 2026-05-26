@@ -9,6 +9,7 @@ RUN uv export --frozen --no-dev --extra aws --no-hashes -o /tmp/requirements.txt
     uv pip install --system --no-cache -r /tmp/requirements.txt
 
 COPY src/ src/
+COPY handlers/ handlers/
 COPY lambda_handler.py .
 
 CMD ["lambda_handler.handler"]

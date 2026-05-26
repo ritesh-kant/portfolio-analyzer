@@ -31,6 +31,8 @@ provider:
     GEMINI_API_KEY: ${ssm:/portfolio-analyzer/${sls:stage}/GEMINI_API_KEY, ''}
     TRADING_MODE: ${env:TRADING_MODE, 'paper'}
     ALERT_WEBHOOK_URL: ${env:ALERT_WEBHOOK_URL, ''}
+    TELEGRAM_BOT_TOKEN: ${ssm:/portfolio-analyzer/${sls:stage}/TELEGRAM_BOT_TOKEN, ''}
+    TELEGRAM_CHAT_ID: ${ssm:/portfolio-analyzer/${sls:stage}/TELEGRAM_CHAT_ID, ''}
 
   iam:
     role:
@@ -40,6 +42,15 @@ provider:
             - ssm:GetParameter
             - ssm:GetParameters
           Resource: arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/portfolio-analyzer/${sls:stage}/*
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource:
+            - !GetAtt NewsRawQueue.Arn
+            - !GetAtt NewsSignalsQueue.Arn
 
 plugins:
   - serverless-dotenv-plugin
@@ -52,9 +63,6 @@ functions:
   api:
     image:
       name: signal-engine
-    # Lambda Function URL — IAM-authenticated direct HTTPS endpoint.
-    # Equivalent to the Terraform aws_lambda_function_url resource.
-    # trading-service calls this URL; sign requests with AWS SigV4.
     url:
       authorizer: aws_iam
     events:
@@ -64,12 +72,110 @@ functions:
       - httpApi:
           path: /pipeline/run
           method: post
-    description: Signal-engine FastAPI (Mangum ASGI adapter)
+    description: Signal-engine FastAPI (Mangum ASGI adapter) — quant pipeline endpoint
     environment:
-      # Lambda sets AWS_LAMBDA_FUNCTION_NAME; secrets.py uses this to activate SSM
       AWS_SECRETS_ENABLED: 'true'
 
+  # ── News-trader Lambdas ──────────────────────────────────────────────────────
+
+  newsIngester:
+    image:
+      name: signal-engine
+      command:
+        - handlers.news_ingester.handler
+    description: Poll RSS + NSE/BSE announcements every 5 min; dedup + enqueue
+    memorySize: 512
+    timeout: 120
+    environment:
+      NEWS_RAW_QUEUE_URL: !Ref NewsRawQueue
+    events:
+      # Market hours: 09:00–15:35 IST = 03:30–10:05 UTC, Mon–Fri
+      - schedule:
+          rate: cron(*/5 3-10 ? * MON-FRI *)
+          enabled: true
+
+  newsClassifier:
+    image:
+      name: signal-engine
+      command:
+        - handlers.news_classifier.handler
+    description: Gemini 1.5 Flash classifier; enqueues high/medium signals with 15-min delay
+    memorySize: 512
+    timeout: 60
+    environment:
+      NEWS_SIGNALS_QUEUE_URL: !Ref NewsSignalsQueue
+    events:
+      - sqs:
+          arn: !GetAtt NewsRawQueue.Arn
+          batchSize: 5
+          maximumBatchingWindow: 30
+          functionResponseType: ReportBatchItemFailures
+
+  tradeDecision:
+    image:
+      name: signal-engine
+      command:
+        - handlers.trade_decision.handler
+    description: Check capacity, fetch price, open paper position, send Telegram alert
+    memorySize: 512
+    timeout: 60
+    events:
+      - sqs:
+          arn: !GetAtt NewsSignalsQueue.Arn
+          batchSize: 1
+          functionResponseType: ReportBatchItemFailures
+
+  slMonitor:
+    image:
+      name: signal-engine
+      command:
+        - handlers.sl_monitor.handler
+    description: Update trailing SL every 3 min; close positions on SL/target/day-5
+    memorySize: 512
+    timeout: 60
+    events:
+      # Market hours: 09:15–15:30 IST = 03:45–10:00 UTC, Mon–Fri
+      - schedule:
+          rate: cron(*/3 3-10 ? * MON-FRI *)
+          enabled: true
+
 resources:
+  Resources:
+    # ── SQS Queues ────────────────────────────────────────────────────────────
+
+    NewsRawQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: nt-news-raw-${sls:stage}
+        MessageRetentionPeriod: 86400   # 1 day
+        VisibilityTimeout: 120
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt NewsRawDLQ.Arn
+          maxReceiveCount: 3
+
+    NewsRawDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: nt-news-raw-dlq-${sls:stage}
+        MessageRetentionPeriod: 604800  # 7 days
+
+    NewsSignalsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: nt-news-signals-${sls:stage}
+        MessageRetentionPeriod: 86400
+        # Max SQS delay is 15 min (900s) — matches nt_news_delay_seconds
+        VisibilityTimeout: 120
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt NewsSignalsDLQ.Arn
+          maxReceiveCount: 3
+
+    NewsSignalsDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: nt-news-signals-dlq-${sls:stage}
+        MessageRetentionPeriod: 604800
+
   Outputs:
     SignalEngineFunctionName:
       Value: !Ref ApiLambdaFunction
@@ -83,3 +189,11 @@ resources:
       Value: !GetAtt ApiLambdaFunctionUrl.FunctionUrl
       Export:
         Name: ${sls:stage}-signal-engine-function-url
+    NewsRawQueueUrl:
+      Value: !Ref NewsRawQueue
+      Export:
+        Name: ${sls:stage}-nt-news-raw-queue-url
+    NewsSignalsQueueUrl:
+      Value: !Ref NewsSignalsQueue
+      Export:
+        Name: ${sls:stage}-nt-news-signals-queue-url

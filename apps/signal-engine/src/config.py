@@ -52,6 +52,23 @@ class Settings(BaseSettings):
     daily_loss_limit_pct: float = 3.0   # halt new orders if portfolio drops ≥3% today
     portfolio_floor_pct: float = 70.0   # absolute halt if total_value < 70% of initial
 
+    # News-trader Telegram alerts
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
+    # News-trader SQS queue URLs (injected by serverless.yml at deploy time)
+    news_raw_queue_url: str = ""
+    news_signals_queue_url: str = ""
+
+    # News-trader position rules
+    nt_position_size_inr: float = 50_000.0   # fixed rupees per trade
+    nt_max_positions: int = 7                 # max simultaneous open positions
+    nt_max_stocks_per_signal: int = 2         # max entries from a single news event
+    nt_sl_pct: float = 0.015                  # trailing stop-loss distance (1.5%)
+    nt_target_pct: float = 0.08               # profit target (8%)
+    nt_max_hold_days: int = 5                 # force-close on day 5
+    nt_news_delay_seconds: int = 900          # SQS delay after classification (15 min)
+
     # Auth
     signal_engine_api_key: str = _DEFAULT_API_KEY
 
