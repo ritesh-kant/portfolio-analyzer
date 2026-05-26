@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_TRADING_API_BASE ?? 'http://localhost:6002';
+const BASE = process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE ?? 'http://localhost:3001';
 
 let cachedToken: string | null = null;
 
@@ -29,6 +29,7 @@ async function post<T>(path: string, body: Record<string, unknown> = {}): Promis
   const token = await getToken();
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
+    cache: 'no-store',
     headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
@@ -42,147 +43,95 @@ async function post<T>(path: string, body: Record<string, unknown> = {}): Promis
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
-export interface Portfolio {
-  portfolio_id: 'main';
-  cash: number;
-  invested: number;
-  total_value: number;
-  initial_capital: number;
-  open_positions: number;
-  total_trades: number;
-  winning_trades: number;
-  total_pnl: number;
-  total_pnl_pct: number;
-  updatedAt: string;
-}
-
-export interface Signal {
+export interface NtPosition {
   _id: string;
-  run_id: string;
-  date: string;
   symbol: string;
-  direction: 'BUY' | 'SELL';
-  confidence: number;
-  base_score: number;
-  llm_bonus: number;
-  triggered_signals: string[];
-  weak_signals?: string[];
-  reasoning: string;
+  signal: 'bullish' | 'bearish';
+  sector: string;
+  confidence: 'high' | 'medium' | 'low';
   entry_price: number;
-  target_pct?: number;
-  stop_pct?: number;
-  r_r_ratio?: number;
-  holding_days?: number;
-  signal_scores?: Record<string, number>;
-  rsi?: number;
-  macd_hist?: number;
-  above_ema20?: boolean;
-  above_ema50?: boolean;
-  volume_ratio?: number;
-  meets_threshold: boolean;
-  order_placed: boolean;
-  createdAt: string;
-}
-
-export interface Order {
-  _id: string;
-  run_id: string;
-  symbol: string;
-  direction: 'BUY' | 'SELL';
-  mode: 'paper' | 'live';
-  entry_price: number;
-  shares: number;
-  position_value: number;
-  confidence: number;
-  kelly_fraction: number;
-  stop_loss: number;
-  target: number;
-  date: string;
-  status: 'OPEN' | 'CLOSED' | 'STOPPED';
-  reasoning: string;
+  qty: number;
+  entry_value: number;
+  current_price?: number;
+  highest_price: number;
+  trailing_sl: number;
+  target_price: number;
+  status: 'open' | 'closed';
+  exit_reason?: 'sl_hit' | 'target_hit' | 'day5';
   exit_price?: number;
-  exit_date?: string;
-  actual_return_pct?: number;
-  createdAt: string;
+  gross_pnl?: number;
+  net_pnl?: number;
+  entry_at: string;
+  exit_at?: string;
+  signal_id?: string;
+  paper?: boolean;
 }
 
-export interface PipelineRun {
-  run_id: string;
-  date: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  ai_provider: string;
-  started_at: string;
-  completed_at?: string;
-  agent_statuses: Record<string, 'pending' | 'running' | 'done' | 'error'>;
-  agent_timings: Record<string, number>;
-  stats?: { news_count: number; signals_count: number; orders_count: number; errors_count: number };
-  error_summary?: string;
-}
-
-export interface NewsArticle {
+export interface NtSignal {
   _id: string;
-  run_id: string;
+  sector: string;
+  signal: 'bullish' | 'bearish' | 'neutral';
+  magnitude: 'major' | 'moderate' | 'minor';
+  stocks: string[];
+  confidence: 'high' | 'medium' | 'low';
+  reasoning: string;
+  acted_on: boolean;
+  created_at: string;
+}
+
+export interface NtNews {
+  _id: string;
   headline: string;
-  url: string;
+  url?: string;
   source: string;
-  sentiment: 'positive' | 'negative' | 'neutral';
-  tier?: 1 | 2 | 3;
-  affected_sectors: string[];
-  affected_stocks: string[];
-  summary?: string;
-  createdAt: string;
+  classified: boolean;
+  ingested_at: string;
 }
 
-export interface PortfolioSnapshot {
-  date: string;
-  daily_pnl: number;
-  cumulative_pnl: number;
-  portfolio_value: number;
-  trades: number;
-  wins: number;
-}
-
-export interface DashboardData {
-  latest_run?: PipelineRun;
-  signals: Signal[];
-  open_orders: Order[];
-  portfolio: Portfolio | null;
-  recent_news: NewsArticle[];
+export interface NtStats {
+  open_count: number;
+  total_invested_inr: number;
+  unrealized_pnl: number;
+  has_live_prices: boolean;
+  closed_count: number;
+  win_count: number;
+  loss_count: number;
+  win_rate_pct: number | null;
+  total_realized_net_pnl: number;
+  avg_hold_days: number | null;
+  by_exit_reason: Record<string, { count: number; total_net_pnl: number }>;
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
 
-export const fetchDashboard = () => get<DashboardData>('/trading/dashboard');
-
-export const fetchPortfolio = () => get<Portfolio | null>('/trading/portfolio');
-
-export const fetchPortfolioHistory = () =>
-  get<{ snapshots: PortfolioSnapshot[]; initial_capital: number }>('/trading/portfolio/history');
-
-export const fetchSignals = (params?: { run_id?: string; limit?: number }) => {
-  const qs = new URLSearchParams();
-  if (params?.run_id) qs.set('run_id', params.run_id);
-  if (params?.limit) qs.set('limit', String(params.limit));
-  return get<{ signals: Signal[]; count: number }>(`/trading/signals?${qs}`);
-};
-
-export const fetchOrders = (status?: 'OPEN' | 'CLOSED' | 'STOPPED') => {
+export const fetchPositions = (status?: 'open' | 'closed' | 'all') => {
   const qs = status ? `?status=${status}` : '';
-  return get<{ orders: Order[]; count: number }>(`/trading/orders${qs}`);
+  return get<{ positions: NtPosition[]; count: number }>(`/nt/positions${qs}`);
 };
 
-export const fetchRuns = (limit = 5) =>
-  get<{ runs: PipelineRun[]; count: number }>(`/trading/runs?limit=${limit}`);
+export const fetchSignals = (limit = 50) =>
+  get<{ signals: NtSignal[]; count: number }>(`/nt/signals?limit=${limit}`);
 
-export const fetchNews = (params?: { run_id?: string; limit?: number }) => {
-  const qs = new URLSearchParams();
-  if (params?.run_id) qs.set('run_id', params.run_id);
-  if (params?.limit) qs.set('limit', String(params.limit));
-  return get<{ articles: NewsArticle[]; count: number }>(`/trading/news?${qs}`);
-};
+export const fetchNews = (limit = 30) =>
+  get<{ articles: NtNews[]; count: number }>(`/nt/news?limit=${limit}`);
 
-export const triggerRun = (opts?: { date?: string; ai_provider?: string }) =>
-  post<{ run_id: string; date: string; ai_provider: string; status: string }>(
-    '/trading/runs/trigger',
-    opts ?? {},
-  );
+export const fetchStats = () => get<NtStats>('/nt/stats');
+
+export type StageStatus = 'pending' | 'running' | 'waiting' | 'done';
+
+export interface PipelineStatus {
+  run: { _id: string; triggered_at: string; source: string } | null;
+  stages: {
+    ingester: { status: StageStatus; count: number };
+    classifier: { status: StageStatus; count: number };
+    sqs_delay: { status: StageStatus; remain_ms: number };
+    trade: { status: StageStatus; count: number };
+  } | null;
+  is_active: boolean;
+  elapsed_ms: number;
+}
+
+export const fetchPipelineStatus = () => get<PipelineStatus>('/nt/pipeline/status');
+
+export const triggerPipeline = () =>
+  post<{ status: string; function?: string; message?: string }>('/nt/pipeline');

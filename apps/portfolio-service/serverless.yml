@@ -28,6 +28,13 @@ provider:
     MFAPI_SCHEME_CODE: '120716'
     AUTH_SECRET: ${env:AUTH_SECRET, 'local-dev-secret-change-in-prod'}
     ALLOWED_ORIGIN: ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
+    SIGNAL_ENGINE_INGESTER_FN: signal-engine-${self:provider.stage}-newsIngester
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action: lambda:InvokeFunction
+          Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:signal-engine-${self:provider.stage}-newsIngester"
   httpApi:
     cors:
       allowedOrigins:
@@ -94,3 +101,39 @@ functions:
       - httpApi:
           path: /portfolio/transactions/import
           method: post
+  ntPositions:
+    handler: src/handlers/nt-positions.handler
+    events:
+      - httpApi:
+          path: /nt/positions
+          method: get
+  ntSignals:
+    handler: src/handlers/nt-signals.handler
+    events:
+      - httpApi:
+          path: /nt/signals
+          method: get
+  ntNews:
+    handler: src/handlers/nt-news.handler
+    events:
+      - httpApi:
+          path: /nt/news
+          method: get
+  ntStats:
+    handler: src/handlers/nt-stats.handler
+    events:
+      - httpApi:
+          path: /nt/stats
+          method: get
+  ntPipeline:
+    handler: src/handlers/nt-pipeline.handler
+    events:
+      - httpApi:
+          path: /nt/pipeline
+          method: post
+  ntPipelineStatus:
+    handler: src/handlers/nt-pipeline-status.handler
+    events:
+      - httpApi:
+          path: /nt/pipeline/status
+          method: get

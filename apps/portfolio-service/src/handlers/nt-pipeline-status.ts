@@ -1,0 +1,85 @@
+import mongoose from 'mongoose';
+
+import { requireAuth } from '../lib/auth.js';
+import { json } from '../lib/http.js';
+import { config } from '../lib/config.js';
+
+async function connect() {
+  if (!config.mongodbUri) throw new Error('MONGODB_URI is not set');
+  if (mongoose.connection.readyState === 1) return;
+  await mongoose.connect(config.mongodbUri, { serverSelectionTimeoutMS: 3000 });
+}
+
+const DELAY_MS = 15 * 60 * 1000; // 15-min SQS delay
+const RUN_TTL_MS = 22 * 60 * 1000; // consider run stale after 22 min
+
+export const handler = requireAuth(async () => {
+  await connect();
+  const db = mongoose.connection.db!;
+
+  const run = await db
+    .collection('nt_pipeline_runs')
+    .findOne({}, { sort: { triggered_at: -1 } });
+
+  if (!run) return json(200, { run: null, is_active: false });
+
+  const triggeredAt = new Date(run.triggered_at as Date);
+  const now = new Date();
+  const elapsedMs = now.getTime() - triggeredAt.getTime();
+
+  // Count new docs in each collection since this run was triggered
+  const [newArticles, newSignals, newPositions] = await Promise.all([
+    db.collection('nt_news_raw').countDocuments({ ingested_at: { $gte: triggeredAt } }),
+    db.collection('nt_signals').countDocuments({ created_at: { $gte: triggeredAt } }),
+    db.collection('nt_positions').countDocuments({
+      entry_at: { $gte: new Date(triggeredAt.getTime() + DELAY_MS) },
+    }),
+  ]);
+
+  const delayWindowEndMs = triggeredAt.getTime() + DELAY_MS;
+  const delayRemainMs = Math.max(0, delayWindowEndMs - now.getTime());
+
+  // Derive stage statuses ─────────────────────────────────────────────────────
+  // Ingester: done if articles appeared, or 3 min elapsed (may have found no new news)
+  const ingesterDone = newArticles > 0 || elapsedMs > 3 * 60 * 1000;
+  const ingesterStatus = ingesterDone ? 'done' : 'running';
+
+  // Classifier: done if signals appeared, or 6 min elapsed since trigger
+  const classifierDone = newSignals > 0 || elapsedMs > 6 * 60 * 1000;
+  const classifierStatus = !ingesterDone
+    ? 'pending'
+    : classifierDone
+      ? 'done'
+      : 'running';
+
+  // SQS delay: waiting with countdown, done once window passes
+  const delayStatus = !classifierDone
+    ? 'pending'
+    : delayRemainMs > 0
+      ? 'waiting'
+      : 'done';
+
+  // Trade decision: done if positions appeared after the delay window
+  const tradeDone = newPositions > 0;
+  const tradeStatus =
+    delayStatus !== 'done' ? 'pending' : tradeDone ? 'done' : 'running';
+
+  const isActive =
+    elapsedMs < RUN_TTL_MS && !(tradeDone || (delayStatus === 'done' && elapsedMs > 18 * 60 * 1000));
+
+  return json(200, {
+    run: {
+      _id: String(run._id),
+      triggered_at: triggeredAt.toISOString(),
+      source: run.source ?? 'manual',
+    },
+    stages: {
+      ingester: { status: ingesterStatus, count: newArticles },
+      classifier: { status: classifierStatus, count: newSignals },
+      sqs_delay: { status: delayStatus, remain_ms: delayRemainMs },
+      trade: { status: tradeStatus, count: newPositions },
+    },
+    is_active: isActive,
+    elapsed_ms: elapsedMs,
+  });
+});

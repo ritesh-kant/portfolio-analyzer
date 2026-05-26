@@ -13,6 +13,10 @@ import os
 
 from fastapi import FastAPI
 
+# Ensure INFO-level logs from application code are visible even under uvicorn,
+# which does not set the root logger level (leaves it at WARNING by default).
+logging.getLogger().setLevel(logging.INFO)
+
 from .secrets import bootstrap_secrets
 
 bootstrap_secrets(stage=os.getenv("STAGE", "dev"))
@@ -43,3 +47,11 @@ async def health() -> dict[str, str]:
         "version": "0.2.0-rebuild",
         "phase": "demolition-complete-month1",
     }
+
+
+@app.post("/trigger/ingester")
+async def trigger_ingester() -> dict:
+    """Manually invoke the news ingester — local dev only."""
+    from handlers.news_ingester import _run
+    result = await _run(settings)
+    return result

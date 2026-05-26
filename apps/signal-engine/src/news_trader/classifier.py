@@ -58,6 +58,7 @@ def classify(raw_text: str, gemini_api_key: str, model: str = "gemini-1.5-flash"
         response = llm.invoke(messages)
         raw = response.content if isinstance(response.content, str) else str(response.content)
         raw = raw.strip()
+        logger.info("[GEMINI] raw response (first 300 chars): %s", raw[:300])
 
         # Strip accidental markdown fences
         if raw.startswith("```"):
@@ -70,7 +71,7 @@ def classify(raw_text: str, gemini_api_key: str, model: str = "gemini-1.5-flash"
         # Validate required keys
         required = {"sector", "signal", "magnitude", "stocks", "confidence", "reasoning"}
         if not required.issubset(result.keys()):
-            logger.warning("classifier_incomplete_response keys=%s", list(result.keys()))
+            logger.warning("[GEMINI] incomplete response — missing keys, got: %s", list(result.keys()))
             return None
 
         # Normalise
@@ -82,8 +83,8 @@ def classify(raw_text: str, gemini_api_key: str, model: str = "gemini-1.5-flash"
         return result
 
     except json.JSONDecodeError as exc:
-        logger.warning("classifier_json_parse_failed err=%s", exc)
+        logger.warning("[GEMINI] JSON parse failed err=%s raw=%.200s", exc, raw if 'raw' in dir() else '?')
         return None
     except Exception as exc:
-        logger.error("classifier_error err=%s", exc)
+        logger.error("[GEMINI] unexpected error err=%s", exc)
         return None

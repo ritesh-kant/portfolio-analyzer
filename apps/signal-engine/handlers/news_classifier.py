@@ -33,32 +33,40 @@ async def _process_message(msg: dict, settings: Settings) -> bool:
     db = get_db()
     news_id = msg.get("news_id")
     if not news_id:
-        logger.warning("classifier_bad_message msg=%s", msg)
+        logger.warning("[CLASSIFIER] bad message — no news_id: %s", msg)
         return False
 
     article = await news_raw(db).find_one({"_id": ObjectId(news_id)})
     if not article:
-        logger.warning("classifier_article_not_found news_id=%s", news_id)
+        logger.warning("[CLASSIFIER] article not found news_id=%s", news_id)
         return False
 
     if article.get("classified"):
-        logger.debug("classifier_already_classified news_id=%s", news_id)
+        logger.debug("[CLASSIFIER] already classified news_id=%s", news_id)
         return False
 
-    raw_text = article.get("raw_text", article.get("headline", ""))
+    headline = article.get("headline", "")
+    logger.info("[CLASSIFIER] processing news_id=%s headline=%.80s", news_id, headline)
+
+    raw_text = article.get("raw_text", headline)
+    logger.info("[CLASSIFIER] calling Gemini (%s) for news_id=%s...", settings.gemini_model, news_id)
     result = classify(raw_text, settings.gemini_api_key, model=settings.gemini_model)
 
     if result is None:
-        logger.warning("classifier_gemini_failed news_id=%s headline=%.80s",
-                       news_id, article.get("headline", ""))
+        logger.warning("[CLASSIFIER] Gemini failed for news_id=%s headline=%.80s — marking classified",
+                       news_id, headline)
         await news_raw(db).update_one(
             {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
         )
         return False
 
+    logger.info("[CLASSIFIER] Gemini result news_id=%s signal=%s confidence=%s magnitude=%s stocks=%s sector=%s",
+                news_id, result["signal"], result["confidence"], result["magnitude"],
+                result["stocks"], result["sector"])
+
     signal_doc = {
         "news_id": news_id,
-        "headline": article.get("headline", ""),
+        "headline": headline,
         "source": article.get("source", ""),
         "sector": result["sector"],
         "signal": result["signal"],
@@ -76,17 +84,16 @@ async def _process_message(msg: dict, settings: Settings) -> bool:
         {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
     )
 
-    logger.info(
-        "classifier_done news_id=%s signal=%s confidence=%s stocks=%s",
-        news_id, result["signal"], result["confidence"], result["stocks"],
-    )
-
     # Only actionable signals go to the trade-decision queue
     if result["confidence"] not in _ACTIONABLE_CONFIDENCE:
+        logger.info("[CLASSIFIER] signal not actionable confidence=%s — saved but not enqueued",
+                    result["confidence"])
         return False
     if result["signal"] == "neutral":
+        logger.info("[CLASSIFIER] signal is neutral — saved but not enqueued")
         return False
     if not result["stocks"]:
+        logger.info("[CLASSIFIER] no stocks identified — saved but not enqueued")
         return False
 
     if settings.news_signals_queue_url:
@@ -96,8 +103,10 @@ async def _process_message(msg: dict, settings: Settings) -> bool:
             MessageBody=json.dumps({"signal_id": signal_id}),
             DelaySeconds=settings.nt_news_delay_seconds,  # 15-min wait before entry
         )
-        logger.info("classifier_enqueued signal_id=%s delay=%ds",
+        logger.info("[CLASSIFIER] enqueued signal_id=%s to trade-decision queue delay=%ds",
                     signal_id, settings.nt_news_delay_seconds)
+    else:
+        logger.warning("[CLASSIFIER] NEWS_SIGNALS_QUEUE_URL not set — skipping SQS enqueue")
 
     return True
 
@@ -107,6 +116,7 @@ async def _run(event: dict, settings: Settings) -> dict:
     await ensure_indexes(db)
 
     records = event.get("Records", [])
+    logger.info("[CLASSIFIER] processing %d SQS record(s)", len(records))
     acted = 0
     for record in records:
         try:
@@ -114,8 +124,9 @@ async def _run(event: dict, settings: Settings) -> dict:
             if await _process_message(msg, settings):
                 acted += 1
         except Exception as exc:
-            logger.error("classifier_record_error err=%s record=%.200s", exc, record)
+            logger.error("[CLASSIFIER] record error err=%s record=%.200s", exc, record)
 
+    logger.info("[CLASSIFIER] done — processed=%d actionable=%d", len(records), acted)
     return {"processed": len(records), "acted_on": acted}
 
 

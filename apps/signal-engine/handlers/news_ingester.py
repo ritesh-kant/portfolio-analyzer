@@ -39,23 +39,39 @@ def _is_market_hours() -> bool:
 
 async def _run(settings: Settings) -> dict:
     if not _is_market_hours():
-        logger.info("ingester_skipped outside_market_hours")
+        logger.info("[INGESTER] skipped — outside market hours")
         return {"skipped": "outside_market_hours"}
 
+    logger.info("[INGESTER] starting run")
     db = get_db()
     await ensure_indexes(db)
 
+    logger.info("[INGESTER] fetching RSS feeds...")
     rss_articles, feed_health = await fetch_all_rss()
+    logger.info("[INGESTER] RSS done — %d articles from %d feeds (%d failed)",
+                len(rss_articles),
+                len(feed_health),
+                sum(1 for ok in feed_health.values() if not ok))
+
+    logger.info("[INGESTER] fetching NSE announcements...")
     nse_articles = await fetch_nse_announcements()
+    logger.info("[INGESTER] NSE done — %d announcements", len(nse_articles))
+
+    logger.info("[INGESTER] fetching BSE announcements...")
     bse_articles = await fetch_bse_announcements()
+    logger.info("[INGESTER] BSE done — %d announcements", len(bse_articles))
 
     all_articles = rss_articles + nse_articles + bse_articles
+    logger.info("[INGESTER] total fetched=%d (rss=%d nse=%d bse=%d) — deduplicating...",
+                len(all_articles), len(rss_articles), len(nse_articles), len(bse_articles))
+
     now = datetime.now(tz=timezone.utc)
     for a in all_articles:
         a["ingested_at"] = now
         a["classified"] = False
 
     if not all_articles:
+        logger.info("[INGESTER] done — 0 articles fetched from all sources")
         return {"new_articles": 0, "feed_health": feed_health}
 
     # Bulk insert — ignore duplicates (unique index on topic_hash)
@@ -63,6 +79,7 @@ async def _run(settings: Settings) -> dict:
     try:
         result = await news_raw(db).insert_many(all_articles, ordered=False)
         inserted_ids = [str(i) for i in result.inserted_ids]
+        logger.info("[INGESTER] inserted %d new articles (0 duplicates)", len(inserted_ids))
     except BulkWriteError as bwe:
         # Extract IDs that were actually inserted (not the duplicates)
         inserted_ids = [
@@ -71,8 +88,8 @@ async def _run(settings: Settings) -> dict:
         ]
         # Simpler: count from the error details
         n_inserted = bwe.details.get("nInserted", 0)
-        logger.info("ingester_bulk_write new=%d duplicates_skipped=%d", n_inserted,
-                    len(bwe.details.get("writeErrors", [])))
+        n_dupes = len(bwe.details.get("writeErrors", []))
+        logger.info("[INGESTER] inserted %d new articles, %d duplicates skipped", n_inserted, n_dupes)
         # Re-query for the actually inserted IDs
         if n_inserted > 0:
             cursor = news_raw(db).find(
@@ -82,19 +99,24 @@ async def _run(settings: Settings) -> dict:
             inserted_ids = [str(doc["_id"]) async for doc in cursor]
 
     if not inserted_ids:
-        logger.info("ingester_done new=0 total_fetched=%d", len(all_articles))
+        logger.info("[INGESTER] done — all %d articles were duplicates, nothing new to enqueue",
+                    len(all_articles))
         return {"new_articles": 0}
 
     # Enqueue to SQS
     if settings.news_raw_queue_url:
+        logger.info("[INGESTER] enqueuing %d new articles to SQS...", len(inserted_ids))
         sqs = boto3.client("sqs")
         for news_id in inserted_ids:
             sqs.send_message(
                 QueueUrl=settings.news_raw_queue_url,
                 MessageBody=json.dumps({"news_id": news_id}),
             )
+        logger.info("[INGESTER] enqueued %d messages", len(inserted_ids))
+    else:
+        logger.warning("[INGESTER] NEWS_RAW_QUEUE_URL not set — skipping SQS enqueue")
 
-    logger.info("ingester_done new=%d enqueued=%d", len(inserted_ids), len(inserted_ids))
+    logger.info("[INGESTER] done — new=%d", len(inserted_ids))
     return {"new_articles": len(inserted_ids), "feed_health": feed_health}
 
 

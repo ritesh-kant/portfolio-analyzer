@@ -1,104 +1,51 @@
 'use client';
 
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
 import { formatCurrency } from '../../lib/format';
 import {
-  fetchPortfolio,
-  fetchPortfolioHistory,
+  fetchPositions,
   fetchSignals,
-  fetchOrders,
-  fetchRuns,
   fetchNews,
-  triggerRun,
-  type Portfolio,
-  type PortfolioSnapshot,
-  type Signal,
-  type Order,
-  type PipelineRun,
-  type NewsArticle,
+  fetchStats,
+  fetchPipelineStatus,
+  triggerPipeline,
+  type NtPosition,
+  type NtSignal,
+  type NtNews,
+  type NtStats,
+  type PipelineStatus,
+  type StageStatus,
 } from '../../lib/trading-api';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const AGENTS = [
-  'news_agent',
-  'sector_agent',
-  'stock_selector',
-  'technical_agent',
-  'market_agent',
-  'guard_agent',
-  'signal_agent',
-  'order_agent',
-  'audit_agent',
-] as const;
-
-const AGENT_LABELS: Record<string, string> = {
-  news_agent: 'News',
-  sector_agent: 'Sector',
-  stock_selector: 'Stocks',
-  technical_agent: 'Tech',
-  market_agent: 'Market',
-  guard_agent: 'Guard',
-  signal_agent: 'Signals',
-  order_agent: 'Orders',
-  audit_agent: 'Audit',
-};
-
-const POLL_ACTIVE_MS = 30_000;
-const POLL_IDLE_MS = 5 * 60 * 1000;
-
-type TabId = 'overview' | 'signals' | 'orders' | 'analytics';
-type SigDir = 'all' | 'BUY' | 'SELL';
-type OrderTab = 'OPEN' | 'CLOSED' | 'ALL';
-
-// ─── Small components ─────────────────────────────────────────────────────────
-
-function AgentDot({ status }: { status: string }) {
-  const base = 'h-2.5 w-2.5 rounded-full flex-shrink-0';
-  if (status === 'done') return <span className={`${base} bg-emerald-500`} />;
-  if (status === 'running') return <span className={`${base} animate-pulse bg-accent`} />;
-  if (status === 'error') return <span className={`${base} bg-rose-500`} />;
-  return <span className={`${base} bg-black/15`} />;
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
-function Pill({ status }: { status: PipelineRun['status'] }) {
-  const map: Record<PipelineRun['status'], string> = {
-    completed: 'bg-emerald-100 text-emerald-700',
-    running: 'bg-accent/10 text-accent animate-pulse',
-    pending: 'bg-amber-100 text-amber-700',
-    failed: 'bg-rose-100 text-rose-700',
-  };
-  return (
-    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${map[status]}`}>
-      {status}
-    </span>
-  );
+function holdDays(entryIso: string, exitIso?: string): number {
+  const end = exitIso ? new Date(exitIso) : new Date();
+  return Math.floor((end.getTime() - new Date(entryIso).getTime()) / 86_400_000);
 }
 
-function ConfBar({ value }: { value: number }) {
-  const color = value >= 70 ? 'bg-emerald-500' : value >= 50 ? 'bg-amber-400' : 'bg-rose-400';
-  return (
-    <div className="flex items-center gap-2">
-      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-black/10">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${value}%` }} />
-      </div>
-      <span className="text-xs font-semibold tabular-nums">{value}</span>
-    </div>
-  );
+function fmtPrice(n: number) {
+  return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 }
+
+function pnlColor(v: number) {
+  return v > 0 ? 'text-emerald-700' : v < 0 ? 'text-rose-600' : 'text-ink/60';
+}
+
+function pnlSign(v: number) {
+  return v > 0 ? '+' : '';
+}
+
+// ─── Small atoms ─────────────────────────────────────────────────────────────
 
 function Empty({ msg }: { msg: string }) {
   return (
@@ -161,486 +108,359 @@ function SubTab({
   );
 }
 
-// ─── Analytics tab ────────────────────────────────────────────────────────────
-
-function AnalyticsTab({
-  portfolio,
-  history,
-}: {
-  portfolio: Portfolio | null;
-  history: { snapshots: PortfolioSnapshot[]; initial_capital: number } | null;
-}) {
-  if (!portfolio && !history) {
-    return <Empty msg="No trade data yet — run the pipeline to generate trades." />;
-  }
-
-  const wins = portfolio?.winning_trades ?? 0;
-  const losses = (portfolio?.total_trades ?? 0) - wins;
-  const winRate =
-    portfolio && portfolio.total_trades > 0
-      ? ((wins / portfolio.total_trades) * 100).toFixed(1)
-      : null;
-
-  const donutData = [
-    { name: 'Wins', value: wins },
-    { name: 'Losses', value: Math.max(0, losses) },
-  ];
-
-  const snapshots = history?.snapshots ?? [];
-  const initialCap = history?.initial_capital ?? portfolio?.initial_capital ?? 100_000;
-  const pnlPositive = (portfolio?.total_pnl ?? 0) >= 0;
-
-  // Derive max drawdown from snapshots
-  let peak = initialCap;
-  let maxDrawdown = 0;
-  for (const s of snapshots) {
-    if (s.portfolio_value > peak) peak = s.portfolio_value;
-    const dd = ((peak - s.portfolio_value) / peak) * 100;
-    if (dd > maxDrawdown) maxDrawdown = dd;
-  }
-
+function ConfBadge({ confidence }: { confidence: NtPosition['confidence'] }) {
+  const map = {
+    high: 'bg-emerald-100 text-emerald-700',
+    medium: 'bg-amber-100 text-amber-700',
+    low: 'bg-black/5 text-ink/50',
+  };
   return (
-    <div className="space-y-4">
-      {/* Key stats row */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {[
-          {
-            label: 'Total Trades',
-            value: String(portfolio?.total_trades ?? 0),
-          },
-          {
-            label: 'Win Rate',
-            value: winRate ? `${winRate}%` : '—',
-            color: winRate && parseFloat(winRate) >= 50 ? 'text-emerald-700' : 'text-rose-600',
-          },
-          {
-            label: 'Total P&L',
-            value: portfolio ? formatCurrency(portfolio.total_pnl) : '—',
-            color: pnlPositive ? 'text-emerald-700' : 'text-rose-600',
-            prefix: pnlPositive && (portfolio?.total_pnl ?? 0) > 0 ? '+' : '',
-          },
-          {
-            label: 'Max Drawdown',
-            value: maxDrawdown > 0 ? `-${maxDrawdown.toFixed(1)}%` : '—',
-            color: maxDrawdown > 5 ? 'text-rose-600' : 'text-ink',
-          },
-        ].map(({ label, value, color, prefix }) => (
-          <div key={label} className="metric-chip">
-            <p className="text-xs text-ink/50">{label}</p>
-            <p className={`mt-0.5 font-display text-xl font-bold ${color ?? ''}`}>
-              {prefix}
-              {value}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      {/* Equity curve */}
-      <div className="metric-chip space-y-3">
-        <h3 className="text-sm font-semibold">Portfolio Equity Curve</h3>
-        {snapshots.length <= 1 ? (
-          <p className="py-6 text-center text-sm text-ink/40">
-            Close some trades to see the equity curve.
-          </p>
-        ) : (
-          <ResponsiveContainer width="100%" height={240}>
-            <AreaChart data={snapshots} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
-              <defs>
-                <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#0f766e" stopOpacity={0.18} />
-                  <stop offset="95%" stopColor="#0f766e" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#17212a12" />
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 10, fill: '#17212a80' }}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: '#17212a80' }}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(v: number) => `₹${(v / 1000).toFixed(0)}k`}
-                domain={['auto', 'auto']}
-              />
-              <ReferenceLine
-                y={initialCap}
-                stroke="#17212a30"
-                strokeDasharray="4 4"
-                label={{ value: 'Initial', fontSize: 9, fill: '#17212a50' }}
-              />
-              <Tooltip
-                formatter={(v: number) => [formatCurrency(v), 'Portfolio Value']}
-                contentStyle={{
-                  fontSize: 12,
-                  borderRadius: 8,
-                  border: '1px solid #17212a15',
-                  background: '#fffaf2',
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="portfolio_value"
-                stroke="#0f766e"
-                strokeWidth={2}
-                fill="url(#equityGrad)"
-                dot={false}
-                activeDot={{ r: 4 }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-
-      {/* Win/Loss donut */}
-      {portfolio && portfolio.total_trades > 0 && (
-        <div className="metric-chip flex items-center gap-8">
-          <div>
-            <h3 className="mb-2 text-sm font-semibold">Win / Loss</h3>
-            <PieChart width={120} height={120}>
-              <Pie
-                data={donutData}
-                cx={55}
-                cy={55}
-                innerRadius={34}
-                outerRadius={52}
-                paddingAngle={2}
-                dataKey="value"
-              >
-                <Cell fill="#10b981" />
-                <Cell fill="#f43f5e" />
-              </Pie>
-              <Tooltip
-                formatter={(v: number, name: string) => [v, name]}
-                contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #17212a15' }}
-              />
-            </PieChart>
-          </div>
-          <div className="space-y-2 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-              <span className="text-ink/70">Wins</span>
-              <span className="ml-auto font-bold">{wins}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-              <span className="text-ink/70">Losses</span>
-              <span className="ml-auto font-bold">{losses}</span>
-            </div>
-            {winRate && (
-              <p className="pt-1 text-xs text-ink/50">
-                Win rate: <span className="font-semibold text-ink">{winRate}%</span>
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${map[confidence]}`}>
+      {confidence}
+    </span>
   );
 }
 
-// ─── Signals tab ──────────────────────────────────────────────────────────────
+function SignalBadge({ signal }: { signal: NtSignal['signal'] | NtPosition['signal'] }) {
+  const map = {
+    bullish: 'bg-emerald-100 text-emerald-700',
+    bearish: 'bg-rose-100 text-rose-700',
+    neutral: 'bg-black/5 text-ink/50',
+  };
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${map[signal]}`}>
+      {signal}
+    </span>
+  );
+}
 
-function SignalsTab({ signals }: { signals: Signal[] }) {
-  const [dir, setDir] = useState<SigDir>('all');
-  const [expanded, setExpanded] = useState<string | null>(null);
+function ExitBadge({ reason }: { reason: NtPosition['exit_reason'] }) {
+  if (!reason) return null;
+  const map = {
+    sl_hit: 'bg-rose-100 text-rose-700',
+    target_hit: 'bg-emerald-100 text-emerald-700',
+    day5: 'bg-amber-100 text-amber-700',
+  };
+  const label = { sl_hit: 'SL Hit', target_hit: 'Target', day5: 'Day 5 Expired' };
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${map[reason]}`}>
+      {label[reason]}
+    </span>
+  );
+}
 
-  const filtered = dir === 'all' ? signals : signals.filter((s) => s.direction === dir);
+// ─── Pipeline status panel ────────────────────────────────────────────────────
+
+function fmt(ms: number) {
+  const m = Math.floor(ms / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+const STAGE_META: { key: keyof NonNullable<PipelineStatus['stages']>; label: string; detail: (s: PipelineStatus['stages']) => string }[] = [
+  { key: 'ingester',   label: 'Ingester',       detail: s => s!.ingester.count > 0 ? `${s!.ingester.count} articles` : s!.ingester.status === 'done' ? 'no new articles' : 'fetching news…' },
+  { key: 'classifier', label: 'Classifier',     detail: s => s!.classifier.count > 0 ? `${s!.classifier.count} signals` : s!.classifier.status === 'done' ? '0 signals' : 'classifying…' },
+  { key: 'sqs_delay',  label: 'SQS Delay',      detail: s => s!.sqs_delay.remain_ms > 0 ? `${fmt(s!.sqs_delay.remain_ms)} left` : '15-min wait done' },
+  { key: 'trade',      label: 'Trade Decision', detail: s => s!.trade.count > 0 ? `${s!.trade.count} positions opened` : s!.trade.status === 'done' ? 'no positions opened' : 'evaluating signals…' },
+];
+
+function StageDot({ status }: { status: StageStatus }) {
+  if (status === 'done')    return <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 shrink-0" />;
+  if (status === 'running') return <span className="h-2.5 w-2.5 rounded-full bg-accent animate-pulse shrink-0" />;
+  if (status === 'waiting') return <span className="h-2.5 w-2.5 rounded-full bg-amber-400 animate-pulse shrink-0" />;
+  return <span className="h-2.5 w-2.5 rounded-full bg-black/15 shrink-0" />;
+}
+
+function PipelineStatusPanel({ pipelineStatus }: { pipelineStatus: PipelineStatus | null }) {
+  if (!pipelineStatus?.run) return null;
+
+  const { run, stages, is_active, elapsed_ms } = pipelineStatus;
 
   return (
-    <div className="space-y-3">
-      {/* Direction filter */}
-      <div className="flex items-center gap-1">
-        {(['all', 'BUY', 'SELL'] as SigDir[]).map((d) => (
-          <SubTab key={d} active={dir === d} onClick={() => setDir(d)}>
-            {d === 'all' ? 'All' : d}
-            {d !== 'all' && (
-              <span className="ml-1 text-[10px]">
-                ({signals.filter((s) => s.direction === d).length})
-              </span>
-            )}
-          </SubTab>
-        ))}
-        <span className="ml-auto text-xs text-ink/40">
-          {filtered.filter((s) => s.meets_threshold).length} actionable
+    <div className="metric-chip space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold">Pipeline Run</h2>
+          {is_active ? (
+            <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent animate-pulse">
+              running
+            </span>
+          ) : (
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+              complete
+            </span>
+          )}
+        </div>
+        <span className="text-xs text-ink/40">
+          triggered {fmt(elapsed_ms)} ago · {run.source}
         </span>
       </div>
 
-      {filtered.length === 0 ? (
-        <Empty msg="No signals match the filter." />
-      ) : (
-        <div className="metric-chip overflow-x-auto p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-black/5 text-xs text-ink/50">
-                <th className="px-4 py-3 text-left font-semibold">Symbol</th>
-                <th className="px-4 py-3 text-left font-semibold">Dir</th>
-                <th className="px-4 py-3 text-left font-semibold">Confidence</th>
-                <th className="px-4 py-3 text-left font-semibold">Signals</th>
-                <th className="px-4 py-3 text-right font-semibold">Entry ₹</th>
-                <th className="px-4 py-3 text-right font-semibold">Target</th>
-                <th className="px-4 py-3 text-left font-semibold">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((s) => {
-                const key = s._id ?? `${s.run_id}-${s.symbol}`;
-                const isExpanded = expanded === key;
-                return (
-                  <Fragment key={key}>
-                    <tr
-                      className="cursor-pointer border-b border-black/5 last:border-0 hover:bg-black/[0.02]"
-                      onClick={() => setExpanded(isExpanded ? null : key)}
-                    >
-                      <td className="px-4 py-3">
-                        <span className="font-display font-bold">
-                          {s.symbol.replace('.NS', '')}
-                        </span>
-                        <span className="ml-1.5 text-xs text-ink/40">{s.date}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                            s.direction === 'BUY'
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-rose-100 text-rose-700'
-                          }`}
-                        >
-                          {s.direction}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <ConfBar value={s.confidence} />
-                        {s.llm_bonus > 0 && (
-                          <span className="text-[10px] text-accent">+{s.llm_bonus} LLM</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-xs text-ink/60">{s.triggered_signals.length}/9</span>
-                        {s.triggered_signals.slice(0, 2).map((t) => (
-                          <span
-                            key={t}
-                            className="ml-1 rounded bg-black/5 px-1.5 py-0.5 text-[10px] text-ink/60"
-                          >
-                            {t.split(' ')[0]}
-                          </span>
-                        ))}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium tabular-nums">
-                        {s.entry_price > 0 ? `₹${s.entry_price.toLocaleString('en-IN')}` : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-emerald-700">
-                        {s.target_pct !== undefined ? `+${s.target_pct.toFixed(1)}%` : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        {s.order_placed ? (
-                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                            Ordered
-                          </span>
-                        ) : s.meets_threshold ? (
-                          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent">
-                            Actionable
-                          </span>
-                        ) : (
-                          <span className="rounded-full bg-black/5 px-2 py-0.5 text-xs font-semibold text-ink/40">
-                            Below threshold
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                    {isExpanded && (
-                      <tr
-                        key={`${key}-expand`}
-                        className="border-b border-black/5 bg-black/[0.015]"
-                      >
-                        <td colSpan={7} className="px-4 pb-3 pt-1">
-                          <p className="text-xs font-semibold text-ink/50">LLM Reasoning</p>
-                          <p className="mt-1 text-xs leading-relaxed text-ink/70">
-                            {s.reasoning || 'No reasoning recorded.'}
-                          </p>
-                          {(s.rsi !== undefined ||
-                            s.macd_hist !== undefined ||
-                            s.volume_ratio !== undefined) && (
-                            <div className="mt-2 flex flex-wrap gap-3 text-[10px] text-ink/50">
-                              {s.rsi !== undefined && (
-                                <span>
-                                  RSI: <b className="text-ink">{s.rsi.toFixed(1)}</b>
-                                </span>
-                              )}
-                              {s.macd_hist !== undefined && (
-                                <span>
-                                  MACD hist:{' '}
-                                  <b
-                                    className={
-                                      s.macd_hist >= 0 ? 'text-emerald-700' : 'text-rose-600'
-                                    }
-                                  >
-                                    {s.macd_hist.toFixed(3)}
-                                  </b>
-                                </span>
-                              )}
-                              {s.volume_ratio !== undefined && (
-                                <span>
-                                  Vol ratio:{' '}
-                                  <b className="text-ink">{s.volume_ratio.toFixed(2)}×</b>
-                                </span>
-                              )}
-                              {s.above_ema20 !== undefined && (
-                                <span>
-                                  EMA20: <b>{s.above_ema20 ? '↑ above' : '↓ below'}</b>
-                                </span>
-                              )}
-                              {s.above_ema50 !== undefined && (
-                                <span>
-                                  EMA50: <b>{s.above_ema50 ? '↑ above' : '↓ below'}</b>
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {STAGE_META.map(({ key, label, detail }) => {
+          const status = stages?.[key]?.status ?? 'pending';
+          return (
+            <div
+              key={key}
+              className="flex flex-col gap-1.5 rounded-xl border border-black/5 bg-bg px-3 py-2.5"
+            >
+              <div className="flex items-center gap-1.5">
+                <StageDot status={status} />
+                <span className="text-xs font-semibold text-ink/70">{label}</span>
+              </div>
+              <span
+                className={`text-[10px] tabular-nums ${
+                  status === 'done' ? 'text-emerald-700' : status === 'waiting' ? 'text-amber-600' : 'text-ink/40'
+                }`}
+              >
+                {stages ? detail(stages) : status}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-// ─── Orders tab ───────────────────────────────────────────────────────────────
+// ─── Stats row ────────────────────────────────────────────────────────────────
 
-function OrdersTab({ orders }: { orders: Order[] }) {
-  const [sub, setSub] = useState<OrderTab>('OPEN');
+function StatsRow({ stats }: { stats: NtStats | null }) {
+  if (!stats) return null;
 
-  const filtered = sub === 'ALL' ? orders : orders.filter((o) => o.status === sub);
+  const totalPnl = stats.total_realized_net_pnl + (stats.has_live_prices ? stats.unrealized_pnl : 0);
+
+  return (
+    <div className="metric-chip grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
+      <div>
+        <p className="text-xs text-ink/50">Open Positions</p>
+        <p className="mt-0.5 font-display text-xl font-bold">{stats.open_count}</p>
+        {stats.open_count > 0 && (
+          <p className="text-xs text-ink/40">{formatCurrency(stats.total_invested_inr)} invested</p>
+        )}
+      </div>
+
+      <div>
+        <p className="text-xs text-ink/50">Unrealised P&L</p>
+        <p className={`mt-0.5 font-display text-xl font-bold ${pnlColor(stats.unrealized_pnl)}`}>
+          {stats.has_live_prices
+            ? `${pnlSign(stats.unrealized_pnl)}${formatCurrency(stats.unrealized_pnl)}`
+            : '—'}
+        </p>
+        {!stats.has_live_prices && stats.open_count > 0 && (
+          <p className="text-xs text-ink/40">updates every 3 min</p>
+        )}
+      </div>
+
+      <div>
+        <p className="text-xs text-ink/50">Realised P&L</p>
+        <p
+          className={`mt-0.5 font-display text-xl font-bold ${pnlColor(stats.total_realized_net_pnl)}`}
+        >
+          {stats.closed_count > 0
+            ? `${pnlSign(stats.total_realized_net_pnl)}${formatCurrency(stats.total_realized_net_pnl)}`
+            : '—'}
+        </p>
+        {stats.has_live_prices && stats.closed_count > 0 && (
+          <p className={`text-xs ${pnlColor(totalPnl)}`}>
+            Total {pnlSign(totalPnl)}{formatCurrency(totalPnl)}
+          </p>
+        )}
+      </div>
+
+      <div>
+        <p className="text-xs text-ink/50">Win Rate</p>
+        <p
+          className={`mt-0.5 font-display text-xl font-bold ${
+            stats.win_rate_pct != null && stats.win_rate_pct >= 50
+              ? 'text-emerald-700'
+              : 'text-rose-600'
+          }`}
+        >
+          {stats.win_rate_pct != null ? `${stats.win_rate_pct}%` : '—'}
+        </p>
+        {stats.closed_count > 0 && (
+          <p className="text-xs text-ink/40">
+            {stats.win_count}W / {stats.loss_count}L
+          </p>
+        )}
+      </div>
+
+      <div>
+        <p className="text-xs text-ink/50">Total Trades</p>
+        <p className="mt-0.5 font-display text-xl font-bold">{stats.closed_count}</p>
+        {stats.avg_hold_days != null && (
+          <p className="text-xs text-ink/40">avg {stats.avg_hold_days}d hold</p>
+        )}
+      </div>
+
+      <div>
+        <p className="text-xs text-ink/50">By Exit</p>
+        <div className="mt-1 space-y-0.5">
+          {Object.entries(stats.by_exit_reason).map(([reason, d]) => (
+            <div key={reason} className="flex items-center justify-between gap-2 text-xs">
+              <ExitBadge reason={reason as NtPosition['exit_reason']} />
+              <span
+                className={`tabular-nums font-semibold ${pnlColor(d.total_net_pnl)}`}
+              >
+                {d.count} ({pnlSign(d.total_net_pnl)}{formatCurrency(d.total_net_pnl)})
+              </span>
+            </div>
+          ))}
+          {Object.keys(stats.by_exit_reason).length === 0 && (
+            <p className="text-xs text-ink/30">no closed trades</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Positions (orders) tab ───────────────────────────────────────────────────
+
+type PosFilter = 'open' | 'closed' | 'all';
+
+function PositionsTab({ positions }: { positions: NtPosition[] }) {
+  const [sub, setSub] = useState<PosFilter>('open');
+  const filtered = sub === 'all' ? positions : positions.filter((p) => p.status === sub);
+  const openCount = positions.filter((p) => p.status === 'open').length;
+  const closedCount = positions.filter((p) => p.status === 'closed').length;
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-1">
-        {(['OPEN', 'CLOSED', 'ALL'] as OrderTab[]).map((s) => (
+        {(
+          [
+            ['open', `Open (${openCount})`],
+            ['closed', `Closed (${closedCount})`],
+            ['all', `All (${positions.length})`],
+          ] as [PosFilter, string][]
+        ).map(([s, label]) => (
           <SubTab key={s} active={sub === s} onClick={() => setSub(s)}>
-            {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
-            <span className="ml-1 text-[10px]">
-              ({s === 'ALL' ? orders.length : orders.filter((o) => o.status === s).length})
-            </span>
+            {label}
           </SubTab>
         ))}
       </div>
 
       {filtered.length === 0 ? (
-        <Empty msg={`No ${sub === 'ALL' ? '' : sub.toLowerCase() + ' '}orders.`} />
+        <Empty msg={`No ${sub === 'all' ? '' : sub + ' '}positions yet.`} />
       ) : (
         <div className="metric-chip overflow-x-auto p-0">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-black/5 text-xs text-ink/50">
                 <th className="px-4 py-3 text-left font-semibold">Symbol</th>
-                <th className="px-4 py-3 text-right font-semibold">Shares</th>
+                <th className="px-4 py-3 text-left font-semibold">Signal</th>
                 <th className="px-4 py-3 text-right font-semibold">Entry</th>
-                {sub !== 'OPEN' && <th className="px-4 py-3 text-right font-semibold">Exit</th>}
-                {sub === 'OPEN' && (
+                {sub !== 'closed' && (
                   <>
-                    <th className="px-4 py-3 text-right font-semibold">Stop</th>
+                    <th className="px-4 py-3 text-right font-semibold">Current</th>
+                    <th className="px-4 py-3 text-right font-semibold">Unreal P&L</th>
+                    <th className="px-4 py-3 text-right font-semibold">Trailing SL</th>
                     <th className="px-4 py-3 text-right font-semibold">Target</th>
                   </>
                 )}
-                <th className="px-4 py-3 text-right font-semibold">Value</th>
-                {sub !== 'OPEN' && <th className="px-4 py-3 text-right font-semibold">P&amp;L</th>}
-                <th className="px-4 py-3 text-right font-semibold">Kelly</th>
-                {sub === 'ALL' && <th className="px-4 py-3 text-left font-semibold">Status</th>}
+                {sub !== 'open' && (
+                  <>
+                    <th className="px-4 py-3 text-right font-semibold">Exit</th>
+                    <th className="px-4 py-3 text-right font-semibold">Net P&L</th>
+                    <th className="px-4 py-3 text-left font-semibold">Reason</th>
+                  </>
+                )}
+                <th className="px-4 py-3 text-right font-semibold">Qty</th>
+                <th className="px-4 py-3 text-right font-semibold">Days</th>
+                {sub === 'all' && <th className="px-4 py-3 text-left font-semibold">Status</th>}
               </tr>
             </thead>
             <tbody>
-              {filtered.map((o) => {
-                const key = o._id ?? `${o.run_id}-${o.symbol}`;
-                const stopPct =
-                  o.stop_loss > 0
-                    ? (((o.entry_price - o.stop_loss) / o.entry_price) * 100).toFixed(1)
+              {filtered.map((p) => {
+                const unrealPnl =
+                  p.current_price != null
+                    ? (p.current_price - p.entry_price) * p.qty
                     : null;
-                const tgtPct =
-                  o.target > 0
-                    ? (((o.target - o.entry_price) / o.entry_price) * 100).toFixed(1)
-                    : null;
-                const pnlVal =
-                  o.actual_return_pct !== undefined
-                    ? o.position_value * (o.actual_return_pct / 100)
-                    : null;
-                const pnlPos = pnlVal !== null && pnlVal >= 0;
+                const days = holdDays(p.entry_at, p.exit_at);
 
                 return (
                   <tr
-                    key={key}
+                    key={p._id}
                     className="border-b border-black/5 last:border-0 hover:bg-black/[0.02]"
                   >
                     <td className="px-4 py-3">
-                      <span className="font-display font-bold">{o.symbol.replace('.NS', '')}</span>
-                      <span className="ml-1.5 text-xs text-ink/40">{o.date}</span>
+                      <span className="font-display font-bold">{p.symbol}</span>
+                      <span className="ml-1.5 text-xs text-ink/40">{p.sector}</span>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums">{o.shares}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      ₹{o.entry_price.toLocaleString('en-IN')}
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col gap-0.5">
+                        <SignalBadge signal={p.signal} />
+                        <ConfBadge confidence={p.confidence} />
+                      </div>
                     </td>
-                    {sub !== 'OPEN' && (
-                      <td className="px-4 py-3 text-right tabular-nums">
-                        {o.exit_price ? `₹${o.exit_price.toLocaleString('en-IN')}` : '—'}
-                      </td>
-                    )}
-                    {sub === 'OPEN' && (
+                    <td className="px-4 py-3 text-right tabular-nums">{fmtPrice(p.entry_price)}</td>
+
+                    {/* Open-only columns */}
+                    {sub !== 'closed' && (
                       <>
-                        <td className="px-4 py-3 text-right tabular-nums text-rose-600">
-                          ₹{o.stop_loss.toLocaleString('en-IN')}
-                          {stopPct && (
-                            <span className="ml-0.5 text-[10px] text-ink/40">−{stopPct}%</span>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {p.current_price != null ? fmtPrice(p.current_price) : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums font-semibold">
+                          {unrealPnl != null ? (
+                            <span className={pnlColor(unrealPnl)}>
+                              {pnlSign(unrealPnl)}{formatCurrency(unrealPnl)}
+                            </span>
+                          ) : (
+                            <span className="text-ink/30">—</span>
                           )}
                         </td>
+                        <td className="px-4 py-3 text-right tabular-nums text-rose-600">
+                          {fmtPrice(p.trailing_sl)}
+                          <span className="ml-0.5 text-[10px] text-ink/40">
+                            {(((p.trailing_sl - p.entry_price) / p.entry_price) * 100).toFixed(1)}%
+                          </span>
+                        </td>
                         <td className="px-4 py-3 text-right tabular-nums text-emerald-700">
-                          ₹{o.target.toLocaleString('en-IN')}
-                          {tgtPct && (
-                            <span className="ml-0.5 text-[10px] text-ink/40">+{tgtPct}%</span>
-                          )}
+                          {fmtPrice(p.target_price)}
+                          <span className="ml-0.5 text-[10px] text-ink/40">
+                            +{(((p.target_price - p.entry_price) / p.entry_price) * 100).toFixed(1)}%
+                          </span>
                         </td>
                       </>
                     )}
-                    <td className="px-4 py-3 text-right font-medium tabular-nums">
-                      {formatCurrency(o.position_value)}
-                    </td>
-                    {sub !== 'OPEN' && (
-                      <td className="px-4 py-3 text-right tabular-nums font-medium">
-                        {pnlVal !== null ? (
-                          <span className={pnlPos ? 'text-emerald-700' : 'text-rose-600'}>
-                            {pnlPos ? '+' : ''}
-                            {formatCurrency(pnlVal)}
-                            <span className="ml-0.5 text-[10px]">
-                              ({pnlPos ? '+' : ''}
-                              {o.actual_return_pct?.toFixed(1)}%)
+
+                    {/* Closed-only columns */}
+                    {sub !== 'open' && (
+                      <>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          {p.exit_price ? fmtPrice(p.exit_price) : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums font-semibold">
+                          {p.net_pnl != null ? (
+                            <span className={pnlColor(p.net_pnl)}>
+                              {pnlSign(p.net_pnl)}{formatCurrency(p.net_pnl)}
                             </span>
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <ExitBadge reason={p.exit_reason} />
+                        </td>
+                      </>
                     )}
-                    <td className="px-4 py-3 text-right tabular-nums text-ink/60">
-                      {(o.kelly_fraction * 100).toFixed(1)}%
-                    </td>
-                    {sub === 'ALL' && (
+
+                    <td className="px-4 py-3 text-right tabular-nums text-ink/60">{p.qty}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-ink/60">{days}d</td>
+
+                    {sub === 'all' && (
                       <td className="px-4 py-3">
                         <span
                           className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                            o.status === 'OPEN'
+                            p.status === 'open'
                               ? 'bg-accent/10 text-accent'
-                              : o.status === 'CLOSED'
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : 'bg-rose-100 text-rose-700'
+                              : 'bg-black/5 text-ink/50'
                           }`}
                         >
-                          {o.status}
+                          {p.status}
                         </span>
                       </td>
                     )}
@@ -655,186 +475,230 @@ function OrdersTab({ orders }: { orders: Order[] }) {
   );
 }
 
-// ─── Overview tab ─────────────────────────────────────────────────────────────
+// ─── Signals tab ──────────────────────────────────────────────────────────────
 
-function OverviewTab({
-  portfolio,
-  runs,
-  news,
-}: {
-  portfolio: Portfolio | null;
-  runs: PipelineRun[];
-  news: NewsArticle[];
-}) {
-  const latestRun = runs[0];
-  const pnlPositive = (portfolio?.total_pnl ?? 0) >= 0;
+type SigFilter = 'all' | 'bullish' | 'bearish';
+
+function SignalsTab({ signals }: { signals: NtSignal[] }) {
+  const [filter, setFilter] = useState<SigFilter>('all');
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const filtered = filter === 'all' ? signals : signals.filter((s) => s.signal === filter);
+
+  // Sector frequency map for the summary bar
+  const sectorCounts: Record<string, number> = {};
+  for (const s of signals) {
+    sectorCounts[s.sector] = (sectorCounts[s.sector] ?? 0) + 1;
+  }
+  const topSectors = Object.entries(sectorCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
 
   return (
-    <div className="space-y-5">
-      {/* Portfolio summary */}
-      {portfolio ? (
-        <div className="metric-chip grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-          {[
-            { label: 'Total Value', value: formatCurrency(portfolio.total_value) },
-            { label: 'Cash', value: formatCurrency(portfolio.cash) },
-            { label: 'Invested', value: formatCurrency(portfolio.invested) },
-            {
-              label: 'Total P&L',
-              value: `${pnlPositive && portfolio.total_pnl > 0 ? '+' : ''}${formatCurrency(portfolio.total_pnl)}`,
-              sub: `${pnlPositive && portfolio.total_pnl_pct > 0 ? '+' : ''}${portfolio.total_pnl_pct.toFixed(2)}%`,
-              color: pnlPositive ? 'text-emerald-700' : 'text-rose-600',
-            },
-            {
-              label: 'Trades / Open',
-              value: String(portfolio.total_trades),
-              sub: `${portfolio.open_positions} open`,
-            },
-          ].map(({ label, value, sub, color }) => (
-            <div key={label}>
-              <p className="text-xs text-ink/50">{label}</p>
-              <p className={`mt-0.5 font-display text-lg font-bold leading-tight ${color ?? ''}`}>
-                {value}
-              </p>
-              {sub && <p className="text-xs text-ink/50">{sub}</p>}
-            </div>
+    <div className="space-y-3">
+      {/* Sector summary chips */}
+      {topSectors.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {topSectors.map(([sector, count]) => (
+            <span
+              key={sector}
+              className="rounded-full border border-black/8 bg-panel px-3 py-1 text-xs font-semibold text-ink/70 shadow-sm"
+            >
+              {sector} <span className="text-ink/40">×{count}</span>
+            </span>
           ))}
         </div>
-      ) : (
-        <Empty msg="Portfolio not initialised — trigger a pipeline run to start." />
       )}
 
-      {/* Latest run */}
-      <div className="metric-chip space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Latest Pipeline Run</h2>
-          {latestRun && (
-            <span className="text-xs text-ink/40">
-              {new Date(latestRun.started_at).toLocaleString('en-IN', {
-                day: '2-digit',
-                month: 'short',
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </span>
-          )}
-        </div>
-
-        {latestRun ? (
-          <>
-            <div className="flex flex-wrap items-center gap-3">
-              <Pill status={latestRun.status} />
-              <span className="text-xs text-ink/50">{latestRun.ai_provider}</span>
-              <span className="text-xs text-ink/50">{latestRun.date}</span>
-              {latestRun.stats && (
-                <span className="text-xs text-ink/50">
-                  {latestRun.stats.signals_count} signals · {latestRun.stats.orders_count} orders
-                </span>
-              )}
-            </div>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-9">
-              {AGENTS.map((agent) => {
-                const status = latestRun.agent_statuses[agent] ?? 'pending';
-                const ms = latestRun.agent_timings[agent];
-                return (
-                  <div
-                    key={agent}
-                    className="flex flex-col items-center gap-1.5 rounded-xl border border-black/5 bg-bg px-2 py-3 text-center"
-                    title={`${agent}: ${status}${ms ? ` (${(ms / 1000).toFixed(1)}s)` : ''}`}
-                  >
-                    <AgentDot status={status} />
-                    <span className="text-[10px] font-semibold text-ink/70">
-                      {AGENT_LABELS[agent]}
-                    </span>
-                    <span className="text-[9px] text-ink/40 tabular-nums">
-                      {status === 'done' && ms ? `${(ms / 1000).toFixed(1)}s` : status}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-            {latestRun.error_summary && (
-              <p className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700">
-                {latestRun.error_summary}
-              </p>
+      {/* Filter + meta */}
+      <div className="flex items-center gap-1">
+        {(['all', 'bullish', 'bearish'] as SigFilter[]).map((f) => (
+          <SubTab key={f} active={filter === f} onClick={() => setFilter(f)}>
+            {f.charAt(0).toUpperCase() + f.slice(1)}
+            {f !== 'all' && (
+              <span className="ml-1 text-[10px]">
+                ({signals.filter((s) => s.signal === f).length})
+              </span>
             )}
-          </>
-        ) : (
-          <p className="text-sm text-ink/40">No pipeline runs yet.</p>
-        )}
+          </SubTab>
+        ))}
+        <span className="ml-auto text-xs text-ink/40">
+          {signals.filter((s) => s.acted_on).length}/{signals.length} acted on
+        </span>
       </div>
 
-      {/* Run history */}
-      {runs.length > 1 && (
-        <div className="metric-chip space-y-2">
-          <h2 className="mb-1 text-sm font-semibold">Run History</h2>
-          {runs.slice(1).map((run) => (
-            <div key={run.run_id} className="flex items-center justify-between text-sm">
-              <span className="font-medium">{run.date}</span>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-ink/40">{run.ai_provider}</span>
-                {run.stats && (
-                  <span className="text-xs text-ink/40">
-                    {run.stats.signals_count} sig · {run.stats.orders_count} ord
-                  </span>
-                )}
-                <Pill status={run.status} />
-              </div>
-            </div>
-          ))}
+      {filtered.length === 0 ? (
+        <Empty msg="No signals match the filter." />
+      ) : (
+        <div className="metric-chip overflow-x-auto p-0">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-black/5 text-xs text-ink/50">
+                <th className="px-4 py-3 text-left font-semibold">Sector</th>
+                <th className="px-4 py-3 text-left font-semibold">Signal</th>
+                <th className="px-4 py-3 text-left font-semibold">Confidence</th>
+                <th className="px-4 py-3 text-left font-semibold">Stocks</th>
+                <th className="px-4 py-3 text-left font-semibold">Magnitude</th>
+                <th className="px-4 py-3 text-left font-semibold">Action</th>
+                <th className="px-4 py-3 text-left font-semibold">Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((s) => (
+                <Fragment key={s._id}>
+                  <tr
+                    className="cursor-pointer border-b border-black/5 last:border-0 hover:bg-black/[0.02]"
+                    onClick={() => setExpanded(expanded === s._id ? null : s._id)}
+                  >
+                    <td className="px-4 py-3 font-semibold">{s.sector}</td>
+                    <td className="px-4 py-3">
+                      <SignalBadge signal={s.signal} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <ConfBadge confidence={s.confidence} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="font-display text-xs font-semibold">
+                        {s.stocks.slice(0, 3).join(', ')}
+                      </span>
+                      {s.stocks.length > 3 && (
+                        <span className="text-xs text-ink/40"> +{s.stocks.length - 3}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-ink/60 capitalize">{s.magnitude}</td>
+                    <td className="px-4 py-3">
+                      {s.acted_on ? (
+                        <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
+                          Trade opened
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-ink/40">
+                          No trade
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-ink/40">{fmtDate(s.created_at)}</td>
+                  </tr>
+                  {expanded === s._id && (
+                    <tr className="border-b border-black/5 bg-black/[0.015]">
+                      <td colSpan={7} className="px-4 pb-3 pt-1">
+                        <p className="text-xs font-semibold text-ink/50">Gemini Reasoning</p>
+                        <p className="mt-1 max-w-2xl text-xs leading-relaxed text-ink/70">
+                          {s.reasoning || 'No reasoning recorded.'}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {s.stocks.map((sym) => (
+                            <span
+                              key={sym}
+                              className="rounded bg-black/5 px-1.5 py-0.5 font-display text-[10px] font-bold text-ink/60"
+                            >
+                              {sym}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── News tab ─────────────────────────────────────────────────────────────────
+
+function NewsTab({ news, signals }: { news: NtNews[]; signals: NtSignal[] }) {
+  // Sector analysis derived from signals
+  const sectorStats: Record<string, { bullish: number; bearish: number; neutral: number }> = {};
+  for (const s of signals) {
+    if (!sectorStats[s.sector]) sectorStats[s.sector] = { bullish: 0, bearish: 0, neutral: 0 };
+    (sectorStats[s.sector] as Record<string, number>)[s.signal] =
+      ((sectorStats[s.sector] as Record<string, number>)[s.signal] ?? 0) + 1;
+  }
+  const sectorEntries = Object.entries(sectorStats).sort(
+    (a, b) => b[1].bullish + b[1].bearish - (a[1].bullish + a[1].bearish),
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Sector sentiment analysis */}
+      {sectorEntries.length > 0 && (
+        <div className="metric-chip space-y-3">
+          <h2 className="text-sm font-semibold">Sector Sentiment (from signals)</h2>
+          <div className="space-y-2">
+            {sectorEntries.map(([sector, counts]) => {
+              const total = counts.bullish + counts.bearish + counts.neutral;
+              const bullPct = total > 0 ? (counts.bullish / total) * 100 : 0;
+              const bearPct = total > 0 ? (counts.bearish / total) * 100 : 0;
+              return (
+                <div key={sector} className="flex items-center gap-3">
+                  <span className="w-28 shrink-0 text-xs font-semibold text-ink/70">{sector}</span>
+                  <div className="flex h-2 flex-1 overflow-hidden rounded-full bg-black/5">
+                    <div
+                      className="bg-emerald-500"
+                      style={{ width: `${bullPct}%` }}
+                      title={`${counts.bullish} bullish`}
+                    />
+                    <div
+                      className="bg-rose-400"
+                      style={{ width: `${bearPct}%` }}
+                      title={`${counts.bearish} bearish`}
+                    />
+                  </div>
+                  <div className="flex gap-2 text-[10px] text-ink/50">
+                    <span className="text-emerald-700">{counts.bullish}↑</span>
+                    <span className="text-rose-600">{counts.bearish}↓</span>
+                    {counts.neutral > 0 && <span>{counts.neutral}~</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Recent news */}
-      {news.length > 0 && (
+      {/* Raw news */}
+      {news.length === 0 ? (
+        <Empty msg="No news ingested yet." />
+      ) : (
         <div className="metric-chip space-y-3">
-          <h2 className="text-sm font-semibold">Recent News</h2>
+          <h2 className="text-sm font-semibold">
+            Ingested News{' '}
+            <span className="text-xs font-normal text-ink/40">
+              ({news.filter((a) => a.classified).length}/{news.length} classified)
+            </span>
+          </h2>
           {news.map((article) => (
             <div
-              key={article._id ?? article.url}
-              className="border-b border-black/5 pb-3 last:border-0 last:pb-0"
+              key={article._id}
+              className="flex items-start gap-3 border-b border-black/5 pb-3 last:border-0 last:pb-0"
             >
-              <div className="flex items-start justify-between gap-2">
-                <a
-                  href={article.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-medium hover:text-accent"
-                >
-                  {article.headline}
-                </a>
-                <div className="flex shrink-0 items-center gap-1">
-                  {article.tier && (
-                    <span
-                      className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
-                        article.tier === 1
-                          ? 'bg-accent/10 text-accent'
-                          : article.tier === 2
-                            ? 'bg-amber-100 text-amber-700'
-                            : 'bg-black/5 text-ink/50'
-                      }`}
-                    >
-                      T{article.tier}
-                    </span>
-                  )}
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                      article.sentiment === 'positive'
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : article.sentiment === 'negative'
-                          ? 'bg-rose-100 text-rose-700'
-                          : 'bg-black/5 text-ink/50'
-                    }`}
+              <div className="flex-1 min-w-0">
+                {article.url ? (
+                  <a
+                    href={article.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-medium hover:text-accent"
                   >
-                    {article.sentiment}
-                  </span>
-                </div>
-              </div>
-              <p className="mt-0.5 text-xs text-ink/50">
-                {article.source}
-                {article.affected_sectors.length > 0 && (
-                  <> · {article.affected_sectors.slice(0, 2).join(', ')}</>
+                    {article.headline}
+                  </a>
+                ) : (
+                  <p className="text-sm font-medium">{article.headline}</p>
                 )}
-              </p>
+                <p className="mt-0.5 text-xs text-ink/40">
+                  {article.source} · {fmtDate(article.ingested_at)}
+                </p>
+              </div>
+              {article.classified && (
+                <span className="shrink-0 rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-bold text-accent">
+                  analysed
+                </span>
+              )}
             </div>
           ))}
         </div>
@@ -843,146 +707,351 @@ function OverviewTab({
   );
 }
 
+// ─── Overview tab ─────────────────────────────────────────────────────────────
+
+function OverviewTab({
+  positions,
+  signals,
+  news,
+}: {
+  positions: NtPosition[];
+  signals: NtSignal[];
+  news: NtNews[];
+}) {
+  const open = positions.filter((p) => p.status === 'open');
+
+  return (
+    <div className="space-y-5">
+      {/* Open positions mini-table */}
+      {open.length > 0 ? (
+        <div className="metric-chip space-y-2">
+          <h2 className="text-sm font-semibold">Open Positions</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-black/5 text-xs text-ink/50">
+                  <th className="py-2 text-left font-semibold">Symbol</th>
+                  <th className="py-2 text-right font-semibold">Entry</th>
+                  <th className="py-2 text-right font-semibold">Current</th>
+                  <th className="py-2 text-right font-semibold">P&L</th>
+                  <th className="py-2 text-right font-semibold">SL</th>
+                  <th className="py-2 text-right font-semibold">Target</th>
+                </tr>
+              </thead>
+              <tbody>
+                {open.map((p) => {
+                  const unrealPnl =
+                    p.current_price != null
+                      ? (p.current_price - p.entry_price) * p.qty
+                      : null;
+                  return (
+                    <tr key={p._id} className="border-b border-black/5 last:border-0">
+                      <td className="py-2">
+                        <span className="font-display font-bold">{p.symbol}</span>
+                        <SignalBadge signal={p.signal} />
+                      </td>
+                      <td className="py-2 text-right tabular-nums">{fmtPrice(p.entry_price)}</td>
+                      <td className="py-2 text-right tabular-nums">
+                        {p.current_price != null ? fmtPrice(p.current_price) : '—'}
+                      </td>
+                      <td className="py-2 text-right tabular-nums font-semibold">
+                        {unrealPnl != null ? (
+                          <span className={pnlColor(unrealPnl)}>
+                            {pnlSign(unrealPnl)}{formatCurrency(unrealPnl)}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="py-2 text-right tabular-nums text-rose-600">
+                        {fmtPrice(p.trailing_sl)}
+                      </td>
+                      <td className="py-2 text-right tabular-nums text-emerald-700">
+                        {fmtPrice(p.target_price)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="metric-chip py-6 text-center text-sm text-ink/40">
+          No open positions — signals are checked every 5 minutes during market hours.
+        </div>
+      )}
+
+      {/* Recent signals */}
+      {signals.slice(0, 6).length > 0 && (
+        <div className="metric-chip space-y-2">
+          <h2 className="text-sm font-semibold">Recent Signals</h2>
+          {signals.slice(0, 6).map((s) => (
+            <div
+              key={s._id}
+              className="flex items-start justify-between gap-3 border-b border-black/5 pb-2 last:border-0 last:pb-0"
+            >
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <SignalBadge signal={s.signal} />
+                  <span className="text-sm font-semibold">{s.sector}</span>
+                  <span className="text-xs text-ink/40 capitalize">{s.magnitude}</span>
+                </div>
+                <p className="mt-0.5 truncate text-xs text-ink/60">
+                  {s.stocks.slice(0, 4).join(', ')}
+                  {s.stocks.length > 4 && ` +${s.stocks.length - 4}`}
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <ConfBadge confidence={s.confidence} />
+                <span className="text-[10px] text-ink/40">{fmtDate(s.created_at)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Recent news */}
+      {news.slice(0, 5).length > 0 && (
+        <div className="metric-chip space-y-2">
+          <h2 className="text-sm font-semibold">Recent News</h2>
+          {news.slice(0, 5).map((article) => (
+            <div
+              key={article._id}
+              className="flex items-start gap-3 border-b border-black/5 pb-2 last:border-0 last:pb-0"
+            >
+              <div className="flex-1 min-w-0">
+                {article.url ? (
+                  <a
+                    href={article.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-medium hover:text-accent"
+                  >
+                    {article.headline}
+                  </a>
+                ) : (
+                  <p className="text-sm font-medium">{article.headline}</p>
+                )}
+                <p className="mt-0.5 text-xs text-ink/40">
+                  {article.source} · {fmtDate(article.ingested_at)}
+                </p>
+              </div>
+              {article.classified && (
+                <span className="shrink-0 rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-bold text-accent">
+                  analysed
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {positions.length === 0 && signals.length === 0 && news.length === 0 && (
+        <Empty msg="No data yet — the ingester runs every 5 min during market hours (09:00–15:35 IST)." />
+      )}
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
+
+type TabId = 'overview' | 'positions' | 'signals' | 'news';
 
 export default function TradingPage() {
   const [tab, setTab] = useState<TabId>('overview');
 
-  const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
-  const [signals, setSignals] = useState<Signal[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [runs, setRuns] = useState<PipelineRun[]>([]);
-  const [news, setNews] = useState<NewsArticle[]>([]);
-  const [history, setHistory] = useState<{
-    snapshots: PortfolioSnapshot[];
-    initial_capital: number;
-  } | null>(null);
-
+  const [positions, setPositions] = useState<NtPosition[]>([]);
+  const [signals, setSignals] = useState<NtSignal[]>([]);
+  const [news, setNews] = useState<NtNews[]>([]);
+  const [stats, setStats] = useState<NtStats | null>(null);
+  const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [triggering, setTriggering] = useState(false);
-  const [triggerError, setTriggerError] = useState<string | null>(null);
+  const [triggerMsg, setTriggerMsg] = useState<{ text: string; kind: 'info' | 'success' | 'error' } | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const analyticsLoadedRef = useRef(false);
+  const statusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const loadAll = useCallback(async () => {
-    const [pRes, sRes, oRes, rRes, nRes] = await Promise.allSettled([
-      fetchPortfolio(),
-      fetchSignals({ limit: 50 }),
-      fetchOrders(),
-      fetchRuns(10),
-      fetchNews({ limit: 10 }),
-    ]);
-    if (pRes.status === 'fulfilled') setPortfolio(pRes.value);
-    if (sRes.status === 'fulfilled') setSignals(sRes.value.signals);
-    if (oRes.status === 'fulfilled') setOrders(oRes.value.orders);
-    if (rRes.status === 'fulfilled') setRuns(rRes.value.runs);
-    if (nRes.status === 'fulfilled') setNews(nRes.value.articles);
-  }, []);
-
-  const loadHistory = useCallback(async () => {
-    if (analyticsLoadedRef.current) return;
-    analyticsLoadedRef.current = true;
+  const loadPipelineStatus = useCallback(async () => {
     try {
-      const res = await fetchPortfolioHistory();
-      setHistory(res);
+      const s = await fetchPipelineStatus();
+      setPipelineStatus(s);
+      return s;
     } catch {
-      /* ignore */
+      return null;
     }
   }, []);
 
-  // Polling: 30s when active, 5min when idle — always running
-  useEffect(() => {
-    const latestRun = runs[0];
-    const isActive = latestRun?.status === 'running' || latestRun?.status === 'pending';
-    const ms = isActive ? POLL_ACTIVE_MS : POLL_IDLE_MS;
+  const loadAll = useCallback(async () => {
+    try {
+      const [pRes, sRes, nRes, stRes] = await Promise.allSettled([
+        fetchPositions('all'),
+        fetchSignals(100),
+        fetchNews(50),
+        fetchStats(),
+      ]);
+      if (pRes.status === 'fulfilled') setPositions(pRes.value.positions);
+      if (sRes.status === 'fulfilled') setSignals(sRes.value.signals);
+      if (nRes.status === 'fulfilled') setNews(nRes.value.articles);
+      if (stRes.status === 'fulfilled') setStats(stRes.value);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(() => void loadAll(), ms);
-
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
+  // Start/stop fast status polling when a run is active
+  const startStatusPoll = useCallback(() => {
+    if (statusPollRef.current) return;
+    statusPollRef.current = setInterval(async () => {
+      const s = await loadPipelineStatus();
+      if (!s?.is_active) {
+        clearInterval(statusPollRef.current!);
+        statusPollRef.current = null;
+        void loadAll(); // refresh data once run completes
       }
+    }, 15_000);
+  }, [loadPipelineStatus, loadAll]);
+
+  useEffect(() => {
+    void Promise.all([loadAll(), loadPipelineStatus().then(s => {
+      if (s?.is_active) startStatusPoll();
+    })]);
+    // Slow poll every 3 min for sl_monitor price updates
+    pollRef.current = setInterval(() => void loadAll(), 3 * 60 * 1000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (statusPollRef.current) clearInterval(statusPollRef.current);
     };
-  }, [runs, loadAll]);
-
-  // Load analytics lazily on tab switch
-  useEffect(() => {
-    if (tab === 'analytics') void loadHistory();
-  }, [tab, loadHistory]);
-
-  useEffect(() => {
-    void loadAll();
-  }, [loadAll]);
+  }, [loadAll, loadPipelineStatus, startStatusPoll]);
 
   async function handleTrigger() {
     setTriggering(true);
-    setTriggerError(null);
+    setTriggerMsg(null);
     try {
-      await triggerRun();
-      await loadAll();
+      const res = await triggerPipeline();
+      if (res.status === 'local_dev') {
+        setTriggerMsg({
+          text: res.message ?? 'Run `pnpm nt:ingester` from apps/signal-engine/ to invoke locally.',
+          kind: 'info',
+        });
+      } else {
+        setTriggerMsg({ text: 'Pipeline started — tracking progress below.', kind: 'success' });
+        await loadPipelineStatus();
+        startStatusPoll();
+      }
     } catch (err) {
-      setTriggerError(err instanceof Error ? err.message : 'Failed to trigger pipeline');
+      setTriggerMsg({
+        text: err instanceof Error ? err.message : 'Failed to trigger pipeline',
+        kind: 'error',
+      });
     } finally {
       setTriggering(false);
     }
   }
 
-  const latestRun = runs[0];
-  const isActive = latestRun?.status === 'running' || latestRun?.status === 'pending';
-  const openOrders = orders.filter((o) => o.status === 'OPEN');
+  const openPositions = positions.filter((p) => p.status === 'open');
+  const pipelineActive = pipelineStatus?.is_active ?? false;
 
   return (
     <div className="space-y-4">
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight">Trading Dashboard</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight">News Trader</h1>
           <p className="text-sm text-ink/60">
-            Paper trading · NSE/BSE · Half-Kelly position sizing
+            Paper · NSE/BSE · Event-driven · Trailing SL · Gemini classifier
           </p>
         </div>
-        <button
-          onClick={() => void handleTrigger()}
-          disabled={triggering || isActive}
-          className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {triggering ? 'Triggering…' : isActive ? 'Running…' : 'Run Pipeline'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void loadAll()}
+            className="rounded-lg border border-black/10 px-3 py-2 text-sm font-semibold transition hover:bg-black/5"
+          >
+            ↻ Refresh
+          </button>
+          <button
+            onClick={() => void handleTrigger()}
+            disabled={triggering || pipelineActive}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {triggering ? 'Starting…' : pipelineActive ? '⏳ Running…' : '▶ Run Pipeline'}
+          </button>
+        </div>
       </div>
 
-      {triggerError && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-          {triggerError}
+      {/* Trigger feedback */}
+      {triggerMsg && (
+        <div
+          className={`rounded-xl border p-3 text-sm ${
+            triggerMsg.kind === 'success'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : triggerMsg.kind === 'info'
+                ? 'border-amber-200 bg-amber-50 text-amber-800'
+                : 'border-rose-200 bg-rose-50 text-rose-700'
+          }`}
+        >
+          {triggerMsg.text}
         </div>
       )}
 
-      {/* ── Tab bar ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 rounded-full bg-panel p-1 shadow-card w-fit">
-        <TabBtn active={tab === 'overview'} onClick={() => setTab('overview')}>
-          Overview
-        </TabBtn>
-        <TabBtn active={tab === 'signals'} onClick={() => setTab('signals')} count={signals.length}>
-          Signals
-        </TabBtn>
-        <TabBtn
-          active={tab === 'orders'}
-          onClick={() => setTab('orders')}
-          count={openOrders.length}
-        >
-          Orders
-        </TabBtn>
-        <TabBtn active={tab === 'analytics'} onClick={() => setTab('analytics')}>
-          Analytics
-        </TabBtn>
-      </div>
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
 
-      {/* ── Tab content ─────────────────────────────────────────────────── */}
-      {tab === 'overview' && <OverviewTab portfolio={portfolio} runs={runs} news={news} />}
-      {tab === 'signals' && <SignalsTab signals={signals} />}
-      {tab === 'orders' && <OrdersTab orders={orders} />}
-      {tab === 'analytics' && <AnalyticsTab portfolio={portfolio} history={history} />}
+      {loading ? (
+        <div className="metric-chip flex items-center justify-center py-10 text-sm text-ink/40">
+          Loading…
+        </div>
+      ) : (
+        <>
+          {/* ── Pipeline status ────────────────────────────────────────── */}
+          <PipelineStatusPanel pipelineStatus={pipelineStatus} />
+
+          {/* ── Stats row ──────────────────────────────────────────────── */}
+          <StatsRow stats={stats} />
+
+          {/* ── Tab bar ────────────────────────────────────────────────── */}
+          <div className="flex w-fit items-center gap-1 rounded-full bg-panel p-1 shadow-card">
+            <TabBtn active={tab === 'overview'} onClick={() => setTab('overview')}>
+              Overview
+            </TabBtn>
+            <TabBtn
+              active={tab === 'positions'}
+              onClick={() => setTab('positions')}
+              count={openPositions.length}
+            >
+              Orders
+            </TabBtn>
+            <TabBtn
+              active={tab === 'signals'}
+              onClick={() => setTab('signals')}
+              count={signals.length}
+            >
+              Signals
+            </TabBtn>
+            <TabBtn
+              active={tab === 'news'}
+              onClick={() => setTab('news')}
+              count={news.length}
+            >
+              News
+            </TabBtn>
+          </div>
+
+          {/* ── Tab content ──────────────────────────────────────────── */}
+          {tab === 'overview' && (
+            <OverviewTab positions={positions} signals={signals} news={news} />
+          )}
+          {tab === 'positions' && <PositionsTab positions={positions} />}
+          {tab === 'signals' && <SignalsTab signals={signals} />}
+          {tab === 'news' && <NewsTab news={news} signals={signals} />}
+        </>
+      )}
     </div>
   );
 }

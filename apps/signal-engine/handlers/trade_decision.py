@@ -32,31 +32,43 @@ async def _process_signal(signal_doc: dict, settings: Settings) -> int:
     """Returns number of positions opened."""
     db = get_db()
     paper = settings.trading_mode.lower() != "live"
+    signal_id = str(signal_doc.get("_id", "?"))
+
+    logger.info("[TRADE] evaluating signal_id=%s sector=%s signal=%s confidence=%s stocks=%s",
+                signal_id, signal_doc.get("sector"), signal_doc.get("signal"),
+                signal_doc.get("confidence"), signal_doc.get("stocks"))
 
     # Check available capacity
     open_count = await positions(db).count_documents({"status": "open"})
     capacity = settings.nt_max_positions - open_count
+    logger.info("[TRADE] capacity check open=%d max=%d available=%d",
+                open_count, settings.nt_max_positions, capacity)
     if capacity <= 0:
-        logger.info("trade_decision_skip_full open=%d max=%d", open_count, settings.nt_max_positions)
+        logger.info("[TRADE] skip — portfolio full open=%d max=%d", open_count, settings.nt_max_positions)
         return 0
 
     stocks = signal_doc.get("stocks", [])
     if not stocks:
+        logger.info("[TRADE] skip — no stocks in signal")
         return 0
 
     entered = 0
-    for symbol in stocks[: min(settings.nt_max_stocks_per_signal, capacity)]:
+    candidates = stocks[: min(settings.nt_max_stocks_per_signal, capacity)]
+    logger.info("[TRADE] evaluating %d stock(s): %s", len(candidates), candidates)
+    for symbol in candidates:
         # Check if we already have an open position in this symbol
         existing = await positions(db).find_one({"symbol": symbol, "status": "open"})
         if existing:
-            logger.info("trade_decision_skip_duplicate symbol=%s", symbol)
+            logger.info("[TRADE] skip %s — already have open position", symbol)
             continue
 
+        logger.info("[TRADE] fetching LTP for %s...", symbol)
         price = get_ltp(symbol)
         if not price:
-            logger.warning("trade_decision_no_price symbol=%s", symbol)
+            logger.warning("[TRADE] no price for %s — skipping", symbol)
             continue
 
+        logger.info("[TRADE] %s LTP=%.2f — calculating position size...", symbol, price)
         qty = calc_qty(settings.nt_position_size_inr, price)
         target = price * (1.0 + settings.nt_target_pct)
         sl = initial_trailing_sl(price, settings.nt_sl_pct)
@@ -76,7 +88,7 @@ async def _process_signal(signal_doc: dict, settings: Settings) -> int:
             "trailing_sl": sl,
             "target_price": target,
             "status": "open",
-            "close_reason": None,
+            "exit_reason": None,
             "exit_price": None,
             "exit_at": None,
             "gross_pnl": None,
@@ -87,14 +99,15 @@ async def _process_signal(signal_doc: dict, settings: Settings) -> int:
         if paper:
             await positions(db).insert_one(position_doc)
             logger.info(
-                "paper_trade_entered symbol=%s price=%.2f qty=%d sl=%.2f target=%.2f",
-                symbol, price, qty, sl, target,
+                "[TRADE] paper position opened symbol=%s price=%.2f qty=%d sl=%.2f target=%.2f value=₹%.0f",
+                symbol, price, qty, sl, target, price * qty,
             )
         else:
             # Live: GTT placement via Kite Connect (Month 5+)
-            logger.warning("live_trading_not_implemented symbol=%s — falling back to paper", symbol)
+            logger.warning("[TRADE] live trading not implemented for %s — falling back to paper", symbol)
             await positions(db).insert_one(position_doc)
 
+        logger.info("[TRADE] sending Telegram alert for %s...", symbol)
         alert_trade_entered(
             bot_token=settings.telegram_bot_token,
             chat_id=settings.telegram_chat_id,
@@ -110,6 +123,7 @@ async def _process_signal(signal_doc: dict, settings: Settings) -> int:
         )
         entered += 1
 
+    logger.info("[TRADE] signal_id=%s done — %d position(s) opened", signal_id, entered)
     return entered
 
 
@@ -118,6 +132,7 @@ async def _run(event: dict, settings: Settings) -> dict:
     await ensure_indexes(db)
 
     records = event.get("Records", [])
+    logger.info("[TRADE] processing %d SQS record(s)", len(records))
     total_entered = 0
 
     for record in records:
@@ -125,15 +140,17 @@ async def _run(event: dict, settings: Settings) -> dict:
             msg = json.loads(record["body"])
             signal_id = msg.get("signal_id")
             if not signal_id:
+                logger.warning("[TRADE] bad message — no signal_id: %s", msg)
                 continue
 
             from src.news_trader.db import signals as signals_coll
             signal_doc = await signals_coll(db).find_one({"_id": ObjectId(signal_id)})
             if not signal_doc:
-                logger.warning("trade_decision_signal_not_found id=%s", signal_id)
+                logger.warning("[TRADE] signal not found id=%s", signal_id)
                 continue
 
             if signal_doc.get("acted_on"):
+                logger.info("[TRADE] signal already acted on id=%s — skipping", signal_id)
                 continue
 
             n = await _process_signal(signal_doc, settings)
@@ -143,8 +160,9 @@ async def _run(event: dict, settings: Settings) -> dict:
                 {"_id": ObjectId(signal_id)}, {"$set": {"acted_on": True}}
             )
         except Exception as exc:
-            logger.error("trade_decision_error err=%s", exc)
+            logger.error("[TRADE] error processing record err=%s", exc)
 
+    logger.info("[TRADE] done — processed=%d total_positions_opened=%d", len(records), total_entered)
     return {"processed": len(records), "positions_opened": total_entered}
 
 

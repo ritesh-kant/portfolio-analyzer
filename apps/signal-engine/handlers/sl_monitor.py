@@ -76,11 +76,12 @@ async def _monitor_position(pos: dict, settings: Settings) -> str:
             {
                 "$set": {
                     "status": "closed",
-                    "close_reason": exit_reason,
+                    "exit_reason": exit_reason,
                     "exit_price": price,
                     "exit_at": now,
                     "highest_price": new_highest,
                     "trailing_sl": new_sl,
+                    "current_price": price,
                     "gross_pnl": gross_pnl,
                     "net_pnl": net_pnl,
                 }
@@ -103,8 +104,8 @@ async def _monitor_position(pos: dict, settings: Settings) -> str:
         )
         return f"closed:{exit_reason}"
 
-    # Position stays open — persist updated SL
-    update: dict = {"highest_price": new_highest, "trailing_sl": new_sl}
+    # Position stays open — persist updated SL + latest price for unrealized P&L
+    update: dict = {"highest_price": new_highest, "trailing_sl": new_sl, "current_price": price}
     await positions(db).update_one({"_id": pos["_id"]}, {"$set": update})
 
     if sl_raised:
