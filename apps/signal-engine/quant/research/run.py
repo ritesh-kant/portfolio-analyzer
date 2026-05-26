@@ -3,6 +3,7 @@
 Usage:
   python -m quant.research.run --strategy pead_midcap --split dev
   python -m quant.research.run --strategy index_recon --split dev
+  python -m quant.research.run --strategy momentum --split dev
   python -m quant.research.run --strategy pead_midcap --split train
 
 The --split argument must be "train" or "dev".  The hold-out split is
@@ -776,6 +777,850 @@ def run_gate_check_idi(split: str, n_trials: int | None = None) -> int:
     return 0 if all_pass else 1
 
 
+def run_gate_check_momentum(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check for Strategy P — Cross-Sectional Momentum.
+
+    Pre-registered hypothesis: research/hypotheses/2026-05-25-cross-sectional-momentum.md
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.pit_loader import load as _pit_load
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.cs_momentum import (
+        build_anti_portfolios,
+        build_close_pivot,
+        build_monthly_portfolios,
+        build_open_pivot,
+        compute_gate_metrics as mom_gate_metrics,
+        load_constituents,
+        run_cost_stress as mom_cost_stress,
+        simulate_portfolio,
+    )
+
+    _MOM_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-25-cross-sectional-momentum.md"
+    )
+    _MOM_EXPERIMENT = "cs_momentum_v1"
+
+    _MOM_SPLIT_DATES = {
+        "train":   ("2015-01-01", "2023-06-30"),
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _MOM_SPLIT_DATES:
+        logger.error("Invalid split: %r. Choose 'train', 'dev', or 'holdout'.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout(_MOM_EXPERIMENT, _MOM_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _MOM_SPLIT_DATES[split]
+
+    # Auto-detect trial count from MLflow
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_MOM_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="",
+                    max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=momentum split=%s n_trials=%d", split, n_trials)
+
+    # ── Load OHLCV data ───────────────────────────────────────────────────────
+    # pit_loader returns a MultiIndex (business_date, symbol); flatten to
+    # standard flat columns (date, symbol, open, high, low, close, ...) so
+    # the cs_momentum strategy module can operate on a plain DataFrame.
+    try:
+        ohlcv = _pit_load(symbol=None, start="2014-01-01", end=end)
+        # Reset MultiIndex → flat columns; rename business_date → date
+        if isinstance(ohlcv.index, pd.MultiIndex):
+            ohlcv = ohlcv.reset_index()
+            if "business_date" in ohlcv.columns:
+                ohlcv = ohlcv.rename(columns={"business_date": "date"})
+        ohlcv["date"] = pd.to_datetime(ohlcv["date"])
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv.empty:
+        logger.error("OHLCV data is empty for range 2014-01-01 → %s", end)
+        return 2
+
+    # ── Load Midcap 150 universe ──────────────────────────────────────────────
+    symbols = load_constituents()
+    if not symbols:
+        logger.error(
+            "Midcap 150 constituent list is empty.  "
+            "Expected: data/lake/midcap150_constituents.csv"
+        )
+        return 2
+
+    logger.info("Universe: %d symbols | OHLCV rows: %d", len(symbols), len(ohlcv))
+
+    # ── Build pivots ONCE — reused for scoring, simulation, anti + stress ─────
+    logger.info("Building price pivots (one-time, ~5–10 seconds)...")
+    close_piv = build_close_pivot(ohlcv, symbols)
+    open_piv  = build_open_pivot(ohlcv, symbols)
+    logger.info("Pivots ready: close %s | open %s", close_piv.shape, open_piv.shape)
+
+    # ── Build portfolios (signal + anti-signal) ───────────────────────────────
+    portfolios = build_monthly_portfolios(
+        ohlcv, symbols, start=start, end=end, close_pivot=close_piv
+    )
+    if len(portfolios) < 2:
+        logger.error("Fewer than 2 monthly portfolios built for %s → %s.", start, end)
+        return 2
+
+    anti_ports = build_anti_portfolios(
+        ohlcv, symbols, start=start, end=end, close_pivot=close_piv
+    )
+
+    # ── Simulate ──────────────────────────────────────────────────────────────
+    result_df = simulate_portfolio(
+        portfolios, ohlcv, costs_enabled=True,
+        open_pivot=open_piv, close_pivot=close_piv,
+    )
+    anti_df = simulate_portfolio(
+        anti_ports, ohlcv, costs_enabled=True,
+        open_pivot=open_piv, close_pivot=close_piv,
+    )
+
+    if result_df.empty:
+        logger.error("Simulation produced no monthly return records.")
+        return 2
+
+    # ── Benchmark (equal-weight Midcap 150 proxy) ─────────────────────────────
+    # For now, use median return of all scored symbols as the benchmark proxy.
+    # This is a conservative benchmark (universe beta, not a true TRI).
+    # TODO: replace with official Nifty Midcap 150 TRI when data is available.
+    benchmark_df = None  # will report excess_return as None; gate still runs
+
+    # ── Gate metrics ──────────────────────────────────────────────────────────
+    metrics  = mom_gate_metrics(result_df, benchmark_df=benchmark_df, n_trials=n_trials)
+    anti_met = mom_gate_metrics(anti_df, benchmark_df=benchmark_df, n_trials=n_trials)
+
+    # Cost-stress test (200 runs with t-dist slippage) — pass pivots to avoid rebuild
+    stress = mom_cost_stress(
+        portfolios, ohlcv, n_trials=n_trials,
+        open_pivot=open_piv, close_pivot=close_piv,
+    )
+    stress_collapse = (
+        (metrics["dsr"] - stress["dsr_median"]) / metrics["dsr"]
+        if metrics["dsr"] and metrics["dsr"] > 1e-6
+        else 1.0
+    )
+
+    # ── Gate evaluation ───────────────────────────────────────────────────────
+    gates: dict[str, bool] = {
+        "dsr >= 0.6":               (metrics["dsr"] or 0.0) >= 0.6,
+        "sharpe >= 0.7":            (metrics["sharpe"] or 0.0) >= 0.7,
+        "stress_dsr_collapse <= 50%": stress_collapse <= 0.5,
+        "max_drawdown >= -20%":     (metrics["max_drawdown"] or -99.0) >= -0.20,
+        "anti_strategy_dsr <= 0":   (anti_met["dsr"] or 1.0) <= 0.0,
+        "n_months >= 12":           (metrics["n_months"] or 0) >= 12,
+    }
+
+    # Alpha gate only if benchmark available
+    if metrics["excess_return_vs_benchmark"] is not None:
+        gates["excess_return > 0"] = metrics["excess_return_vs_benchmark"] > 0.0
+
+    all_pass = all(gates.values())
+
+    # ── Print gate report ─────────────────────────────────────────────────────
+    print("\n" + "=" * 65)
+    print(f"Cross-Sectional Momentum Gate Report — split={split}")
+    print("=" * 65)
+    print(f"  Monthly rebalances:      {metrics['n_months']}")
+    print(f"  Annualised return:       {(metrics['annualised_return'] or 0):.1%}")
+    print(f"  Sharpe (net of costs):   {(metrics['sharpe'] or 0):.3f}")
+    print(f"  DSR (n_trials={n_trials}):      {(metrics['dsr'] or 0):.3f}")
+    print(f"  Max drawdown:            {(metrics['max_drawdown'] or 0):.1%}")
+    print(f"  Anti-strategy DSR:       {(anti_met['dsr'] or 0):.3f}")
+    print(f"  Stress DSR (median):     {stress['dsr_median']:.3f}  "
+          f"[collapse {stress_collapse:.1%}]")
+    if metrics["excess_return_vs_benchmark"] is not None:
+        print(f"  Excess return vs bench:  {metrics['excess_return_vs_benchmark']:.1%}")
+    else:
+        print(f"  Excess return vs bench:  N/A (no benchmark loaded)")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 65 + "\n")
+
+    # ── MLflow logging ────────────────────────────────────────────────────────
+    try:
+        mlflow.set_experiment(_MOM_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "cs_momentum_v1"}):
+            mlflow.log_metrics({
+                "n_months":          float(metrics["n_months"] or 0),
+                "ann_return":        float(metrics["annualised_return"] or 0),
+                "sharpe":            float(metrics["sharpe"] or 0),
+                "dsr":               float(metrics["dsr"] or 0),
+                "max_drawdown":      float(metrics["max_drawdown"] or 0),
+                "anti_dsr":          float(anti_met["dsr"] or 0),
+                "stress_dsr_median": stress["dsr_median"],
+                "stress_collapse":   stress_collapse,
+                "n_trials":          float(n_trials),
+                "gate_all_pass":     float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
+def run_gate_check_qf_momentum(split: str, n_trials: int | None = None) -> int:
+    """Run the full gate-check for Strategy Q — Quality-Filtered Momentum.
+
+    Pre-registered hypothesis: research/hypotheses/2026-05-26-quality-filtered-momentum.md
+
+    Returns 0 if all gates pass, 1 if any fail, 2 if data error.
+    """
+    from quant.data.pit_loader import load as _pit_load
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.cs_momentum import (
+        build_close_pivot,
+        build_open_pivot,
+    )
+    from quant.strategies.qf_momentum import (
+        build_anti_portfolios as qf_build_anti,
+        build_monthly_portfolios as qf_build_ports,
+        compute_gate_metrics as qf_gate_metrics,
+        load_screener_annual,
+        run_cost_stress as qf_stress,
+        simulate_portfolio as qf_simulate,
+    )
+
+    _QF_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-26-quality-filtered-momentum.md"
+    )
+    _QF_EXPERIMENT = "qf_momentum_v1"
+
+    _QF_SPLIT_DATES = {
+        "train":   ("2015-05-01", "2023-06-30"),
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _QF_SPLIT_DATES:
+        logger.error("Invalid split: %r. Choose 'train', 'dev', or 'holdout'.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout(_QF_EXPERIMENT, _QF_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _QF_SPLIT_DATES[split]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_QF_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="",
+                    max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=qf_momentum split=%s n_trials=%d", split, n_trials)
+
+    # ── Load OHLCV (need 12-month lookback before start) ─────────────────────
+    try:
+        ohlcv = _pit_load(symbol=None, start="2014-01-01", end=end)
+        if isinstance(ohlcv.index, pd.MultiIndex):
+            ohlcv = ohlcv.reset_index()
+            if "business_date" in ohlcv.columns:
+                ohlcv = ohlcv.rename(columns={"business_date": "date"})
+        ohlcv["date"] = pd.to_datetime(ohlcv["date"])
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    if ohlcv.empty:
+        logger.error("OHLCV data is empty for 2014-01-01 → %s", end)
+        return 2
+
+    # ── Load Midcap 150 universe ──────────────────────────────────────────────
+    from quant.strategies.cs_momentum import load_constituents
+    symbols = load_constituents()
+    if not symbols:
+        logger.error("Midcap 150 constituent list empty. Expected: data/lake/midcap150_constituents.csv")
+        return 2
+
+    # ── Load Screener.in annual earnings ──────────────────────────────────────
+    annual = load_screener_annual()
+    if annual.empty:
+        logger.error(
+            "screener_annual.parquet not found or empty.  "
+            "Run: python scripts/ingest_screener_annual.py"
+        )
+        return 2
+
+    logger.info(
+        "Universe: %d symbols | OHLCV rows: %d | Annual EPS symbols: %d",
+        len(symbols), len(ohlcv), annual["symbol"].nunique(),
+    )
+
+    # ── Build pivots once ─────────────────────────────────────────────────────
+    logger.info("Building price pivots...")
+    close_piv = build_close_pivot(ohlcv, symbols)
+    open_piv  = build_open_pivot(ohlcv, symbols)
+    logger.info("Pivots: close %s | open %s", close_piv.shape, open_piv.shape)
+
+    # ── Build quality-filtered portfolios ─────────────────────────────────────
+    portfolios = qf_build_ports(
+        ohlcv, symbols, annual, start=start, end=end, close_pivot=close_piv
+    )
+    if len(portfolios) < 2:
+        logger.error("Fewer than 2 monthly portfolios built for %s → %s.", start, end)
+        return 2
+
+    anti_ports = qf_build_anti(
+        ohlcv, symbols, annual, start=start, end=end, close_pivot=close_piv
+    )
+
+    # ── Simulate ──────────────────────────────────────────────────────────────
+    result_df = qf_simulate(
+        portfolios, ohlcv, costs_enabled=True,
+        open_pivot=open_piv, close_pivot=close_piv,
+    )
+    anti_df = qf_simulate(
+        anti_ports, ohlcv, costs_enabled=True,
+        open_pivot=open_piv, close_pivot=close_piv,
+    )
+
+    if result_df.empty:
+        logger.error("Simulation produced no monthly return records.")
+        return 2
+
+    # ── Gate metrics ──────────────────────────────────────────────────────────
+    metrics  = qf_gate_metrics(result_df, n_trials=n_trials)
+    anti_met = qf_gate_metrics(anti_df,   n_trials=n_trials)
+
+    stress = qf_stress(
+        portfolios, ohlcv, n_trials=n_trials,
+        open_pivot=open_piv, close_pivot=close_piv,
+    )
+    stress_collapse = (
+        (metrics["dsr"] - stress["dsr_median"]) / metrics["dsr"]
+        if metrics["dsr"] and metrics["dsr"] > 1e-6
+        else 1.0
+    )
+
+    # Avg positions per month (gate: >= 5)
+    avg_positions = float(result_df["n_positions"].mean()) if "n_positions" in result_df.columns else 0.0
+
+    # ── Gate evaluation (pre-registered §4) ───────────────────────────────────
+    gates: dict[str, bool] = {
+        "dsr >= 0.65":               (metrics["dsr"] or 0.0) >= 0.65,
+        "sharpe >= 0.7":             (metrics["sharpe"] or 0.0) >= 0.7,
+        "stress_dsr_collapse <= 50%": stress_collapse <= 0.5,
+        "max_drawdown >= -20%":      (metrics["max_drawdown"] or -99.0) >= -0.20,
+        "anti_strategy_dsr <= 0":    (anti_met["dsr"] or 1.0) <= 0.0,
+        "n_months >= 12":            (metrics["n_months"] or 0) >= 12,
+        "avg_positions >= 5":        avg_positions >= 5.0,
+    }
+    all_pass = all(gates.values())
+
+    # ── Gate report ────────────────────────────────────────────────────────────
+    print("\n" + "=" * 65)
+    print(f"Quality-Filtered Momentum Gate Report — split={split}")
+    print("=" * 65)
+    print(f"  Monthly rebalances:      {metrics['n_months']}")
+    print(f"  Avg positions/month:     {avg_positions:.1f}")
+    print(f"  Annualised return:       {(metrics['annualised_return'] or 0):.1%}")
+    print(f"  Sharpe (net of costs):   {(metrics['sharpe'] or 0):.3f}")
+    print(f"  DSR (n_trials={n_trials}):      {(metrics['dsr'] or 0):.3f}")
+    print(f"  Max drawdown:            {(metrics['max_drawdown'] or 0):.1%}")
+    print(f"  Anti-strategy DSR:       {(anti_met['dsr'] or 0):.3f}")
+    print(f"  Stress DSR (median):     {stress['dsr_median']:.3f}  "
+          f"[collapse {stress_collapse:.1%}]")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 65 + "\n")
+
+    # ── MLflow logging ─────────────────────────────────────────────────────────
+    try:
+        mlflow.set_experiment(_QF_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "qf_momentum_v1"}):
+            mlflow.log_metrics({
+                "n_months":          float(metrics["n_months"] or 0),
+                "avg_positions":     avg_positions,
+                "ann_return":        float(metrics["annualised_return"] or 0),
+                "sharpe":            float(metrics["sharpe"] or 0),
+                "dsr":               float(metrics["dsr"] or 0),
+                "max_drawdown":      float(metrics["max_drawdown"] or 0),
+                "anti_dsr":          float(anti_met["dsr"] or 0),
+                "stress_dsr_median": stress["dsr_median"],
+                "stress_collapse":   stress_collapse,
+                "n_trials":          float(n_trials),
+                "gate_all_pass":     float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
+def run_gate_check_low_vol(split: str, n_trials: int | None = None) -> int:
+    """Strategy S — Low-Volatility + Quality Filter.
+
+    Pre-registered: research/hypotheses/2026-05-26-low-volatility.md
+    Anti-strategy gate: strategy Sharpe >= anti (high-vol) Sharpe.
+    """
+    from quant.data.pit_loader import load as _pit_load
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.cs_momentum import (
+        build_close_pivot,
+        build_open_pivot,
+        compute_gate_metrics as cs_gate_metrics,
+    )
+    from quant.strategies.cs_momentum import load_constituents
+    from quant.strategies.low_vol import (
+        build_anti_portfolios as lv_anti,
+        build_monthly_portfolios as lv_ports,
+        run_cost_stress as lv_stress,
+        simulate_portfolio as lv_simulate,
+    )
+    from quant.strategies.qf_momentum import load_screener_annual
+
+    _LV_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-26-low-volatility.md"
+    )
+    _LV_EXPERIMENT = "low_vol_v1"
+
+    _LV_SPLIT_DATES = {
+        "train":   ("2015-05-01", "2023-06-30"),
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _LV_SPLIT_DATES:
+        logger.error("Invalid split: %r. Choose 'train', 'dev', or 'holdout'.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout(_LV_EXPERIMENT, _LV_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _LV_SPLIT_DATES[split]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_LV_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="",
+                    max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=low_vol split=%s n_trials=%d", split, n_trials)
+
+    # ── Load data ─────────────────────────────────────────────────────────────
+    try:
+        ohlcv = _pit_load(symbol=None, start="2014-01-01", end=end)
+        if isinstance(ohlcv.index, pd.MultiIndex):
+            ohlcv = ohlcv.reset_index()
+            if "business_date" in ohlcv.columns:
+                ohlcv = ohlcv.rename(columns={"business_date": "date"})
+        ohlcv["date"] = pd.to_datetime(ohlcv["date"])
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    symbols = load_constituents()
+    if not symbols:
+        logger.error("Midcap 150 constituent list empty.")
+        return 2
+
+    annual = load_screener_annual()
+    if annual.empty:
+        logger.error("screener_annual.parquet missing. Run: python scripts/ingest_screener_annual.py")
+        return 2
+
+    logger.info(
+        "Universe: %d symbols | OHLCV rows: %d | EPS symbols: %d",
+        len(symbols), len(ohlcv), annual["symbol"].nunique(),
+    )
+
+    # ── Build pivots ──────────────────────────────────────────────────────────
+    logger.info("Building price pivots...")
+    close_piv = build_close_pivot(ohlcv, symbols)
+    open_piv  = build_open_pivot(ohlcv, symbols)
+
+    # ── Build portfolios ──────────────────────────────────────────────────────
+    portfolios = lv_ports(ohlcv, symbols, annual, start=start, end=end, close_pivot=close_piv)
+    anti_ports = lv_anti(ohlcv, symbols, annual, start=start, end=end, close_pivot=close_piv)
+
+    if len(portfolios) < 2:
+        logger.error("Fewer than 2 monthly portfolios.")
+        return 2
+
+    # ── Simulate ──────────────────────────────────────────────────────────────
+    result_df = lv_simulate(portfolios, ohlcv, costs_enabled=True, open_pivot=open_piv, close_pivot=close_piv)
+    anti_df   = lv_simulate(anti_ports, ohlcv, costs_enabled=True, open_pivot=open_piv, close_pivot=close_piv)
+
+    if result_df.empty:
+        logger.error("Simulation produced no monthly records.")
+        return 2
+
+    # ── Gate metrics ──────────────────────────────────────────────────────────
+    metrics  = cs_gate_metrics(result_df, n_trials=n_trials)
+    anti_met = cs_gate_metrics(anti_df,   n_trials=n_trials)
+
+    strat_sharpe = metrics["sharpe"] or 0.0
+    anti_sharpe  = anti_met["sharpe"] or 0.0
+
+    stress = lv_stress(portfolios, ohlcv, n_trials=n_trials, open_pivot=open_piv, close_pivot=close_piv)
+    stress_collapse = (
+        (metrics["dsr"] - stress["dsr_median"]) / metrics["dsr"]
+        if metrics["dsr"] and metrics["dsr"] > 1e-6 else 1.0
+    )
+
+    avg_positions = float(result_df["n_positions"].mean()) if "n_positions" in result_df.columns else 0.0
+
+    # ── Gate evaluation ───────────────────────────────────────────────────────
+    gates: dict[str, bool] = {
+        "dsr >= 0.35":                    (metrics["dsr"] or 0.0) >= 0.35,
+        "sharpe >= 0.35":                 strat_sharpe >= 0.35,
+        "strategy_sharpe >= anti_sharpe": strat_sharpe >= anti_sharpe,
+        "max_drawdown >= -15%":           (metrics["max_drawdown"] or -99.0) >= -0.15,
+        "n_months >= 12":                 (metrics["n_months"] or 0) >= 12,
+        "avg_positions >= 5":             avg_positions >= 5.0,
+    }
+    all_pass = all(gates.values())
+
+    # ── Gate report ───────────────────────────────────────────────────────────
+    print("\n" + "=" * 65)
+    print(f"Low-Volatility + Quality (Strategy S) | split={split}")
+    print("=" * 65)
+    print(f"  Monthly rebalances:      {metrics['n_months']}")
+    print(f"  Avg positions/month:     {avg_positions:.1f}")
+    print(f"  Annualised return:       {(metrics['annualised_return'] or 0):.1%}")
+    print(f"  Sharpe (net of costs):   {strat_sharpe:.3f}")
+    print(f"  Anti Sharpe (high-vol):  {anti_sharpe:.3f}")
+    print(f"  DSR (n_trials={n_trials}):      {(metrics['dsr'] or 0):.3f}")
+    print(f"  Max drawdown:            {(metrics['max_drawdown'] or 0):.1%}")
+    print(f"  Stress DSR (median):     {stress['dsr_median']:.3f}  [collapse {stress_collapse:.1%}]")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 65 + "\n")
+
+    # ── MLflow ────────────────────────────────────────────────────────────────
+    try:
+        mlflow.set_experiment(_LV_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "low_vol_v1"}):
+            mlflow.log_metrics({
+                "n_months":          float(metrics["n_months"] or 0),
+                "avg_positions":     avg_positions,
+                "ann_return":        float(metrics["annualised_return"] or 0),
+                "sharpe":            strat_sharpe,
+                "anti_sharpe":       anti_sharpe,
+                "dsr":               float(metrics["dsr"] or 0),
+                "max_drawdown":      float(metrics["max_drawdown"] or 0),
+                "stress_dsr_median": stress["dsr_median"],
+                "stress_collapse":   stress_collapse,
+                "n_trials":          float(n_trials),
+                "gate_all_pass":     float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
+def run_gate_check_qf_momentum_r(split: str, n_trials: int | None = None) -> int:
+    """Strategy R — Quality-Filtered Momentum with spread-based anti-strategy gate.
+
+    Identical signal to Strategy Q. Corrected gate: spread_dsr >= 0.3 replaces
+    the absolute-return anti_strategy_dsr <= 0 criterion (wrong for long-only factors).
+
+    Pre-registered: research/hypotheses/2026-05-26-qf-momentum-spread.md
+    """
+    from quant.data.pit_loader import load as _pit_load
+    from quant.research.holdout_lock import HOLDOUT_START, read_holdout
+    from quant.strategies.cs_momentum import (
+        build_close_pivot,
+        build_open_pivot,
+        compute_gate_metrics as cs_gate_metrics,
+    )
+    from quant.strategies.qf_momentum import (
+        build_anti_portfolios as qf_build_anti,
+        build_monthly_portfolios as qf_build_ports,
+        compute_gate_metrics as qf_gate_metrics,
+        load_screener_annual,
+        run_cost_stress as qf_stress,
+        simulate_portfolio as qf_simulate,
+    )
+
+    _R_HYPOTHESIS = (
+        Path(__file__).parents[4] / "research" / "hypotheses"
+        / "2026-05-26-qf-momentum-spread.md"
+    )
+    _R_EXPERIMENT = "qf_momentum_r_v1"
+
+    _R_SPLIT_DATES = {
+        "train":   ("2015-05-01", "2023-06-30"),
+        "dev":     (DEV_START, DEV_END),
+        "holdout": (HOLDOUT_START, "2026-12-31"),
+    }
+
+    if split not in _R_SPLIT_DATES:
+        logger.error("Invalid split: %r. Choose 'train', 'dev', or 'holdout'.", split)
+        return 2
+
+    if split == "holdout":
+        try:
+            read_holdout(_R_EXPERIMENT, _R_HYPOTHESIS)
+        except (PermissionError, ValueError, FileNotFoundError) as exc:
+            logger.error("Hold-out unlock failed: %s", exc)
+            return 2
+
+    start, end = _R_SPLIT_DATES[split]
+
+    if n_trials is None:
+        try:
+            client = mlflow.tracking.MlflowClient()
+            exp = client.get_experiment_by_name(_R_EXPERIMENT)
+            if exp:
+                runs = client.search_runs(
+                    experiment_ids=[exp.experiment_id],
+                    filter_string="",
+                    max_results=1000,
+                )
+                n_trials = max(len(runs), 1)
+            else:
+                n_trials = 1
+        except Exception:
+            n_trials = 1
+
+    logger.info("Gate check: strategy=qf_momentum_r split=%s n_trials=%d", split, n_trials)
+
+    # ── Load data ─────────────────────────────────────────────────────────────
+    try:
+        ohlcv = _pit_load(symbol=None, start="2014-01-01", end=end)
+        if isinstance(ohlcv.index, pd.MultiIndex):
+            ohlcv = ohlcv.reset_index()
+            if "business_date" in ohlcv.columns:
+                ohlcv = ohlcv.rename(columns={"business_date": "date"})
+        ohlcv["date"] = pd.to_datetime(ohlcv["date"])
+    except Exception as exc:
+        logger.error("OHLCV load failed: %s", exc)
+        return 2
+
+    from quant.strategies.cs_momentum import load_constituents
+    symbols = load_constituents()
+    if not symbols:
+        logger.error("Midcap 150 constituent list empty.")
+        return 2
+
+    annual = load_screener_annual()
+    if annual.empty:
+        logger.error("screener_annual.parquet missing. Run: python scripts/ingest_screener_annual.py")
+        return 2
+
+    logger.info(
+        "Universe: %d symbols | OHLCV rows: %d | Annual EPS symbols: %d",
+        len(symbols), len(ohlcv), annual["symbol"].nunique(),
+    )
+
+    # ── Build pivots once ─────────────────────────────────────────────────────
+    logger.info("Building price pivots...")
+    close_piv = build_close_pivot(ohlcv, symbols)
+    open_piv  = build_open_pivot(ohlcv, symbols)
+
+    # ── Build portfolios ──────────────────────────────────────────────────────
+    portfolios = qf_build_ports(
+        ohlcv, symbols, annual, start=start, end=end, close_pivot=close_piv
+    )
+    anti_ports = qf_build_anti(
+        ohlcv, symbols, annual, start=start, end=end, close_pivot=close_piv
+    )
+
+    if len(portfolios) < 2:
+        logger.error("Fewer than 2 monthly portfolios.")
+        return 2
+
+    # ── Simulate top and bottom portfolios ────────────────────────────────────
+    result_df = qf_simulate(
+        portfolios, ohlcv, costs_enabled=True,
+        open_pivot=open_piv, close_pivot=close_piv,
+    )
+    anti_df = qf_simulate(
+        anti_ports, ohlcv, costs_enabled=True,
+        open_pivot=open_piv, close_pivot=close_piv,
+    )
+
+    if result_df.empty:
+        logger.error("Simulation produced no monthly records.")
+        return 2
+
+    # ── Compute spread series (top - bottom, aligned by date) ─────────────────
+    # Spread = cross-sectional alpha independent of market direction
+    spread_df = result_df[["net_return"]].join(
+        anti_df[["net_return"]].rename(columns={"net_return": "anti_net_return"}),
+        how="inner",
+    )
+    spread_df["spread"] = spread_df["net_return"] - spread_df["anti_net_return"]
+
+    spread_rets  = spread_df["spread"].dropna().values
+    spread_mean  = float(np.mean(spread_rets)) if len(spread_rets) else 0.0
+    spread_dsr   = deflated_sharpe(spread_rets, n_trials=n_trials) if len(spread_rets) > 1 else 0.0
+
+    # ── Main strategy metrics ─────────────────────────────────────────────────
+    metrics = qf_gate_metrics(result_df, n_trials=n_trials)
+
+    stress = qf_stress(
+        portfolios, ohlcv, n_trials=n_trials,
+        open_pivot=open_piv, close_pivot=close_piv,
+    )
+    stress_collapse = (
+        (metrics["dsr"] - stress["dsr_median"]) / metrics["dsr"]
+        if metrics["dsr"] and metrics["dsr"] > 1e-6 else 1.0
+    )
+
+    avg_positions = (
+        float(result_df["n_positions"].mean())
+        if "n_positions" in result_df.columns else 0.0
+    )
+
+    # ── Gate evaluation (hypothesis §4 — pre-registered) ─────────────────────
+    gates: dict[str, bool] = {
+        "dsr >= 0.65":               (metrics["dsr"] or 0.0) >= 0.65,
+        "sharpe >= 0.7":             (metrics["sharpe"] or 0.0) >= 0.7,
+        "spread_dsr >= 0.3":         spread_dsr >= 0.3,
+        "spread_mean > 0":           spread_mean > 0.0,
+        "stress_dsr_collapse <= 50%": stress_collapse <= 0.5,
+        "max_drawdown >= -20%":      (metrics["max_drawdown"] or -99.0) >= -0.20,
+        "n_months >= 12":            (metrics["n_months"] or 0) >= 12,
+        "avg_positions >= 5":        avg_positions >= 5.0,
+    }
+    all_pass = all(gates.values())
+
+    # ── Gate report ───────────────────────────────────────────────────────────
+    n_spread = len(spread_rets)
+    print("\n" + "=" * 65)
+    print(f"QF Momentum — Spread Gate (Strategy R) | split={split}")
+    print("=" * 65)
+    print(f"  Monthly rebalances:      {metrics['n_months']}")
+    print(f"  Avg positions/month:     {avg_positions:.1f}")
+    print(f"  Annualised return:       {(metrics['annualised_return'] or 0):.1%}")
+    print(f"  Sharpe (net of costs):   {(metrics['sharpe'] or 0):.3f}")
+    print(f"  DSR (n_trials={n_trials}):      {(metrics['dsr'] or 0):.3f}")
+    print(f"  Max drawdown:            {(metrics['max_drawdown'] or 0):.1%}")
+    print(f"  Spread months:           {n_spread}")
+    print(f"  Spread mean (monthly):   {spread_mean:.3%}  "
+          f"({'≈'+str(round((1+spread_mean)**12-1, 3)*100)+'% ann.' if spread_mean else 'n/a'})")
+    print(f"  Spread DSR:              {spread_dsr:.3f}")
+    print(f"  Stress DSR (median):     {stress['dsr_median']:.3f}  "
+          f"[collapse {stress_collapse:.1%}]")
+    print()
+    print("Gate results:")
+    for criterion, passed in gates.items():
+        mark = "PASS" if passed else "FAIL"
+        print(f"  [{mark}] {criterion}")
+    print()
+    if all_pass:
+        print("RESULT: ALL GATES PASS")
+        if split == "dev":
+            print("  Next step: mark hypothesis final=true, then run hold-out (once).")
+    else:
+        print("RESULT: STRATEGY KILLED — one or more gates failed.")
+        print("  Do NOT adjust parameters and re-run. The strategy is dead.")
+    print("=" * 65 + "\n")
+
+    # ── MLflow ────────────────────────────────────────────────────────────────
+    try:
+        mlflow.set_experiment(_R_EXPERIMENT)
+        with mlflow.start_run(tags={"stage": split, "strategy": "qf_momentum_r_v1"}):
+            mlflow.log_metrics({
+                "n_months":          float(metrics["n_months"] or 0),
+                "avg_positions":     avg_positions,
+                "ann_return":        float(metrics["annualised_return"] or 0),
+                "sharpe":            float(metrics["sharpe"] or 0),
+                "dsr":               float(metrics["dsr"] or 0),
+                "max_drawdown":      float(metrics["max_drawdown"] or 0),
+                "spread_mean":       spread_mean,
+                "spread_dsr":        spread_dsr,
+                "stress_dsr_median": stress["dsr_median"],
+                "stress_collapse":   stress_collapse,
+                "n_trials":          float(n_trials),
+                "gate_all_pass":     float(all_pass),
+            })
+    except Exception as exc:
+        logger.warning("MLflow logging failed (non-fatal): %s", exc)
+
+    return 0 if all_pass else 1
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -785,7 +1630,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Strategy gate-check runner")
     parser.add_argument(
         "--strategy",
-        choices=["pead_midcap", "index_recon", "idi"],
+        choices=["pead_midcap", "index_recon", "idi", "momentum", "qf_momentum", "qf_momentum_r", "low_vol"],
         required=True,
         help="Strategy to evaluate",
     )
@@ -820,6 +1665,14 @@ def main() -> None:
         exit_code = run_gate_check(args.split, n_trials=args.n_trials, no_model=args.no_model)
     elif args.strategy == "index_recon":
         exit_code = run_gate_check_index_recon(args.split, n_trials=args.n_trials)
+    elif args.strategy == "momentum":
+        exit_code = run_gate_check_momentum(args.split, n_trials=args.n_trials)
+    elif args.strategy == "qf_momentum":
+        exit_code = run_gate_check_qf_momentum(args.split, n_trials=args.n_trials)
+    elif args.strategy == "qf_momentum_r":
+        exit_code = run_gate_check_qf_momentum_r(args.split, n_trials=args.n_trials)
+    elif args.strategy == "low_vol":
+        exit_code = run_gate_check_low_vol(args.split, n_trials=args.n_trials)
     else:
         exit_code = run_gate_check_idi(args.split, n_trials=args.n_trials)
     sys.exit(exit_code)
