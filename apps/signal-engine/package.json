@@ -6,6 +6,17 @@
     "dev": "make dev",
     "build": "echo 'Python: no build step required'",
     "typecheck": "uv run --extra dev mypy src",
-    "lint": "uv run --extra dev ruff check src"
+    "lint": "uv run --extra dev ruff check src",
+    "lint:fix": "uv run --extra dev ruff check src --fix",
+
+    "test": "uv run --extra dev pytest",
+    "test:nt": "uv run --extra dev pytest tests/news_trader/ -v",
+    "test:watch": "uv run --extra dev pytest tests/news_trader/ -v --tb=short -x",
+
+    "nt:ingester": "uv run --extra dev python scripts/invoke_news_trader.py ingester",
+    "nt:classifier": "uv run --extra dev python scripts/invoke_news_trader.py classifier",
+    "nt:trade": "uv run --extra dev python scripts/invoke_news_trader.py trade",
+    "nt:monitor": "uv run --extra dev python scripts/invoke_news_trader.py monitor",
+    "nt:pipeline": "uv run --extra dev python scripts/invoke_news_trader.py pipeline"
   }
 }

@@ -39,6 +39,7 @@ dev = [
     "pytest-mock>=3.14.0",
     "ruff>=0.9.0",
     "mypy>=1.14.0",
+    "boto3>=1.35.0",  # needed to mock SQS calls in handler tests
 ]
 aws = [
     "mangum>=0.19.0",
