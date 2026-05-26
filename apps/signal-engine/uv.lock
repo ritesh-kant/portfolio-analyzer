@@ -3333,6 +3333,7 @@ aws = [
     { name = "mangum" },
 ]
 dev = [
+    { name = "boto3" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -3344,6 +3345,7 @@ dev = [
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.13.0" },
     { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.35.0" },
+    { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.35.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "feedparser", specifier = ">=6.0.11" },
     { name = "httpx", specifier = ">=0.28.0" },
