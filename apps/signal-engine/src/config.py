@@ -11,7 +11,7 @@ _DEFAULT_MONGO_CREDS = "admin:admin123"
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file="../../.env",
+        env_file=("../../.env", ".env"),  # root .env first, local apps/signal-engine/.env overrides
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     # News-trader SQS queue URLs (injected by serverless.yml at deploy time)
     news_raw_queue_url: str = ""
     news_signals_queue_url: str = ""
+
+    # News-trader dev flags
+    nt_bypass_market_hours: bool = False      # set true in .env to test outside 09:00–15:35
 
     # News-trader position rules
     nt_position_size_inr: float = 50_000.0   # fixed rupees per trade

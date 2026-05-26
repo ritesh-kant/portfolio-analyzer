@@ -8,12 +8,14 @@ import {
   fetchNews,
   fetchStats,
   fetchPipelineStatus,
+  fetchPipelineHistory,
   triggerPipeline,
   type NtPosition,
   type NtSignal,
   type NtNews,
   type NtStats,
   type PipelineStatus,
+  type PipelineRun,
   type StageStatus,
 } from '../../lib/trading-api';
 
@@ -160,8 +162,8 @@ function fmt(ms: number) {
 const STAGE_META: { key: keyof NonNullable<PipelineStatus['stages']>; label: string; detail: (s: PipelineStatus['stages']) => string }[] = [
   { key: 'ingester',   label: 'Ingester',       detail: s => s!.ingester.count > 0 ? `${s!.ingester.count} articles` : s!.ingester.status === 'done' ? 'no new articles' : 'fetching news…' },
   { key: 'classifier', label: 'Classifier',     detail: s => s!.classifier.count > 0 ? `${s!.classifier.count} signals` : s!.classifier.status === 'done' ? '0 signals' : 'classifying…' },
-  { key: 'sqs_delay',  label: 'SQS Delay',      detail: s => s!.sqs_delay.remain_ms > 0 ? `${fmt(s!.sqs_delay.remain_ms)} left` : '15-min wait done' },
-  { key: 'trade',      label: 'Trade Decision', detail: s => s!.trade.count > 0 ? `${s!.trade.count} positions opened` : s!.trade.status === 'done' ? 'no positions opened' : 'evaluating signals…' },
+  { key: 'sqs_delay',  label: 'SQS Delay',      detail: s => s!.sqs_delay.remain_ms > 0 ? `${fmt(s!.sqs_delay.remain_ms)} left` : s!.classifier.count === 0 ? 'skipped — no signals' : '15-min wait done' },
+  { key: 'trade',      label: 'Trade Decision', detail: s => s!.trade.count > 0 ? `${s!.trade.count} positions opened` : s!.trade.status === 'done' ? (s!.classifier.count === 0 ? 'skipped — no signals' : 'no positions opened') : 'evaluating signals…' },
 ];
 
 function StageDot({ status }: { status: StageStatus }) {
@@ -219,6 +221,107 @@ function PipelineStatusPanel({ pipelineStatus }: { pipelineStatus: PipelineStatu
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ─── Pipeline history ─────────────────────────────────────────────────────────
+
+function RunStatusBadge({ status }: { status: PipelineRun['status'] }) {
+  if (status === 'running')
+    return <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent animate-pulse">running</span>;
+  if (status === 'failed')
+    return <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">failed</span>;
+  return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">complete</span>;
+}
+
+function Stat({ label, value }: { label: string; value: string | number | null }) {
+  return (
+    <div className="text-center">
+      <p className="tabular-nums font-semibold">{value ?? '—'}</p>
+      <p className="text-[10px] text-ink/40">{label}</p>
+    </div>
+  );
+}
+
+function PipelineHistory() {
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<{ runs: PipelineRun[]; total: number; pages: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchPipelineHistory(page)
+      .then(setData)
+      .catch(() => null)
+      .finally(() => setLoading(false));
+  }, [page]);
+
+  if (!data && loading) return null;
+  if (!data || data.total === 0) return null;
+
+  const durationStr = (run: PipelineRun) => {
+    if (!run.completed_at) return null;
+    const ms = new Date(run.completed_at).getTime() - new Date(run.triggered_at).getTime();
+    const s = Math.floor(ms / 1000);
+    return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
+  };
+
+  return (
+    <div className="metric-chip space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Pipeline History</h2>
+        <span className="text-xs text-ink/40">{data.total} run{data.total !== 1 ? 's' : ''}</span>
+      </div>
+
+      <div className="overflow-x-auto p-0 -mx-4">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-black/5 text-xs text-ink/50">
+              <th className="px-4 py-2 text-left font-semibold">Triggered</th>
+              <th className="px-4 py-2 text-left font-semibold">Source</th>
+              <th className="px-4 py-2 text-left font-semibold">Status</th>
+              <th className="px-4 py-2 text-center font-semibold">Articles</th>
+              <th className="px-4 py-2 text-center font-semibold">Signals</th>
+              <th className="px-4 py-2 text-center font-semibold">Positions</th>
+              <th className="px-4 py-2 text-right font-semibold">Duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.runs.map((run) => (
+              <tr key={run._id} className="border-b border-black/5 last:border-0 hover:bg-black/[0.02]">
+                <td className="px-4 py-2.5 text-xs text-ink/60">{fmtDate(run.triggered_at)}</td>
+                <td className="px-4 py-2.5 text-xs text-ink/50">{run.source}</td>
+                <td className="px-4 py-2.5"><RunStatusBadge status={run.status} /></td>
+                <td className="px-4 py-2.5"><Stat label="articles" value={run.new_articles} /></td>
+                <td className="px-4 py-2.5"><Stat label="signals" value={run.signals_created} /></td>
+                <td className="px-4 py-2.5"><Stat label="positions" value={run.positions_opened} /></td>
+                <td className="px-4 py-2.5 text-right text-xs text-ink/40">{durationStr(run) ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {data.pages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-1">
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+            className="rounded px-2.5 py-1 text-xs font-semibold disabled:opacity-30 hover:bg-black/5"
+          >
+            ← Prev
+          </button>
+          <span className="text-xs text-ink/40">page {page} of {data.pages}</span>
+          <button
+            onClick={() => setPage((p) => Math.min(data.pages, p + 1))}
+            disabled={page === data.pages}
+            className="rounded px-2.5 py-1 text-xs font-semibold disabled:opacity-30 hover:bg-black/5"
+          >
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -937,6 +1040,11 @@ export default function TradingPage() {
           text: res.message ?? 'Run `pnpm nt:ingester` from apps/signal-engine/ to invoke locally.',
           kind: 'info',
         });
+      } else if (res.status === 'skipped') {
+        setTriggerMsg({
+          text: res.message ?? 'Skipped — outside market hours.',
+          kind: 'info',
+        });
       } else {
         setTriggerMsg({ text: 'Pipeline started — tracking progress below.', kind: 'success' });
         await loadPipelineStatus();
@@ -1011,6 +1119,9 @@ export default function TradingPage() {
         <>
           {/* ── Pipeline status ────────────────────────────────────────── */}
           <PipelineStatusPanel pipelineStatus={pipelineStatus} />
+
+          {/* ── Pipeline history ───────────────────────────────────────── */}
+          <PipelineHistory />
 
           {/* ── Stats row ──────────────────────────────────────────────── */}
           <StatsRow stats={stats} />

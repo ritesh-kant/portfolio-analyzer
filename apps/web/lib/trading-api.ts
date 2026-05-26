@@ -135,3 +135,20 @@ export const fetchPipelineStatus = () => get<PipelineStatus>('/nt/pipeline/statu
 
 export const triggerPipeline = () =>
   post<{ status: string; function?: string; message?: string }>('/nt/pipeline');
+
+export interface PipelineRun {
+  _id: string;
+  triggered_at: string;
+  completed_at: string | null;
+  source: string;
+  status: 'running' | 'completed' | 'failed';
+  new_articles: number | null;
+  signals_created: number | null;
+  positions_opened: number | null;
+  error: string | null;
+}
+
+export const fetchPipelineHistory = (page = 1) =>
+  get<{ runs: PipelineRun[]; total: number; page: number; pages: number }>(
+    `/nt/pipeline/history?page=${page}`,
+  );

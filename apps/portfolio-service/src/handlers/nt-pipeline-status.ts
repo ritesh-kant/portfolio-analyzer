@@ -52,15 +52,18 @@ export const handler = requireAuth(async () => {
       ? 'done'
       : 'running';
 
-  // SQS delay: waiting with countdown, done once window passes
+  // If classifier finished with 0 signals, the SQS queue is empty — skip delay + trade
+  const nothingToTrade = classifierDone && newSignals === 0;
+
+  // SQS delay: waiting with countdown, done once window passes (or skipped if no signals)
   const delayStatus = !classifierDone
     ? 'pending'
-    : delayRemainMs > 0
-      ? 'waiting'
-      : 'done';
+    : nothingToTrade || delayRemainMs === 0
+      ? 'done'
+      : 'waiting';
 
-  // Trade decision: done if positions appeared after the delay window
-  const tradeDone = newPositions > 0;
+  // Trade decision: done if positions appeared, or skipped if no signals ever queued
+  const tradeDone = newPositions > 0 || nothingToTrade;
   const tradeStatus =
     delayStatus !== 'done' ? 'pending' : tradeDone ? 'done' : 'running';
 

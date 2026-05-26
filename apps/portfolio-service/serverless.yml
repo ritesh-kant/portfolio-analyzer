@@ -137,3 +137,9 @@ functions:
       - httpApi:
           path: /nt/pipeline/status
           method: get
+  ntPipelineHistory:
+    handler: src/handlers/nt-pipeline-history.handler
+    events:
+      - httpApi:
+          path: /nt/pipeline/history
+          method: get

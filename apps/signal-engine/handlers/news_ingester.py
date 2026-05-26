@@ -39,8 +39,11 @@ def _is_market_hours() -> bool:
 
 async def _run(settings: Settings) -> dict:
     if not _is_market_hours():
-        logger.info("[INGESTER] skipped — outside market hours")
-        return {"skipped": "outside_market_hours"}
+        if settings.nt_bypass_market_hours:
+            logger.info("[INGESTER] market hours check bypassed (NT_BYPASS_MARKET_HOURS=true)")
+        else:
+            logger.info("[INGESTER] skipped — outside market hours")
+            return {"skipped": "outside_market_hours"}
 
     logger.info("[INGESTER] starting run")
     db = get_db()
@@ -81,16 +84,9 @@ async def _run(settings: Settings) -> dict:
         inserted_ids = [str(i) for i in result.inserted_ids]
         logger.info("[INGESTER] inserted %d new articles (0 duplicates)", len(inserted_ids))
     except BulkWriteError as bwe:
-        # Extract IDs that were actually inserted (not the duplicates)
-        inserted_ids = [
-            str(r["_id"]) for r in bwe.details.get("writeErrors", [])
-            # writeErrors are the failures; reconstruct from details
-        ]
-        # Simpler: count from the error details
         n_inserted = bwe.details.get("nInserted", 0)
         n_dupes = len(bwe.details.get("writeErrors", []))
         logger.info("[INGESTER] inserted %d new articles, %d duplicates skipped", n_inserted, n_dupes)
-        # Re-query for the actually inserted IDs
         if n_inserted > 0:
             cursor = news_raw(db).find(
                 {"ingested_at": now, "classified": False},
