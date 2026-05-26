@@ -56,7 +56,8 @@ def classify(raw_text: str, gemini_api_key: str, model: str = "gemini-1.5-flash"
             HumanMessage(content=_HUMAN_TMPL.format(text=raw_text[:2000])),
         ]
         response = llm.invoke(messages)
-        raw = response.content.strip()
+        raw = response.content if isinstance(response.content, str) else str(response.content)
+        raw = raw.strip()
 
         # Strip accidental markdown fences
         if raw.startswith("```"):

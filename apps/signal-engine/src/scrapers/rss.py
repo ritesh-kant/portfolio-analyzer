@@ -18,7 +18,7 @@ from ._retry import with_retry
 
 logger = logging.getLogger(__name__)
 
-RSS_FEEDS = [
+RSS_FEEDS: list[dict[str, Any]] = [
     {
         "url": "https://economictimes.indiatimes.com/markets/rss.cms",
         "source": "Economic Times Markets",

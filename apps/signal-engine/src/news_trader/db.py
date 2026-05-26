@@ -7,18 +7,18 @@ nt_signals    — Gemini-classified signals
 nt_positions  — open + closed paper/live positions with trailing SL state
 """
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
 
 
-def news_raw(db: AsyncIOMotorDatabase):  # type: ignore[type-arg]
+def news_raw(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:  # type: ignore[type-arg]
     return db["nt_news_raw"]
 
 
-def signals(db: AsyncIOMotorDatabase):  # type: ignore[type-arg]
+def signals(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:  # type: ignore[type-arg]
     return db["nt_signals"]
 
 
-def positions(db: AsyncIOMotorDatabase):  # type: ignore[type-arg]
+def positions(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:  # type: ignore[type-arg]
     return db["nt_positions"]
 
 
