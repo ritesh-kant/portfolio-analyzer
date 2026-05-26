@@ -7,7 +7,7 @@
 | [index-recon-arb](2026-05-21-index-recon-arb.md) | index_recon | registered | 2026-05-21 | — | — |
 | [cross-sectional-momentum](2026-05-25-cross-sectional-momentum.md) | cs_momentum | killed | 2026-05-25 | 2026-05-25 | KILL — Anti-strategy DSR 0.913 > 0; dev bull-run contamination |
 | [quality-filtered-momentum](2026-05-26-quality-filtered-momentum.md) | qf_momentum | killed | 2026-05-26 | 2026-05-26 | KILL — Anti-strategy DSR 0.777 > 0; gate design error (absolute-return criterion wrong for long-only factor) |
-| [qf-momentum-spread](2026-05-26-qf-momentum-spread.md) | qf_momentum_r | final | 2026-05-26 | — | Dev gate PASS — DSR 0.984, Sharpe 2.957, Spread DSR 0.997, MaxDD −6.9% |
+| [qf-momentum-spread](2026-05-26-qf-momentum-spread.md) | qf_momentum_r | killed | 2026-05-26 | 2026-05-26 | KILL (holdout) — Sharpe −0.325, MaxDD −36.4%; cross-sectional spread survived (DSR 0.598) but absolute return inverted |
 
 ## Status legend
 

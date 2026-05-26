@@ -5,7 +5,7 @@ status: registered
 registered: 2026-05-26
 finalized: ""
 decision: ""
-final: false
+final: true
 type: portfolio_strategy
 standalone: true
 ---
@@ -188,11 +188,24 @@ EPS_GROWTH_FLOOR = 0.0   # must not be declining
 ## 9. Decision
 
 - [ ] **SHIP** — all gate criteria passed on dev; hold-out passed
-- [ ] **KILL** — falsification criterion triggered
+- [x] **KILL** — hold-out gate failed (2026-05-26)
 - [ ] **ITERATE** — train only; new hypothesis required
 
 **Dev gate: ALL 8 CRITERIA PASSED (2026-05-26)**
-Next step: set `final: true`, then run hold-out once.
+**Hold-out gate: FAILED (2026-05-26)**
+
+Hold-out results (2024-07-01 → 2026-05-26, 23 months):
+  Sharpe    : −0.325   (gate: ≥ 0.7)   ✗ FAIL
+  DSR       : 0.326    (gate: ≥ 0.65)  ✗ FAIL  
+  MaxDD     : −36.4%   (gate: ≤ 20%)   ✗ FAIL
+  Spread DSR: 0.598    (gate: ≥ 0.3)   ✅ PASS — cross-sectional signal survived
+  Ann return: −7.0%
+
+Root cause: Indian midcap entered a correction / high-volatility regime from
+mid-2024 onward (post-election uncertainty, FII outflows, rate environment).
+Momentum strategies systematically underperform in market reversals. The
+cross-sectional signal (top beats bottom) survived (spread DSR 0.598) but
+the absolute portfolio return was −7% annualised with a −36% drawdown.
 
 ---
 
