@@ -34,14 +34,27 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const AGENTS = [
-  'news_agent', 'sector_agent', 'stock_selector', 'technical_agent',
-  'market_agent', 'guard_agent', 'signal_agent', 'order_agent', 'audit_agent',
+  'news_agent',
+  'sector_agent',
+  'stock_selector',
+  'technical_agent',
+  'market_agent',
+  'guard_agent',
+  'signal_agent',
+  'order_agent',
+  'audit_agent',
 ] as const;
 
 const AGENT_LABELS: Record<string, string> = {
-  news_agent: 'News', sector_agent: 'Sector', stock_selector: 'Stocks',
-  technical_agent: 'Tech', market_agent: 'Market', guard_agent: 'Guard',
-  signal_agent: 'Signals', order_agent: 'Orders', audit_agent: 'Audit',
+  news_agent: 'News',
+  sector_agent: 'Sector',
+  stock_selector: 'Stocks',
+  technical_agent: 'Tech',
+  market_agent: 'Market',
+  guard_agent: 'Guard',
+  signal_agent: 'Signals',
+  order_agent: 'Orders',
+  audit_agent: 'Audit',
 };
 
 const POLL_ACTIVE_MS = 30_000;
@@ -61,11 +74,7 @@ function AgentDot({ status }: { status: string }) {
   return <span className={`${base} bg-black/15`} />;
 }
 
-function Pill({
-  status,
-}: {
-  status: PipelineRun['status'];
-}) {
+function Pill({ status }: { status: PipelineRun['status'] }) {
   const map: Record<PipelineRun['status'], string> = {
     completed: 'bg-emerald-100 text-emerald-700',
     running: 'bg-accent/10 text-accent animate-pulse',
@@ -167,9 +176,10 @@ function AnalyticsTab({
 
   const wins = portfolio?.winning_trades ?? 0;
   const losses = (portfolio?.total_trades ?? 0) - wins;
-  const winRate = portfolio && portfolio.total_trades > 0
-    ? ((wins / portfolio.total_trades) * 100).toFixed(1)
-    : null;
+  const winRate =
+    portfolio && portfolio.total_trades > 0
+      ? ((wins / portfolio.total_trades) * 100).toFixed(1)
+      : null;
 
   const donutData = [
     { name: 'Wins', value: wins },
@@ -218,7 +228,8 @@ function AnalyticsTab({
           <div key={label} className="metric-chip">
             <p className="text-xs text-ink/50">{label}</p>
             <p className={`mt-0.5 font-display text-xl font-bold ${color ?? ''}`}>
-              {prefix}{value}
+              {prefix}
+              {value}
             </p>
           </div>
         ))}
@@ -320,8 +331,7 @@ function AnalyticsTab({
             </div>
             {winRate && (
               <p className="pt-1 text-xs text-ink/50">
-                Win rate:{' '}
-                <span className="font-semibold text-ink">{winRate}%</span>
+                Win rate: <span className="font-semibold text-ink">{winRate}%</span>
               </p>
             )}
           </div>
@@ -408,9 +418,7 @@ function SignalsTab({ signals }: { signals: Signal[] }) {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-xs text-ink/60">
-                          {s.triggered_signals.length}/9
-                        </span>
+                        <span className="text-xs text-ink/60">{s.triggered_signals.length}/9</span>
                         {s.triggered_signals.slice(0, 2).map((t) => (
                           <span
                             key={t}
@@ -421,14 +429,10 @@ function SignalsTab({ signals }: { signals: Signal[] }) {
                         ))}
                       </td>
                       <td className="px-4 py-3 text-right font-medium tabular-nums">
-                        {s.entry_price > 0
-                          ? `₹${s.entry_price.toLocaleString('en-IN')}`
-                          : '—'}
+                        {s.entry_price > 0 ? `₹${s.entry_price.toLocaleString('en-IN')}` : '—'}
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums text-emerald-700">
-                        {s.target_pct !== undefined
-                          ? `+${s.target_pct.toFixed(1)}%`
-                          : '—'}
+                        {s.target_pct !== undefined ? `+${s.target_pct.toFixed(1)}%` : '—'}
                       </td>
                       <td className="px-4 py-3">
                         {s.order_placed ? (
@@ -447,7 +451,10 @@ function SignalsTab({ signals }: { signals: Signal[] }) {
                       </td>
                     </tr>
                     {isExpanded && (
-                      <tr key={`${key}-expand`} className="border-b border-black/5 bg-black/[0.015]">
+                      <tr
+                        key={`${key}-expand`}
+                        className="border-b border-black/5 bg-black/[0.015]"
+                      >
                         <td colSpan={7} className="px-4 pb-3 pt-1">
                           <p className="text-xs font-semibold text-ink/50">LLM Reasoning</p>
                           <p className="mt-1 text-xs leading-relaxed text-ink/70">
@@ -458,26 +465,37 @@ function SignalsTab({ signals }: { signals: Signal[] }) {
                             s.volume_ratio !== undefined) && (
                             <div className="mt-2 flex flex-wrap gap-3 text-[10px] text-ink/50">
                               {s.rsi !== undefined && (
-                                <span>RSI: <b className="text-ink">{s.rsi.toFixed(1)}</b></span>
+                                <span>
+                                  RSI: <b className="text-ink">{s.rsi.toFixed(1)}</b>
+                                </span>
                               )}
                               {s.macd_hist !== undefined && (
                                 <span>
                                   MACD hist:{' '}
-                                  <b className={s.macd_hist >= 0 ? 'text-emerald-700' : 'text-rose-600'}>
+                                  <b
+                                    className={
+                                      s.macd_hist >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                                    }
+                                  >
                                     {s.macd_hist.toFixed(3)}
                                   </b>
                                 </span>
                               )}
                               {s.volume_ratio !== undefined && (
                                 <span>
-                                  Vol ratio: <b className="text-ink">{s.volume_ratio.toFixed(2)}×</b>
+                                  Vol ratio:{' '}
+                                  <b className="text-ink">{s.volume_ratio.toFixed(2)}×</b>
                                 </span>
                               )}
                               {s.above_ema20 !== undefined && (
-                                <span>EMA20: <b>{s.above_ema20 ? '↑ above' : '↓ below'}</b></span>
+                                <span>
+                                  EMA20: <b>{s.above_ema20 ? '↑ above' : '↓ below'}</b>
+                                </span>
                               )}
                               {s.above_ema50 !== undefined && (
-                                <span>EMA50: <b>{s.above_ema50 ? '↑ above' : '↓ below'}</b></span>
+                                <span>
+                                  EMA50: <b>{s.above_ema50 ? '↑ above' : '↓ below'}</b>
+                                </span>
                               )}
                             </div>
                           )}
@@ -500,8 +518,7 @@ function SignalsTab({ signals }: { signals: Signal[] }) {
 function OrdersTab({ orders }: { orders: Order[] }) {
   const [sub, setSub] = useState<OrderTab>('OPEN');
 
-  const filtered =
-    sub === 'ALL' ? orders : orders.filter((o) => o.status === sub);
+  const filtered = sub === 'ALL' ? orders : orders.filter((o) => o.status === sub);
 
   return (
     <div className="space-y-3">
@@ -526,9 +543,7 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                 <th className="px-4 py-3 text-left font-semibold">Symbol</th>
                 <th className="px-4 py-3 text-right font-semibold">Shares</th>
                 <th className="px-4 py-3 text-right font-semibold">Entry</th>
-                {sub !== 'OPEN' && (
-                  <th className="px-4 py-3 text-right font-semibold">Exit</th>
-                )}
+                {sub !== 'OPEN' && <th className="px-4 py-3 text-right font-semibold">Exit</th>}
                 {sub === 'OPEN' && (
                   <>
                     <th className="px-4 py-3 text-right font-semibold">Stop</th>
@@ -536,13 +551,9 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                   </>
                 )}
                 <th className="px-4 py-3 text-right font-semibold">Value</th>
-                {sub !== 'OPEN' && (
-                  <th className="px-4 py-3 text-right font-semibold">P&amp;L</th>
-                )}
+                {sub !== 'OPEN' && <th className="px-4 py-3 text-right font-semibold">P&amp;L</th>}
                 <th className="px-4 py-3 text-right font-semibold">Kelly</th>
-                {sub === 'ALL' && (
-                  <th className="px-4 py-3 text-left font-semibold">Status</th>
-                )}
+                {sub === 'ALL' && <th className="px-4 py-3 text-left font-semibold">Status</th>}
               </tr>
             </thead>
             <tbody>
@@ -568,9 +579,7 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                     className="border-b border-black/5 last:border-0 hover:bg-black/[0.02]"
                   >
                     <td className="px-4 py-3">
-                      <span className="font-display font-bold">
-                        {o.symbol.replace('.NS', '')}
-                      </span>
+                      <span className="font-display font-bold">{o.symbol.replace('.NS', '')}</span>
                       <span className="ml-1.5 text-xs text-ink/40">{o.date}</span>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums">{o.shares}</td>
@@ -579,9 +588,7 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                     </td>
                     {sub !== 'OPEN' && (
                       <td className="px-4 py-3 text-right tabular-nums">
-                        {o.exit_price
-                          ? `₹${o.exit_price.toLocaleString('en-IN')}`
-                          : '—'}
+                        {o.exit_price ? `₹${o.exit_price.toLocaleString('en-IN')}` : '—'}
                       </td>
                     )}
                     {sub === 'OPEN' && (
@@ -629,8 +636,8 @@ function OrdersTab({ orders }: { orders: Order[] }) {
                             o.status === 'OPEN'
                               ? 'bg-accent/10 text-accent'
                               : o.status === 'CLOSED'
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-rose-100 text-rose-700'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-rose-100 text-rose-700'
                           }`}
                         >
                           {o.status}
@@ -703,7 +710,10 @@ function OverviewTab({
           {latestRun && (
             <span className="text-xs text-ink/40">
               {new Date(latestRun.started_at).toLocaleString('en-IN', {
-                day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+                day: '2-digit',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit',
               })}
             </span>
           )}
@@ -736,9 +746,7 @@ function OverviewTab({
                       {AGENT_LABELS[agent]}
                     </span>
                     <span className="text-[9px] text-ink/40 tabular-nums">
-                      {status === 'done' && ms
-                        ? `${(ms / 1000).toFixed(1)}s`
-                        : status}
+                      {status === 'done' && ms ? `${(ms / 1000).toFixed(1)}s` : status}
                     </span>
                   </div>
                 );
@@ -801,8 +809,8 @@ function OverviewTab({
                         article.tier === 1
                           ? 'bg-accent/10 text-accent'
                           : article.tier === 2
-                          ? 'bg-amber-100 text-amber-700'
-                          : 'bg-black/5 text-ink/50'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-black/5 text-ink/50'
                       }`}
                     >
                       T{article.tier}
@@ -813,8 +821,8 @@ function OverviewTab({
                       article.sentiment === 'positive'
                         ? 'bg-emerald-100 text-emerald-700'
                         : article.sentiment === 'negative'
-                        ? 'bg-rose-100 text-rose-700'
-                        : 'bg-black/5 text-ink/50'
+                          ? 'bg-rose-100 text-rose-700'
+                          : 'bg-black/5 text-ink/50'
                     }`}
                   >
                     {article.sentiment}
@@ -877,14 +885,15 @@ export default function TradingPage() {
     try {
       const res = await fetchPortfolioHistory();
       setHistory(res);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   // Polling: 30s when active, 5min when idle — always running
   useEffect(() => {
     const latestRun = runs[0];
-    const isActive =
-      latestRun?.status === 'running' || latestRun?.status === 'pending';
+    const isActive = latestRun?.status === 'running' || latestRun?.status === 'pending';
     const ms = isActive ? POLL_ACTIVE_MS : POLL_IDLE_MS;
 
     if (pollRef.current) clearInterval(pollRef.current);
@@ -914,17 +923,14 @@ export default function TradingPage() {
       await triggerRun();
       await loadAll();
     } catch (err) {
-      setTriggerError(
-        err instanceof Error ? err.message : 'Failed to trigger pipeline',
-      );
+      setTriggerError(err instanceof Error ? err.message : 'Failed to trigger pipeline');
     } finally {
       setTriggering(false);
     }
   }
 
   const latestRun = runs[0];
-  const isActive =
-    latestRun?.status === 'running' || latestRun?.status === 'pending';
+  const isActive = latestRun?.status === 'running' || latestRun?.status === 'pending';
   const openOrders = orders.filter((o) => o.status === 'OPEN');
 
   return (
@@ -932,9 +938,7 @@ export default function TradingPage() {
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight">
-            Trading Dashboard
-          </h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight">Trading Dashboard</h1>
           <p className="text-sm text-ink/60">
             Paper trading · NSE/BSE · Half-Kelly position sizing
           </p>
@@ -959,11 +963,7 @@ export default function TradingPage() {
         <TabBtn active={tab === 'overview'} onClick={() => setTab('overview')}>
           Overview
         </TabBtn>
-        <TabBtn
-          active={tab === 'signals'}
-          onClick={() => setTab('signals')}
-          count={signals.length}
-        >
+        <TabBtn active={tab === 'signals'} onClick={() => setTab('signals')} count={signals.length}>
           Signals
         </TabBtn>
         <TabBtn
@@ -979,14 +979,10 @@ export default function TradingPage() {
       </div>
 
       {/* ── Tab content ─────────────────────────────────────────────────── */}
-      {tab === 'overview' && (
-        <OverviewTab portfolio={portfolio} runs={runs} news={news} />
-      )}
+      {tab === 'overview' && <OverviewTab portfolio={portfolio} runs={runs} news={news} />}
       {tab === 'signals' && <SignalsTab signals={signals} />}
       {tab === 'orders' && <OrdersTab orders={orders} />}
-      {tab === 'analytics' && (
-        <AnalyticsTab portfolio={portfolio} history={history} />
-      )}
+      {tab === 'analytics' && <AnalyticsTab portfolio={portfolio} history={history} />}
     </div>
   );
 }

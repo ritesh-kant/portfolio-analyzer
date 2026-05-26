@@ -17,12 +17,12 @@ standalone: true
 When a Nifty Midcap 150 stock shows a significant delivery-percentage spike
 (> 2σ above its 20-day rolling mean) coinciding with a strong positive daily
 return (> 1.5%) and above-average volume, it experiences further price
-appreciation over the following 5 trading days.  The expected mean net return
+appreciation over the following 5 trading days. The expected mean net return
 (T+1 open → T+5 close) exceeds 80 bps after all transaction costs.
 
 The delivery percentage signal — unique to Indian markets via NSE's
 `sec_bhavdata_full` files — separates institutional/committed buying from
-intraday noise.  High delivery % on a strong up-day indicates durable demand
+intraday noise. High delivery % on a strong up-day indicates durable demand
 from investors who intend to hold overnight, distinguishing genuine momentum
 from stop-hunt intraday moves.
 
@@ -31,19 +31,20 @@ from stop-hunt intraday moves.
 ### 2.1 Why delivery percentage is informative (India-specific)
 
 NSE's equity settlement system separates delivered transactions from intraday
-(MIS/squaring-off) trades.  `DELIV_PER` in the sec_bhavdata_full daily file
+(MIS/squaring-off) trades. `DELIV_PER` in the sec_bhavdata_full daily file
 measures:
 
     DELIV_PER = DELIV_QTY / TTL_TRD_QNTY × 100
 
 A high delivery percentage on a given day means:
+
 - A large fraction of buying was carried to T+2 settlement (i.e. actual
   ownership transfer).
 - Buyers were not intraday traders seeking to square off before market close.
 - The demand is "sticky" — these shares left the float and went into
   portfolios that will hold for at least T+2.
 
-This is structurally different from volume alone.  A high-volume day with
+This is structurally different from volume alone. A high-volume day with
 low delivery could be HFT or speculative intraday churn; high delivery
 on high volume means genuine accumulation.
 
@@ -69,23 +70,23 @@ Three conditions must ALL hold simultaneously:
 ### 2.3 Why the edge should persist (T+1 to T+5)
 
 1. **Information lag**: sec_bhavdata_full is published at ~20:00 IST (after
-   market close).  Retail participants rarely read this file.  Most reaction
+   market close). Retail participants rarely read this file. Most reaction
    happens over T+1 to T+3 as institutional research desks process the signal.
 
 2. **Momentum continuation in accumulation periods**: Academic literature
    (Grinblatt & Titman 1989, Jegadeesh & Titman 1993) documents that stocks
    being accumulated by institutions continue to rise for days to weeks as
-   the buyer gradually fills their position.  Delivery spikes often mark the
+   the buyer gradually fills their position. Delivery spikes often mark the
    first day of a multi-day institutional buying programme.
 
 3. **Midcap 150 liquidity profile**: Unlike Nifty 50, Midcap 150 stocks have
-   lower daily float turnover.  A sustained institutional buyer creates a
+   lower daily float turnover. A sustained institutional buyer creates a
    visible supply absorption effect over 3–7 trading sessions.
 
 4. **Empirical baseline (pre-registration context)**:
    Raw OHLCV momentum on the same universe (5-day and 20-day) shows Sharpe
    ~0.09 — below the 0.5 gate — due to short-term reversal in the broad
-   universe.  The delivery filter is expected to select the sub-population
+   universe. The delivery filter is expected to select the sub-population
    where momentum persists, yielding an expected Sharpe 0.5–0.8 per:
    - Kannan, Malathy & Bhattacharyya (2018): delivery-confirmed momentum in
      Indian markets, Sharpe ~0.65 in backtests (BSE 500 universe, 2010–2018).
@@ -96,22 +97,23 @@ Three conditions must ALL hold simultaneously:
 
 5. **Why reversal doesn't dominate here**: Short-term reversal in India is
    concentrated in low-delivery (intraday-heavy) stocks — the reversion is
-   driven by intraday market-makers unwinding hedges.  Delivery-confirmed
+   driven by intraday market-makers unwinding hedges. Delivery-confirmed
    moves do not reverse because the buyer has already taken settlement; there
    is no closing pressure from leveraged intraday positions.
 
 ## 3. Expected Effect Size
 
-| Metric | Expected value | Basis |
-|--------|---------------|-------|
-| Mean net return per trade | 80–200 bps | Kannan et al. (2018), scaled to Midcap 150 |
-| Win rate | 52–60% | Consistent with 5-day continuation literature |
-| Sharpe (per-trade return / std) | 0.5–0.8 | Delivery-confirmed subset, not full universe |
-| Event frequency | 80–150 signals/year | 3–4% of 150 stocks × 250 trading days × 3% daily trigger rate |
-| Hold period | 5 trading days (calendar ~7 days) | T+1 open to T+5 close |
-| DSR (n_trials = 1, clean exp) | ≥ 0.5 | Minimal trial inflation, conservative prior |
+| Metric                          | Expected value                    | Basis                                                         |
+| ------------------------------- | --------------------------------- | ------------------------------------------------------------- |
+| Mean net return per trade       | 80–200 bps                        | Kannan et al. (2018), scaled to Midcap 150                    |
+| Win rate                        | 52–60%                            | Consistent with 5-day continuation literature                 |
+| Sharpe (per-trade return / std) | 0.5–0.8                           | Delivery-confirmed subset, not full universe                  |
+| Event frequency                 | 80–150 signals/year               | 3–4% of 150 stocks × 250 trading days × 3% daily trigger rate |
+| Hold period                     | 5 trading days (calendar ~7 days) | T+1 open to T+5 close                                         |
+| DSR (n_trials = 1, clean exp)   | ≥ 0.5                             | Minimal trial inflation, conservative prior                   |
 
 **Cost model:**
+
 - Round-trip: STT + exchange + SEBI + GST = ~0.25%
 - Slippage: 0.15% each side (Midcap 150 is more liquid than PEAD events)
 - Total round-trip cost: **0.55%** (55 bps) — same as Index Recon
@@ -119,40 +121,42 @@ Three conditions must ALL hold simultaneously:
 ## 4. Falsification Criterion (pre-registered, immutable)
 
 **Training period: 2020-01-01 → 2023-06-30**
-*(Constrained by delivery data availability: sec_bhavdata_full from ~2020-01-01)*
+_(Constrained by delivery data availability: sec_bhavdata_full from ~2020-01-01)_
 
 **Dev period: 2023-07-01 → 2024-06-30**
-*(Hold-out: 2024-07-01 → present — untouched until dev gate passes)*
+_(Hold-out: 2024-07-01 → present — untouched until dev gate passes)_
 
 The strategy is **killed without appeal** if ANY of the following trigger on dev:
 
-| Criterion | Kill threshold |
-|-----------|---------------|
-| Mean net return (T+1 open → T+5 close, after costs) | < 80 bps |
-| Win rate (fraction of trades with net positive return) | < 52% |
-| Sharpe (per-trade return / per-trade std) | < 0.5 |
-| Deflated Sharpe Ratio (vs n_trials from MLflow) | < 0.5 |
-| Anti-strategy: SHORT the same signal over same window | > 0 bps |
+| Criterion                                                       | Kill threshold |
+| --------------------------------------------------------------- | -------------- |
+| Mean net return (T+1 open → T+5 close, after costs)             | < 80 bps       |
+| Win rate (fraction of trades with net positive return)          | < 52%          |
+| Sharpe (per-trade return / per-trade std)                       | < 0.5          |
+| Deflated Sharpe Ratio (vs n_trials from MLflow)                 | < 0.5          |
+| Anti-strategy: SHORT the same signal over same window           | > 0 bps        |
 | Cost-stress: DSR collapse under t-dist(df=4, scale=2×) slippage | > 50% relative |
-| Total dev-period signal events | < 80 |
+| Total dev-period signal events                                  | < 80           |
 
 **Notes on thresholds:**
+
 - 80 bps (vs 100 bps for Index Recon): lower because the signal occurs more
   frequently (80–150 events/year), which reduces per-event size while
-  improving portfolio diversification.  Signal edge compensates via frequency.
+  improving portfolio diversification. Signal edge compensates via frequency.
 - Win rate 52% (vs 50% for Index Recon): marginally higher because the 5-day
   horizon is short enough that directional accuracy should dominate noise.
 - Dev events ≥ 80: one-year dev window (Jul 2023–Jun 2024) with ~150 expected
-  signals should comfortably pass.  If fewer than 80 trigger, the signal is
+  signals should comfortably pass. If fewer than 80 trigger, the signal is
   too rare to be operationally useful.
 - DSR n_trials: clean MLflow experiment `idi_v1` starting from run #1.
 
 ## 5. Universe and Scope
 
 **Universe:** Nifty Midcap 150 constituents (EQ series only)
+
 - Rationale: Midcap 150 has the best signal-to-noise ratio for delivery-based
-  signals.  Nifty 50 stocks have delivery% that is structurally high
-  (institutions dominate) making a zscore approach noisy.  Small caps have
+  signals. Nifty 50 stocks have delivery% that is structurally high
+  (institutions dominate) making a zscore approach noisy. Small caps have
   thin liquidity where delivery % can be artificially elevated on small parcels.
 - EQ series only: excludes BE (trade-to-trade), BT (book entry), etc.
 
@@ -161,7 +165,7 @@ The strategy is **killed without appeal** if ANY of the following trigger on dev
 **Holding period:** 5 trading days ≈ 1 calendar week
 
 **No short leg in v1:** Exclusion only — we do not short the anti-signal
-(low-delivery declining days).  Short validation is included as the
+(low-delivery declining days). Short validation is included as the
 anti-strategy test only.
 
 ## 6. Signal Pre-computation Requirements
@@ -180,11 +184,11 @@ daily_return[t]           = (CLOSE_PRICE[t] - PREV_CLOSE[t]) / PREV_CLOSE[t]
 ```
 
 **Minimum history required:** 21 trading days of prior delivery data before
-the first eligible signal date.  Signals fired before 21 days of history are
+the first eligible signal date. Signals fired before 21 days of history are
 discarded.
 
 **PIT discipline:** sec_bhavdata_full for date T is published at ~20:00 IST.
-Signal is generated after publication; entry is at T+1 open.  No look-ahead.
+Signal is generated after publication; entry is at T+1 open. No look-ahead.
 
 ## 7. Data Required
 
@@ -196,21 +200,22 @@ Signal is generated after publication; entry is at T+1 open.  No look-ahead.
 
 **Relevant columns:**
 
-| Column | Type | Description |
-|--------|------|-------------|
-| SYMBOL | str | NSE trading symbol |
-| SERIES | str | Equity series (filter: EQ) |
-| DATE1 | str | Trading date (DD-Mon-YYYY format) |
-| PREV_CLOSE | float | Previous close price |
-| OPEN_PRICE | float | Open price |
-| CLOSE_PRICE | float | Close price |
-| TTL_TRD_QNTY | int | Total traded quantity (volume) |
-| DELIV_QTY | int | Delivered quantity (T+2 settled) |
-| DELIV_PER | float | Delivery % = DELIV_QTY / TTL_TRD_QNTY × 100 |
+| Column       | Type  | Description                                 |
+| ------------ | ----- | ------------------------------------------- |
+| SYMBOL       | str   | NSE trading symbol                          |
+| SERIES       | str   | Equity series (filter: EQ)                  |
+| DATE1        | str   | Trading date (DD-Mon-YYYY format)           |
+| PREV_CLOSE   | float | Previous close price                        |
+| OPEN_PRICE   | float | Open price                                  |
+| CLOSE_PRICE  | float | Close price                                 |
+| TTL_TRD_QNTY | int   | Total traded quantity (volume)              |
+| DELIV_QTY    | int   | Delivered quantity (T+2 settled)            |
+| DELIV_PER    | float | Delivery % = DELIV_QTY / TTL_TRD_QNTY × 100 |
 
 **Storage:** `data/lake/delivery/nse_delivery_YYYY.parquet` (one file per year)
 
 Schema after ingest:
+
 ```
 symbol          str        NSE symbol (uppercased)
 business_date   date       trading date
@@ -226,6 +231,7 @@ as_of_timestamp datetime   date 20:00 IST (PIT boundary)
 ### 7.2 Ingest module
 
 `quant/data/delivery_ingest.py` — handles:
+
 - Bulk download of historical sec_bhavdata_full files (2020-01-01 → present)
 - Parsing the DATE1 column (DD-Mon-YYYY format, e.g. "15-Jan-2024")
 - Symbol filtering to Nifty Midcap 150 universe
@@ -236,7 +242,7 @@ as_of_timestamp datetime   date 20:00 IST (PIT boundary)
 ### 7.3 Dependency on existing data
 
 - Nifty Midcap 150 constituent list (dynamic membership over time): required
-  for universe filtering.  Use `data/lake/index_changes/nse_recon_events.csv`
+  for universe filtering. Use `data/lake/index_changes/nse_recon_events.csv`
   to reconstruct historical Midcap 150 membership by date (PIT-correct).
 - Bhavcopy OHLCV: used for T+1 entry price (open) and T+5 exit price (close).
   sec_bhavdata_full also has open/close, but Bhavcopy is the existing clean
@@ -244,18 +250,19 @@ as_of_timestamp datetime   date 20:00 IST (PIT boundary)
 
 ## 8. Feature List (rules-based v1; no ML model)
 
-This version is rules-based.  No ML model, no hyperparameter search.
+This version is rules-based. No ML model, no hyperparameter search.
 DSR n_trials starts at 1 (clean MLflow experiment).
 
 **Signal (all conditions must hold simultaneously):**
 
-| Feature | Condition | Computation |
-|---------|-----------|-------------|
-| `delivery_zscore` | > 2.0 | (DELIV_PER − 20d mean) / 20d std |
-| `daily_return` | > 1.5% | (close − prev_close) / prev_close |
-| `volume_ratio` | > 1.2 | volume / 20d avg volume |
+| Feature           | Condition | Computation                       |
+| ----------------- | --------- | --------------------------------- |
+| `delivery_zscore` | > 2.0     | (DELIV_PER − 20d mean) / 20d std  |
+| `daily_return`    | > 1.5%    | (close − prev_close) / prev_close |
+| `volume_ratio`    | > 1.2     | volume / 20d avg volume           |
 
 **Filters applied before entry (pre-registered):**
+
 1. Election filter: skip events within ±30 calendar days of Lok Sabha first
    phase (same window as Strategies A and B: 2019-03-12–2019-06-22,
    2024-03-20–2024-07-04).
@@ -263,6 +270,7 @@ DSR n_trials starts at 1 (clean MLflow experiment).
    skip the signal (fail-open if no pledge data available).
 
 **Optional v2 features (NOT in v1 — register separately if v1 passes):**
+
 - Sector-adjusted delivery zscore (controls for sector-wide accumulation events)
 - FII/DII participation proxy (from NSE bulk/block deals)
 - Earnings proximity exclusion (skip signals within ±5 days of earnings release)
@@ -296,18 +304,19 @@ except ValueError:
 
 ## 10. Code References (to be built)
 
-| File | Purpose |
-|------|---------|
-| `quant/data/delivery_ingest.py` | Download + parse sec_bhavdata_full; write parquet |
-| `quant/data/nifty_membership.py` | PIT-correct Midcap 150 membership by date |
-| `quant/strategies/idi.py` | `simulate_trades()`, `run_anti_strategy()`, `run_cost_stress()` |
-| `quant/research/run.py` | Add `--strategy idi` dispatch |
-| `data/lake/delivery/nse_delivery_*.parquet` | Delivery data store (one parquet per year) |
-| MLflow experiment | `idi_v1` (clean slate, n_trials = 1) |
+| File                                        | Purpose                                                         |
+| ------------------------------------------- | --------------------------------------------------------------- |
+| `quant/data/delivery_ingest.py`             | Download + parse sec_bhavdata_full; write parquet               |
+| `quant/data/nifty_membership.py`            | PIT-correct Midcap 150 membership by date                       |
+| `quant/strategies/idi.py`                   | `simulate_trades()`, `run_anti_strategy()`, `run_cost_stress()` |
+| `quant/research/run.py`                     | Add `--strategy idi` dispatch                                   |
+| `data/lake/delivery/nse_delivery_*.parquet` | Delivery data store (one parquet per year)                      |
+| MLflow experiment                           | `idi_v1` (clean slate, n_trials = 1)                            |
 
 ## 11. Execution Plan
 
 1. **Build delivery data pipeline** (one-time, ~3 hours):
+
    ```bash
    python -m quant.data.delivery_ingest --start 2020-01-01 --end 2024-06-30
    # Downloads and parses sec_bhavdata_full for each trading day in range
@@ -316,12 +325,14 @@ except ValueError:
    ```
 
 2. **Build PIT membership module**:
+
    ```bash
    python -m quant.data.nifty_membership --validate
    # Should report: date range, symbols per index, missing coverage gaps
    ```
 
 3. **Implement `quant/strategies/idi.py`**:
+
    ```bash
    python -m quant.research.run --strategy idi --split train
    # Training window: 2020-01-01 → 2023-06-30
@@ -329,6 +340,7 @@ except ValueError:
    ```
 
 4. **Dev gate** (single, irreversible evaluation):
+
    ```bash
    python -m quant.research.run --strategy idi --split dev
    # Report: all 7 gate criteria from §4
@@ -337,6 +349,7 @@ except ValueError:
    ```
 
 5. **Hold-out** (only if all 7 dev criteria pass):
+
    ```bash
    python -m quant.research.run --strategy idi --split holdout --final
    # Single shot — spend the hold-out only after dev gate confirmation
@@ -349,23 +362,23 @@ except ValueError:
 
 ## 12. Result
 
-*Dev gate evaluated 2026-05-22 (577 executed trades from 925 raw signals, dev period 2023-07-01 → 2024-06-30)*
+_Dev gate evaluated 2026-05-22 (577 executed trades from 925 raw signals, dev period 2023-07-01 → 2024-06-30)_
 
-| Metric | Value | Threshold | Pass? |
-|--------|-------|-----------|-------|
-| Mean net return | −43.9 bps | ≥ 80 bps | ✗ FAIL |
-| Win rate | 43.8% | ≥ 52% | ✗ FAIL |
-| Sharpe (per-trade) | −0.053 | ≥ 0.5 | ✗ FAIL |
-| DSR (n_trials=1) | 0.087 | ≥ 0.5 | ✗ FAIL |
-| Anti-strategy return | −66.1 bps | ≤ 0 | ✓ PASS |
-| Cost-stress DSR collapse | 90.7% | ≤ 50% | ✗ FAIL |
-| Total dev events | 577 | ≥ 80 | ✓ PASS |
+| Metric                   | Value     | Threshold | Pass?  |
+| ------------------------ | --------- | --------- | ------ |
+| Mean net return          | −43.9 bps | ≥ 80 bps  | ✗ FAIL |
+| Win rate                 | 43.8%     | ≥ 52%     | ✗ FAIL |
+| Sharpe (per-trade)       | −0.053    | ≥ 0.5     | ✗ FAIL |
+| DSR (n_trials=1)         | 0.087     | ≥ 0.5     | ✗ FAIL |
+| Anti-strategy return     | −66.1 bps | ≤ 0       | ✓ PASS |
+| Cost-stress DSR collapse | 90.7%     | ≤ 50%     | ✗ FAIL |
+| Total dev events         | 577       | ≥ 80      | ✓ PASS |
 
 **5 of 7 gate criteria fail. Strategy killed on dev gate.**
 
 ## 13. Decision
 
-*Dev gate run: 2026-05-22 — single evaluation, irreversible.*
+_Dev gate run: 2026-05-22 — single evaluation, irreversible._
 
 **KILLED — dev gate failed on 5 of 7 criteria.**
 
@@ -393,19 +406,19 @@ except ValueError:
 
 **Decision: [✗] Kill — per §4, no re-runs, no parameter adjustments.**
 
-*The signal idea was sound in theory but did not survive empirical validation.
+_The signal idea was sound in theory but did not survive empirical validation.
 A future hypothesis could explore delivery % at longer exit horizons (T+10, T+20)
 where the short-term reversal subsides — but that would require a new pre-registered
-hypothesis with a new falsification criterion, registered before any experiment begins.*
+hypothesis with a new falsification criterion, registered before any experiment begins._
 
 ---
 
-*Registered: 2026-05-22 by Ritesh Kant. Immutable after this commit.
-Changes to §4 (falsification criteria) after this commit are process violations (plan §3.3).*
+_Registered: 2026-05-22 by Ritesh Kant. Immutable after this commit.
+Changes to §4 (falsification criteria) after this commit are process violations (plan §3.3)._
 
 ---
 
-*Registered: 2026-05-22 by Ritesh Kant.  Falsification criteria (§4) are
-pre-registered and immutable.  Signal conditions (§8) are immutable once any
-experiment begins.  Changes to either after any MLflow run begins are process
-violations (plan §3.3).*
+_Registered: 2026-05-22 by Ritesh Kant. Falsification criteria (§4) are
+pre-registered and immutable. Signal conditions (§8) are immutable once any
+experiment begins. Changes to either after any MLflow run begins are process
+violations (plan §3.3)._

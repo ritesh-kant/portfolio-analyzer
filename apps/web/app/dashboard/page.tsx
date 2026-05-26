@@ -154,13 +154,7 @@ export default function DashboardPage() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#00000014" />
-                <XAxis
-                  dataKey="month"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                  dy={10}
-                />
+                <XAxis dataKey="month" fontSize={11} tickLine={false} axisLine={false} dy={10} />
                 <YAxis
                   fontSize={11}
                   tickLine={false}

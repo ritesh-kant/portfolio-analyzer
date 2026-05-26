@@ -3,8 +3,8 @@ slug: qf-momentum-spread
 strategy: qf_momentum_r
 status: registered
 registered: 2026-05-26
-finalized: ""
-decision: ""
+finalized: ''
+decision: ''
 final: true
 type: portfolio_strategy
 standalone: true
@@ -18,6 +18,7 @@ standalone: true
 methodological error in Strategy Q's anti-strategy gate.
 
 **Signal (unchanged from Q):**
+
 1. Annual EPS quality filter: exclude stocks with negative EPS or declining YoY EPS
 2. Monthly 12-1 price momentum within the quality-filtered universe
 3. Long top 10% of filtered universe; buffer at top 20%; vol-target overlay at 15%
@@ -25,14 +26,14 @@ methodological error in Strategy Q's anti-strategy gate.
 **What changed and why:**
 
 Strategy Q used `anti_strategy_dsr ≤ 0` as the gate criterion — requiring that the
-*absolute return* of the bottom decile be negative. This criterion is correct for
+_absolute return_ of the bottom decile be negative. This criterion is correct for
 event-driven strategies (PEAD, block deals) where individual stock moves should be
 independent of market direction. It is the **wrong test for cross-sectional factor
 strategies** with a long-only constraint.
 
 In markets with structural positive drift (Nifty Midcap 150 returns +15–20% p.a.
 over the full period), even poorly-ranked stocks have positive absolute returns in
-most years. Requiring the bottom decile to have negative *absolute* returns is
+most years. Requiring the bottom decile to have negative _absolute_ returns is
 equivalent to requiring a bear market — that is a market-direction test, not a
 signal-quality test.
 
@@ -69,6 +70,7 @@ criterion changed.
 ## 2. Expected Effect Size
 
 Same as Strategy Q:
+
 - **Filtered universe:** ~90–110 stocks after quality filter
 - **Positions:** top 10% of filtered universe ≈ 9–11 stocks
 - **Expected gross Sharpe:** 1.0–1.8
@@ -103,6 +105,7 @@ EPS_GROWTH_FLOOR = 0.0   # must not be declining
 ```
 
 **What is NOT allowed to change after registration:**
+
 - EPS growth floor (0.0)
 - Lookback / skip windows (252 / 21 trading days)
 - Top/buffer percentiles (10% / 20% of filtered universe)
@@ -116,26 +119,27 @@ EPS_GROWTH_FLOOR = 0.0   # must not be declining
 
 **Dev period gate (2023-07-01 → 2024-06-30). ALL must pass:**
 
-| Criterion | Kill if... | Rationale |
-|-----------|-----------|-----------|
-| Dev DSR | < 0.65 | 18 prior experiments; deflated appropriately |
-| Dev Sharpe (net of costs) | < 0.7 | Annualized on monthly returns |
-| Spread DSR | < 0.3 | Top decile must reliably beat bottom decile (cross-sectional alpha) |
-| Spread mean monthly return | ≤ 0 | Top must outperform bottom on average |
-| Sharpe under 2× cost-stress | < 0.5 | t-dist(df=4, scale=2×nominal) slippage |
-| Max drawdown (vol-targeted) | > 20% | Dev-period equity curve |
-| Monthly rebalances in dev | < 12 | Statistical floor |
-| Avg positions per month | < 5 | Filter not too aggressive |
+| Criterion                   | Kill if... | Rationale                                                           |
+| --------------------------- | ---------- | ------------------------------------------------------------------- |
+| Dev DSR                     | < 0.65     | 18 prior experiments; deflated appropriately                        |
+| Dev Sharpe (net of costs)   | < 0.7      | Annualized on monthly returns                                       |
+| Spread DSR                  | < 0.3      | Top decile must reliably beat bottom decile (cross-sectional alpha) |
+| Spread mean monthly return  | ≤ 0        | Top must outperform bottom on average                               |
+| Sharpe under 2× cost-stress | < 0.5      | t-dist(df=4, scale=2×nominal) slippage                              |
+| Max drawdown (vol-targeted) | > 20%      | Dev-period equity curve                                             |
+| Monthly rebalances in dev   | < 12       | Statistical floor                                                   |
+| Avg positions per month     | < 5        | Filter not too aggressive                                           |
 
 **Hold-out gate (2024-07-01 → present). Single shot:**
 
-| Criterion | Kill if... |
-|-----------|-----------|
-| DSR | < 0.4 |
-| Spread DSR | < 0.2 |
-| Max drawdown | > 25% |
+| Criterion    | Kill if... |
+| ------------ | ---------- |
+| DSR          | < 0.4      |
+| Spread DSR   | < 0.2      |
+| Max drawdown | > 25%      |
 
 **Anti-strategy criterion change log:**
+
 - Strategy P: `anti_strategy_dsr ≤ 0` (bottom-decile absolute return gate) → FAILED
 - Strategy Q: same gate → FAILED (DSR 0.777; bull market contamination)
 - Strategy R: `spread_dsr ≥ 0.3` (relative gate) ← corrected criterion
@@ -144,11 +148,11 @@ EPS_GROWTH_FLOOR = 0.0   # must not be declining
 
 ## 5. Data Needed
 
-| Source | Path | Use |
-|--------|------|-----|
-| NSE Bhavcopy OHLCV | `data/lake/nse_bhavcopy/*.parquet` | Prices |
-| Screener.in annual P&L | `data/lake/earnings/screener_annual.parquet` | EPS quality filter |
-| Midcap 150 constituents | `data/lake/midcap150_constituents.csv` | Universe |
+| Source                  | Path                                         | Use                |
+| ----------------------- | -------------------------------------------- | ------------------ |
+| NSE Bhavcopy OHLCV      | `data/lake/nse_bhavcopy/*.parquet`           | Prices             |
+| Screener.in annual P&L  | `data/lake/earnings/screener_annual.parquet` | EPS quality filter |
+| Midcap 150 constituents | `data/lake/midcap150_constituents.csv`       | Universe           |
 
 ---
 
@@ -162,26 +166,26 @@ EPS_GROWTH_FLOOR = 0.0   # must not be declining
 
 ## 7. Code References
 
-| File | Purpose |
-|------|---------|
-| `quant/strategies/qf_momentum.py` | Signal (unchanged from Q) |
-| `quant/research/run.py` | `--strategy qf_momentum_r` dispatch |
-| MLflow experiment | `qf_momentum_r_v1` |
+| File                              | Purpose                             |
+| --------------------------------- | ----------------------------------- |
+| `quant/strategies/qf_momentum.py` | Signal (unchanged from Q)           |
+| `quant/research/run.py`           | `--strategy qf_momentum_r` dispatch |
+| MLflow experiment                 | `qf_momentum_r_v1`                  |
 
 ---
 
 ## 8. Result (filled after dev gate run)
 
-| Criterion | Result | Gate | Status |
-|-----------|--------|------|--------|
-| DSR | **0.984** | ≥ 0.65 | ✅ PASS |
-| Sharpe | **2.957** | ≥ 0.7 | ✅ PASS |
-| Spread DSR | **0.997** | ≥ 0.3 | ✅ PASS |
-| Spread mean monthly | **+3.93%** (≈+59% ann.) | > 0 | ✅ PASS |
-| Stress DSR collapse | **−0.1%** | ≤ 50% | ✅ PASS |
-| Max drawdown | **−6.9%** | ≤ 20% | ✅ PASS |
-| Monthly rebalances | **12** | ≥ 12 | ✅ PASS |
-| Avg positions | **10.3** | ≥ 5 | ✅ PASS |
+| Criterion           | Result                  | Gate   | Status  |
+| ------------------- | ----------------------- | ------ | ------- |
+| DSR                 | **0.984**               | ≥ 0.65 | ✅ PASS |
+| Sharpe              | **2.957**               | ≥ 0.7  | ✅ PASS |
+| Spread DSR          | **0.997**               | ≥ 0.3  | ✅ PASS |
+| Spread mean monthly | **+3.93%** (≈+59% ann.) | > 0    | ✅ PASS |
+| Stress DSR collapse | **−0.1%**               | ≤ 50%  | ✅ PASS |
+| Max drawdown        | **−6.9%**               | ≤ 20%  | ✅ PASS |
+| Monthly rebalances  | **12**                  | ≥ 12   | ✅ PASS |
+| Avg positions       | **10.3**                | ≥ 5    | ✅ PASS |
 
 ---
 
@@ -195,11 +199,11 @@ EPS_GROWTH_FLOOR = 0.0   # must not be declining
 **Hold-out gate: FAILED (2026-05-26)**
 
 Hold-out results (2024-07-01 → 2026-05-26, 23 months):
-  Sharpe    : −0.325   (gate: ≥ 0.7)   ✗ FAIL
-  DSR       : 0.326    (gate: ≥ 0.65)  ✗ FAIL  
-  MaxDD     : −36.4%   (gate: ≤ 20%)   ✗ FAIL
-  Spread DSR: 0.598    (gate: ≥ 0.3)   ✅ PASS — cross-sectional signal survived
-  Ann return: −7.0%
+Sharpe : −0.325 (gate: ≥ 0.7) ✗ FAIL
+DSR : 0.326 (gate: ≥ 0.65) ✗ FAIL  
+ MaxDD : −36.4% (gate: ≤ 20%) ✗ FAIL
+Spread DSR: 0.598 (gate: ≥ 0.3) ✅ PASS — cross-sectional signal survived
+Ann return: −7.0%
 
 Root cause: Indian midcap entered a correction / high-volatility regime from
 mid-2024 onward (post-election uncertainty, FII outflows, rate environment).
@@ -209,6 +213,6 @@ the absolute portfolio return was −7% annualised with a −36% drawdown.
 
 ---
 
-*Registered: 2026-05-26.*
-*Signal identical to Strategy Q. Gate corrected from absolute-return to spread-based anti-strategy criterion.*
-*18 prior experiments; DSR deflation gate = 0.65.*
+_Registered: 2026-05-26._
+_Signal identical to Strategy Q. Gate corrected from absolute-return to spread-based anti-strategy criterion._
+_18 prior experiments; DSR deflation gate = 0.65._

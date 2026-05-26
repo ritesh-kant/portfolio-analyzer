@@ -67,7 +67,12 @@ export async function fetchBenchmarkWithContext(
   investedAmount: number,
   inceptionDate: string,
 ): Promise<
-  BenchmarkComparison & { benchmarkScheme?: string; benchmarkAsOf?: string; navLatest?: string; navAtInception?: string }
+  BenchmarkComparison & {
+    benchmarkScheme?: string;
+    benchmarkAsOf?: string;
+    navLatest?: string;
+    navAtInception?: string;
+  }
 > {
   const params = new URLSearchParams({
     currentValue: currentValue.toFixed(2),

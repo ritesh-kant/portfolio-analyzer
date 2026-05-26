@@ -6,7 +6,7 @@ frameworkVersion: '4'
 # Heavy Python deps (pandas, yfinance, langgraph) exceed the 250 MB zip limit.
 # Deploy as a Docker container image pushed to ECR.
 build:
-  esbuild: false  # Python — no esbuild
+  esbuild: false # Python — no esbuild
 
 provider:
   name: aws
@@ -14,7 +14,7 @@ provider:
   stage: ${opt:stage, 'dev'}
   architecture: arm64
   memorySize: 2048
-  timeout: 900  # max Lambda timeout; pipeline can take ~10 min
+  timeout: 900 # max Lambda timeout; pipeline can take ~10 min
   logRetentionInDays: 14
 
   ecr:
@@ -147,7 +147,7 @@ resources:
       Type: AWS::SQS::Queue
       Properties:
         QueueName: nt-news-raw-${sls:stage}
-        MessageRetentionPeriod: 86400   # 1 day
+        MessageRetentionPeriod: 86400 # 1 day
         VisibilityTimeout: 120
         RedrivePolicy:
           deadLetterTargetArn: !GetAtt NewsRawDLQ.Arn
@@ -157,7 +157,7 @@ resources:
       Type: AWS::SQS::Queue
       Properties:
         QueueName: nt-news-raw-dlq-${sls:stage}
-        MessageRetentionPeriod: 604800  # 7 days
+        MessageRetentionPeriod: 604800 # 7 days
 
     NewsSignalsQueue:
       Type: AWS::SQS::Queue

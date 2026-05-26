@@ -165,7 +165,10 @@ function buildGrowthSeries(
   });
 }
 
-function findNavOnOrBefore(history: { date: string; nav: number }[], targetDate: string): number | null {
+function findNavOnOrBefore(
+  history: { date: string; nav: number }[],
+  targetDate: string,
+): number | null {
   const target = new Date(targetDate).getTime();
   let bestNav: number | null = null;
 

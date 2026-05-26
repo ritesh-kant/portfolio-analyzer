@@ -7,7 +7,10 @@ interface TechnicalsPanelProps {
   data: TechnicalsResponse | null;
 }
 
-const ROWS: { key: keyof Omit<TechnicalsResponse, 'symbol' | 'currentPrice' | 'error'>; label: string }[] = [
+const ROWS: {
+  key: keyof Omit<TechnicalsResponse, 'symbol' | 'currentPrice' | 'error'>;
+  label: string;
+}[] = [
   { key: 'rsi', label: 'RSI (14)' },
   { key: 'macd', label: 'MACD Histogram' },
   { key: 'bollingerBands', label: 'Bollinger Position' },
@@ -17,13 +20,17 @@ const ROWS: { key: keyof Omit<TechnicalsResponse, 'symbol' | 'currentPrice' | 'e
 ];
 
 const DESCRIPTIONS: Record<string, string> = {
-  rsi: "Measures how fast and strongly a stock price is moving.\n\nRange: 0 to 100\n• Above 70 → stock may be overbought (price went up too fast)\n• Below 30 → stock may be oversold (price fell too fast)",
-  macd: "Shows the difference between two moving averages.\n\n• Above 0 → bullish momentum (price trending up)\n• Below 0 → bearish momentum (price trending down)",
-  bollingerBands: "Shows where the current price is relative to its recent average range.\n\n• 100% → upper band (potentially overextended)\n• 0% → lower band (potentially undervalued)",
-  ema20: "The 20-day Exponential Moving Average. Short-term trend indicator.\n\n• Price above EMA 20 usually suggests a short-term uptrend.",
-  ema50: "The 50-day Exponential Moving Average. Medium-term trend indicator.\n\n• Often acts as a support or resistance level for the stock.",
-  volumeRatio: "Compares today's volume to the average volume.\n\n• Above 1.0 → higher than usual trading activity, suggesting strong interest in the stock.",
- };
+  rsi: 'Measures how fast and strongly a stock price is moving.\n\nRange: 0 to 100\n• Above 70 → stock may be overbought (price went up too fast)\n• Below 30 → stock may be oversold (price fell too fast)',
+  macd: 'Shows the difference between two moving averages.\n\n• Above 0 → bullish momentum (price trending up)\n• Below 0 → bearish momentum (price trending down)',
+  bollingerBands:
+    'Shows where the current price is relative to its recent average range.\n\n• 100% → upper band (potentially overextended)\n• 0% → lower band (potentially undervalued)',
+  ema20:
+    'The 20-day Exponential Moving Average. Short-term trend indicator.\n\n• Price above EMA 20 usually suggests a short-term uptrend.',
+  ema50:
+    'The 50-day Exponential Moving Average. Medium-term trend indicator.\n\n• Often acts as a support or resistance level for the stock.',
+  volumeRatio:
+    "Compares today's volume to the average volume.\n\n• Above 1.0 → higher than usual trading activity, suggesting strong interest in the stock.",
+};
 
 export function TechnicalsPanel({ data }: TechnicalsPanelProps) {
   const [infoKey, setInfoKey] = useState<string | null>(null);

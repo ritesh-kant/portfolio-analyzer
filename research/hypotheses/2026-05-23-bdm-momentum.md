@@ -24,11 +24,12 @@ existing uptrend.
 ## 2. Relationship to Strategy F (BDM — killed 2026-05-23)
 
 Strategy F (BDM) was killed on the dev gate: mean return 277.8 bps ✅, win rate 49.1%
-❌, Sharpe 0.173 ❌.  The directional edge existed (anti-strategy returned −387.8 bps)
+❌, Sharpe 0.173 ❌. The directional edge existed (anti-strategy returned −387.8 bps)
 but the return distribution was right-skewed: a minority of large winners masked a
 majority of losing trades.
 
 **Post-mortem root cause**: the BDM signal mixes two qualitatively different events:
+
 1. Bulk deals in stocks already in positive momentum → buyer is adding to an
    established trend; continued accumulation amplifies existing price pressure.
 2. Bulk deals in stocks below their trend average → buyer is positioning
@@ -43,7 +44,7 @@ be above its 50-day EMA at the close of signal date T.
 ### 3.1 Why the EMA50 pre-condition improves win rate
 
 Patel & Vaidya (2018) found that bulk deal BUY abnormal returns in NSE midcap stocks
-are "concentrated in stocks with pre-existing positive momentum."  Stocks below their
+are "concentrated in stocks with pre-existing positive momentum." Stocks below their
 medium-term moving average are in a declining or mean-reverting regime where the
 mechanical demand shock from the bulk deal is absorbed by sellers who interpret the
 disclosure as a contrarian signal ("someone is trying to catch a falling knife"), or
@@ -51,6 +52,7 @@ where the stock's momentum already reflects deteriorating fundamentals that the 
 due diligence may not have fully captured.
 
 Above the EMA50:
+
 - The stock has already established demand > supply in recent sessions.
 - The bulk deal adds to an existing trend rather than fighting mean reversion.
 - Information asymmetry is larger: a buyer willing to pay current trend-following
@@ -85,23 +87,24 @@ Above the EMA50:
 
 **Training period: 2015-01-01 → 2023-06-30**
 **Dev period: 2023-07-01 → 2024-06-30**
-*(Hold-out: 2024-07-01 → present — untouched until dev gate passes)*
+_(Hold-out: 2024-07-01 → present — untouched until dev gate passes)_
 
 The strategy is **killed without appeal** if ANY of the following trigger on dev:
 
-| Criterion | Kill threshold |
-|-----------|---------------|
-| Mean net return (T+1 open → T+20 close, after costs) | < 100 bps |
-| Win rate (fraction of trades with net positive return) | < 52% |
-| Sharpe (per-trade return / per-trade std) | < 0.5 |
-| Deflated Sharpe Ratio (vs n_trials from MLflow) | < 0.5 |
-| Anti-strategy: SHORT same events over same window | > 0 bps |
+| Criterion                                                       | Kill threshold |
+| --------------------------------------------------------------- | -------------- |
+| Mean net return (T+1 open → T+20 close, after costs)            | < 100 bps      |
+| Win rate (fraction of trades with net positive return)          | < 52%          |
+| Sharpe (per-trade return / per-trade std)                       | < 0.5          |
+| Deflated Sharpe Ratio (vs n_trials from MLflow)                 | < 0.5          |
+| Anti-strategy: SHORT same events over same window               | > 0 bps        |
 | Cost-stress: DSR collapse under t-dist(df=4, scale=2×) slippage | > 50% relative |
-| Total dev-period signal events (after momentum filter) | < 30 |
+| Total dev-period signal events (after momentum filter)          | < 30           |
 
 **Notes on thresholds:**
+
 - Event count threshold reduced from 40 (F) to 30: the momentum filter will reduce
-  the raw event count.  30 is the minimum for statistical validity of a binary
+  the raw event count. 30 is the minimum for statistical validity of a binary
   win/loss proportion test at 5% significance.
 - All other thresholds identical to F: the mechanism and cost model are the same;
   only the pre-condition changes.
@@ -120,6 +123,7 @@ The strategy is **killed without appeal** if ANY of the following trigger on dev
 ```
 
 **EMA computation:**
+
 - Span = 50 (standard pandas ewm span parameter, adjust=False)
 - Uses close prices from the PIT-correct OHLCV (as_of_timestamp = 18:00 IST ≥ bulk
   deal disclosure at 16:00 IST → no lookahead)
@@ -134,6 +138,7 @@ The strategy is **killed without appeal** if ANY of the following trigger on dev
 **Cost model:** 55 bps round-trip (same as F, pre-registered)
 
 **Filters applied before entry (same as F, plus new momentum filter):**
+
 1. Momentum filter (NEW): close_T > EMA50_T (using 50-day span EMA)
 2. Election filter: skip events within ±30 calendar days of Lok Sabha first phase
 3. Pledge filter: `is_pledge_flagged(symbol, event_date)` — fail-open
@@ -142,51 +147,53 @@ The strategy is **killed without appeal** if ANY of the following trigger on dev
 ## 7. Data Required
 
 All data already on disk:
+
 - Bulk deals: `data/lake/bulk_deals/nse_bulk_deals.parquet` (from Strategy F pipeline)
 - OHLCV: Bhavcopy parquet via `pit_loader.load()` (pre-existing)
 - Midcap 150: `data/lake/midcap150_constituents.csv` (pre-existing)
 
 **OHLCV lookback:** Must load OHLCV from ~75 trading days before `start` to warm up
-the 50-day EMA.  In practice, load from `start - 100 calendar days` to `end`.
+the 50-day EMA. In practice, load from `start - 100 calendar days` to `end`.
 
 ## 8. Code References
 
-| File | Purpose |
-|------|---------|
+| File                               | Purpose                                                              |
+| ---------------------------------- | -------------------------------------------------------------------- |
 | `quant/strategies/bdm_momentum.py` | Strategy G: build_events_momentum(), simulate_trades(), gate metrics |
-| `quant/research/run.py` | `--strategy g` dispatch, `run_gate_check_g()` |
-| MLflow experiment | `bdm_momentum_v1` (clean slate, n_trials = 1) |
+| `quant/research/run.py`            | `--strategy g` dispatch, `run_gate_check_g()`                        |
+| MLflow experiment                  | `bdm_momentum_v1` (clean slate, n_trials = 1)                        |
 
 ## 9. Differentiation from Prior Strategies
 
-| Dimension | BDM (F — killed) | BDM-Momentum (G) |
-|-----------|-----------------|-----------------|
-| Signal | Bulk deal BUY ≥ 0.5% | Same |
-| Momentum filter | None | close > 50-day EMA |
-| Expected win rate | ~49% (observed) | ≥ 52% (hypothesis) |
-| Expected Sharpe | ~0.17 (observed) | ≥ 0.50 (hypothesis) |
-| Expected events/year | ~80–160 | ~50–100 (filtered) |
+| Dimension            | BDM (F — killed)     | BDM-Momentum (G)    |
+| -------------------- | -------------------- | ------------------- |
+| Signal               | Bulk deal BUY ≥ 0.5% | Same                |
+| Momentum filter      | None                 | close > 50-day EMA  |
+| Expected win rate    | ~49% (observed)      | ≥ 52% (hypothesis)  |
+| Expected Sharpe      | ~0.17 (observed)     | ≥ 0.50 (hypothesis) |
+| Expected events/year | ~80–160              | ~50–100 (filtered)  |
 
 ## 10. Result
 
 **Dev gate run: 2026-05-23**
 **Dev period: 2023-07-01 → 2024-06-30**
 
-| Metric | Result | Gate | Status |
-|--------|--------|------|--------|
-| Raw events (pre-momentum) | 231 | — | — |
-| Momentum-filtered trades | 136 | ≥ 30 | ✅ PASS |
-| Mean net return | +463.9 bps | ≥ 100 bps | ✅ PASS |
-| Win rate | 52.2% | ≥ 52% | ✅ PASS |
-| Sharpe (per-trade) | 0.277 | ≥ 0.5 | ❌ FAIL |
-| DSR (n_trials=1) | 1.000 | ≥ 0.5 | ✅ PASS |
-| Anti-strategy return | −573.9 bps | ≤ 0 | ✅ PASS |
-| Cost-stress DSR collapse | 0.0% | ≤ 50% | ✅ PASS |
+| Metric                    | Result     | Gate      | Status  |
+| ------------------------- | ---------- | --------- | ------- |
+| Raw events (pre-momentum) | 231        | —         | —       |
+| Momentum-filtered trades  | 136        | ≥ 30      | ✅ PASS |
+| Mean net return           | +463.9 bps | ≥ 100 bps | ✅ PASS |
+| Win rate                  | 52.2%      | ≥ 52%     | ✅ PASS |
+| Sharpe (per-trade)        | 0.277      | ≥ 0.5     | ❌ FAIL |
+| DSR (n_trials=1)          | 1.000      | ≥ 0.5     | ✅ PASS |
+| Anti-strategy return      | −573.9 bps | ≤ 0       | ✅ PASS |
+| Cost-stress DSR collapse  | 0.0%       | ≤ 50%     | ✅ PASS |
 
 **6/7 gates pass, 1/7 fails → KILLED**
 
 **Momentum filter effect:**
 Compared to Strategy F (BDM, no momentum filter):
+
 - Win rate: 49.1% → 52.2% ✅ (fixed as hypothesised)
 - Mean return: 277.8 → 463.9 bps (dramatically improved)
 - Sharpe: 0.173 → 0.277 (improved but still insufficient)
@@ -196,42 +203,44 @@ Compared to Strategy F (BDM, no momentum filter):
 **Root cause of Sharpe failure:** The momentum filter successfully selects stocks with
 higher expected returns, but the per-trade standard deviation remains ~16.7%:
 
-  Sharpe = mean/std = 0.0464 / 0.1674 ≈ 0.277
+Sharpe = mean/std = 0.0464 / 0.1674 ≈ 0.277
 
 For a 20-day hold in Nifty Midcap 150, a 16.7% per-trade std is characteristic of
-the universe: individual stocks can easily move 20–40% in a 20-day window.  Even
+the universe: individual stocks can easily move 20–40% in a 20-day window. Even
 with a strong mean return of 464 bps, the noise overwhelms the signal at the per-trade
 level.
 
 **The problem is variance, not bias.** All directional indicators are extremely strong
 (anti-strategy −574 bps, DSR 1.000, win rate > 52%) but the distribution has fat
-tails in both directions.  To reach Sharpe ≥ 0.5, need either:
-  1. A filter that selects only the highest-conviction subset (fewer events,
-     much lower variance per trade), OR
-  2. A larger mean return relative to the same variance (needs a stronger signal), OR
-  3. A shorter hold period (less time for noise to accumulate — but F showed ≤10 days
-     means reversion dominates, and 5 days gave Sharpe 0.17).
+tails in both directions. To reach Sharpe ≥ 0.5, need either:
+
+1. A filter that selects only the highest-conviction subset (fewer events,
+   much lower variance per trade), OR
+2. A larger mean return relative to the same variance (needs a stronger signal), OR
+3. A shorter hold period (less time for noise to accumulate — but F showed ≤10 days
+   means reversion dominates, and 5 days gave Sharpe 0.17).
 
 The residual problem is that "bulk deal in a momentum stock" still captures both
 institutional continuation programmes AND one-off tactical buys by HNIs/promoters
-that have no follow-through.  The key filter needed for Strategy H: **distinguish
+that have no follow-through. The key filter needed for Strategy H: **distinguish
 institutional buyers from retail/HNI/promoter buyers.**
 
 ## 11. Decision
 
 **KILLED — 2026-05-23**
 
-Sharpe 0.277 fails the pre-registered threshold of ≥ 0.50.  Per §4, the strategy
+Sharpe 0.277 fails the pre-registered threshold of ≥ 0.50. Per §4, the strategy
 is killed without appeal.
 
 **Post-mortem for Strategy H design:**
-The signal has genuine edge — 6/7 gates pass cleanly.  The missing piece is entity
+The signal has genuine edge — 6/7 gates pass cleanly. The missing piece is entity
 classification: an institutional bulk buyer (FII, domestic MF, insurance) has a
 larger target allocation and is more likely to continue accumulating, producing a
-narrower, more consistent return distribution (higher Sharpe).  A retail/HNI buyer
+narrower, more consistent return distribution (higher Sharpe). A retail/HNI buyer
 may be a one-off tactical trade with no follow-through, contributing to the fat tails.
 
 Strategy H pre-registration requirements:
+
 - Signal: BDM + momentum pre-condition (same as G) + institutional entity filter
 - Entity classifier: keyword-based using client_name field
   (MUTUAL FUND / FII / FPI / INSURANCE / PENSION → institutional)
@@ -240,7 +249,7 @@ Strategy H pre-registration requirements:
 
 ---
 
-*Registered: 2026-05-23 by Ritesh Kant.  Falsification criteria (§4) are
-pre-registered and immutable.  Signal conditions (§5/§6) are immutable once
-any MLflow experiment begins.  Changes to either after any run begins are
-process violations (plan §3.3).*
+_Registered: 2026-05-23 by Ritesh Kant. Falsification criteria (§4) are
+pre-registered and immutable. Signal conditions (§5/§6) are immutable once
+any MLflow experiment begins. Changes to either after any run begins are
+process violations (plan §3.3)._

@@ -22,12 +22,13 @@ trading days** by ≥ 100 bps net of costs, with a per-trade Sharpe ≥ 0.5.
 ## 2. Relationship to Strategy I (killed 2026-05-23)
 
 Strategy I (20-day hold) produced Sharpe 0.389 — failed the ≥ 0.5 gate.
-Root cause: per-trade std ~11% over 20 days.  Strategy J (8% stop-loss) made things
+Root cause: per-trade std ~11% over 20 days. Strategy J (8% stop-loss) made things
 worse (Sharpe 0.368) by whipsawing 5 recovering trades.
 
 **The binding constraint is hold-period variance, not signal quality.**
 
 Block deal continuation buying is front-loaded:
+
 - The disclosing entity has a large target allocation (typically ₹200–500 Cr) and
   buys in tranches — the first 5 trading days see the heaviest follow-on buying.
 - Information cascade: other market participants react to the public block deal
@@ -36,10 +37,11 @@ Block deal continuation buying is front-loaded:
   complete; continuing to hold adds stock-specific noise without adding signal.
 
 **Why 5 days specifically:**
+
 - 5 trading days ≈ 1 calendar week: the natural "news absorption" window for
   institutional disclosures in Indian midcap stocks.
 - Per-trade std should compress to ~4–6% (from ~11% at 20 days), as noise
-  accumulates roughly as √T.  Expected Sharpe: (444 bps / 2) × (11% / 5%) ≈ 0.49–0.55.
+  accumulates roughly as √T. Expected Sharpe: (444 bps / 2) × (11% / 5%) ≈ 0.49–0.55.
   (Conservative estimate: even if mean halves, std should compress more than 2×.)
 - Round numbers (3, 5, 10 days) were the candidates; 5 is the tightest that still
   captures the full information cascade (3 days may be too short post-block-deal
@@ -51,6 +53,7 @@ over a 20-day window; a 5-day hold has naturally bounded downside).
 ## 3. Mechanism
 
 Same as Strategy I except:
+
 - **Hold period: 5 trading days** (T+1 open → T+5 close)
 - No stop-loss
 - All other filters identical (election, pledge, EMA50 momentum)
@@ -69,24 +72,24 @@ For each block deal BUY in Nifty Midcap 150 on date T:
 
 ### 3.2 Cost assumption
 
-Same 55 bps round-trip as Strategies I and J.  With a 5-day hold, the cost is a
+Same 55 bps round-trip as Strategies I and J. With a 5-day hold, the cost is a
 larger fraction of expected mean return — if the 5-day mean is ~200 bps, costs are
-~28% of gross return (vs ~12% for the 20-day hold).  This is the main risk to
+~28% of gross return (vs ~12% for the 20-day hold). This is the main risk to
 the hypothesis.
 
 ## 4. Falsification Criterion (pre-registered, immutable)
 
 **Dev period: 2023-07-01 → 2024-06-30** (same as prior strategies)
 
-| Criterion | Kill threshold |
-|-----------|---------------|
-| Mean net return | < 100 bps |
-| Win rate | < 52% |
-| Sharpe (per-trade) | < 0.5 |
-| DSR (n_trials from MLflow) | < 0.5 |
-| Anti-strategy return | > 0 bps |
-| Cost-stress DSR collapse | > 50% |
-| Total dev events (after all filters) | < 15 |
+| Criterion                            | Kill threshold |
+| ------------------------------------ | -------------- |
+| Mean net return                      | < 100 bps      |
+| Win rate                             | < 52%          |
+| Sharpe (per-trade)                   | < 0.5          |
+| DSR (n_trials from MLflow)           | < 0.5          |
+| Anti-strategy return                 | > 0 bps        |
+| Cost-stress DSR collapse             | > 50%          |
+| Total dev events (after all filters) | < 15           |
 
 ## 5. Signal Construction
 
@@ -102,26 +105,26 @@ the hypothesis.
 
 ## 6. Code References
 
-| File | Purpose |
-|------|---------|
+| File                                      | Purpose                    |
+| ----------------------------------------- | -------------------------- |
 | `quant/strategies/block_momentum_5day.py` | Strategy K with 5-day hold |
-| `quant/research/run.py` | `--strategy k` dispatch |
-| MLflow experiment | `block_deal_5day_v1` |
+| `quant/research/run.py`                   | `--strategy k` dispatch    |
+| MLflow experiment                         | `block_deal_5day_v1`       |
 
 ## 7. Result
 
 **Dev gate run: 2026-05-24**
 
-| Metric | Result | Gate | Status |
-|--------|--------|------|--------|
-| Raw events | 71 | — | — |
-| Executed trades | 36 | ≥ 15 | ✅ PASS |
-| Mean net return | +194.4 bps | ≥ 100 bps | ✅ PASS |
-| Win rate | 52.8% | ≥ 52% | ✅ PASS |
-| Sharpe | 0.254 | ≥ 0.5 | ❌ FAIL |
-| DSR | 0.953 | ≥ 0.5 | ✅ PASS |
-| Anti-strategy | −304.4 bps | ≤ 0 | ✅ PASS |
-| Cost-stress collapse | 2.6% | ≤ 50% | ✅ PASS |
+| Metric               | Result     | Gate      | Status  |
+| -------------------- | ---------- | --------- | ------- |
+| Raw events           | 71         | —         | —       |
+| Executed trades      | 36         | ≥ 15      | ✅ PASS |
+| Mean net return      | +194.4 bps | ≥ 100 bps | ✅ PASS |
+| Win rate             | 52.8%      | ≥ 52%     | ✅ PASS |
+| Sharpe               | 0.254      | ≥ 0.5     | ❌ FAIL |
+| DSR                  | 0.953      | ≥ 0.5     | ✅ PASS |
+| Anti-strategy        | −304.4 bps | ≤ 0       | ✅ PASS |
+| Cost-stress collapse | 2.6%       | ≤ 50%     | ✅ PASS |
 
 **6/7 pass, Sharpe ❌ → KILLED**
 
@@ -130,18 +133,19 @@ the hypothesis.
 The block deal signal is a slow institutional accumulation drift, not a fast
 price reaction.
 
-| Hold | Mean return | Implied std | Sharpe |
-|------|------------|-------------|--------|
-| 5 days | 194 bps | ~7.6% | 0.254 |
-| 20 days | 444 bps | ~11.4% | 0.389 |
+| Hold    | Mean return | Implied std | Sharpe |
+| ------- | ----------- | ----------- | ------ |
+| 5 days  | 194 bps     | ~7.6%       | 0.254  |
+| 20 days | 444 bps     | ~11.4%      | 0.389  |
 
 Std compressed ~33% when moving from 20→5 days, but mean compressed ~56%.
 The bulk of the return materialises in weeks 2–4, driven by the institutional
-buyer's continued open-market accumulation.  A 5-day window captures only the
+buyer's continued open-market accumulation. A 5-day window captures only the
 initial price discovery; the signal hasn't fully played out yet.
 
-Conclusion: the block deal signal is a slow drift.  There is no hold period
+Conclusion: the block deal signal is a slow drift. There is no hold period
 that achieves Sharpe ≥ 0.5:
+
 - Short hold (5d): drift not yet materialised → low mean → low Sharpe
 - Long hold (20d): drift captured but noise accumulates → high std → low Sharpe
 - Stop-loss (J): whipsaw destroys more winners than it saves losers
@@ -152,14 +156,14 @@ that achieves Sharpe ≥ 0.5:
 
 **Block deal / bulk deal family (F–K) final verdict: EXHAUSTED**
 
-| Strategy | Signal | Hold | Sharpe | Kill reason |
-|----------|--------|------|--------|-------------|
-| F | Bulk, no filter | 20d | 0.173 | Sharpe + win rate |
-| G | Bulk + EMA50 | 20d | 0.277 | Sharpe |
-| H | Bulk + institutional | 20d | 0.152 | Sharpe + n<20 |
-| I | Block + EMA50 | 20d | 0.389 | Sharpe |
-| J | Block + EMA50 + stop | 20d | 0.368 | Sharpe (whipsaw) |
-| K | Block + EMA50 | 5d | 0.254 | Sharpe (drift too slow) |
+| Strategy | Signal               | Hold | Sharpe | Kill reason             |
+| -------- | -------------------- | ---- | ------ | ----------------------- |
+| F        | Bulk, no filter      | 20d  | 0.173  | Sharpe + win rate       |
+| G        | Bulk + EMA50         | 20d  | 0.277  | Sharpe                  |
+| H        | Bulk + institutional | 20d  | 0.152  | Sharpe + n<20           |
+| I        | Block + EMA50        | 20d  | 0.389  | Sharpe                  |
+| J        | Block + EMA50 + stop | 20d  | 0.368  | Sharpe (whipsaw)        |
+| K        | Block + EMA50        | 5d   | 0.254  | Sharpe (drift too slow) |
 
 The block deal signal has genuine edge (clean anti-strategy, DSR ~0.99, win
 rates 53–67%) but is structurally incompatible with the Sharpe ≥ 0.5 gate.
@@ -171,4 +175,5 @@ price signals (overnight gaps, opening range) or a fundamentals-driven approach
 that generates higher mean return per event.
 
 ---
-*Registered: 2026-05-24 by Ritesh Kant.*
+
+_Registered: 2026-05-24 by Ritesh Kant._

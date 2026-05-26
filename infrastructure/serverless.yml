@@ -54,7 +54,7 @@ resources:
 
   Outputs:
     SignalEngineEcrRepoUrl:
-      Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/portfolio-analyzer/signal-engine"
+      Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/portfolio-analyzer/signal-engine'
       Export:
         Name: ${sls:stage}-signal-engine-ecr-url
 

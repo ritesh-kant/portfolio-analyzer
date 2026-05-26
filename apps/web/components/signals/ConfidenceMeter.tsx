@@ -6,8 +6,7 @@ interface ConfidenceMeterProps {
 
 export function ConfidenceMeter({ confidence }: ConfidenceMeterProps) {
   const clipped = Math.min(100, Math.max(0, confidence));
-  const colorClass =
-    clipped >= 70 ? 'bg-green-500' : clipped >= 40 ? 'bg-amber-400' : 'bg-red-400';
+  const colorClass = clipped >= 70 ? 'bg-green-500' : clipped >= 40 ? 'bg-amber-400' : 'bg-red-400';
 
   return (
     <div className="space-y-1">

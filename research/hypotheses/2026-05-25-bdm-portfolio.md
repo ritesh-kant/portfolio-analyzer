@@ -32,6 +32,7 @@ portfolio strategy. The per-trade σ of ~16% overstates the risk actually borne
 by a diversified portfolio of these positions.
 
 The mechanism that makes portfolio evaluation correct:
+
 - Each bulk deal is a company-specific institutional accumulation event
 - Concurrent events span different sectors and timing → low pairwise correlation
 - Averaging 14.9 positions daily shrinks daily portfolio σ relative to per-trade σ
@@ -46,7 +47,7 @@ evaluation framework for a multi-position strategy.
 - Signal trigger: bulk deal BUY disclosure on NSE, deal value ≥ ₹1 crore
 - Entry: T+1 open (day after disclosure)
 - Exit: T+20 close (20 trading sessions after entry)
-- Cost: 55 bps round-trip (_ROUND_TRIP_COST from bdm.py)
+- Cost: 55 bps round-trip (\_ROUND_TRIP_COST from bdm.py)
 - Exclusions: election periods, pledge-flagged stocks (same as F–K)
 
 ## 4. Portfolio Construction (pre-registered, immutable)
@@ -82,14 +83,14 @@ The cost allocation follows the convention: cost applied at exit date only.
 
 Primary metric is **annualised portfolio Sharpe** from daily portfolio returns.
 
-| Criterion | Kill threshold | Rationale |
-|-----------|---------------|-----------|
-| Annualised portfolio Sharpe | < 0.5 | Primary gate — same threshold as per-trade strategies |
-| Mean daily portfolio return | ≤ 0 | Strategy must be profitable |
-| DSR (on daily return series) | < 0.5 | Deflated Sharpe using n_trials from MLflow |
-| Active portfolio days | < 50% of dev period | Strategy must actually be deployed |
-| Anti-strategy Sharpe | > 0 | Flipping all returns negative must lose money |
-| Cost-stress Sharpe collapse | > 50% | 2× costs must not destroy the edge |
+| Criterion                    | Kill threshold      | Rationale                                             |
+| ---------------------------- | ------------------- | ----------------------------------------------------- |
+| Annualised portfolio Sharpe  | < 0.5               | Primary gate — same threshold as per-trade strategies |
+| Mean daily portfolio return  | ≤ 0                 | Strategy must be profitable                           |
+| DSR (on daily return series) | < 0.5               | Deflated Sharpe using n_trials from MLflow            |
+| Active portfolio days        | < 50% of dev period | Strategy must actually be deployed                    |
+| Anti-strategy Sharpe         | > 0                 | Flipping all returns negative must lose money         |
+| Cost-stress Sharpe collapse  | > 50%               | 2× costs must not destroy the edge                    |
 
 Note: per-trade win rate (≥ 52%) and per-trade Sharpe (≥ 0.5) are NOT gates
 for Strategy O — they are per-trade metrics and were already evaluated under
@@ -102,31 +103,31 @@ floor(260 trading days / 20) = 13. This will be used for DSR calculation.
 
 ## 7. Code References
 
-| File | Purpose |
-|------|---------|
-| `quant/strategies/bdm.py` | Signal generation + simulate_trades() (unchanged) |
-| `quant/strategies/bdm_portfolio.py` | NEW: portfolio aggregation + daily return series |
-| `quant/research/run.py` | `--strategy o` dispatch |
-| MLflow experiment | `bdm_portfolio_v1` |
+| File                                | Purpose                                           |
+| ----------------------------------- | ------------------------------------------------- |
+| `quant/strategies/bdm.py`           | Signal generation + simulate_trades() (unchanged) |
+| `quant/strategies/bdm_portfolio.py` | NEW: portfolio aggregation + daily return series  |
+| `quant/research/run.py`             | `--strategy o` dispatch                           |
+| MLflow experiment                   | `bdm_portfolio_v1`                                |
 
 ## 8. Result
 
 **Dev gate run: 2026-05-25**
 
-| Metric | Result | Gate | Status |
-|--------|--------|------|--------|
-| Eval events | 231 | — | — |
-| Trades executed | 173 | — | — |
-| Active portfolio days | 210 / 260 (80.8%) | ≥ 50% | ✅ PASS |
-| Mean concurrent positions | 18.4 | — | — |
-| Max concurrent positions | 49 | — | — |
-| Mean daily return | 8.38 bps/day | > 0 | ✅ PASS |
-| Annualised return | 21.1% | — | — |
-| Annualised vol | 5.2% | — | — |
-| Annualised portfolio Sharpe | **4.054** | ≥ 0.5 | ✅ PASS |
-| DSR (n_trials=13) | **0.992** | ≥ 0.5 | ✅ PASS |
-| Anti-strategy Sharpe | −6.529 | ≤ 0 | ✅ PASS |
-| Stress Sharpe (2× cost) | 4.054 (collapse 0.0%) | collapse ≤ 50% | ✅ PASS |
+| Metric                      | Result                | Gate           | Status  |
+| --------------------------- | --------------------- | -------------- | ------- |
+| Eval events                 | 231                   | —              | —       |
+| Trades executed             | 173                   | —              | —       |
+| Active portfolio days       | 210 / 260 (80.8%)     | ≥ 50%          | ✅ PASS |
+| Mean concurrent positions   | 18.4                  | —              | —       |
+| Max concurrent positions    | 49                    | —              | —       |
+| Mean daily return           | 8.38 bps/day          | > 0            | ✅ PASS |
+| Annualised return           | 21.1%                 | —              | —       |
+| Annualised vol              | 5.2%                  | —              | —       |
+| Annualised portfolio Sharpe | **4.054**             | ≥ 0.5          | ✅ PASS |
+| DSR (n_trials=13)           | **0.992**             | ≥ 0.5          | ✅ PASS |
+| Anti-strategy Sharpe        | −6.529                | ≤ 0            | ✅ PASS |
+| Stress Sharpe (2× cost)     | 4.054 (collapse 0.0%) | collapse ≤ 50% | ✅ PASS |
 
 **ALL 6 GATES PASS.**
 
@@ -138,20 +139,20 @@ The portfolio Sharpe of 4.054 vs per-trade Sharpe of ~0.174 confirms the hypothe
 
 **Hold-out gate run: 2026-05-25**
 
-| Metric | Result | Gate | Status |
-|--------|--------|------|--------|
-| Eval events | 247 | — | — |
-| Trades executed | 227 | — | — |
-| Active portfolio days | 467 / 654 (71.4%) | ≥ 50% | ✅ PASS |
-| Mean concurrent positions | 10.7 | — | — |
-| Max concurrent positions | 25 | — | — |
-| Mean daily portfolio return | **−11.83 bps/day** | > 0 | ❌ FAIL |
-| Annualised return | −29.8% | — | — |
-| Annualised vol | 4.2% | — | — |
-| Annualised portfolio Sharpe | **−7.032** | ≥ 0.5 | ❌ FAIL |
-| DSR (n_trials=13) | **0.000** | ≥ 0.5 | ❌ FAIL |
-| Anti-strategy Sharpe | 4.921 | ≤ 0 | ❌ FAIL |
-| Stress collapse (2× cost) | 100.0% | ≤ 50% | ❌ FAIL |
+| Metric                      | Result             | Gate  | Status  |
+| --------------------------- | ------------------ | ----- | ------- |
+| Eval events                 | 247                | —     | —       |
+| Trades executed             | 227                | —     | —       |
+| Active portfolio days       | 467 / 654 (71.4%)  | ≥ 50% | ✅ PASS |
+| Mean concurrent positions   | 10.7               | —     | —       |
+| Max concurrent positions    | 25                 | —     | —       |
+| Mean daily portfolio return | **−11.83 bps/day** | > 0   | ❌ FAIL |
+| Annualised return           | −29.8%             | —     | —       |
+| Annualised vol              | 4.2%               | —     | —       |
+| Annualised portfolio Sharpe | **−7.032**         | ≥ 0.5 | ❌ FAIL |
+| DSR (n_trials=13)           | **0.000**          | ≥ 0.5 | ❌ FAIL |
+| Anti-strategy Sharpe        | 4.921              | ≤ 0   | ❌ FAIL |
+| Stress collapse (2× cost)   | 100.0%             | ≤ 50% | ❌ FAIL |
 
 **5 of 6 gates fail. STRATEGY KILLED.**
 
@@ -170,16 +171,17 @@ The anti-strategy Sharpe of 4.921 (holding all positions short) confirms the sig
 
 **The BDM signal family (F–O) is now definitively closed.**
 
-| Strategy | Dev result | Holdout result | Verdict |
-|----------|------------|----------------|---------|
-| F (per-trade) | Sharpe 0.174 | — | Killed in dev |
-| G–K (variants) | Sharpe < 0.5 | — | Killed in dev |
-| O (portfolio) | Sharpe 4.054 | Sharpe −7.032 | **Killed in holdout** |
+| Strategy       | Dev result   | Holdout result | Verdict               |
+| -------------- | ------------ | -------------- | --------------------- |
+| F (per-trade)  | Sharpe 0.174 | —              | Killed in dev         |
+| G–K (variants) | Sharpe < 0.5 | —              | Killed in dev         |
+| O (portfolio)  | Sharpe 4.054 | Sharpe −7.032  | **Killed in holdout** |
 
 ## 9. Decision
 
 **KILLED — 2026-05-25.** Strategy failed all primary holdout gates. Signal inverted completely (anti-strategy Sharpe 4.921). Do NOT re-run, do NOT adjust parameters. The strategy is permanently dead per plan §3.1 + §14.
 
 ---
-*Registered: 2026-05-25 by Ritesh Kant. Signal (§3), portfolio construction (§4),
-and falsification criteria (§5) are pre-registered and immutable.*
+
+_Registered: 2026-05-25 by Ritesh Kant. Signal (§3), portfolio construction (§4),
+and falsification criteria (§5) are pre-registered and immutable._

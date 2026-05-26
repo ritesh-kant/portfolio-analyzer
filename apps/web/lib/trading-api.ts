@@ -17,7 +17,10 @@ async function get<T>(path: string): Promise<T> {
     cache: 'no-store',
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (res.status === 401) { cachedToken = null; throw new Error('Session expired — please refresh'); }
+  if (res.status === 401) {
+    cachedToken = null;
+    throw new Error('Session expired — please refresh');
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${path}`);
   return res.json() as Promise<T>;
 }
@@ -29,7 +32,10 @@ async function post<T>(path: string, body: Record<string, unknown> = {}): Promis
     headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
-  if (res.status === 401) { cachedToken = null; throw new Error('Session expired — please refresh'); }
+  if (res.status === 401) {
+    cachedToken = null;
+    throw new Error('Session expired — please refresh');
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${path}`);
   return res.json() as Promise<T>;
 }

@@ -91,28 +91,28 @@ uv run pytest tests/test_scoring.py -v
 
 ### Test coverage
 
-| File | What it tests |
-|------|--------------|
-| `test_scoring.py` | `_score_base`, `_half_kelly`, `_calc_position`, `_has_positive_news` — pure functions, no I/O |
-| `test_dedup.py` | News article hash deduplication — determinism, case normalisation |
+| File                  | What it tests                                                                                 |
+| --------------------- | --------------------------------------------------------------------------------------------- |
+| `test_scoring.py`     | `_score_base`, `_half_kelly`, `_calc_position`, `_has_positive_news` — pure functions, no I/O |
+| `test_dedup.py`       | News article hash deduplication — determinism, case normalisation                             |
 | `test_guard_logic.py` | All kill-switch checks (VIX, Nifty drop, ASM/GSM, earnings, price move) with mocked NSE calls |
-| `test_integration.py` | `SignalAgent` + `OrderAgent` end-to-end with mocked LLM and mocked MongoDB repositories |
+| `test_integration.py` | `SignalAgent` + `OrderAgent` end-to-end with mocked LLM and mocked MongoDB repositories       |
 
 ## Confidence Scoring
 
 Signals are scored across 9 weighted signals (max 100 pts):
 
-| Signal | Weight | Trigger |
-|--------|--------|---------|
-| RSI oversold | 12 | RSI < 40 |
-| MACD positive | 12 | histogram > 0 |
-| Price > EMA20 | 10 | short-term trend |
-| Price > EMA50 | 12 | medium-term trend |
-| Volume elevated | 10 | > 1.5× 20-day avg |
-| News catalyst | 14 | positive article for stock/sector |
-| Sector bullish | 12 | sector score > 60 |
-| Market positive | 8 | Nifty up + FII buying |
-| LLM bonus | 0–10 | AI reasoning quality |
+| Signal          | Weight | Trigger                           |
+| --------------- | ------ | --------------------------------- |
+| RSI oversold    | 12     | RSI < 40                          |
+| MACD positive   | 12     | histogram > 0                     |
+| Price > EMA20   | 10     | short-term trend                  |
+| Price > EMA50   | 12     | medium-term trend                 |
+| Volume elevated | 10     | > 1.5× 20-day avg                 |
+| News catalyst   | 14     | positive article for stock/sector |
+| Sector bullish  | 12     | sector score > 60                 |
+| Market positive | 8      | Nifty up + FII buying             |
+| LLM bonus       | 0–10   | AI reasoning quality              |
 
 Signals with `confidence >= MIN_SIGNAL_CONFIDENCE` (default 60) are passed to order_agent.
 
@@ -156,12 +156,12 @@ uv run mypy src
 
 Set `AI_PROVIDER` env var to switch providers — no code changes required:
 
-| Value | Model | Notes |
-|-------|-------|-------|
-| `ollama` | `llama3.1` (default) | Local, no API key needed |
-| `anthropic` | `claude-sonnet-4-5` | Requires `ANTHROPIC_API_KEY` |
-| `openai` | `gpt-4o` | Requires `OPENAI_API_KEY` |
-| `gemini` | `gemini-2.0-flash` | Requires `GEMINI_API_KEY` |
+| Value       | Model                | Notes                        |
+| ----------- | -------------------- | ---------------------------- |
+| `ollama`    | `llama3.1` (default) | Local, no API key needed     |
+| `anthropic` | `claude-sonnet-4-5`  | Requires `ANTHROPIC_API_KEY` |
+| `openai`    | `gpt-4o`             | Requires `OPENAI_API_KEY`    |
+| `gemini`    | `gemini-2.0-flash`   | Requires `GEMINI_API_KEY`    |
 
 ## Data Sources
 

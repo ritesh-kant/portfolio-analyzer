@@ -3,8 +3,8 @@ slug: cross-sectional-momentum
 strategy: cs_momentum
 status: registered
 registered: 2026-05-25
-finalized: ""
-decision: ""
+finalized: ''
+decision: ''
 final: false
 type: portfolio_strategy
 standalone: true
@@ -34,18 +34,20 @@ the top 15. Rebalance next month. Repeat.
    business keeps improving.
 
 **Why skip the most recent month (12-1 and not 12-0):**
-The very last month tends to *reverse* — stocks that went up last month often
+The very last month tends to _reverse_ — stocks that went up last month often
 pull back slightly in the current month. This is called the "short-term reversal
 effect" (documented by Jegadeesh 1990). Including it adds noise and hurts the
 signal. The "skip one month" convention is standard in academic momentum research
 since Jegadeesh-Titman 1993.
 
 **Why Midcap 150 specifically:**
+
 - Lower analyst coverage than Nifty 50 → slower information dissemination → drift lasts longer
 - Enough liquidity to execute at ₹50L scale
 - Higher return dispersion than large caps → stronger cross-sectional signal
 
 **Academic support:**
+
 - Jegadeesh & Titman (1993): Original 12-1 momentum paper on US equities; later
   replicated globally including India
 - NSE paper (2014–2021): Physical momentum portfolios on NSE 500 outperform Nifty 50
@@ -64,6 +66,7 @@ since Jegadeesh-Titman 1993.
 - **MaxDD with vol-target overlay:** targeted ≤ 20% (raw momentum without overlay: ~40%)
 
 Cost reference (Zerodha 2026, delivery):
+
 ```
 Per round-trip on ₹50K position:
   STT:       10 bps (₹50)      — sell-side only
@@ -75,6 +78,7 @@ Per round-trip on ₹50K position:
 ```
 
 Annual drag estimate at 40% monthly turnover:
+
 ```
 ~6 full portfolio turns/year × 45 bps = 270 bps ≈ 2.7% per year
 ```
@@ -114,6 +118,7 @@ BUFFER_PCT = 0.20  # stay in portfolio until dropping below top 20%
 ```
 
 **What is NOT allowed to change after registration:**
+
 - Lookback windows (252 / 21 trading days)
 - Universe percentile thresholds (10% / 20%)
 - Vol-target level (15%)
@@ -126,24 +131,24 @@ BUFFER_PCT = 0.20  # stay in portfolio until dropping below top 20%
 
 **Dev period gate (2023-07-01 → 2024-06-30). ALL must pass:**
 
-| Criterion | Kill if... | Notes |
-|-----------|-----------|-------|
-| Dev DSR (n_trials from MLflow) | < 0.6 | Raised from plan default 0.5 due to 16 prior experiments |
-| Dev Sharpe (net of costs) | < 0.7 | Annualized, monthly returns |
-| Sharpe under 2× cost-stress | < 0.5 | Slippage drawn from t-dist(df=4, scale=2×nominal) |
-| Capacity-adjusted DSR @ ₹50L | < 0.3 | Linear impact model at ₹3.3L per stock |
-| Anti-strategy DSR (bottom decile) | > 0 | If shorting losers also makes money → not a signal |
-| Max drawdown (vol-targeted portfolio) | > 20% | Measured on dev period equity curve |
-| Excess return vs Nifty Midcap 150 TRI | ≤ 0 | Net alpha, not gross |
-| Monthly rebalances in dev | < 12 | Statistical significance floor |
+| Criterion                             | Kill if... | Notes                                                    |
+| ------------------------------------- | ---------- | -------------------------------------------------------- |
+| Dev DSR (n_trials from MLflow)        | < 0.6      | Raised from plan default 0.5 due to 16 prior experiments |
+| Dev Sharpe (net of costs)             | < 0.7      | Annualized, monthly returns                              |
+| Sharpe under 2× cost-stress           | < 0.5      | Slippage drawn from t-dist(df=4, scale=2×nominal)        |
+| Capacity-adjusted DSR @ ₹50L          | < 0.3      | Linear impact model at ₹3.3L per stock                   |
+| Anti-strategy DSR (bottom decile)     | > 0        | If shorting losers also makes money → not a signal       |
+| Max drawdown (vol-targeted portfolio) | > 20%      | Measured on dev period equity curve                      |
+| Excess return vs Nifty Midcap 150 TRI | ≤ 0        | Net alpha, not gross                                     |
+| Monthly rebalances in dev             | < 12       | Statistical significance floor                           |
 
 **Hold-out gate (2024-07-01 → present). Single shot:**
 
-| Criterion | Kill if... |
-|-----------|-----------|
-| DSR | < 0.4 |
-| Excess return vs Nifty Midcap 150 TRI | ≤ 0 |
-| Max drawdown | > 25% |
+| Criterion                             | Kill if... |
+| ------------------------------------- | ---------- |
+| DSR                                   | < 0.4      |
+| Excess return vs Nifty Midcap 150 TRI | ≤ 0        |
+| Max drawdown                          | > 25%      |
 
 **This file becomes immutable once status = "registered". Results go in §7.**
 
@@ -153,20 +158,21 @@ BUFFER_PCT = 0.20  # stay in portfolio until dropping below top 20%
 
 All data is already on disk. No new acquisition required.
 
-| Source | Path | Use |
-|--------|------|-----|
-| NSE Bhavcopy OHLCV | `data/lake/nse_bhavcopy/*.parquet` | Prices for momentum score + simulation |
-| Midcap 150 constituents | `data/lake/midcap150_constituents.csv` | Universe definition |
-| Nifty Midcap 150 TRI | Derived from Bhavcopy (equal-weight benchmark proxy) | Alpha computation |
+| Source                  | Path                                                 | Use                                    |
+| ----------------------- | ---------------------------------------------------- | -------------------------------------- |
+| NSE Bhavcopy OHLCV      | `data/lake/nse_bhavcopy/*.parquet`                   | Prices for momentum score + simulation |
+| Midcap 150 constituents | `data/lake/midcap150_constituents.csv`               | Universe definition                    |
+| Nifty Midcap 150 TRI    | Derived from Bhavcopy (equal-weight benchmark proxy) | Alpha computation                      |
 
 **PIT discipline:**
+
 - Momentum score computed from OHLCV close prices, available same evening
 - Signal date = last trading day of month (t_end) at market close
 - Entry = next business day's open → no look-ahead bias
 - Constituent list: currently static CSV; for production, use point-in-time versioned list
 
 **Important caveat on static constituents:**
-The `midcap150_constituents.csv` is a snapshot of *current* constituents, not
+The `midcap150_constituents.csv` is a snapshot of _current_ constituents, not
 historical. This introduces mild survivorship bias (companies that survived to
 today look slightly better than the true historical universe). For dev/holdout
 this is acceptable (the recent past is what matters for live trading). For a
@@ -178,11 +184,12 @@ Flag this in the gate report; don't adjust the gate for it.
 ## 6. Train / Dev / Hold-out Split
 
 Standard plan splits apply:
+
 - **Train:** 2015-01-01 → 2023-06-30 (hyperparameter exploration, NOT gate)
 - **Dev:** 2023-07-01 → 2024-06-30 (gate evaluation — 12 monthly rebalances)
 - **Hold-out:** 2024-07-01 → present (NEVER touched until status = final)
 
-Note: momentum requires a 12-month lookback, so the *first signal date* in the
+Note: momentum requires a 12-month lookback, so the _first signal date_ in the
 dev period is 2023-07-31 (using prices back to 2022-07). The Bhavcopy covers
 back to 2015, so this is fully satisfied.
 
@@ -190,27 +197,27 @@ back to 2015, so this is fully satisfied.
 
 ## 7. Code References
 
-| File | Purpose |
-|------|---------|
-| `quant/strategies/cs_momentum.py` | Signal construction, simulation, gate metrics |
-| `quant/research/run.py` | `--strategy momentum` dispatch |
-| MLflow experiment | `cs_momentum_v1` (n_trials starts at 1, fresh experiment family) |
-| Hypothesis hash | (computed at finalization by holdout_lock.py) |
+| File                              | Purpose                                                          |
+| --------------------------------- | ---------------------------------------------------------------- |
+| `quant/strategies/cs_momentum.py` | Signal construction, simulation, gate metrics                    |
+| `quant/research/run.py`           | `--strategy momentum` dispatch                                   |
+| MLflow experiment                 | `cs_momentum_v1` (n_trials starts at 1, fresh experiment family) |
+| Hypothesis hash                   | (computed at finalization by holdout_lock.py)                    |
 
 ---
 
 ## 8. Result (filled after dev gate run)
 
-| Criterion | Result | Gate | Status |
-|-----------|--------|------|--------|
-| DSR | — | ≥ 0.6 | — |
-| Sharpe (net of costs) | — | ≥ 0.7 | — |
-| Sharpe under cost-stress | — | ≥ 0.5 | — |
-| Capacity DSR @ ₹50L | — | ≥ 0.3 | — |
-| Anti-strategy DSR | — | ≤ 0 | — |
-| Max drawdown (vol-targeted) | — | ≤ 20% | — |
-| Excess return vs benchmark | — | > 0 | — |
-| Monthly rebalances in dev | — | ≥ 12 | — |
+| Criterion                   | Result | Gate  | Status |
+| --------------------------- | ------ | ----- | ------ |
+| DSR                         | —      | ≥ 0.6 | —      |
+| Sharpe (net of costs)       | —      | ≥ 0.7 | —      |
+| Sharpe under cost-stress    | —      | ≥ 0.5 | —      |
+| Capacity DSR @ ₹50L         | —      | ≥ 0.3 | —      |
+| Anti-strategy DSR           | —      | ≤ 0   | —      |
+| Max drawdown (vol-targeted) | —      | ≤ 20% | —      |
+| Excess return vs benchmark  | —      | > 0   | —      |
+| Monthly rebalances in dev   | —      | ≥ 12  | —      |
 
 ---
 
@@ -222,6 +229,6 @@ back to 2015, so this is fully satisfied.
 
 ---
 
-*Registered: 2026-05-25.*
-*Signal construction (§3), falsification criteria (§4) are pre-registered and immutable.*
-*First genuinely new mechanism after A–O kill log. DSR gate raised to 0.6 due to 16 prior experiments.*
+_Registered: 2026-05-25._
+_Signal construction (§3), falsification criteria (§4) are pre-registered and immutable._
+_First genuinely new mechanism after A–O kill log. DSR gate raised to 0.6 due to 16 prior experiments._

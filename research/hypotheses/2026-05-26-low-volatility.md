@@ -3,8 +3,8 @@ slug: low-volatility
 strategy: low_vol
 status: registered
 registered: 2026-05-26
-finalized: ""
-decision: ""
+finalized: ''
+decision: ''
 final: false
 type: portfolio_strategy
 standalone: true
@@ -57,6 +57,7 @@ absolute return. The holdout period (July 2024 → present) coincides with the
 correction that destroyed momentum — exactly when low-vol should perform best.
 
 **Academic support:**
+
 - Baker, Bradley & Wurgler (2011): Low-vol anomaly robust across 33 countries.
 - Blitz & van Vliet (2007): Low-vol replicates in emerging markets specifically.
 - NSE-India research: Nifty Low Volatility 50 outperforms Nifty 50 on risk-adjusted
@@ -121,6 +122,7 @@ BUFFER_PCT = 0.30   # exit when rank > 30% (wider buffer than momentum)
 ```
 
 **What is NOT allowed to change after registration:**
+
 - Volatility lookback (252 days)
 - Minimum observations required (200)
 - Selection percentile (bottom 20%)
@@ -139,35 +141,35 @@ Note: this period is a bull market, which is structurally unfavorable for low-vo
 Gates are calibrated accordingly — lower absolute-return thresholds, strict
 drawdown threshold, and Sharpe-comparison anti-strategy gate.
 
-| Criterion | Kill if... | Rationale |
-|-----------|-----------|-----------|
-| Dev DSR | < 0.35 | 19 prior experiments; lower bar for bull-market period |
-| Dev Sharpe (net costs) | < 0.35 | Bull-market period; low-vol underperforms in absolute return by design |
-| Strategy Sharpe ≥ Anti Sharpe | False | Core anomaly test: low-vol must be better risk-adjusted than high-vol |
-| Max drawdown | > 15% | Stricter than momentum — controlled drawdown is the key promise |
-| Monthly rebalances | < 12 | Statistical floor |
-| Avg positions/month | < 5 | Filter not too aggressive |
+| Criterion                     | Kill if... | Rationale                                                              |
+| ----------------------------- | ---------- | ---------------------------------------------------------------------- |
+| Dev DSR                       | < 0.35     | 19 prior experiments; lower bar for bull-market period                 |
+| Dev Sharpe (net costs)        | < 0.35     | Bull-market period; low-vol underperforms in absolute return by design |
+| Strategy Sharpe ≥ Anti Sharpe | False      | Core anomaly test: low-vol must be better risk-adjusted than high-vol  |
+| Max drawdown                  | > 15%      | Stricter than momentum — controlled drawdown is the key promise        |
+| Monthly rebalances            | < 12       | Statistical floor                                                      |
+| Avg positions/month           | < 5        | Filter not too aggressive                                              |
 
 **Hold-out gate (2024-07-01 → present). Single shot:**
 
 Note: correction regime — where low-vol should demonstrate its value.
 
-| Criterion | Kill if... |
-|-----------|-----------|
-| DSR | < 0.35 |
-| Sharpe (net costs) | < 0.35 |
-| Max drawdown | > 20% |
-| Strategy Sharpe ≥ Anti Sharpe | False |
+| Criterion                     | Kill if... |
+| ----------------------------- | ---------- |
+| DSR                           | < 0.35     |
+| Sharpe (net costs)            | < 0.35     |
+| Max drawdown                  | > 20%      |
+| Strategy Sharpe ≥ Anti Sharpe | False      |
 
 ---
 
 ## 5. Data Needed
 
-| Source | Path | Use |
-|--------|------|-----|
-| NSE Bhavcopy OHLCV | `data/lake/nse_bhavcopy/*.parquet` | Daily closes for vol computation |
-| Screener.in annual P&L | `data/lake/earnings/screener_annual.parquet` | EPS quality filter |
-| Midcap 150 constituents | `data/lake/midcap150_constituents.csv` | Universe |
+| Source                  | Path                                         | Use                              |
+| ----------------------- | -------------------------------------------- | -------------------------------- |
+| NSE Bhavcopy OHLCV      | `data/lake/nse_bhavcopy/*.parquet`           | Daily closes for vol computation |
+| Screener.in annual P&L  | `data/lake/earnings/screener_annual.parquet` | EPS quality filter               |
+| Midcap 150 constituents | `data/lake/midcap150_constituents.csv`       | Universe                         |
 
 All data already on disk. No new acquisition.
 
@@ -183,24 +185,24 @@ All data already on disk. No new acquisition.
 
 ## 7. Code References
 
-| File | Purpose |
-|------|---------|
+| File                          | Purpose                          |
+| ----------------------------- | -------------------------------- |
 | `quant/strategies/low_vol.py` | Signal, simulation, gate metrics |
-| `quant/research/run.py` | `--strategy low_vol` dispatch |
-| MLflow experiment | `low_vol_v1` |
+| `quant/research/run.py`       | `--strategy low_vol` dispatch    |
+| MLflow experiment             | `low_vol_v1`                     |
 
 ---
 
 ## 8. Result (filled after dev gate run)
 
-| Criterion | Result | Gate | Status |
-|-----------|--------|------|--------|
-| DSR | — | ≥ 0.35 | — |
-| Sharpe | — | ≥ 0.35 | — |
-| Sharpe ≥ Anti Sharpe | — | True | — |
-| Max drawdown | — | ≤ 15% | — |
-| Monthly rebalances | — | ≥ 12 | — |
-| Avg positions | — | ≥ 5 | — |
+| Criterion            | Result | Gate   | Status |
+| -------------------- | ------ | ------ | ------ |
+| DSR                  | —      | ≥ 0.35 | —      |
+| Sharpe               | —      | ≥ 0.35 | —      |
+| Sharpe ≥ Anti Sharpe | —      | True   | —      |
+| Max drawdown         | —      | ≤ 15%  | —      |
+| Monthly rebalances   | —      | ≥ 12   | —      |
+| Avg positions        | —      | ≥ 5    | —      |
 
 ---
 
@@ -212,6 +214,6 @@ All data already on disk. No new acquisition.
 
 ---
 
-*Registered: 2026-05-26.*
-*Strategy S — 19 prior experiments. Gates calibrated for bull-market dev period.*
-*Cross-sectional gate is Sharpe comparison (risk-adjusted), not absolute-return spread.*
+_Registered: 2026-05-26._
+_Strategy S — 19 prior experiments. Gates calibrated for bull-market dev period._
+_Cross-sectional gate is Sharpe comparison (risk-adjusted), not absolute-return spread._

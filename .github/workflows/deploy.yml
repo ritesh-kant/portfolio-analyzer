@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       force_deploy:
-        description: "Force deploy all services, ignoring change detection"
+        description: 'Force deploy all services, ignoring change detection'
         type: boolean
         default: false
 
@@ -17,21 +17,21 @@ concurrency:
 
 env:
   AWS_REGION: ap-south-1
-  NODE_VERSION: "20"
-  PNPM_VERSION: "9.12.3"
+  NODE_VERSION: '20'
+  PNPM_VERSION: '9.12.3'
 
 jobs:
   changes:
     name: Detect changed paths
     runs-on: ubuntu-latest
     outputs:
-      infra:             ${{ steps.filter.outputs.infra }}
+      infra: ${{ steps.filter.outputs.infra }}
       portfolio-service: ${{ steps.filter.outputs.portfolio-service }}
       analytics-service: ${{ steps.filter.outputs.analytics-service }}
-      signals-service:   ${{ steps.filter.outputs.signals-service }}
-      signal-engine:     ${{ steps.filter.outputs.signal-engine }}
-      web:               ${{ steps.filter.outputs.web }}
-      any-backend:       ${{ steps.filter.outputs.any-backend }}
+      signals-service: ${{ steps.filter.outputs.signals-service }}
+      signal-engine: ${{ steps.filter.outputs.signal-engine }}
+      web: ${{ steps.filter.outputs.web }}
+      any-backend: ${{ steps.filter.outputs.any-backend }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -1,5 +1,4 @@
-export const SIGNALS_API_BASE =
-  process.env.NEXT_PUBLIC_SIGNALS_API_BASE ?? 'http://localhost:5001';
+export const SIGNALS_API_BASE = process.env.NEXT_PUBLIC_SIGNALS_API_BASE ?? 'http://localhost:5001';
 
 export interface SettingsResponse {
   provider: string;
@@ -122,7 +121,10 @@ async function fetchJson<T>(url: string): Promise<T> {
     headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
     cache: 'no-store',
   });
-  if (response.status === 401) { cachedToken = null; throw new Error('Session expired — please refresh'); }
+  if (response.status === 401) {
+    cachedToken = null;
+    throw new Error('Session expired — please refresh');
+  }
   if (!response.ok) throw new Error(`Request failed (${response.status}) for ${url}`);
   return (await response.json()) as T;
 }
@@ -131,7 +133,10 @@ export async function fetchSignalsSettings(): Promise<SettingsResponse> {
   return fetchJson<SettingsResponse>(`${SIGNALS_API_BASE}/signals/settings`);
 }
 
-export async function fetchSignalsNews(symbol?: string, companyName?: string): Promise<NewsResponse> {
+export async function fetchSignalsNews(
+  symbol?: string,
+  companyName?: string,
+): Promise<NewsResponse> {
   const params = new URLSearchParams();
   if (symbol) params.append('symbol', symbol);
   if (companyName) params.append('companyName', companyName);

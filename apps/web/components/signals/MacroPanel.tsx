@@ -24,9 +24,12 @@ export function MacroPanel({ indicators }: MacroPanelProps) {
           return (
             <div key={m.symbol} className="metric-chip space-y-1" title={m.context}>
               <p className="text-xs text-ink/50">{m.label}</p>
-              <p className="font-semibold">{m.value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
+              <p className="font-semibold">
+                {m.value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+              </p>
               <p className={`text-xs font-medium ${positive ? 'text-green-600' : 'text-red-500'}`}>
-                {positive ? '+' : ''}{m.changePercent.toFixed(2)}%
+                {positive ? '+' : ''}
+                {m.changePercent.toFixed(2)}%
               </p>
             </div>
           );

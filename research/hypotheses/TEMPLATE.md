@@ -1,11 +1,11 @@
 ---
 slug: <kebab-case-id>
-strategy: <strategy_module_name>     # e.g. pead_midcap
-status: draft                         # draft | registered | final | shipped | killed
-registered_at: ""
-finalized_at: ""
-decided_at: ""
-hypothesis_hash: ""                   # SHA of this file at finalization; used by holdout_lock
+strategy: <strategy_module_name> # e.g. pead_midcap
+status: draft # draft | registered | final | shipped | killed
+registered_at: ''
+finalized_at: ''
+decided_at: ''
+hypothesis_hash: '' # SHA of this file at finalization; used by holdout_lock
 ---
 
 # Hypothesis: <one sentence stating the directional bet>
@@ -48,7 +48,7 @@ just delaying the funeral.
 ## 5. Train / dev / hold-out split
 
 - **Train**: 2015-01-01 → 2023-06-30
-- **Dev**:   2023-07-01 → 2024-06-30
+- **Dev**: 2023-07-01 → 2024-06-30
 - **Hold-out**: 2024-07-01 → present (NEVER touched until status=final)
 
 ## 6. Code reference
@@ -74,4 +74,4 @@ just delaying the funeral.
 - [ ] **SHIP** — all gate criteria passed on dev; final hold-out passed
 - [ ] **KILL** — falsification criterion triggered; no second look
 - [ ] **ITERATE** — only allowed on train; requires opening a new
-        hypothesis file with a clear delta from this one
+      hypothesis file with a clear delta from this one

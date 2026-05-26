@@ -47,8 +47,8 @@ any feature that could be curve-fit to the training data.
 - Expected qualifying events per quarter for Midcap 150 universe: ~15–30
 
 Effect size is net of NSE transaction costs:
-  STT (0.1% sell-side) + exchange fees + SEBI fee + GST + conservative slippage
-  (0.15% both sides) = ~0.45% round-trip.
+STT (0.1% sell-side) + exchange fees + SEBI fee + GST + conservative slippage
+(0.15% both sides) = ~0.45% round-trip.
 
 ## 4. Falsification Criterion (pre-registered, immutable)
 
@@ -57,19 +57,19 @@ Effect size is net of NSE transaction costs:
 The strategy is **killed without appeal** if ANY of the following trigger on
 the dev set:
 
-| Criterion | Kill threshold |
-|-----------|---------------|
-| Mean 5-day net drift (gate-filtered events) | < 40 bps |
-| Sharpe (per-trade daily P&L) | < 0.5 |
-| Deflated Sharpe Ratio (vs n_trials from MLflow) | < 0.5 |
-| Anti-strategy: inverse signal net P&L | > 0 (if inverse also profits, not a signal) |
-| Cost-stress DSR (slippage t-dist df=4, scale=2×) | collapse > 50% vs nominal |
-| Capacity-adjusted DSR @ ₹50L AUM | < 0.3 |
-| Median trades per fold | < 30 |
+| Criterion                                        | Kill threshold                              |
+| ------------------------------------------------ | ------------------------------------------- |
+| Mean 5-day net drift (gate-filtered events)      | < 40 bps                                    |
+| Sharpe (per-trade daily P&L)                     | < 0.5                                       |
+| Deflated Sharpe Ratio (vs n_trials from MLflow)  | < 0.5                                       |
+| Anti-strategy: inverse signal net P&L            | > 0 (if inverse also profits, not a signal) |
+| Cost-stress DSR (slippage t-dist df=4, scale=2×) | collapse > 50% vs nominal                   |
+| Capacity-adjusted DSR @ ₹50L AUM                 | < 0.3                                       |
+| Median trades per fold                           | < 30                                        |
 
 "Adjust one parameter and re-run" is explicitly not permitted after seeing dev
 results. The dev period is for a single evaluation pass, not iterative tuning.
-All hyperparameters are chosen via purged k-fold inside the *training* split
+All hyperparameters are chosen via purged k-fold inside the _training_ split
 (2015-01-01 → 2023-06-30) only.
 
 ## 5. Feature List (pre-registered, ≤ 20 features)
@@ -77,24 +77,24 @@ All hyperparameters are chosen via purged k-fold inside the *training* split
 All features below are locked at hypothesis registration. Adding or removing
 features after seeing dev residuals is a process violation (plan §3.3).
 
-| # | Feature name | Source | Lag discipline |
-|---|---|---|---|
-| 1 | `eps_surprise_pct` | NSE filings vs YoY naive baseline | available at filing as_of_timestamp |
-| 2 | `revenue_surprise_pct` | NSE filings vs YoY naive baseline | available at filing as_of_timestamp |
-| 3 | `guidance_direction` | LLM filing parser (Deepseek V3) | available at filing as_of_timestamp |
-| 4 | `mgmt_tone_score` | LLM filing parser (Deepseek V3) | available at filing as_of_timestamp |
-| 5 | `day0_price_reaction` | NSE Bhavcopy, day of announcement | available at 18:00 IST announcement day |
-| 6 | `reaction_coverage_ratio` | day0 / historical median PEAD day0 (computed on train) | same as above |
-| 7 | `momentum_residual_5d` | OHLCV via builder.py | available T-1 close |
-| 8 | `momentum_residual_20d` | OHLCV via builder.py | available T-1 close |
-| 9 | `turnover_z_score_day0` | OHLCV via builder.py, announcement day | available at 18:00 IST announcement day |
-| 10 | `sector_return_5d` | NSE sector index via Bhavcopy | available T-1 close |
-| 11 | `nifty_return_5d` | Nifty index via Bhavcopy | available T-1 close |
-| 12 | `market_cap_log` | shares_outstanding × close (from Bhavcopy) | available T-1 close |
-| 13 | `analyst_coverage_proxy` | screener.in (best-effort; 0 if unavailable) | best-effort; no data → 0 |
-| 14 | `days_since_last_result` | derived from filings history | available at filing timestamp |
-| 15 | `quarter_sin` | sin(2π × fiscal_quarter / 4) | available at announcement |
-| 16 | `quarter_cos` | cos(2π × fiscal_quarter / 4) | available at announcement |
+| #   | Feature name              | Source                                                 | Lag discipline                          |
+| --- | ------------------------- | ------------------------------------------------------ | --------------------------------------- |
+| 1   | `eps_surprise_pct`        | NSE filings vs YoY naive baseline                      | available at filing as_of_timestamp     |
+| 2   | `revenue_surprise_pct`    | NSE filings vs YoY naive baseline                      | available at filing as_of_timestamp     |
+| 3   | `guidance_direction`      | LLM filing parser (Deepseek V3)                        | available at filing as_of_timestamp     |
+| 4   | `mgmt_tone_score`         | LLM filing parser (Deepseek V3)                        | available at filing as_of_timestamp     |
+| 5   | `day0_price_reaction`     | NSE Bhavcopy, day of announcement                      | available at 18:00 IST announcement day |
+| 6   | `reaction_coverage_ratio` | day0 / historical median PEAD day0 (computed on train) | same as above                           |
+| 7   | `momentum_residual_5d`    | OHLCV via builder.py                                   | available T-1 close                     |
+| 8   | `momentum_residual_20d`   | OHLCV via builder.py                                   | available T-1 close                     |
+| 9   | `turnover_z_score_day0`   | OHLCV via builder.py, announcement day                 | available at 18:00 IST announcement day |
+| 10  | `sector_return_5d`        | NSE sector index via Bhavcopy                          | available T-1 close                     |
+| 11  | `nifty_return_5d`         | Nifty index via Bhavcopy                               | available T-1 close                     |
+| 12  | `market_cap_log`          | shares_outstanding × close (from Bhavcopy)             | available T-1 close                     |
+| 13  | `analyst_coverage_proxy`  | screener.in (best-effort; 0 if unavailable)            | best-effort; no data → 0                |
+| 14  | `days_since_last_result`  | derived from filings history                           | available at filing timestamp           |
+| 15  | `quarter_sin`             | sin(2π × fiscal_quarter / 4)                           | available at announcement               |
+| 16  | `quarter_cos`             | cos(2π × fiscal_quarter / 4)                           | available at announcement               |
 
 Total: **16 features**. The model hard-errors if passed more than 20.
 
@@ -125,21 +125,22 @@ Use the list as of T-1 to avoid reconstitution look-ahead.
 
 **Evaluated 2026-05-20. Gate check on dev split (2023-07-01 → 2024-06-30).**
 
-| Metric | Value | Threshold | Pass? |
-|--------|-------|-----------|-------|
-| Mean 5-day net drift | 53.4 bps | ≥ 40 bps | PASS |
-| Sharpe (per-trade) | 0.077 | ≥ 0.5 | **FAIL** |
-| DSR (n_trials=5) | 0.392 | ≥ 0.5 | **FAIL** |
-| Anti-strategy DSR | 0.000 | ≤ 0.5 | PASS |
-| Cost-stress DSR collapse | 48.1% | ≤ 50% | PASS |
-| Capacity DSR @ ₹50L | 0.375 | ≥ 0.3 | PASS |
-| Median trades/fold | 31 | ≥ 30 | PASS |
+| Metric                   | Value    | Threshold | Pass?    |
+| ------------------------ | -------- | --------- | -------- |
+| Mean 5-day net drift     | 53.4 bps | ≥ 40 bps  | PASS     |
+| Sharpe (per-trade)       | 0.077    | ≥ 0.5     | **FAIL** |
+| DSR (n_trials=5)         | 0.392    | ≥ 0.5     | **FAIL** |
+| Anti-strategy DSR        | 0.000    | ≤ 0.5     | PASS     |
+| Cost-stress DSR collapse | 48.1%    | ≤ 50%     | PASS     |
+| Capacity DSR @ ₹50L      | 0.375    | ≥ 0.3     | PASS     |
+| Median trades/fold       | 31       | ≥ 30      | PASS     |
 
 - Total trades: 145 (dev period, 5 purged k-folds)
 - MLflow experiment: `pead_midcap` (5 runs, including 4 debug/bug-fix runs)
 - Decision: **KILL** — Sharpe and DSR fail gate criteria.
 
 **Post-mortem (key learnings):**
+
 1. Mean drift of 53 bps confirms PEAD is real in Nifty Midcap 150 — the
    economic mechanism is there. The signal just has too much noise.
 2. The TTM EPS series from screener.in was the wrong proxy. TTM changes
@@ -151,6 +152,7 @@ Use the list as of T-1 to avoid reconstitution look-ahead.
    DSR is honest about all data peeks. Next hypothesis should start clean.
 
 **Recommended next hypothesis (PEAD-v2):**
+
 - Use BSE corporate filing dates from `https://api.bseindia.com` (less
   aggressively rate-limited than NSE/Akamai).
 - Use standalone + consolidated quarterly EPS from the BSE filing PDF
@@ -163,12 +165,12 @@ This section is immutable after this commit.
 
 ## 9. Decision
 
-*(Filled after hold-out, if and only if all dev gate criteria pass.)*
+_(Filled after hold-out, if and only if all dev gate criteria pass.)_
 
 - Hold-out DSR:
 - Hold-out mean drift:
 - Hold-out alpha vs Nifty:
-- Decision: [ ] Ship to paper  [ ] Kill
+- Decision: [ ] Ship to paper [ ] Kill
 
 ---
 
@@ -178,17 +180,17 @@ This section is immutable after this commit.
 
 The pre-registered entry gate ("EPS surprise > 1 std above universe mean")
 was initially implemented using the arithmetic mean and std of the
-cross-sectional distribution on each announcement day.  This is broken when
+cross-sectional distribution on each announcement day. This is broken when
 one stock reports a recovery-from-distress (e.g. a small finance bank with
 near-zero prior-year EPS producing a 4000%+ YoY change): the outlier inflates
 both the mean and std, making the threshold > 1000%, which blocks all genuine
 candidates on that day.
 
 **Change**: switch to `median + surprise_std_threshold × (1.4826 × MAD)` where
-MAD is the Median Absolute Deviation.  This is the standard in PEAD literature
+MAD is the Median Absolute Deviation. This is the standard in PEAD literature
 (equivalent to the robust z-score estimator used in López de Prado's work).
 It does NOT change the "1 sigma above universe" criterion — it replaces the
-non-robust estimator with a robust one.  This is a data-quality fix, not
+non-robust estimator with a robust one. This is a data-quality fix, not
 post-hoc tuning.
 
 This change is documented here rather than in the feature list because it
@@ -196,5 +198,5 @@ affects the estimator, not the feature definition or threshold value.
 
 ---
 
-*Registered: 2026-05-19 by Ritesh Kant. Immutable after commit. Changes to
-falsification criteria or feature list after this commit are process violations.*
+_Registered: 2026-05-19 by Ritesh Kant. Immutable after commit. Changes to
+falsification criteria or feature list after this commit are process violations._
