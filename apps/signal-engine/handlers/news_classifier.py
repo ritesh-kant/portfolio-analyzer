@@ -49,11 +49,11 @@ async def _process_message(msg: dict, settings: Settings) -> bool:
     logger.info("[CLASSIFIER] processing news_id=%s headline=%.80s", news_id, headline)
 
     raw_text = article.get("raw_text", headline)
-    logger.info("[CLASSIFIER] calling Gemini (%s) for news_id=%s...", settings.gemini_model, news_id)
-    result = classify(raw_text, settings.gemini_api_key, model=settings.gemini_model)
+    logger.info("[CLASSIFIER] calling LLM (provider=%s) for news_id=%s...", settings.ai_provider, news_id)
+    result = classify(raw_text, settings)
 
     if result is None:
-        logger.warning("[CLASSIFIER] Gemini failed for news_id=%s headline=%.80s — marking classified",
+        logger.warning("[CLASSIFIER] LLM failed for news_id=%s headline=%.80s — marking classified",
                        news_id, headline)
         await news_raw(db).update_one(
             {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}

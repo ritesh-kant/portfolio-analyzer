@@ -18,8 +18,10 @@ import json
 import logging
 from typing import Any
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
+
+from src.config import Settings
+from src.providers.llm_factory import get_llm
 
 logger = logging.getLogger(__name__)
 
@@ -42,15 +44,10 @@ Rules:
 _HUMAN_TMPL = "NEWS:\n{text}"
 
 
-def classify(raw_text: str, gemini_api_key: str, model: str = "gemini-1.5-flash") -> dict[str, Any] | None:
+def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
     """Classify a news article. Returns parsed dict or None on failure."""
     try:
-        llm = ChatGoogleGenerativeAI(
-            model=model,
-            google_api_key=gemini_api_key,
-            temperature=0.1,
-            max_tokens=512,
-        )
+        llm = get_llm(settings=settings)
         messages = [
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=_HUMAN_TMPL.format(text=raw_text[:2000])),
@@ -58,7 +55,7 @@ def classify(raw_text: str, gemini_api_key: str, model: str = "gemini-1.5-flash"
         response = llm.invoke(messages)
         raw = response.content if isinstance(response.content, str) else str(response.content)
         raw = raw.strip()
-        logger.info("[GEMINI] raw response (first 300 chars): %s", raw[:300])
+        logger.info("[LLM] raw response (first 300 chars): %s", raw[:300])
 
         # Strip accidental markdown fences
         if raw.startswith("```"):
@@ -71,7 +68,7 @@ def classify(raw_text: str, gemini_api_key: str, model: str = "gemini-1.5-flash"
         # Validate required keys
         required = {"sector", "signal", "magnitude", "stocks", "confidence", "reasoning"}
         if not required.issubset(result.keys()):
-            logger.warning("[GEMINI] incomplete response — missing keys, got: %s", list(result.keys()))
+            logger.warning("[LLM] incomplete response — missing keys, got: %s", list(result.keys()))
             return None
 
         # Normalise
@@ -83,8 +80,8 @@ def classify(raw_text: str, gemini_api_key: str, model: str = "gemini-1.5-flash"
         return result
 
     except json.JSONDecodeError as exc:
-        logger.warning("[GEMINI] JSON parse failed err=%s raw=%.200s", exc, raw if 'raw' in dir() else '?')
+        logger.warning("[LLM] JSON parse failed err=%s raw=%.200s", exc, raw if 'raw' in dir() else '?')
         return None
     except Exception as exc:
-        logger.error("[GEMINI] unexpected error err=%s", exc)
+        logger.error("[LLM] unexpected error err=%s", exc)
         return None

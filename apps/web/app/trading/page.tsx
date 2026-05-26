@@ -685,7 +685,7 @@ function SignalsTab({ signals }: { signals: NtSignal[] }) {
                   {expanded === s._id && (
                     <tr className="border-b border-black/5 bg-black/[0.015]">
                       <td colSpan={7} className="px-4 pb-3 pt-1">
-                        <p className="text-xs font-semibold text-ink/50">Gemini Reasoning</p>
+                        <p className="text-xs font-semibold text-ink/50">AI Reasoning</p>
                         <p className="mt-1 max-w-2xl text-xs leading-relaxed text-ink/70">
                           {s.reasoning || 'No reasoning recorded.'}
                         </p>
@@ -993,9 +993,9 @@ export default function TradingPage() {
         fetchNews(50),
         fetchStats(),
       ]);
-      if (pRes.status === 'fulfilled') setPositions(pRes.value.positions);
-      if (sRes.status === 'fulfilled') setSignals(sRes.value.signals);
-      if (nRes.status === 'fulfilled') setNews(nRes.value.articles);
+      if (pRes.status === 'fulfilled') setPositions(pRes.value.positions ?? []);
+      if (sRes.status === 'fulfilled') setSignals(sRes.value.signals ?? []);
+      if (nRes.status === 'fulfilled') setNews(nRes.value.articles ?? []);
       if (stRes.status === 'fulfilled') setStats(stRes.value);
       setError(null);
     } catch (err) {
@@ -1070,7 +1070,7 @@ export default function TradingPage() {
         <div>
           <h1 className="font-display text-2xl font-bold tracking-tight">News Trader</h1>
           <p className="text-sm text-ink/60">
-            Paper · NSE/BSE · Event-driven · Trailing SL · Gemini classifier
+            Paper · NSE/BSE · Event-driven · Trailing SL · AI classifier
           </p>
         </div>
         <div className="flex items-center gap-2">

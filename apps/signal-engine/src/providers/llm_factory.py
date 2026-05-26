@@ -64,8 +64,9 @@ def get_llm(provider: str | None = None, settings: Settings | None = None) -> ob
             max_tokens=2048,
         )
 
-    # ollama — local, no API key
+    # ollama — local, no API key; format="json" forces valid JSON output
     return ChatOllama(
         model=s.ollama_model,
         base_url=s.ollama_base_url,
+        format="json",
     )

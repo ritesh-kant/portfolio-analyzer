@@ -121,6 +121,7 @@ functions:
           method: get
   ntStats:
     handler: src/handlers/nt-stats.handler
+    timeout: 60
     events:
       - httpApi:
           path: /nt/stats

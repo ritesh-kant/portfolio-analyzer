@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-4-5"
     openai_model: str = "gpt-4o"
     gemini_model: str = "gemini-2.0-flash"
-    kimi_model: str = "moonshotai/kimi-k2-instruct"
+    kimi_model: str = "moonshotai/kimi-k2"
     ollama_model: str = "llama3.1"
 
     # Provider credentials

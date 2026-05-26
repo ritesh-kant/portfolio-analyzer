@@ -106,7 +106,7 @@ async def trigger_pipeline() -> dict:
                 acted_signals += 1
         except Exception as exc:
             logger.error("[PIPELINE] classifier error news_id=%s err=%s", news_id, exc)
-        await asyncio.sleep(0.3)  # avoid Gemini rate limits
+        await asyncio.sleep(0.05)  # small gap between articles
 
     logger.info("[PIPELINE] classification done — %d actionable signals", acted_signals)
 
