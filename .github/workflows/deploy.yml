@@ -334,11 +334,6 @@ jobs:
             --output text)
           echo "uri=$URI" >> "$GITHUB_OUTPUT"
 
-      - name: Login to Amazon ECR
-        run: |
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
-            docker login --username AWS --password-stdin ${{ steps.ecr.outputs.uri }}
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
@@ -346,6 +341,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
