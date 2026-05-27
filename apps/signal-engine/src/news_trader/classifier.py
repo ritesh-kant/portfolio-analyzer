@@ -1,16 +1,17 @@
-"""Gemini 1.5 Flash news classifier.
+"""News classifier — calls the configured LLM and returns a structured signal.
 
-Calls Gemini with a structured prompt and parses the JSON response.
 Returns None on any failure so the caller can skip gracefully.
 
-Output schema (matches plan spec):
+Output schema:
     {
         "sector": str,
         "signal": "bullish" | "bearish" | "neutral",
         "magnitude": "major" | "moderate" | "minor",
         "stocks": list[str],           # NSE symbols, max 5
         "confidence": "high" | "medium" | "low",
-        "reasoning": str
+        "reasoning": str,
+        "llm_model": str,              # model name used (e.g. "gemini-2.0-flash")
+        "prompt_version": str,         # semver — bump when _SYSTEM prompt changes
     }
 """
 
@@ -24,6 +25,10 @@ from src.config import Settings
 from src.providers.llm_factory import get_llm
 
 logger = logging.getLogger(__name__)
+
+# Fallback used when Settings is unavailable (tests, one-off scripts).
+# The canonical value lives in Settings.nt_classifier_prompt_version (env: NT_CLASSIFIER_PROMPT_VERSION).
+_DEFAULT_PROMPT_VERSION = "1.0.0"
 
 _SYSTEM = """You are a senior Indian stock market analyst with deep expertise in NSE/BSE listed companies.
 
@@ -48,6 +53,7 @@ def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
     """Classify a news article. Returns parsed dict or None on failure."""
     try:
         llm = get_llm(settings=settings)
+        llm_model = _resolve_model_name(settings)
         messages = [
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=_HUMAN_TMPL.format(text=raw_text[:2000])),
@@ -77,6 +83,9 @@ def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
         result["magnitude"] = result["magnitude"].lower()
         result["stocks"] = [s.upper().strip() for s in result.get("stocks", [])[:5]]
 
+        result["llm_model"] = llm_model
+        result["prompt_version"] = getattr(settings, "nt_classifier_prompt_version", _DEFAULT_PROMPT_VERSION)
+
         return result
 
     except json.JSONDecodeError as exc:
@@ -85,3 +94,17 @@ def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
     except Exception as exc:
         logger.error("[LLM] unexpected error err=%s", exc)
         return None
+
+
+def _resolve_model_name(settings: Settings) -> str:
+    """Return the actual model string for the active provider."""
+    p = settings.ai_provider.lower()
+    mapping = {
+        "anthropic": settings.anthropic_model,
+        "openai": settings.openai_model,
+        "gemini": settings.gemini_model,
+        "kimi": settings.kimi_model,
+        "deepseek": settings.deepseek_model,
+        "ollama": settings.ollama_model,
+    }
+    return mapping.get(p, p)

@@ -21,7 +21,7 @@ from bson import ObjectId
 from src.config import Settings
 from src.db.client import get_db
 from src.news_trader.db import ensure_indexes, positions, signals
-from src.news_trader.prices import get_ltp
+from src.news_trader.prices import get_ltp, get_market_snapshot
 from src.news_trader.telegram import alert_trade_entered
 from src.news_trader.trailing_sl import calc_qty, initial_trailing_sl
 
@@ -74,6 +74,7 @@ async def _process_signal(signal_doc: dict[str, Any], settings: Settings) -> int
         target = price * (1.0 + settings.nt_target_pct)
         sl = initial_trailing_sl(price, settings.nt_sl_pct)
         now = datetime.now(tz=timezone.utc)
+        market_ctx = get_market_snapshot(sector=signal_doc.get("sector"))
 
         position_doc = {
             "symbol": symbol,
@@ -95,6 +96,9 @@ async def _process_signal(signal_doc: dict[str, Any], settings: Settings) -> int
             "gross_pnl": None,
             "net_pnl": None,
             "paper": paper,
+            # Market context at entry — frozen snapshot for strategy evaluation
+            "entry_nifty50": market_ctx["nifty50"],
+            "entry_sector_index": market_ctx["sector_index"],
         }
 
         if paper:

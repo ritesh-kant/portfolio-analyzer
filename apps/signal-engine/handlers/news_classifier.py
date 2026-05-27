@@ -75,6 +75,8 @@ async def _process_message(msg: dict[str, Any], settings: Settings, run_id: str 
         "stocks": result["stocks"],
         "confidence": result["confidence"],
         "reasoning": result["reasoning"],
+        "llm_model": result["llm_model"],
+        "prompt_version": result["prompt_version"],
         "created_at": datetime.now(tz=timezone.utc),
         "acted_on": False,
     }

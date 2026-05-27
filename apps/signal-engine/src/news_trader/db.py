@@ -2,8 +2,8 @@
 
 Collections
 -----------
-nt_news_raw   — raw ingested articles (TTL 7 days); deduplicated on topic_hash
-nt_signals    — Gemini-classified signals
+nt_news_raw   — raw ingested articles (TTL 90 days); deduplicated on topic_hash
+nt_signals    — classifier output (every signal, actionable or not)
 nt_positions  — open + closed paper/live positions with trailing SL state
 """
 
@@ -25,9 +25,10 @@ def positions(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:  # type: igno
 async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:  # type: ignore[type-arg]
     # Unique dedup on topic_hash so concurrent ingester invocations are safe
     await news_raw(db).create_index("topic_hash", unique=True, background=True)
-    # TTL: expire raw articles after 7 days
+    # TTL: expire raw articles after 90 days (long enough to replay classifier on old signals)
+    # NOTE: changing this on an existing collection requires dropping and recreating the index.
     await news_raw(db).create_index(
-        "ingested_at", expireAfterSeconds=7 * 24 * 3600, background=True
+        "ingested_at", expireAfterSeconds=90 * 24 * 3600, background=True
     )
     await signals(db).create_index("news_id", background=True)
     await signals(db).create_index("created_at", background=True)

@@ -87,7 +87,13 @@ async def _monitor_position(pos: dict, settings: Settings) -> str:
                     "current_price": price,
                     "gross_pnl": gross_pnl,
                     "net_pnl": net_pnl,
-                }
+                },
+                "$push": {
+                    "price_snapshots": {
+                        "$each": [{"t": now.isoformat(), "p": price}],
+                        "$slice": -100,  # keep last 100 ticks (~5 hours at 3-min interval)
+                    }
+                },
             },
         )
         logger.info(
@@ -107,9 +113,20 @@ async def _monitor_position(pos: dict, settings: Settings) -> str:
         )
         return f"closed:{exit_reason}"
 
-    # Position stays open — persist updated SL + latest price for unrealized P&L
-    update: dict = {"highest_price": new_highest, "trailing_sl": new_sl, "current_price": price}
-    await positions(db).update_one({"_id": pos["_id"]}, {"$set": update})
+    # Position stays open — persist updated SL + latest price, append to history
+    now = datetime.now(tz=timezone.utc)
+    await positions(db).update_one(
+        {"_id": pos["_id"]},
+        {
+            "$set": {"highest_price": new_highest, "trailing_sl": new_sl, "current_price": price},
+            "$push": {
+                "price_snapshots": {
+                    "$each": [{"t": now.isoformat(), "p": price}],
+                    "$slice": -100,
+                }
+            },
+        },
+    )
 
     if sl_raised:
         logger.info("sl_raised symbol=%s old=%.2f new=%.2f price=%.2f",

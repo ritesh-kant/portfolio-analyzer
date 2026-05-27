@@ -34,3 +34,42 @@ def get_ltp(symbol: str) -> float | None:
 def get_ltps(symbols: list[str]) -> dict[str, float]:
     """Batch price fetch. Returns only symbols with valid prices."""
     return {s: p for s in symbols if (p := get_ltp(s)) is not None}
+
+
+# NSE sector index tickers on Yahoo Finance
+_SECTOR_TICKERS: dict[str, str] = {
+    "Banking": "^NSEBANK",
+    "IT": "^CNXIT",
+    "Auto": "^CNXAUTO",
+    "Pharma": "^CNXPHARMA",
+    "Energy": "^CNXENERGY",
+    "FMCG": "^CNXFMCG",
+    "Metal": "^CNXMETAL",
+    "Realty": "^CNXREALTY",
+    "Media": "^CNXMEDIA",
+    "PSU Bank": "^CNXPSUBANK",
+}
+
+
+def get_market_snapshot(sector: str | None = None) -> dict[str, float | None]:
+    """Fetch NIFTY 50 and optionally the sector index at the current moment.
+
+    Stored once at trade entry so market regime can be reconstructed later.
+    Returns None values on fetch failure — never raises.
+    """
+    snapshot: dict[str, float | None] = {"nifty50": None, "sector_index": None}
+    try:
+        snapshot["nifty50"] = get_ltp("^NSEI")
+    except Exception as exc:
+        logger.warning("market_snapshot_nifty_failed err=%s", exc)
+
+    if sector and sector in _SECTOR_TICKERS:
+        try:
+            t = yf.Ticker(_SECTOR_TICKERS[sector])
+            fi: Any = t.fast_info
+            price = getattr(fi, "last_price", None) or getattr(fi, "regular_market_price", None)
+            snapshot["sector_index"] = float(price) if price else None
+        except Exception as exc:
+            logger.warning("market_snapshot_sector_failed sector=%s err=%s", sector, exc)
+
+    return snapshot

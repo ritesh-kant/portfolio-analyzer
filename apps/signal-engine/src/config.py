@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     nt_target_pct: float = 0.08               # profit target (8%)
     nt_max_hold_days: int = 5                 # force-close on day 5
     nt_news_delay_seconds: int = 900          # SQS delay after classification (15 min)
+    nt_classifier_prompt_version: str = "1.0.0"  # bump when classifier prompt changes
 
     # Auth
     signal_engine_api_key: str = _DEFAULT_API_KEY
