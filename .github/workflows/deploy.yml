@@ -28,7 +28,6 @@ jobs:
       infra: ${{ steps.filter.outputs.infra }}
       portfolio-service: ${{ steps.filter.outputs.portfolio-service }}
       analytics-service: ${{ steps.filter.outputs.analytics-service }}
-      signals-service: ${{ steps.filter.outputs.signals-service }}
       signal-engine: ${{ steps.filter.outputs.signal-engine }}
       web: ${{ steps.filter.outputs.web }}
       any-backend: ${{ steps.filter.outputs.any-backend }}
@@ -49,9 +48,6 @@ jobs:
             analytics-service:
               - 'apps/analytics-service/**'
               - 'packages/**'
-            signals-service:
-              - 'apps/signals-service/**'
-              - 'packages/**'
             signal-engine:
               - 'apps/signal-engine/**'
               - 'infrastructure/serverless.yml'
@@ -62,7 +58,6 @@ jobs:
             any-backend:
               - 'apps/portfolio-service/**'
               - 'apps/analytics-service/**'
-              - 'apps/signals-service/**'
               - 'apps/signal-engine/**'
               - 'packages/**'
 
@@ -214,79 +209,15 @@ jobs:
           ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
         run: pnpm exec serverless deploy --stage prod --verbose
 
-  deploy-signals-service:
-    name: Deploy signals-service (AWS)
-    needs: [changes, build]
-    if: >
-      always() &&
-      needs.build.result == 'success' &&
-      (inputs.force_deploy == true || needs.changes.outputs.signals-service == 'true')
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Restore build cache
-        id: build-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            node_modules
-            packages/*/node_modules
-            packages/*/dist
-            apps/*/node_modules
-          key: build-${{ github.sha }}
-
-      - name: Install dependencies (if cache miss)
-        if: steps.build-cache.outputs.cache-hit != 'true'
-        run: pnpm install --frozen-lockfile
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Deploy signals-service
-        working-directory: apps/signals-service
-        env:
-          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
-          NEWSDATA_API_KEY: ${{ secrets.NEWSDATA_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
-          AI_PROVIDER: ${{ vars.AI_PROVIDER }}
-          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
-          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
-        run: pnpm exec serverless deploy --stage prod --verbose
-
   deploy-signal-engine:
     name: Deploy signal-engine (AWS ECR + Lambda)
-    needs: [changes, build, deploy-infra, deploy-portfolio-service, deploy-signals-service]
+    needs: [changes, build, deploy-infra, deploy-portfolio-service]
     if: >
       always() &&
       needs.build.result == 'success' &&
       (inputs.force_deploy == true || needs.changes.outputs.signal-engine == 'true') &&
       (needs.deploy-infra.result == 'success' || needs.deploy-infra.result == 'skipped') &&
-      (needs.deploy-portfolio-service.result == 'success' || needs.deploy-portfolio-service.result == 'skipped') &&
-      (needs.deploy-signals-service.result == 'success' || needs.deploy-signals-service.result == 'skipped')
+      (needs.deploy-portfolio-service.result == 'success' || needs.deploy-portfolio-service.result == 'skipped')
     runs-on: ubuntu-latest
     environment: production
     steps:
