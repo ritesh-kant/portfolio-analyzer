@@ -29,6 +29,7 @@ provider:
     AUTH_SECRET: ${env:AUTH_SECRET, 'local-dev-secret-change-in-prod'}
     ALLOWED_ORIGIN: ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
     SIGNAL_ENGINE_INGESTER_FN: signal-engine-${self:provider.stage}-newsIngester
+    NT_NEWS_DELAY_SECONDS: ${env:NT_NEWS_DELAY_SECONDS, '900'}
   iam:
     role:
       statements:

@@ -10,8 +10,8 @@ async function connect() {
   await mongoose.connect(config.mongodbUri, { serverSelectionTimeoutMS: 3000 });
 }
 
-const DELAY_MS = 15 * 60 * 1000; // 15-min SQS delay
-const RUN_TTL_MS = 22 * 60 * 1000; // consider run stale after 22 min
+const DELAY_MS = parseInt(process.env.NT_NEWS_DELAY_SECONDS ?? '900', 10) * 1000; // 15-min SQS delay
+const RUN_TTL_MS = DELAY_MS + 7 * 60 * 1000; // stale after delay + 7 min buffer
 
 export const handler = requireAuth(async () => {
   await connect();
