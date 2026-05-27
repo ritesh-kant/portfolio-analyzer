@@ -330,8 +330,14 @@ jobs:
         id: ecr
         run: |
           URI=$(aws cloudformation list-exports \
+            --no-paginate \
             --query "Exports[?Name=='prod-signal-engine-ecr-url'].Value" \
             --output text)
+          URI="${URI//[$'\t\r\n ']}"
+          if [[ -z "$URI" || "$URI" == "None" ]]; then
+            echo "ERROR: CloudFormation export 'prod-signal-engine-ecr-url' not found. Run deploy-infra first."
+            exit 1
+          fi
           echo "uri=$URI" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
