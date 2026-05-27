@@ -67,25 +67,20 @@ export const handler = requireAuth(async () => {
     // Record the run before starting so the status panel shows it immediately
     const runId = await insertRun('manual_local');
 
-    // Fire-and-forget: pipeline is slow (classifying ~300+ articles), return 202 right away
-    fetch(`${base}/trigger/pipeline`, { method: 'POST' })
+    // Fire-and-forget: pipeline is slow (classifying ~300+ articles), return 202 right away.
+    // Signal-engine owns finalization — it updates nt_pipeline_runs directly via run_id.
+    fetch(`${base}/trigger/pipeline?run_id=${runId}`, { method: 'POST' })
       .then(async (res) => {
         if (!res.ok) {
-          await failRun(runId, `signal-engine returned ${res.status}`);
-          return;
+          // Signal-engine already marked the run failed before returning the error response.
+          // Log for observability but do not double-write.
+          console.error(`[PIPELINE] signal-engine returned ${res.status} for run_id=${runId}`);
         }
-        const body = await res.json() as Record<string, unknown>;
-        if (body.skipped === 'outside_market_hours') {
-          // Delete the run — no work was done
-          await connect();
-          await mongoose.connection.db!.collection('nt_pipeline_runs').deleteOne(
-            { _id: new mongoose.Types.ObjectId(runId) },
-          );
-        } else {
-          await finaliseRun(runId, body);
-        }
+        // On success or skipped: signal-engine called finalise_run / delete_run directly.
       })
       .catch(async (err) => {
+        // Network-level failure — signal-engine never received the request, so it cannot
+        // finalize. Portfolio-service must mark the run failed here.
         await failRun(runId, String(err));
       });
 
@@ -93,13 +88,14 @@ export const handler = requireAuth(async () => {
   }
 
   try {
-    await insertRun('manual');
+    const runId = await insertRun('manual');
     const client = new LambdaClient({});
     await client.send(
       new InvokeCommand({
         FunctionName: FN_NAME,
         InvocationType: 'Event',
-        Payload: JSON.stringify({}),
+        // run_id is threaded through the SQS chain so tradeDecision can finalize the run.
+        Payload: JSON.stringify({ run_id: runId }),
       }),
     );
     return json(202, { status: 'triggered', function: FN_NAME });

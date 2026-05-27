@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 _ACTIONABLE_CONFIDENCE = {"high", "medium"}
 
 
-async def _process_message(msg: dict[str, Any], settings: Settings) -> bool:
+async def _process_message(msg: dict[str, Any], settings: Settings, run_id: str | None = None) -> bool:
     """Returns True if a signal was created and enqueued."""
     db = get_db()
     news_id = msg.get("news_id")
@@ -99,11 +99,16 @@ async def _process_message(msg: dict[str, Any], settings: Settings) -> bool:
 
     if settings.news_signals_queue_url:
         sqs = boto3.client("sqs")
-        sqs.send_message(
-            QueueUrl=settings.news_signals_queue_url,
-            MessageBody=json.dumps({"signal_id": signal_id}),
-            DelaySeconds=settings.nt_news_delay_seconds,  # 15-min wait before entry
-        )
+        enqueue_kwargs: dict[str, Any] = {
+            "QueueUrl": settings.news_signals_queue_url,
+            "MessageBody": json.dumps({"signal_id": signal_id}),
+            "DelaySeconds": settings.nt_news_delay_seconds,  # 15-min wait before entry
+        }
+        if run_id:
+            enqueue_kwargs["MessageAttributes"] = {
+                "run_id": {"DataType": "String", "StringValue": run_id}
+            }
+        sqs.send_message(**enqueue_kwargs)
         logger.info("[CLASSIFIER] enqueued signal_id=%s to trade-decision queue delay=%ds",
                     signal_id, settings.nt_news_delay_seconds)
     else:
@@ -122,7 +127,9 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
     for record in records:
         try:
             msg = json.loads(record["body"])
-            if await _process_message(msg, settings):
+            attrs = record.get("messageAttributes", {})
+            run_id: str | None = attrs.get("run_id", {}).get("stringValue")
+            if await _process_message(msg, settings, run_id=run_id):
                 acted += 1
         except Exception as exc:
             logger.error("[CLASSIFIER] record error err=%s record=%.200s", exc, record)

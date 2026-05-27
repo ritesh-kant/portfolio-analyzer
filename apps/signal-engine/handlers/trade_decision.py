@@ -128,6 +128,47 @@ async def _process_signal(signal_doc: dict[str, Any], settings: Settings) -> int
     return entered
 
 
+async def _maybe_finalise_run(run_id: str, db: object) -> None:
+    """Finalize nt_pipeline_runs when all signals for a run have been acted on."""
+    from src.news_trader.pipeline_lifecycle import finalise_run
+
+    run = await db["nt_pipeline_runs"].find_one(  # type: ignore[index]
+        {"_id": ObjectId(run_id)}, {"triggered_at": 1, "status": 1}
+    )
+    if not run:
+        logger.warning("[TRADE] run_id=%s not found in nt_pipeline_runs — skipping finalise", run_id)
+        return
+    if run.get("status") != "running":
+        logger.info("[TRADE] run_id=%s already in status=%s — skipping finalise", run_id, run.get("status"))
+        return
+
+    triggered_at = run["triggered_at"]
+
+    remaining = await signals(db).count_documents(  # type: ignore[arg-type]
+        {"created_at": {"$gte": triggered_at}, "acted_on": False}
+    )
+    if remaining > 0:
+        logger.info("[TRADE] run_id=%s — %d signal(s) still pending, not finalising yet", run_id, remaining)
+        return
+
+    # All signals acted on — collect final counts and finalize
+    new_articles = await db["nt_news_raw"].count_documents(  # type: ignore[index]
+        {"ingested_at": {"$gte": triggered_at}}
+    )
+    signals_created = await signals(db).count_documents(  # type: ignore[arg-type]
+        {"created_at": {"$gte": triggered_at}}
+    )
+    positions_opened = await positions(db).count_documents(  # type: ignore[arg-type]
+        {"entry_at": {"$gte": triggered_at}}
+    )
+
+    await finalise_run(run_id, {
+        "new_articles": new_articles,
+        "signals": signals_created,
+        "positions_opened": positions_opened,
+    })
+
+
 async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
     db = get_db()
     await ensure_indexes(db)
@@ -135,9 +176,15 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
     records = event.get("Records", [])
     logger.info("[TRADE] processing %d SQS record(s)", len(records))
     total_entered = 0
+    run_ids_seen: set[str] = set()
 
     for record in records:
         try:
+            attrs = record.get("messageAttributes", {})
+            run_id: str | None = attrs.get("run_id", {}).get("stringValue")
+            if run_id:
+                run_ids_seen.add(run_id)
+
             msg = json.loads(record["body"])
             signal_id = msg.get("signal_id")
             if not signal_id:
@@ -162,6 +209,13 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
             )
         except Exception as exc:
             logger.error("[TRADE] error processing record err=%s", exc)
+
+    # After processing the full SQS batch, check if any observed run is now complete
+    for run_id in run_ids_seen:
+        try:
+            await _maybe_finalise_run(run_id, db)
+        except Exception as exc:
+            logger.error("[TRADE] finalise_run error run_id=%s err=%s", run_id, exc)
 
     logger.info("[TRADE] done — processed=%d total_positions_opened=%d", len(records), total_entered)
     return {"processed": len(records), "positions_opened": total_entered}

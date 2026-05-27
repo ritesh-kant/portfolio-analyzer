@@ -44,7 +44,7 @@ def _is_market_hours(bypass_holiday: bool = False) -> bool:
     return 9 * 60 <= total_minutes <= 15 * 60 + 35
 
 
-async def _run(settings: Settings) -> dict[str, Any]:
+async def _run(settings: Settings, run_id: str | None = None) -> dict[str, Any]:
     if not _is_market_hours(bypass_holiday=settings.nt_bypass_market_holiday):
         if settings.nt_bypass_market_hours:
             logger.info("[INGESTER] market hours check bypassed (NT_BYPASS_MARKET_HOURS=true)")
@@ -113,10 +113,15 @@ async def _run(settings: Settings) -> dict[str, Any]:
         logger.info("[INGESTER] enqueuing %d new articles to SQS...", len(inserted_ids))
         sqs = boto3.client("sqs")
         for news_id in inserted_ids:
-            sqs.send_message(
-                QueueUrl=settings.news_raw_queue_url,
-                MessageBody=json.dumps({"news_id": news_id}),
-            )
+            msg: dict[str, Any] = {
+                "QueueUrl": settings.news_raw_queue_url,
+                "MessageBody": json.dumps({"news_id": news_id}),
+            }
+            if run_id:
+                msg["MessageAttributes"] = {
+                    "run_id": {"DataType": "String", "StringValue": run_id}
+                }
+            sqs.send_message(**msg)
         logger.info("[INGESTER] enqueued %d messages", len(inserted_ids))
     else:
         logger.warning("[INGESTER] NEWS_RAW_QUEUE_URL not set — skipping SQS enqueue")
@@ -127,4 +132,11 @@ async def _run(settings: Settings) -> dict[str, Any]:
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     settings = Settings()
-    return asyncio.run(_run(settings))
+    run_id: str | None = event.get("run_id")
+    try:
+        return asyncio.run(_run(settings, run_id=run_id))
+    except Exception as exc:
+        if run_id:
+            from src.news_trader.pipeline_lifecycle import fail_run
+            asyncio.run(fail_run(run_id, str(exc)))
+        raise
