@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from bson import ObjectId
 
@@ -28,7 +29,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-async def _process_signal(signal_doc: dict, settings: Settings) -> int:
+async def _process_signal(signal_doc: dict[str, Any], settings: Settings) -> int:
     """Returns number of positions opened."""
     db = get_db()
     paper = settings.trading_mode.lower() != "live"
@@ -127,7 +128,7 @@ async def _process_signal(signal_doc: dict, settings: Settings) -> int:
     return entered
 
 
-async def _run(event: dict, settings: Settings) -> dict:
+async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
     db = get_db()
     await ensure_indexes(db)
 
@@ -166,6 +167,6 @@ async def _run(event: dict, settings: Settings) -> dict:
     return {"processed": len(records), "positions_opened": total_entered}
 
 
-def handler(event: dict, context: object) -> dict:
+def handler(event: dict[str, Any], context: object) -> dict[str, int]:
     settings = Settings()
     return asyncio.run(_run(event, settings))

@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 import boto3
 from bson import ObjectId
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 _ACTIONABLE_CONFIDENCE = {"high", "medium"}
 
 
-async def _process_message(msg: dict, settings: Settings) -> bool:
+async def _process_message(msg: dict[str, Any], settings: Settings) -> bool:
     """Returns True if a signal was created and enqueued."""
     db = get_db()
     news_id = msg.get("news_id")
@@ -111,7 +112,7 @@ async def _process_message(msg: dict, settings: Settings) -> bool:
     return True
 
 
-async def _run(event: dict, settings: Settings) -> dict:
+async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
     db = get_db()
     await ensure_indexes(db)
 
@@ -130,6 +131,6 @@ async def _run(event: dict, settings: Settings) -> dict:
     return {"processed": len(records), "acted_on": acted}
 
 
-def handler(event: dict, context: object) -> dict:
+def handler(event: dict[str, Any], context: object) -> dict[str, int]:
     settings = Settings()
     return asyncio.run(_run(event, settings))

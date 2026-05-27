@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 import boto3
 from pymongo.errors import BulkWriteError
@@ -37,7 +38,7 @@ def _is_market_hours() -> bool:
     return 9 * 60 <= total_minutes <= 15 * 60 + 35
 
 
-async def _run(settings: Settings) -> dict:
+async def _run(settings: Settings) -> dict[str, Any]:
     if not _is_market_hours():
         if settings.nt_bypass_market_hours:
             logger.info("[INGESTER] market hours check bypassed (NT_BYPASS_MARKET_HOURS=true)")
@@ -116,6 +117,6 @@ async def _run(settings: Settings) -> dict:
     return {"new_articles": len(inserted_ids), "feed_health": feed_health}
 
 
-def handler(event: dict, context: object) -> dict:
+def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     settings = Settings()
     return asyncio.run(_run(settings))

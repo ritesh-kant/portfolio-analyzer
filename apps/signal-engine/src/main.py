@@ -10,6 +10,7 @@ New endpoints will be added in Month 3 once quant/ pipeline lands.
 
 import logging
 import os
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -50,7 +51,7 @@ async def health() -> dict[str, str]:
 
 
 @app.post("/trigger/ingester")
-async def trigger_ingester() -> dict:
+async def trigger_ingester() -> dict[str, Any]:
     """Manually invoke the news ingester — local dev only."""
     from handlers.news_ingester import _run
     result = await _run(settings)
@@ -58,7 +59,7 @@ async def trigger_ingester() -> dict:
 
 
 @app.post("/trigger/pipeline")
-async def trigger_pipeline() -> dict:
+async def trigger_pipeline() -> dict[str, Any]:
     """Run the full news-trader pipeline locally, bypassing SQS.
 
     Chains: ingester → classifier (per new article) → trade decision (per signal).

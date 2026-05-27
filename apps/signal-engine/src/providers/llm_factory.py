@@ -4,6 +4,7 @@ Provider selection: AI_PROVIDER env var → anthropic | openai | gemini | kimi |
 """
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
@@ -14,7 +15,7 @@ from src.config import Settings
 _VALID_PROVIDERS = {"anthropic", "openai", "gemini", "kimi", "deepseek", "ollama"}
 
 
-def get_llm(provider: str | None = None, settings: Settings | None = None) -> object:
+def get_llm(provider: str | None = None, settings: Settings | None = None) -> BaseChatModel:
     """Return a LangChain BaseChatModel for the given provider name.
 
     Falls back to AI_PROVIDER env var when provider is None.
