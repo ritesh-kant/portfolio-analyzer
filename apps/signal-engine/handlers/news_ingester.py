@@ -17,6 +17,7 @@ from pymongo.errors import BulkWriteError
 from src.config import Settings
 from src.db.client import get_db
 from src.news_trader.db import ensure_indexes, news_raw
+from src.news_trader.market_calendar import is_trading_day
 from src.scrapers.bse import fetch_bse_announcements
 from src.scrapers.nse import fetch_nse_announcements
 from src.scrapers.rss import fetch_all_rss
@@ -27,24 +28,31 @@ logger = logging.getLogger(__name__)
 _IST_OFFSET = 5.5 * 3600  # seconds
 
 
-def _is_market_hours() -> bool:
-    """True if current IST time is 09:00–15:35 on a weekday."""
+def _is_market_hours(bypass_holiday: bool = False) -> bool:
+    """True if current IST time is 09:00–15:35 on a trading day (no weekends, no NSE holidays).
+
+    bypass_holiday=True skips the holiday check but never bypasses weekends.
+    """
     now_ist = datetime.fromtimestamp(
         datetime.now(tz=timezone.utc).timestamp() + _IST_OFFSET
     )
     if now_ist.weekday() >= 5:
+        return False
+    if not bypass_holiday and not is_trading_day(now_ist.date()):
         return False
     total_minutes = now_ist.hour * 60 + now_ist.minute
     return 9 * 60 <= total_minutes <= 15 * 60 + 35
 
 
 async def _run(settings: Settings) -> dict[str, Any]:
-    if not _is_market_hours():
+    if not _is_market_hours(bypass_holiday=settings.nt_bypass_market_holiday):
         if settings.nt_bypass_market_hours:
             logger.info("[INGESTER] market hours check bypassed (NT_BYPASS_MARKET_HOURS=true)")
         else:
             logger.info("[INGESTER] skipped — outside market hours")
             return {"skipped": "outside_market_hours"}
+    elif settings.nt_bypass_market_holiday:
+        logger.info("[INGESTER] holiday check bypassed (NT_BYPASS_MARKET_HOLIDAY=true)")
 
     logger.info("[INGESTER] starting run")
     db = get_db()

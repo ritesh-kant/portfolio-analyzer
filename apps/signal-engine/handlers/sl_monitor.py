@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from src.config import Settings
 from src.db.client import get_db
 from src.news_trader.db import ensure_indexes, positions
+from src.news_trader.market_calendar import is_trading_day
 from src.news_trader.prices import get_ltp
 from src.news_trader.telegram import alert_sl_updated, alert_trade_closed
 from src.news_trader.trailing_sl import calc_pnl, check_exit, update_trailing_sl
@@ -26,11 +27,13 @@ logger = logging.getLogger(__name__)
 _IST_OFFSET = 5.5 * 3600
 
 
-def _is_market_hours() -> bool:
+def _is_market_hours(bypass_holiday: bool = False) -> bool:
     now_ist = datetime.fromtimestamp(
         datetime.now(tz=timezone.utc).timestamp() + _IST_OFFSET
     )
     if now_ist.weekday() >= 5:
+        return False
+    if not bypass_holiday and not is_trading_day(now_ist.date()):
         return False
     total_minutes = now_ist.hour * 60 + now_ist.minute
     # 09:15 to 15:25 (5 min before close — avoid last-minute market orders)
@@ -125,9 +128,11 @@ async def _monitor_position(pos: dict, settings: Settings) -> str:
 
 
 async def _run(settings: Settings) -> dict:
-    if not _is_market_hours():
+    if not _is_market_hours(bypass_holiday=settings.nt_bypass_market_holiday):
         logger.info("sl_monitor_skipped outside_market_hours")
         return {"skipped": "outside_market_hours"}
+    if settings.nt_bypass_market_holiday:
+        logger.info("sl_monitor holiday check bypassed (NT_BYPASS_MARKET_HOLIDAY=true)")
 
     db = get_db()
     await ensure_indexes(db)

@@ -62,6 +62,7 @@ class Settings(BaseSettings):
 
     # News-trader dev flags
     nt_bypass_market_hours: bool = False      # set true in .env to test outside 09:00–15:35
+    nt_bypass_market_holiday: bool = False    # set true in .env to test on NSE holidays
 
     # News-trader position rules
     nt_position_size_inr: float = 50_000.0   # fixed rupees per trade

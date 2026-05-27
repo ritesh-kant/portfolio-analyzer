@@ -76,7 +76,9 @@ class TestTrailingSLInSlMonitor:
 class TestNewsIngesterHandler:
 
     @patch("handlers.news_ingester._is_market_hours", return_value=False)
-    def test_skips_outside_market_hours(self, _mock):
+    @patch("handlers.news_ingester.Settings")
+    def test_skips_outside_market_hours(self, MockSettings, _mock):
+        MockSettings.return_value.nt_bypass_market_hours = False
         from handlers.news_ingester import handler
         result = handler({}, None)
         assert result == {"skipped": "outside_market_hours"}
@@ -130,8 +132,8 @@ class TestNewsClassifierHandler:
 
     @patch("handlers.news_classifier.get_db")
     @patch("handlers.news_classifier.boto3")
-    @patch("src.news_trader.classifier.ChatGoogleGenerativeAI")
-    def test_low_confidence_not_enqueued(self, MockLLM, mock_boto3, mock_get_db):
+    @patch("src.news_trader.classifier.get_llm")
+    def test_low_confidence_not_enqueued(self, mock_get_llm, mock_boto3, mock_get_db):
         """low-confidence signals must NOT be enqueued to the signals queue."""
         low_conf = json.dumps({
             "sector": "Generic",
@@ -141,8 +143,7 @@ class TestNewsClassifierHandler:
             "confidence": "low",
             "reasoning": "Nothing specific.",
         })
-        instance = MockLLM.return_value
-        instance.invoke.return_value = MagicMock(content=low_conf)
+        mock_get_llm.return_value.invoke.return_value = MagicMock(content=low_conf)
 
         sqs_client = MagicMock()
         mock_boto3.client.return_value = sqs_client
