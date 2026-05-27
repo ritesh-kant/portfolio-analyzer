@@ -1,18 +1,24 @@
-"""Tests for the Gemini classifier — all LLM calls are mocked."""
+"""Tests for the news classifier — all LLM calls are mocked via get_llm."""
 
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
+from src.config import Settings
 from src.news_trader.classifier import classify
 
 
+def _settings() -> Settings:
+    return Settings(ai_provider="ollama")
+
+
 def _mock_llm_response(content: str):
-    """Build a mock LangChain response with the given content string."""
     msg = MagicMock()
     msg.content = content
     return msg
+
+
+def _patched_llm(mock_get_llm: MagicMock, content: str) -> None:
+    mock_get_llm.return_value.invoke.return_value = _mock_llm_response(content)
 
 
 VALID_RESPONSE = json.dumps({
@@ -25,12 +31,11 @@ VALID_RESPONSE = json.dumps({
 })
 
 
-@patch("src.news_trader.classifier.ChatGoogleGenerativeAI")
-def test_classify_returns_dict_on_valid_response(MockLLM):
-    instance = MockLLM.return_value
-    instance.invoke.return_value = _mock_llm_response(VALID_RESPONSE)
+@patch("src.news_trader.classifier.get_llm")
+def test_classify_returns_dict_on_valid_response(mock_get_llm):
+    _patched_llm(mock_get_llm, VALID_RESPONSE)
 
-    result = classify("RBI cuts repo rate by 25bps", gemini_api_key="test-key")
+    result = classify("RBI cuts repo rate by 25bps", _settings())
 
     assert result is not None
     assert result["sector"] == "Banking"
@@ -39,19 +44,18 @@ def test_classify_returns_dict_on_valid_response(MockLLM):
     assert "HDFCBANK" in result["stocks"]
 
 
-@patch("src.news_trader.classifier.ChatGoogleGenerativeAI")
-def test_classify_strips_markdown_fences(MockLLM):
+@patch("src.news_trader.classifier.get_llm")
+def test_classify_strips_markdown_fences(mock_get_llm):
     fenced = f"```json\n{VALID_RESPONSE}\n```"
-    instance = MockLLM.return_value
-    instance.invoke.return_value = _mock_llm_response(fenced)
+    _patched_llm(mock_get_llm, fenced)
 
-    result = classify("some headline", gemini_api_key="test-key")
+    result = classify("some headline", _settings())
     assert result is not None
     assert result["signal"] == "bullish"
 
 
-@patch("src.news_trader.classifier.ChatGoogleGenerativeAI")
-def test_classify_uppercases_stock_symbols(MockLLM):
+@patch("src.news_trader.classifier.get_llm")
+def test_classify_uppercases_stock_symbols(mock_get_llm):
     response = json.dumps({
         "sector": "IT",
         "signal": "bearish",
@@ -60,35 +64,32 @@ def test_classify_uppercases_stock_symbols(MockLLM):
         "confidence": "medium",
         "reasoning": "US recession fears hit IT exports.",
     })
-    instance = MockLLM.return_value
-    instance.invoke.return_value = _mock_llm_response(response)
+    _patched_llm(mock_get_llm, response)
 
-    result = classify("IT sector faces headwinds", gemini_api_key="test-key")
+    result = classify("IT sector faces headwinds", _settings())
     assert result is not None
     assert result["stocks"] == ["INFY", "TCS", "WIPRO"]
 
 
-@patch("src.news_trader.classifier.ChatGoogleGenerativeAI")
-def test_classify_returns_none_on_bad_json(MockLLM):
-    instance = MockLLM.return_value
-    instance.invoke.return_value = _mock_llm_response("not json at all")
+@patch("src.news_trader.classifier.get_llm")
+def test_classify_returns_none_on_bad_json(mock_get_llm):
+    _patched_llm(mock_get_llm, "not json at all")
 
-    result = classify("some headline", gemini_api_key="test-key")
+    result = classify("some headline", _settings())
     assert result is None
 
 
-@patch("src.news_trader.classifier.ChatGoogleGenerativeAI")
-def test_classify_returns_none_on_missing_keys(MockLLM):
+@patch("src.news_trader.classifier.get_llm")
+def test_classify_returns_none_on_missing_keys(mock_get_llm):
     incomplete = json.dumps({"sector": "Banking", "signal": "bullish"})
-    instance = MockLLM.return_value
-    instance.invoke.return_value = _mock_llm_response(incomplete)
+    _patched_llm(mock_get_llm, incomplete)
 
-    result = classify("some headline", gemini_api_key="test-key")
+    result = classify("some headline", _settings())
     assert result is None
 
 
-@patch("src.news_trader.classifier.ChatGoogleGenerativeAI")
-def test_classify_truncates_stocks_to_5(MockLLM):
+@patch("src.news_trader.classifier.get_llm")
+def test_classify_truncates_stocks_to_5(mock_get_llm):
     response = json.dumps({
         "sector": "Banking",
         "signal": "bullish",
@@ -97,18 +98,16 @@ def test_classify_truncates_stocks_to_5(MockLLM):
         "confidence": "low",
         "reasoning": "test",
     })
-    instance = MockLLM.return_value
-    instance.invoke.return_value = _mock_llm_response(response)
+    _patched_llm(mock_get_llm, response)
 
-    result = classify("some headline", gemini_api_key="test-key")
+    result = classify("some headline", _settings())
     assert result is not None
     assert len(result["stocks"]) == 5
 
 
-@patch("src.news_trader.classifier.ChatGoogleGenerativeAI")
-def test_classify_returns_none_on_llm_exception(MockLLM):
-    instance = MockLLM.return_value
-    instance.invoke.side_effect = Exception("network error")
+@patch("src.news_trader.classifier.get_llm")
+def test_classify_returns_none_on_llm_exception(mock_get_llm):
+    mock_get_llm.return_value.invoke.side_effect = Exception("network error")
 
-    result = classify("some headline", gemini_api_key="test-key")
+    result = classify("some headline", _settings())
     assert result is None
