@@ -1,5 +1,0 @@
-# Auto-generated cache files — do not commit
-*.parquet
-*.json
-stocks/
-results/

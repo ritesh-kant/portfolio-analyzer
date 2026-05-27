@@ -10,8 +10,6 @@ Provider strategy (plan §6):
     Never Claude as default — cost-prohibitive for this workload
 
 Modules (per plan §11):
-    adversarial_critic.py  — Deepseek-R1; finds 3 distinct failure modes
-                             per proposed trade
     post_mortem.py         — Deepseek-V3; structures every closed trade for
                              the vector-DB retrieval memory layer
 
