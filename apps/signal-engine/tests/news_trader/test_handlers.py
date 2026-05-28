@@ -8,7 +8,7 @@ Requires: pip install mongomock motor  (already in dev deps via motor; mongomock
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -45,12 +45,11 @@ class TestTrailingSLInSlMonitor:
     async def test_sl_hit_closes_position(self, tmp_path):
         from src.news_trader.trailing_sl import check_exit
 
-        entry_at = datetime.now(tz=timezone.utc) - timedelta(days=1)
         result = check_exit(
             current_price=97.0,
             trailing_sl=98.5,
             target_price=108.0,
-            entry_at=entry_at,
+            held_sessions=1,
             max_hold_days=5,
         )
         assert result == "sl_hit"
@@ -63,7 +62,7 @@ class TestTrailingSLInSlMonitor:
             current_price=109.0,
             trailing_sl=98.5,
             target_price=108.0,
-            entry_at=datetime.now(tz=timezone.utc) - timedelta(days=1),
+            held_sessions=1,
             max_hold_days=5,
         )
         assert result == "target_hit"

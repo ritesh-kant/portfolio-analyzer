@@ -1,7 +1,5 @@
 """Unit tests for trailing_sl.py — pure math, no I/O, no fixtures needed."""
 
-from datetime import datetime, timedelta, timezone
-
 import pytest
 
 from src.news_trader.trailing_sl import (
@@ -62,76 +60,43 @@ def test_sl_staircase_three_steps():
 
 # ── check_exit ────────────────────────────────────────────────────────────────
 
-def _entry_at(days_ago: int = 0) -> datetime:
-    return datetime.now(tz=timezone.utc) - timedelta(days=days_ago)
-
-
 def test_no_exit_when_price_between_sl_and_target():
-    result = check_exit(
-        current_price=102.0,
-        trailing_sl=98.5,
-        target_price=108.0,
-        entry_at=_entry_at(1),
-        max_hold_days=5,
-    )
-    assert result is None
+    assert check_exit(102.0, 98.5, 108.0, held_sessions=1, max_hold_days=5) is None
 
 
 def test_sl_hit_when_price_at_or_below_sl():
-    result = check_exit(
-        current_price=98.4,
-        trailing_sl=98.5,
-        target_price=108.0,
-        entry_at=_entry_at(1),
-        max_hold_days=5,
-    )
-    assert result == "sl_hit"
+    assert check_exit(98.4, 98.5, 108.0, held_sessions=1, max_hold_days=5) == "sl_hit"
+
+
+def test_sl_hit_exactly_at_sl():
+    assert check_exit(98.5, 98.5, 108.0, held_sessions=1, max_hold_days=5) == "sl_hit"
 
 
 def test_sl_hit_takes_priority_over_target():
     # Pathological: price simultaneously below SL and above target (won't happen
     # in practice but priority must hold)
-    result = check_exit(
-        current_price=98.0,
-        trailing_sl=98.5,
-        target_price=97.0,
-        entry_at=_entry_at(1),
-        max_hold_days=5,
-    )
-    assert result == "sl_hit"
+    assert check_exit(98.0, 98.5, 97.0, held_sessions=1, max_hold_days=5) == "sl_hit"
 
 
 def test_target_hit():
-    result = check_exit(
-        current_price=108.1,
-        trailing_sl=98.5,
-        target_price=108.0,
-        entry_at=_entry_at(1),
-        max_hold_days=5,
-    )
-    assert result == "target_hit"
+    assert check_exit(108.1, 98.5, 108.0, held_sessions=1, max_hold_days=5) == "target_hit"
 
 
-def test_day5_exit_on_hold_day_gte_max():
-    result = check_exit(
-        current_price=101.0,
-        trailing_sl=98.5,
-        target_price=108.0,
-        entry_at=_entry_at(5),
-        max_hold_days=5,
-    )
-    assert result == "day5"
+def test_target_hit_exactly_at_target():
+    assert check_exit(108.0, 98.5, 108.0, held_sessions=1, max_hold_days=5) == "target_hit"
 
 
-def test_no_day5_on_day_4():
-    result = check_exit(
-        current_price=101.0,
-        trailing_sl=98.5,
-        target_price=108.0,
-        entry_at=_entry_at(4),
-        max_hold_days=5,
-    )
-    assert result is None
+def test_day5_exit_on_session_gte_max():
+    assert check_exit(101.0, 98.5, 108.0, held_sessions=5, max_hold_days=5) == "day5"
+
+
+def test_no_day5_on_session_4():
+    assert check_exit(101.0, 98.5, 108.0, held_sessions=4, max_hold_days=5) is None
+
+
+def test_day5_triggers_on_session_beyond_max():
+    # Any sessions ≥ max_hold_days should trigger, not just exactly equal.
+    assert check_exit(101.0, 98.5, 108.0, held_sessions=7, max_hold_days=5) == "day5"
 
 
 # ── calc_costs ────────────────────────────────────────────────────────────────

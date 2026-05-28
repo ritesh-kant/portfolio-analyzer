@@ -11,7 +11,7 @@ Skips silently outside market hours.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from src.config import Settings
 from src.db.client import get_db
@@ -25,6 +25,26 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _IST_OFFSET = 5.5 * 3600
+
+
+def _trading_days_held(entry_at: datetime) -> int:
+    """Count trading sessions from entry_at (exclusive) to today (inclusive).
+
+    Uses the NSE holiday calendar so weekends + public holidays don't count
+    toward max_hold_days. A trade entered Monday morning and checked the
+    following Monday = 5 sessions, regardless of calendar-day arithmetic.
+    """
+    entry_date: date = entry_at.astimezone(timezone.utc).date()
+    today: date = datetime.now(tz=timezone.utc).date()
+    if today <= entry_date:
+        return 0
+    count = 0
+    d = entry_date
+    while d < today:
+        d += timedelta(days=1)
+        if d.weekday() < 5 and is_trading_day(d):
+            count += 1
+    return count
 
 
 def _is_market_hours(bypass_holiday: bool = False) -> bool:
@@ -67,7 +87,7 @@ async def _monitor_position(pos: dict, settings: Settings) -> str:
         current_price=price,
         trailing_sl=new_sl,
         target_price=pos["target_price"],
-        entry_at=pos["entry_at"],
+        held_sessions=_trading_days_held(pos["entry_at"]),
         max_hold_days=settings.nt_max_hold_days,
     )
 

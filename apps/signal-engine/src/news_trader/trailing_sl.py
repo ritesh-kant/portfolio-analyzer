@@ -13,7 +13,6 @@ Cost model: Indian equity delivery round-trip.
 """
 
 import math
-from datetime import datetime, timezone
 from typing import Literal
 
 # Indian equity delivery cost constants
@@ -48,20 +47,22 @@ def check_exit(
     current_price: float,
     trailing_sl: float,
     target_price: float,
-    entry_at: datetime,
+    held_sessions: int,
     max_hold_days: int,
 ) -> ExitReason | None:
     """Returns the exit reason if any exit condition is met, else None.
 
-    Priority: sl_hit > target_hit > day5 (matches plan priority order).
+    Priority: sl_hit > target_hit > day5.
+
+    held_sessions must be pre-computed trading days (not calendar days) by the
+    caller — see sl_monitor._trading_days_held(). Keeping this function pure
+    avoids a calendar dependency and makes unit tests trivial.
     """
     if current_price <= trailing_sl:
         return "sl_hit"
     if current_price >= target_price:
         return "target_hit"
-    now = datetime.now(tz=timezone.utc)
-    held_days = (now.date() - entry_at.astimezone(timezone.utc).date()).days
-    if held_days >= max_hold_days:
+    if held_sessions >= max_hold_days:
         return "day5"
     return None
 

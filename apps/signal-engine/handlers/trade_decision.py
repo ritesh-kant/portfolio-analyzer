@@ -178,6 +178,11 @@ async def _process_signal(
             "entry_vix": regime.get("vix"),
             "entry_nifty_change_pct": regime.get("nifty_change_pct"),
             "entry_nifty_above_ema50": regime.get("nifty_above_ema50"),
+            # Strategy params frozen at entry — allows backtesting "what if SL
+            # was 2.5% instead of 1.5%" by querying nt_positions directly.
+            "sl_pct_used": settings.nt_sl_pct,
+            "target_pct_used": settings.nt_target_pct,
+            "max_hold_days_used": settings.nt_max_hold_days,
         }
 
         if paper:
