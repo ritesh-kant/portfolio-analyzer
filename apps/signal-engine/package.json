@@ -17,6 +17,11 @@
     "nt:classifier": "uv run --extra dev python scripts/invoke_news_trader.py classifier",
     "nt:trade": "uv run --extra dev python scripts/invoke_news_trader.py trade",
     "nt:monitor": "uv run --extra dev python scripts/invoke_news_trader.py monitor",
-    "nt:pipeline": "uv run --extra dev python scripts/invoke_news_trader.py pipeline"
+    "nt:pipeline": "uv run --extra dev python scripts/invoke_news_trader.py pipeline",
+
+    "nt:refresh-universe": "uv run python scripts/refresh_nifty500.py"
+  },
+  "scriptsComments": {
+    "nt:refresh-universe": "Refresh the Nifty 500 liquid universe (nifty500.py) from NSE archives. Run every 6 months aligned with NSE rebalance (March + September). Commit src/news_trader/nifty500.py after running."
   }
 }

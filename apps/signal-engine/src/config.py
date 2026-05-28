@@ -65,8 +65,8 @@ class Settings(BaseSettings):
     nt_bypass_market_holiday: bool = False    # set true in .env to test on NSE holidays
 
     # News-trader position rules
-    nt_position_size_inr: float = 50_000.0   # fixed rupees per trade
-    nt_max_positions: int = 7                 # max simultaneous open positions
+    nt_position_size_inr: float = 1_000.0   # fixed rupees per trade
+    nt_max_positions: int = 10                 # max simultaneous open positions
     nt_max_stocks_per_signal: int = 2         # max entries from a single news event
     nt_sl_pct: float = 0.015                  # trailing stop-loss distance (1.5%)
     nt_target_pct: float = 0.08               # profit target (8%)

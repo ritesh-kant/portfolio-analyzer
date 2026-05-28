@@ -506,7 +506,7 @@ class TestTradeDecisionHandler:
         with patch("handlers.trade_decision.Settings") as MockSettings:
             s = MockSettings.return_value
             s.trading_mode = "paper"
-            s.nt_max_positions = 7
+            s.nt_max_positions = 10
             s.nt_max_stocks_per_signal = 2
             s.nt_position_size_inr = 50_000.0
             s.nt_sl_pct = 0.015
@@ -562,7 +562,7 @@ class TestTradeDecisionHandler:
         with patch("handlers.trade_decision.Settings") as MockSettings:
             s = MockSettings.return_value
             s.trading_mode = "paper"
-            s.nt_max_positions = 7
+            s.nt_max_positions = 10
             s.nt_max_stocks_per_signal = 2
             s.nt_position_size_inr = 50_000.0
             s.nt_sl_pct = 0.015

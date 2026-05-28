@@ -163,6 +163,11 @@ async def _process_signal(
             logger.warning("[TRADE] no price for %s — skipping", symbol)
             continue
 
+        if price > position_size_inr:
+            logger.info("[TRADE] skip %s — LTP ₹%.2f exceeds position budget ₹%.0f",
+                        symbol, price, position_size_inr)
+            continue
+
         logger.info("[TRADE] %s LTP=%.2f — calculating position size...", symbol, price)
         qty = calc_qty(position_size_inr, price)
         target = price * (1.0 + settings.nt_target_pct)
