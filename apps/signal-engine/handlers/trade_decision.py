@@ -24,20 +24,92 @@ from src.news_trader.db import ensure_indexes, positions, signals
 from src.news_trader.prices import get_ltp, get_market_snapshot
 from src.news_trader.telegram import alert_trade_entered
 from src.news_trader.trailing_sl import calc_qty, initial_trailing_sl
+from src.scrapers.nse_market import fetch_nifty_vix_sync
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Conviction & regime gate thresholds. See plan notes — these are noise-reduction
+# heuristics layered on top of the LLM signal, not formal model parameters.
+_MEDIUM_CONF_MIN_SOURCES = 2   # medium-confidence signal needs ≥2 sources to trade
+_NIFTY_CRASH_PCT = -1.5        # Nifty down >1.5% intraday → skip bullish entries
+_VIX_ELEVATED = 22.0           # halve position size above this
+_VIX_EXTREME = 28.0            # no entries at all above this
 
-async def _process_signal(signal_doc: dict[str, Any], settings: Settings) -> int:
+
+def _apply_conviction_gates(
+    signal_doc: dict[str, Any],
+    regime: dict[str, Any],
+    base_position_size: float,
+) -> tuple[bool, float, str]:
+    """Pure decision function: should we trade this signal, and at what size?
+
+    Returns (allow, effective_position_size, reason). Kept pure so it can be
+    unit-tested without DB or yfinance mocks.
+    """
+    signal_id = str(signal_doc.get("_id", "?"))
+    confidence = (signal_doc.get("confidence") or "").lower()
+    direction = (signal_doc.get("signal") or "").lower()
+    source_count = int(signal_doc.get("source_count", 1))
+
+    # Gate 1 — conviction floor for medium-confidence signals.
+    # Medium-conf + single-source has been the noisiest combination; require
+    # at least 2 independent outlets to corroborate before risking capital.
+    if confidence == "medium" and source_count < _MEDIUM_CONF_MIN_SOURCES:
+        return False, 0.0, f"medium-conf single-source (sources={source_count})"
+
+    # Gate 2 — Nifty regime filter (applies to bullish entries only, since the
+    # current trade_decision opens longs regardless of signal direction).
+    nifty_change = regime.get("nifty_change_pct")
+    nifty_above_ema50 = regime.get("nifty_above_ema50")
+    if direction == "bullish":
+        if nifty_change is not None and nifty_change < _NIFTY_CRASH_PCT:
+            return False, 0.0, f"nifty crash gate (Δ={nifty_change:.2f}%)"
+        if nifty_above_ema50 is False and confidence != "high":
+            return False, 0.0, "Nifty below EMA50 + not high-conf"
+
+    # Gate 3 — VIX-based sizing. Extreme vol = no entries; elevated = half size.
+    vix = regime.get("vix")
+    position_size = base_position_size
+    if vix is not None:
+        if vix > _VIX_EXTREME:
+            return False, 0.0, f"VIX extreme ({vix:.1f})"
+        if vix > _VIX_ELEVATED:
+            position_size = base_position_size * 0.5
+
+    logger.debug(
+        "[TRADE] gates passed signal_id=%s conf=%s sources=%d nifty_Δ=%s vix=%s size=%.0f",
+        signal_id, confidence, source_count, nifty_change, vix, position_size,
+    )
+    return True, position_size, "ok"
+
+
+async def _process_signal(
+    signal_doc: dict[str, Any],
+    settings: Settings,
+    regime: dict[str, Any] | None = None,
+) -> int:
     """Returns number of positions opened."""
     db = get_db()
     paper = settings.trading_mode.lower() != "live"
     signal_id = str(signal_doc.get("_id", "?"))
+    regime = regime or {}
 
-    logger.info("[TRADE] evaluating signal_id=%s sector=%s signal=%s confidence=%s stocks=%s",
+    logger.info("[TRADE] evaluating signal_id=%s sector=%s signal=%s confidence=%s sources=%d stocks=%s",
                 signal_id, signal_doc.get("sector"), signal_doc.get("signal"),
-                signal_doc.get("confidence"), signal_doc.get("stocks"))
+                signal_doc.get("confidence"), int(signal_doc.get("source_count", 1)),
+                signal_doc.get("stocks"))
+
+    # Conviction & regime gates run before any DB / price work — cheap rejects.
+    allow, position_size_inr, reason = _apply_conviction_gates(
+        signal_doc, regime, settings.nt_position_size_inr
+    )
+    if not allow:
+        logger.info("[TRADE] skip signal_id=%s — gate rejected: %s", signal_id, reason)
+        return 0
+    if position_size_inr != settings.nt_position_size_inr:
+        logger.info("[TRADE] signal_id=%s position size scaled %.0f → %.0f (reason: %s)",
+                    signal_id, settings.nt_position_size_inr, position_size_inr, reason)
 
     # Check available capacity
     open_count = await positions(db).count_documents({"status": "open"})
@@ -70,7 +142,7 @@ async def _process_signal(signal_doc: dict[str, Any], settings: Settings) -> int
             continue
 
         logger.info("[TRADE] %s LTP=%.2f — calculating position size...", symbol, price)
-        qty = calc_qty(settings.nt_position_size_inr, price)
+        qty = calc_qty(position_size_inr, price)
         target = price * (1.0 + settings.nt_target_pct)
         sl = initial_trailing_sl(price, settings.nt_sl_pct)
         now = datetime.now(tz=timezone.utc)
@@ -99,6 +171,13 @@ async def _process_signal(signal_doc: dict[str, Any], settings: Settings) -> int
             # Market context at entry — frozen snapshot for strategy evaluation
             "entry_nifty50": market_ctx["nifty50"],
             "entry_sector_index": market_ctx["sector_index"],
+            # Gate inputs frozen at entry — lets post-hoc analysis bucket trades
+            # by conviction (source_count) and regime (VIX, Nifty Δ).
+            "entry_source_count": int(signal_doc.get("source_count", 1)),
+            "entry_position_size_inr": position_size_inr,
+            "entry_vix": regime.get("vix"),
+            "entry_nifty_change_pct": regime.get("nifty_change_pct"),
+            "entry_nifty_above_ema50": regime.get("nifty_above_ema50"),
         }
 
         if paper:
@@ -182,6 +261,18 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
     total_entered = 0
     run_ids_seen: set[str] = set()
 
+    # Regime snapshot fetched once per batch (yfinance download ~250d, ~2-5s).
+    # All signals in this batch trade against the same market state.
+    try:
+        regime = fetch_nifty_vix_sync()
+    except Exception as exc:
+        # Fail-open: never block trading because yfinance hiccuped. Gates that
+        # depend on missing fields will simply be no-ops.
+        logger.warning("[TRADE] regime fetch failed err=%s — proceeding without regime gates", exc)
+        regime = {}
+    logger.info("[TRADE] regime snapshot nifty_Δ=%s vix=%s above_ema50=%s",
+                regime.get("nifty_change_pct"), regime.get("vix"), regime.get("nifty_above_ema50"))
+
     for record in records:
         try:
             attrs = record.get("messageAttributes", {})
@@ -205,7 +296,7 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
                 logger.info("[TRADE] signal already acted on id=%s — skipping", signal_id)
                 continue
 
-            n = await _process_signal(signal_doc, settings)
+            n = await _process_signal(signal_doc, settings, regime=regime)
             total_entered += n
 
             await signals_coll(db).update_one(
