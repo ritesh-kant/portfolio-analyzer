@@ -6,7 +6,7 @@ from .base import BaseRepository
 
 
 class LlmSpendRepository(BaseRepository):
-    def __init__(self, db: AsyncIOMotorDatabase) -> None:  # type: ignore[type-arg]
+    def __init__(self, db: AsyncIOMotorDatabase) -> None:
         super().__init__(db, "llm_daily_spend")
 
     async def get_daily_cost(self, day: str) -> float:

@@ -70,7 +70,7 @@ def calc_costs(
     entry_price: float,
     exit_price: float,
     qty: int,
-) -> dict:
+) -> dict[str, float]:
     """Returns itemised round-trip costs (INR) for Indian equity delivery."""
     entry_val = entry_price * qty
     exit_val = exit_price * qty
@@ -102,7 +102,7 @@ def calc_pnl(
     entry_price: float,
     exit_price: float,
     qty: int,
-) -> tuple[float, float, dict]:
+) -> tuple[float, float, dict[str, float]]:
     """Returns (gross_pnl_inr, net_pnl_inr, costs_dict) after round-trip costs."""
     gross = (exit_price - entry_price) * qty
     costs = calc_costs(entry_price, exit_price, qty)

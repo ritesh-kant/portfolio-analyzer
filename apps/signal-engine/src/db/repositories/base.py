@@ -6,11 +6,11 @@ from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 
 
 class BaseRepository:
-    def __init__(self, db: AsyncIOMotorDatabase, collection_name: str) -> None:  # type: ignore[type-arg]
-        self._col: AsyncIOMotorCollection = db[collection_name]  # type: ignore[type-arg]
+    def __init__(self, db: AsyncIOMotorDatabase, collection_name: str) -> None:
+        self._col: AsyncIOMotorCollection = db[collection_name]
 
     @property
-    def col(self) -> AsyncIOMotorCollection:  # type: ignore[type-arg]
+    def col(self) -> AsyncIOMotorCollection:
         return self._col
 
     async def insert_one(self, doc: dict[str, Any]) -> str:

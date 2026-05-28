@@ -4,7 +4,7 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 from src.config import Settings
 
-_client: AsyncIOMotorClient | None = None  # type: ignore[type-arg]
+_client: AsyncIOMotorClient | None = None
 _settings: Settings | None = None
 
 
@@ -15,7 +15,7 @@ def _get_settings() -> Settings:
     return _settings
 
 
-def get_client() -> AsyncIOMotorClient:  # type: ignore[type-arg]
+def get_client() -> AsyncIOMotorClient:
     global _client
     if _client is None:
         s = _get_settings()
@@ -23,7 +23,7 @@ def get_client() -> AsyncIOMotorClient:  # type: ignore[type-arg]
     return _client
 
 
-def get_db() -> AsyncIOMotorDatabase:  # type: ignore[type-arg]
+def get_db() -> AsyncIOMotorDatabase:
     s = _get_settings()
     return get_client()[s.mongodb_db_name]
 
