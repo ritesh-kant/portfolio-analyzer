@@ -95,6 +95,14 @@ def _make_hash(headline: str, source: str) -> str:
     return hashlib.sha256(f"{headline.strip().lower()}|{source}".encode()).hexdigest()[:24]
 
 
+def _make_story_hash(headline: str) -> str:
+    # Source-independent: collapses cross-source duplicates of the same story
+    # at the signal layer. Internal whitespace runs are normalised so minor
+    # formatting differences don't produce distinct hashes.
+    normalised = " ".join(headline.strip().lower().split())
+    return hashlib.sha256(normalised.encode()).hexdigest()[:24]
+
+
 def _parse_feed_content(content: str | bytes, source: str, tier: str) -> list[dict[str, Any]]:
     """Parse RSS/Atom XML string with feedparser — purely in-memory, no I/O."""
     feed = feedparser.parse(content)
@@ -119,6 +127,7 @@ def _parse_feed_content(content: str | bytes, source: str, tier: str) -> list[di
                 "published_at": published_at,
                 "raw_text": f"{headline}. {description}"[:1000],
                 "topic_hash": _make_hash(headline, source),
+                "story_hash": _make_story_hash(headline),
             }
         )
     return articles

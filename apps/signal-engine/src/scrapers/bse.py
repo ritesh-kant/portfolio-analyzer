@@ -74,6 +74,7 @@ async def fetch_bse_announcements() -> list[dict[str, Any]]:
                 continue
             full_headline = f"{scrip_name}: {headline}" if scrip_name else headline
             published_at = _parse_dt(item.get("DissemDT") or item.get("ANNOUNCEMENTDATE"))
+            topic_hash = _make_hash(news_id, scrip_code)
             articles.append(
                 {
                     "source": "BSE Announcements",
@@ -82,7 +83,9 @@ async def fetch_bse_announcements() -> list[dict[str, Any]]:
                     "url": None,
                     "published_at": published_at,
                     "raw_text": f"{full_headline}. Category: {category}"[:1000],
-                    "topic_hash": _make_hash(news_id, scrip_code),
+                    "topic_hash": topic_hash,
+                    # BSE news_id is canonical — same key serves both layers.
+                    "story_hash": topic_hash,
                     "bse_scrip_code": scrip_code,
                     "bse_category": category,
                 }

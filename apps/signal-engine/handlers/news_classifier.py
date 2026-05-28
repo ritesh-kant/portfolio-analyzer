@@ -17,6 +17,7 @@ from typing import Any
 
 import boto3
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 
 from src.config import Settings
 from src.db.client import get_db
@@ -29,8 +30,17 @@ logger = logging.getLogger(__name__)
 _ACTIONABLE_CONFIDENCE = {"high", "medium"}
 
 
+def _hour_bucket(ts: datetime) -> datetime:
+    return ts.replace(minute=0, second=0, microsecond=0)
+
+
 async def _process_message(msg: dict[str, Any], settings: Settings, run_id: str | None = None) -> bool:
-    """Returns True if a signal was created and enqueued."""
+    """Returns True if a NEW signal was created and enqueued.
+
+    Dedup contract: at most one nt_signals row per (story_hash, hour-bucket).
+    A second raw article in the same bucket bumps source_count + appends to
+    news_ids, but does not produce a new signal or a trade-decision message.
+    """
     db = get_db()
     news_id = msg.get("news_id")
     if not news_id:
@@ -47,6 +57,34 @@ async def _process_message(msg: dict[str, Any], settings: Settings, run_id: str 
         return False
 
     headline = article.get("headline", "")
+    story_hash = article.get("story_hash") or article.get("topic_hash")
+    if not story_hash:
+        logger.warning("[CLASSIFIER] no story_hash/topic_hash on article news_id=%s — skipping", news_id)
+        return False
+
+    now = datetime.now(tz=timezone.utc)
+    window_bucket = _hour_bucket(now)
+
+    # Pre-LLM dedup check: another article for the same story has already been
+    # classified in this hour. Just absorb this raw doc into the existing signal.
+    existing = await signals(db).find_one_and_update(
+        {"story_hash": story_hash, "window_bucket": window_bucket},
+        {
+            "$inc": {"source_count": 1},
+            "$push": {"news_ids": news_id},
+            "$set": {"last_seen_at": now},
+        },
+    )
+    if existing is not None:
+        logger.info(
+            "[CLASSIFIER] dedup hit story_hash=%s window=%s source_count→%d news_id=%s — skipping LLM",
+            story_hash, window_bucket.isoformat(), existing.get("source_count", 1) + 1, news_id,
+        )
+        await news_raw(db).update_one(
+            {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
+        )
+        return False
+
     logger.info("[CLASSIFIER] processing news_id=%s headline=%.80s", news_id, headline)
 
     raw_text = article.get("raw_text", headline)
@@ -66,7 +104,12 @@ async def _process_message(msg: dict[str, Any], settings: Settings, run_id: str 
                 result["stocks"], result["sector"])
 
     signal_doc = {
-        "news_id": news_id,
+        "story_hash": story_hash,
+        "window_bucket": window_bucket,
+        "news_ids": [news_id],
+        "source_count": 1,
+        "first_seen_at": now,
+        "last_seen_at": now,
         "headline": headline,
         "source": article.get("source", ""),
         "sector": result["sector"],
@@ -77,10 +120,29 @@ async def _process_message(msg: dict[str, Any], settings: Settings, run_id: str 
         "reasoning": result["reasoning"],
         "llm_model": result["llm_model"],
         "prompt_version": result["prompt_version"],
-        "created_at": datetime.now(tz=timezone.utc),
+        "created_at": now,
         "acted_on": False,
     }
-    insert_result = await signals(db).insert_one(signal_doc)
+    try:
+        insert_result = await signals(db).insert_one(signal_doc)
+    except DuplicateKeyError:
+        # Race: a concurrent worker inserted the same (story_hash, bucket) between
+        # our find_one_and_update and insert_one. Retry the absorb path.
+        await signals(db).update_one(
+            {"story_hash": story_hash, "window_bucket": window_bucket},
+            {
+                "$inc": {"source_count": 1},
+                "$push": {"news_ids": news_id},
+                "$set": {"last_seen_at": now},
+            },
+        )
+        await news_raw(db).update_one(
+            {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
+        )
+        logger.info("[CLASSIFIER] dedup race resolved story_hash=%s — absorbed news_id=%s",
+                    story_hash, news_id)
+        return False
+
     signal_id = str(insert_result.inserted_id)
 
     await news_raw(db).update_one(

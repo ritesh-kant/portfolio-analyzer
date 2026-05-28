@@ -66,6 +66,7 @@ async def fetch_nse_announcements() -> list[dict[str, Any]]:
                 continue
             headline = f"{symbol}: {subject}" if symbol else subject
             published_at = _parse_dt(item.get("sort_date") or item.get("bcastDate"))
+            topic_hash = _make_hash(symbol, subject)
             articles.append(
                 {
                     "source": "NSE Announcements",
@@ -74,7 +75,10 @@ async def fetch_nse_announcements() -> list[dict[str, Any]]:
                     "url": None,
                     "published_at": published_at,
                     "raw_text": f"{headline}. {body}"[:1000],
-                    "topic_hash": _make_hash(symbol, subject),
+                    "topic_hash": topic_hash,
+                    # NSE announcements are canonical (single official source),
+                    # so the per-source dedup key is also the cross-source one.
+                    "story_hash": topic_hash,
                     "nse_symbol": symbol,
                 }
             )

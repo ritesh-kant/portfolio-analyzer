@@ -3,7 +3,10 @@
 Collections
 -----------
 nt_news_raw   — raw ingested articles (TTL 90 days); deduplicated on topic_hash
-nt_signals    — classifier output (every signal, actionable or not)
+                (one row per source, preserving source-count as a future feature)
+nt_signals    — classifier output; deduplicated on (story_hash, window_bucket) so
+                the same story from multiple feeds produces exactly one signal per
+                hour-bucket. source_count tracks how many raw articles fed the signal.
 nt_positions  — open + closed paper/live positions with trailing SL state
 """
 

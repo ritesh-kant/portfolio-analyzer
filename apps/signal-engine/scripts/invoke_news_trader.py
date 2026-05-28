@@ -77,7 +77,7 @@ async def _get_new_ids_since(collection_name: str, since_ts) -> list[str]:
 async def _get_signal_ids_for_news(news_ids: list[str]) -> list[str]:
     from src.db.client import get_db
     db = get_db()
-    cursor = db["nt_signals"].find({"news_id": {"$in": news_ids}}, {"_id": 1})
+    cursor = db["nt_signals"].find({"news_ids": {"$in": news_ids}}, {"_id": 1})
     return [str(doc["_id"]) async for doc in cursor]
 
 
