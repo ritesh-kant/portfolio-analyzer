@@ -339,7 +339,7 @@ function PipelineHistory() {
 
 function EquityCurvePanel({ stats }: { stats: NtStats }) {
   const { equity_curve, max_drawdown_inr } = stats;
-  if (equity_curve.length < 2) return null;
+  if (!equity_curve || equity_curve.length < 2) return null;
 
   const data = equity_curve.map((pt, i) => ({
     i,
@@ -638,7 +638,7 @@ function StatsRow({ stats }: { stats: NtStats | null }) {
       <div>
         <p className="text-xs text-ink/50">By Exit</p>
         <div className="mt-1 space-y-0.5">
-          {Object.entries(stats.by_exit_reason).map(([reason, d]) => (
+          {Object.entries(stats.by_exit_reason ?? {}).map(([reason, d]) => (
             <div key={reason} className="flex items-center justify-between gap-2 text-xs">
               <ExitBadge reason={reason as NtPosition['exit_reason']} />
               <span
@@ -648,7 +648,7 @@ function StatsRow({ stats }: { stats: NtStats | null }) {
               </span>
             </div>
           ))}
-          {Object.keys(stats.by_exit_reason).length === 0 && (
+          {Object.keys(stats.by_exit_reason ?? {}).length === 0 && (
             <p className="text-xs text-ink/30">no closed trades</p>
           )}
         </div>
