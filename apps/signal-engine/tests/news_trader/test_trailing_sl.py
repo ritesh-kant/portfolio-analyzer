@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from src.news_trader.trailing_sl import (
+    calc_costs,
     calc_pnl,
     calc_qty,
     check_exit,
@@ -133,25 +134,43 @@ def test_no_day5_on_day_4():
     assert result is None
 
 
+# ── calc_costs ────────────────────────────────────────────────────────────────
+
+def test_calc_costs_keys():
+    costs = calc_costs(entry_price=100.0, exit_price=108.0, qty=500)
+    for key in ("brokerage", "stt", "exchange", "stamp", "gst", "slippage", "total"):
+        assert key in costs
+
+def test_calc_costs_total_equals_sum():
+    costs = calc_costs(100.0, 108.0, 500)
+    components = costs["brokerage"] + costs["stt"] + costs["exchange"] + costs["stamp"] + costs["gst"] + costs["slippage"]
+    assert costs["total"] == pytest.approx(components, abs=0.02)
+
+def test_calc_costs_stt_dominates():
+    # STT = 0.1% each side on ₹50k + ₹54k = ₹104; should be the biggest line
+    costs = calc_costs(100.0, 108.0, 500)
+    assert costs["stt"] > costs["brokerage"]
+    assert costs["stt"] > costs["slippage"]
+
+
 # ── calc_pnl ──────────────────────────────────────────────────────────────────
 
 def test_profitable_trade_net_less_than_gross():
-    gross, net = calc_pnl(entry_price=100.0, exit_price=108.0, qty=500)
+    gross, net, costs = calc_pnl(entry_price=100.0, exit_price=108.0, qty=500)
     assert gross == pytest.approx(4000.0)   # (108-100) * 500
     assert net < gross                      # costs deducted
-    # 45bps on 500*(100+108)/2*2 = 500*208*0.0045 = 468 ₹ cost
-    assert net == pytest.approx(gross - 500 * (100.0 + 108.0) * (0.0045 / 2))
+    assert net == pytest.approx(gross - costs["total"])
 
 
 def test_losing_trade_net_worse_than_gross():
-    gross, net = calc_pnl(entry_price=100.0, exit_price=98.0, qty=500)
+    gross, net, _costs = calc_pnl(entry_price=100.0, exit_price=98.0, qty=500)
     assert gross == pytest.approx(-1000.0)
     assert net < gross   # costs make it even worse
 
 
 def test_breakeven_requires_clearing_cost():
     # Entry = exit → gross = 0, net negative (cost not recovered)
-    gross, net = calc_pnl(100.0, 100.0, 500)
+    gross, net, _costs = calc_pnl(100.0, 100.0, 500)
     assert gross == 0.0
     assert net < 0.0
 

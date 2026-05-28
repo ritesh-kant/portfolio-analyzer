@@ -7,15 +7,23 @@ Rules (from plan):
   - Target = entry_price * (1 + TARGET_PCT)
   - Day 5 force-close at market open
 
-Round-trip cost model: 45 bps (matches quant/execution/paper.py _ROUND_TRIP_COST_FRACTION).
+Cost model: Indian equity delivery round-trip.
+  Brokerage ₹20/order (Zerodha flat), STT 0.1% each side, NSE exchange ~0.00345%,
+  stamp duty 0.015% buy-side, GST 18% on (brokerage + exchange), slippage 5 bps/side.
 """
 
 import math
 from datetime import datetime, timezone
 from typing import Literal
 
-# Cost model — matches quant/execution/paper.py
-_ROUND_TRIP_COST = 0.0045  # 45 bps
+# Indian equity delivery cost constants
+_BROKERAGE_PER_ORDER = 20.0   # ₹20 flat per order, capped at 0.03% of turnover
+_BROKERAGE_CAP_RATE = 0.0003  # 0.03% cap
+_STT_RATE = 0.001              # 0.1% each side (delivery)
+_EXCHANGE_RATE = 0.0000345     # NSE exchange + SEBI per side (~0.00345%)
+_STAMP_RATE = 0.00015          # 0.015% on buy-side only
+_GST_RATE = 0.18               # 18% on (brokerage + exchange charges)
+_SLIPPAGE_RATE = 0.0005        # 5 bps per side (market impact estimate)
 
 ExitReason = Literal["sl_hit", "target_hit", "day5"]
 
@@ -58,15 +66,47 @@ def check_exit(
     return None
 
 
+def calc_costs(
+    entry_price: float,
+    exit_price: float,
+    qty: int,
+) -> dict:
+    """Returns itemised round-trip costs (INR) for Indian equity delivery."""
+    entry_val = entry_price * qty
+    exit_val = exit_price * qty
+
+    brokerage = round(
+        min(_BROKERAGE_PER_ORDER, entry_val * _BROKERAGE_CAP_RATE)
+        + min(_BROKERAGE_PER_ORDER, exit_val * _BROKERAGE_CAP_RATE),
+        2,
+    )
+    stt = round((entry_val + exit_val) * _STT_RATE, 2)
+    exchange = round((entry_val + exit_val) * _EXCHANGE_RATE, 2)
+    stamp = round(entry_val * _STAMP_RATE, 2)
+    gst = round((brokerage + exchange) * _GST_RATE, 2)
+    slippage = round((entry_val + exit_val) * _SLIPPAGE_RATE, 2)
+    total = round(brokerage + stt + exchange + stamp + gst + slippage, 2)
+
+    return {
+        "brokerage": brokerage,
+        "stt": stt,
+        "exchange": exchange,
+        "stamp": stamp,
+        "gst": gst,
+        "slippage": slippage,
+        "total": total,
+    }
+
+
 def calc_pnl(
     entry_price: float,
     exit_price: float,
     qty: int,
-) -> tuple[float, float]:
-    """Returns (gross_pnl_inr, net_pnl_inr) after round-trip costs."""
+) -> tuple[float, float, dict]:
+    """Returns (gross_pnl_inr, net_pnl_inr, costs_dict) after round-trip costs."""
     gross = (exit_price - entry_price) * qty
-    cost = (entry_price + exit_price) * qty * (_ROUND_TRIP_COST / 2)
-    return gross, gross - cost
+    costs = calc_costs(entry_price, exit_price, qty)
+    return gross, gross - costs["total"], costs
 
 
 def calc_qty(position_size_inr: float, price: float) -> int:

@@ -88,6 +88,15 @@ export interface NtNews {
   ingested_at: string;
 }
 
+export interface NtCostBreakdown {
+  brokerage: number;
+  stt: number;
+  exchange: number;
+  stamp: number;
+  gst: number;
+  slippage: number;
+}
+
 export interface NtStats {
   open_count: number;
   total_invested_inr: number;
@@ -97,9 +106,21 @@ export interface NtStats {
   win_count: number;
   loss_count: number;
   win_rate_pct: number | null;
-  total_realized_net_pnl: number;
   avg_hold_days: number | null;
   by_exit_reason: Record<string, { count: number; total_net_pnl: number }>;
+  // P&L breakdown
+  total_gross_pnl: number;
+  total_realized_net_pnl: number;
+  total_costs_inr: number;
+  cost_breakdown: NtCostBreakdown | null;
+  // Expectancy & efficiency
+  avg_win_inr: number | null;
+  avg_loss_inr: number | null;
+  expectancy_inr: number | null;
+  profit_factor: number | null;
+  // Equity curve
+  equity_curve: { date: string; cumul: number }[];
+  max_drawdown_inr: number;
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────

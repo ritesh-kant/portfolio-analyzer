@@ -61,7 +61,7 @@ async def _process_message(msg: dict[str, Any], settings: Settings, run_id: str 
         )
         return False
 
-    logger.info("[CLASSIFIER] Gemini result news_id=%s signal=%s confidence=%s magnitude=%s stocks=%s sector=%s",
+    logger.info("[CLASSIFIER] LLM result news_id=%s signal=%s confidence=%s magnitude=%s stocks=%s sector=%s",
                 news_id, result["signal"], result["confidence"], result["magnitude"],
                 result["stocks"], result["sector"])
 

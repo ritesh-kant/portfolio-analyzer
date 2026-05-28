@@ -1,6 +1,15 @@
 'use client';
 
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ReferenceLine,
+  ResponsiveContainer,
+} from 'recharts';
 import { formatCurrency } from '../../lib/format';
 import {
   fetchPositions,
@@ -14,6 +23,7 @@ import {
   type NtSignal,
   type NtNews,
   type NtStats,
+  type NtCostBreakdown,
   type PipelineStatus,
   type PipelineRun,
   type StageStatus,
@@ -320,6 +330,235 @@ function PipelineHistory() {
           >
             Next →
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Equity curve ─────────────────────────────────────────────────────────────
+
+function EquityCurvePanel({ stats }: { stats: NtStats }) {
+  const { equity_curve, max_drawdown_inr } = stats;
+  if (equity_curve.length < 2) return null;
+
+  const data = equity_curve.map((pt, i) => ({
+    i,
+    date: new Date(pt.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+    cumul: pt.cumul,
+  }));
+
+  const minVal = Math.min(...data.map((d) => d.cumul));
+  const maxVal = Math.max(...data.map((d) => d.cumul));
+  const latest = equity_curve[equity_curve.length - 1]?.cumul ?? 0;
+  const isPositive = latest >= 0;
+
+  return (
+    <div className="metric-chip space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Equity Curve</h2>
+        <div className="flex items-center gap-4 text-xs">
+          <span className="text-ink/50">
+            Net P&L{' '}
+            <span className={`font-semibold tabular-nums ${pnlColor(latest)}`}>
+              {pnlSign(latest)}{formatCurrency(latest)}
+            </span>
+          </span>
+          {max_drawdown_inr > 0 && (
+            <span className="text-ink/50">
+              Max DD{' '}
+              <span className="font-semibold tabular-nums text-rose-600">
+                −{formatCurrency(max_drawdown_inr)}
+              </span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      <ResponsiveContainer width="100%" height={160}>
+        <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+          <XAxis
+            dataKey="date"
+            tick={{ fontSize: 10, fill: 'var(--color-ink)', opacity: 0.4 }}
+            axisLine={false}
+            tickLine={false}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            tick={{ fontSize: 10, fill: 'var(--color-ink)', opacity: 0.4 }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={(v: number) =>
+              v >= 1000 || v <= -1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v))
+            }
+            domain={[Math.min(minVal * 1.1, minVal - 50), Math.max(maxVal * 1.1, maxVal + 50)]}
+            width={48}
+          />
+          <ReferenceLine y={0} stroke="var(--color-ink)" strokeOpacity={0.15} strokeDasharray="3 3" />
+          <Tooltip
+            contentStyle={{
+              background: 'var(--color-panel)',
+              border: '1px solid rgba(0,0,0,0.08)',
+              borderRadius: 8,
+              fontSize: 12,
+            }}
+            formatter={(v: number) => [
+              `${pnlSign(v)}${formatCurrency(v)}`,
+              'Cumul Net P&L',
+            ]}
+            labelStyle={{ color: 'var(--color-ink)', opacity: 0.5, marginBottom: 2 }}
+          />
+          <Line
+            type="monotone"
+            dataKey="cumul"
+            stroke={isPositive ? '#059669' : '#e11d48'}
+            strokeWidth={1.5}
+            dot={false}
+            activeDot={{ r: 3 }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// ─── P&L attribution ──────────────────────────────────────────────────────────
+
+function PnlAttributionPanel({ stats }: { stats: NtStats }) {
+  if (stats.closed_count === 0) return null;
+
+  const {
+    total_gross_pnl,
+    total_costs_inr,
+    total_realized_net_pnl,
+    cost_breakdown,
+    avg_win_inr,
+    avg_loss_inr,
+    expectancy_inr,
+    profit_factor,
+  } = stats;
+
+  const costDragPct =
+    total_gross_pnl !== 0
+      ? Math.abs((total_costs_inr / Math.abs(total_gross_pnl)) * 100)
+      : null;
+
+  const costRows: { label: string; tooltip: string; value: number }[] = cost_breakdown
+    ? [
+        { label: 'STT', tooltip: '0.1% each side (delivery)', value: cost_breakdown.stt },
+        { label: 'Slippage', tooltip: 'Modelled 5 bps/side', value: cost_breakdown.slippage },
+        { label: 'Brokerage', tooltip: '₹20/order flat', value: cost_breakdown.brokerage },
+        { label: 'GST', tooltip: '18% on brokerage + exchange', value: cost_breakdown.gst },
+        { label: 'Exchange', tooltip: 'NSE + SEBI charges', value: cost_breakdown.exchange },
+        { label: 'Stamp', tooltip: '0.015% buy-side', value: cost_breakdown.stamp },
+      ]
+    : [];
+
+  return (
+    <div className="metric-chip space-y-4">
+      <h2 className="text-sm font-semibold">P&L Attribution</h2>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/* Waterfall */}
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-ink/50 uppercase tracking-wide">Cost waterfall</p>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-2">
+              <span className="text-xs text-ink/60">Gross P&L</span>
+              <span className={`tabular-nums text-sm font-semibold ${pnlColor(total_gross_pnl)}`}>
+                {pnlSign(total_gross_pnl)}{formatCurrency(total_gross_pnl)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-rose-50 px-3 py-2">
+              <span className="text-xs text-ink/60">
+                Total Costs
+                {costDragPct !== null && (
+                  <span className="ml-1 text-rose-500">({costDragPct.toFixed(1)}% drag)</span>
+                )}
+              </span>
+              <span className="tabular-nums text-sm font-semibold text-rose-600">
+                −{formatCurrency(total_costs_inr)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-2 border border-black/10">
+              <span className="text-xs font-semibold text-ink/70">Net P&L</span>
+              <span className={`tabular-nums text-sm font-bold ${pnlColor(total_realized_net_pnl)}`}>
+                {pnlSign(total_realized_net_pnl)}{formatCurrency(total_realized_net_pnl)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Cost breakdown bar chart or expectancy */}
+        <div className="space-y-2">
+          {cost_breakdown ? (
+            <>
+              <p className="text-xs font-semibold text-ink/50 uppercase tracking-wide">Cost breakdown</p>
+              <div className="space-y-1.5">
+                {costRows.map(({ label, tooltip, value }) => {
+                  const pct = total_costs_inr > 0 ? (value / total_costs_inr) * 100 : 0;
+                  return (
+                    <div key={label} className="flex items-center gap-2">
+                      <span className="w-16 shrink-0 text-xs text-ink/60" title={tooltip}>{label}</span>
+                      <div className="flex-1 h-1.5 bg-black/5 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-rose-400 rounded-full"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="w-16 text-right tabular-nums text-xs text-ink/70">
+                        {formatCurrency(value)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-ink/40 pt-4">Cost breakdown available for trades after the model upgrade.</p>
+          )}
+        </div>
+      </div>
+
+      {/* Expectancy row */}
+      {(expectancy_inr !== null || profit_factor !== null) && (
+        <div className="border-t border-black/5 pt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {expectancy_inr !== null && (
+            <div>
+              <p className="text-xs text-ink/50">Expectancy</p>
+              <p className={`mt-0.5 font-display text-lg font-bold ${pnlColor(expectancy_inr)}`}>
+                {pnlSign(expectancy_inr)}{formatCurrency(expectancy_inr)}
+              </p>
+              <p className="text-[10px] text-ink/40">avg ₹ per trade</p>
+            </div>
+          )}
+          {profit_factor !== null && (
+            <div>
+              <p className="text-xs text-ink/50">Profit Factor</p>
+              <p className={`mt-0.5 font-display text-lg font-bold ${profit_factor >= 1 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                {profit_factor.toFixed(2)}×
+              </p>
+              <p className="text-[10px] text-ink/40">gross wins / losses</p>
+            </div>
+          )}
+          {avg_win_inr !== null && (
+            <div>
+              <p className="text-xs text-ink/50">Avg Win</p>
+              <p className="mt-0.5 font-display text-lg font-bold text-emerald-700">
+                +{formatCurrency(avg_win_inr)}
+              </p>
+              <p className="text-[10px] text-ink/40">{stats.win_count} trades</p>
+            </div>
+          )}
+          {avg_loss_inr !== null && (
+            <div>
+              <p className="text-xs text-ink/50">Avg Loss</p>
+              <p className="mt-0.5 font-display text-lg font-bold text-rose-600">
+                {formatCurrency(avg_loss_inr)}
+              </p>
+              <p className="text-[10px] text-ink/40">{stats.loss_count} trades</p>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1075,7 +1314,12 @@ export default function TradingPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => void loadAll()}
+            onClick={() => {
+              void loadAll();
+              void loadPipelineStatus().then((s) => {
+                if (s?.is_active) startStatusPoll();
+              });
+            }}
             className="rounded-lg border border-black/10 px-3 py-2 text-sm font-semibold transition hover:bg-black/5"
           >
             ↻ Refresh
@@ -1125,6 +1369,12 @@ export default function TradingPage() {
 
           {/* ── Stats row ──────────────────────────────────────────────── */}
           <StatsRow stats={stats} />
+
+          {/* ── Equity curve ───────────────────────────────────────────── */}
+          {stats && <EquityCurvePanel stats={stats} />}
+
+          {/* ── P&L attribution ────────────────────────────────────────── */}
+          {stats && <PnlAttributionPanel stats={stats} />}
 
           {/* ── Tab bar ────────────────────────────────────────────────── */}
           <div className="flex w-fit items-center gap-1 rounded-full bg-panel p-1 shadow-card">

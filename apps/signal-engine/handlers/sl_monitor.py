@@ -72,7 +72,7 @@ async def _monitor_position(pos: dict, settings: Settings) -> str:
     )
 
     if exit_reason:
-        gross_pnl, net_pnl = calc_pnl(pos["entry_price"], price, pos["qty"])
+        gross_pnl, net_pnl, costs = calc_pnl(pos["entry_price"], price, pos["qty"])
         now = datetime.now(tz=timezone.utc)
         await positions(db).update_one(
             {"_id": pos["_id"]},
@@ -87,6 +87,7 @@ async def _monitor_position(pos: dict, settings: Settings) -> str:
                     "current_price": price,
                     "gross_pnl": gross_pnl,
                     "net_pnl": net_pnl,
+                    "costs": costs,
                 },
                 "$push": {
                     "price_snapshots": {
