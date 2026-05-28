@@ -29,6 +29,11 @@ logger = logging.getLogger(__name__)
 
 _ACTIONABLE_CONFIDENCE = {"high", "medium"}
 
+# Articles older than this at classification time are skipped — the market has
+# already had time to price in the news. Especially important for BSE backfills
+# that arrive hours after the actual announcement.
+_MAX_NEWS_AGE_SECONDS = 2 * 3600  # 2 hours
+
 
 def _hour_bucket(ts: datetime) -> datetime:
     return ts.replace(minute=0, second=0, microsecond=0)
@@ -56,13 +61,33 @@ async def _process_message(msg: dict[str, Any], settings: Settings, run_id: str 
         logger.debug("[CLASSIFIER] already classified news_id=%s", news_id)
         return False
 
+    # Filter B — freshness gate.
+    # Use published_at (when the story actually broke) not ingested_at.
+    # BSE backfills, late RSS syncs, and overnight queues all risk acting on
+    # news the market has already priced — skip anything older than 2 hours.
+    now = datetime.now(tz=timezone.utc)
+    pub_ts: datetime | None = article.get("published_at") or article.get("ingested_at")
+    if pub_ts is not None:
+        # MongoDB returns datetimes as naive UTC — normalise before subtracting.
+        if pub_ts.tzinfo is None:
+            pub_ts = pub_ts.replace(tzinfo=timezone.utc)
+        age_seconds = (now - pub_ts).total_seconds()
+        if age_seconds > _MAX_NEWS_AGE_SECONDS:
+            logger.info(
+                "[CLASSIFIER] stale news_id=%s age=%.0fmin — marking classified without LLM",
+                news_id, age_seconds / 60,
+            )
+            await news_raw(db).update_one(
+                {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
+            )
+            return False
+
     headline = article.get("headline", "")
     story_hash = article.get("story_hash") or article.get("topic_hash")
     if not story_hash:
         logger.warning("[CLASSIFIER] no story_hash/topic_hash on article news_id=%s — skipping", news_id)
         return False
 
-    now = datetime.now(tz=timezone.utc)
     window_bucket = _hour_bucket(now)
 
     # Pre-LLM dedup check: another article for the same story has already been

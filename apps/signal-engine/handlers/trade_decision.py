@@ -24,6 +24,7 @@ from src.news_trader.db import ensure_indexes, positions, signals
 from src.news_trader.prices import get_ltp, get_market_snapshot
 from src.news_trader.telegram import alert_trade_entered
 from src.news_trader.trailing_sl import calc_qty, initial_trailing_sl
+from src.news_trader.nifty500 import NIFTY_500
 from src.scrapers.nse_market import fetch_nifty_vix_sync
 
 logging.basicConfig(level=logging.INFO)
@@ -57,6 +58,14 @@ def _apply_conviction_gates(
     # at least 2 independent outlets to corroborate before risking capital.
     if confidence == "medium" and source_count < _MEDIUM_CONF_MIN_SOURCES:
         return False, 0.0, f"medium-conf single-source (sources={source_count})"
+
+    # Gate C — magnitude floor.
+    # LLM labels "minor" when expected move is <0.5%. Round-trip cost is ~0.3%
+    # (STT 0.1% each side + brokerage + slippage), so minor signals can't break
+    # even in expectation. Skip them regardless of confidence or source count.
+    magnitude = (signal_doc.get("magnitude") or "").lower()
+    if magnitude == "minor":
+        return False, 0.0, "minor magnitude — expected <0.5% move, negative EV after costs"
 
     # Gate 2 — Nifty regime filter (applies to bullish entries only, since the
     # current trade_decision opens longs regardless of signal direction).
@@ -127,6 +136,19 @@ async def _process_signal(
 
     entered = 0
     candidates = stocks[: min(settings.nt_max_stocks_per_signal, capacity)]
+
+    # Filter D — Nifty 500 liquid universe whitelist.
+    # Microcaps are excluded: at ₹50k position size, buying a thin stock can
+    # represent a meaningful % of daily volume → poor fill + exit slippage.
+    # Every stock the LLM names must be in the liquid universe to be traded.
+    illiquid = [s for s in candidates if s not in NIFTY_500]
+    candidates = [s for s in candidates if s in NIFTY_500]
+    if illiquid:
+        logger.info("[TRADE] signal_id=%s dropped illiquid stocks: %s", signal_id, illiquid)
+    if not candidates:
+        logger.info("[TRADE] skip signal_id=%s — no Nifty 500 stocks after universe filter", signal_id)
+        return 0
+
     logger.info("[TRADE] evaluating %d stock(s): %s", len(candidates), candidates)
     for symbol in candidates:
         # Check if we already have an open position in this symbol

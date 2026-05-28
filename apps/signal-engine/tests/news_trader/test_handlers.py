@@ -335,6 +335,124 @@ class TestNewsClassifierHandler:
 
 
 # ---------------------------------------------------------------------------
+# Freshness gate — Filter B
+# ---------------------------------------------------------------------------
+
+class TestFreshnessGate:
+    """Verify the freshness gate handles naive/aware datetimes and age correctly."""
+
+    def _base_article(self, news_id, published_at):
+        from bson import ObjectId
+        return {
+            "_id": ObjectId(news_id),
+            "raw_text": "RBI cuts repo rate",
+            "headline": "RBI cuts repo rate",
+            "source": "ET",
+            "story_hash": "freshtest123456789abcde",
+            "topic_hash": "freshtest123456789abcde",
+            "classified": False,
+            "published_at": published_at,
+        }
+
+    def _run_classifier(self, article, mock_get_llm, mock_boto3, mock_get_db):
+        from bson import ObjectId
+        news_id = str(article["_id"])
+
+        mock_db = MagicMock()
+        mock_news_coll = MagicMock()
+        mock_news_coll.create_index = AsyncMock()
+        mock_news_coll.find_one = AsyncMock(return_value=article)
+        mock_news_coll.update_one = AsyncMock()
+
+        mock_sig_coll = MagicMock()
+        mock_sig_coll.create_index = AsyncMock()
+        mock_sig_coll.find_one_and_update = AsyncMock(return_value=None)
+        mock_sig_coll.insert_one = AsyncMock(return_value=MagicMock(inserted_id=ObjectId()))
+
+        def _get_coll(name):
+            if name == "nt_news_raw": return mock_news_coll
+            if name == "nt_signals": return mock_sig_coll
+            c = MagicMock(); c.create_index = AsyncMock(); return c
+
+        mock_db.__getitem__ = MagicMock(side_effect=_get_coll)
+        mock_get_db.return_value = mock_db
+
+        sqs_client = MagicMock()
+        mock_boto3.client.return_value = sqs_client
+
+        from handlers.news_classifier import handler
+        event = _make_sqs_event([{"news_id": news_id}])
+        with patch("handlers.news_classifier.Settings") as MockSettings:
+            s = MockSettings.return_value
+            s.ai_provider = "ollama"
+            s.gemini_api_key = "fake"
+            s.gemini_model = "gemini-1.5-flash"
+            s.news_signals_queue_url = "https://sqs.example.com/signals"
+            s.nt_news_delay_seconds = 900
+            handler(event, None)
+        return mock_get_llm, mock_sig_coll
+
+    @patch("handlers.news_classifier.get_db")
+    @patch("handlers.news_classifier.boto3")
+    @patch("src.news_trader.classifier.get_llm")
+    def test_naive_utc_published_at_does_not_crash(self, mock_get_llm, mock_boto3, mock_get_db):
+        """MongoDB returns naive datetimes; the gate must not raise TypeError."""
+        from bson import ObjectId
+        from datetime import timedelta
+        # Naive datetime — as returned by pymongo/motor
+        recent_naive = datetime.utcnow() - timedelta(minutes=10)
+        article = self._base_article(str(ObjectId()), recent_naive)
+        # Should not raise — test passes if no exception is thrown
+        self._run_classifier(article, mock_get_llm, mock_boto3, mock_get_db)
+
+    @patch("handlers.news_classifier.get_db")
+    @patch("handlers.news_classifier.boto3")
+    @patch("src.news_trader.classifier.get_llm")
+    def test_stale_article_skips_llm(self, mock_get_llm, mock_boto3, mock_get_db):
+        """Article older than 2 hours must be marked classified without LLM call."""
+        from bson import ObjectId
+        from datetime import timedelta
+        stale_naive = datetime.utcnow() - timedelta(hours=3)
+        article = self._base_article(str(ObjectId()), stale_naive)
+        mock_llm, mock_sig = self._run_classifier(article, mock_get_llm, mock_boto3, mock_get_db)
+        mock_get_llm.assert_not_called()
+        mock_sig.insert_one.assert_not_called()
+
+    @patch("handlers.news_classifier.get_db")
+    @patch("handlers.news_classifier.boto3")
+    @patch("src.news_trader.classifier.get_llm")
+    def test_fresh_article_reaches_llm(self, mock_get_llm, mock_boto3, mock_get_db):
+        """Article published 20 minutes ago must proceed to the LLM."""
+        from bson import ObjectId
+        from datetime import timedelta
+        recent_naive = datetime.utcnow() - timedelta(minutes=20)
+        article = self._base_article(str(ObjectId()), recent_naive)
+        mock_get_llm.return_value.invoke.return_value = MagicMock(content=json.dumps({
+            "sector": "Banking", "signal": "bullish", "magnitude": "major",
+            "stocks": ["HDFCBANK"], "confidence": "high", "reasoning": "RBI cut.",
+        }))
+        _, mock_sig = self._run_classifier(article, mock_get_llm, mock_boto3, mock_get_db)
+        mock_get_llm.assert_called_once()
+        mock_sig.insert_one.assert_called_once()
+
+    @patch("handlers.news_classifier.get_db")
+    @patch("handlers.news_classifier.boto3")
+    @patch("src.news_trader.classifier.get_llm")
+    def test_missing_published_at_passes_gate(self, mock_get_llm, mock_boto3, mock_get_db):
+        """Articles with no published_at (e.g. some RSS feeds) must not be blocked."""
+        from bson import ObjectId
+        article = self._base_article(str(ObjectId()), None)
+        del article["published_at"]  # truly absent field
+        mock_get_llm.return_value.invoke.return_value = MagicMock(content=json.dumps({
+            "sector": "IT", "signal": "bullish", "magnitude": "moderate",
+            "stocks": ["TCS"], "confidence": "medium", "reasoning": "order win.",
+        }))
+        _, mock_sig = self._run_classifier(article, mock_get_llm, mock_boto3, mock_get_db)
+        # Gate is fail-open — LLM should still be called
+        mock_get_llm.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # trade_decision handler
 # ---------------------------------------------------------------------------
 

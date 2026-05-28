@@ -819,21 +819,90 @@ function PositionsTab({ positions }: { positions: NtPosition[] }) {
 // ─── Signals tab ──────────────────────────────────────────────────────────────
 
 type SigFilter = 'all' | 'bullish' | 'bearish';
+type SigSortKey = 'sector' | 'signal' | 'confidence' | 'magnitude' | 'created_at';
+type SortDir = 'asc' | 'desc';
 
-function SignalsTab({ signals }: { signals: NtSignal[] }) {
+const MAGNITUDE_ORDER: Record<string, number> = { major: 3, moderate: 2, minor: 1 };
+const CONFIDENCE_ORDER: Record<string, number> = { high: 3, medium: 2, low: 1 };
+const SIG_PAGE_SIZE = 25;
+
+function MagnitudeBadge({ magnitude }: { magnitude: NtSignal['magnitude'] }) {
+  const map: Record<NtSignal['magnitude'], string> = {
+    major: 'bg-rose-100 text-rose-700',
+    moderate: 'bg-amber-100 text-amber-700',
+    minor: 'bg-black/5 text-ink/50',
+  };
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${map[magnitude]}`}>
+      {magnitude}
+    </span>
+  );
+}
+
+function SignalsTab({ signals, positions }: { signals: NtSignal[]; positions: NtPosition[] }) {
   const [filter, setFilter] = useState<SigFilter>('all');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SigSortKey>('created_at');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [page, setPage] = useState(1);
 
-  const filtered = filter === 'all' ? signals : signals.filter((s) => s.signal === filter);
+  // Cross-reference: which signal IDs actually resulted in a position
+  const tradedSignalIds = new Set(positions.map((p) => p.signal_id).filter(Boolean));
 
-  // Sector frequency map for the summary bar
+  function handleSort(key: SigSortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+    setPage(1);
+  }
+
+  const afterFilter = filter === 'all' ? signals : signals.filter((s) => s.signal === filter);
+
+  const sorted = [...afterFilter].sort((a, b) => {
+    // Signals with actual positions always float to top regardless of sort
+    const aTraded = tradedSignalIds.has(a._id);
+    const bTraded = tradedSignalIds.has(b._id);
+    if (aTraded !== bTraded) return aTraded ? -1 : 1;
+
+    let cmp = 0;
+    switch (sortKey) {
+      case 'sector':       cmp = a.sector.localeCompare(b.sector); break;
+      case 'signal':       cmp = a.signal.localeCompare(b.signal); break;
+      case 'confidence':   cmp = (CONFIDENCE_ORDER[a.confidence] ?? 0) - (CONFIDENCE_ORDER[b.confidence] ?? 0); break;
+      case 'magnitude':    cmp = (MAGNITUDE_ORDER[a.magnitude] ?? 0) - (MAGNITUDE_ORDER[b.magnitude] ?? 0); break;
+      case 'created_at':   cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime(); break;
+    }
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const totalPages = Math.ceil(sorted.length / SIG_PAGE_SIZE);
+  const paginated = sorted.slice((page - 1) * SIG_PAGE_SIZE, page * SIG_PAGE_SIZE);
+
   const sectorCounts: Record<string, number> = {};
   for (const s of signals) {
     sectorCounts[s.sector] = (sectorCounts[s.sector] ?? 0) + 1;
   }
-  const topSectors = Object.entries(sectorCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
+  const topSectors = Object.entries(sectorCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  function SortIcon({ col }: { col: SigSortKey }) {
+    if (sortKey !== col) return <span className="ml-1 opacity-20">↕</span>;
+    return <span className="ml-1 text-accent">{sortDir === 'asc' ? '↑' : '↓'}</span>;
+  }
+
+  function ThSort({ col, children }: { col: SigSortKey; children: React.ReactNode }) {
+    return (
+      <th
+        className="cursor-pointer select-none whitespace-nowrap px-4 py-3 text-left font-semibold hover:text-ink transition-colors"
+        onClick={() => handleSort(col)}
+      >
+        {children}
+        <SortIcon col={col} />
+      </th>
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -854,7 +923,7 @@ function SignalsTab({ signals }: { signals: NtSignal[] }) {
       {/* Filter + meta */}
       <div className="flex items-center gap-1">
         {(['all', 'bullish', 'bearish'] as SigFilter[]).map((f) => (
-          <SubTab key={f} active={filter === f} onClick={() => setFilter(f)}>
+          <SubTab key={f} active={filter === f} onClick={() => { setFilter(f); setPage(1); }}>
             {f.charAt(0).toUpperCase() + f.slice(1)}
             {f !== 'all' && (
               <span className="ml-1 text-[10px]">
@@ -864,34 +933,40 @@ function SignalsTab({ signals }: { signals: NtSignal[] }) {
           </SubTab>
         ))}
         <span className="ml-auto text-xs text-ink/40">
-          {signals.filter((s) => s.acted_on).length}/{signals.length} acted on
+          {tradedSignalIds.size} traded · {signals.filter((s) => s.acted_on).length} evaluated
         </span>
       </div>
 
-      {filtered.length === 0 ? (
+      {sorted.length === 0 ? (
         <Empty msg="No signals match the filter." />
       ) : (
-        <div className="metric-chip overflow-x-auto p-0">
+        <div className="metric-chip p-0">
+          <div className="max-h-[560px] overflow-auto">
           <table className="w-full text-sm">
-            <thead>
+            <thead className="sticky top-0 z-10 bg-panel">
               <tr className="border-b border-black/5 text-xs text-ink/50">
-                <th className="px-4 py-3 text-left font-semibold">Sector</th>
-                <th className="px-4 py-3 text-left font-semibold">Signal</th>
-                <th className="px-4 py-3 text-left font-semibold">Confidence</th>
+                <ThSort col="sector">Sector</ThSort>
+                <ThSort col="signal">Signal</ThSort>
+                <ThSort col="confidence">Confidence</ThSort>
                 <th className="px-4 py-3 text-left font-semibold">Stocks</th>
-                <th className="px-4 py-3 text-left font-semibold">Magnitude</th>
+                <ThSort col="magnitude">Magnitude</ThSort>
                 <th className="px-4 py-3 text-left font-semibold">Action</th>
-                <th className="px-4 py-3 text-left font-semibold">Time</th>
+                <ThSort col="created_at">Time</ThSort>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((s) => (
+              {paginated.map((s) => (
                 <Fragment key={s._id}>
                   <tr
-                    className="cursor-pointer border-b border-black/5 last:border-0 hover:bg-black/[0.02]"
+                    className={`cursor-pointer border-b border-black/5 last:border-0 hover:bg-black/[0.02] ${tradedSignalIds.has(s._id) ? 'bg-accent/[0.03]' : ''}`}
                     onClick={() => setExpanded(expanded === s._id ? null : s._id)}
                   >
-                    <td className="px-4 py-3 font-semibold">{s.sector}</td>
+                    <td className="px-4 py-3 font-semibold">
+                      {s.sector}
+                      {tradedSignalIds.has(s._id) && (
+                        <span className="ml-1.5 text-[9px] font-bold uppercase tracking-wide text-accent">traded</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <SignalBadge signal={s.signal} />
                     </td>
@@ -906,15 +981,21 @@ function SignalsTab({ signals }: { signals: NtSignal[] }) {
                         <span className="text-xs text-ink/40"> +{s.stocks.length - 3}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-xs text-ink/60 capitalize">{s.magnitude}</td>
                     <td className="px-4 py-3">
-                      {s.acted_on ? (
+                      <MagnitudeBadge magnitude={s.magnitude} />
+                    </td>
+                    <td className="px-4 py-3">
+                      {tradedSignalIds.has(s._id) ? (
                         <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
                           Trade opened
                         </span>
+                      ) : s.acted_on ? (
+                        <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-ink/50">
+                          Evaluated
+                        </span>
                       ) : (
-                        <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-ink/40">
-                          No trade
+                        <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-ink/30">
+                          Pending
                         </span>
                       )}
                     </td>
@@ -944,6 +1025,29 @@ function SignalsTab({ signals }: { signals: NtSignal[] }) {
               ))}
             </tbody>
           </table>
+          </div>
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-1">
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+            className="rounded px-2.5 py-1 text-xs font-semibold disabled:opacity-30 hover:bg-black/5"
+          >
+            ← Prev
+          </button>
+          <span className="text-xs text-ink/40">
+            {page * SIG_PAGE_SIZE - SIG_PAGE_SIZE + 1}–{Math.min(page * SIG_PAGE_SIZE, sorted.length)} of {sorted.length}
+          </span>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+            className="rounded px-2.5 py-1 text-xs font-semibold disabled:opacity-30 hover:bg-black/5"
+          >
+            Next →
+          </button>
         </div>
       )}
     </div>
@@ -1408,7 +1512,7 @@ export default function TradingPage() {
             <OverviewTab positions={positions} signals={signals} news={news} />
           )}
           {tab === 'positions' && <PositionsTab positions={positions} />}
-          {tab === 'signals' && <SignalsTab signals={signals} />}
+          {tab === 'signals' && <SignalsTab signals={signals} positions={positions} />}
           {tab === 'news' && <NewsTab news={news} signals={signals} />}
         </>
       )}

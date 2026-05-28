@@ -36,6 +36,30 @@ _HEADERS = {
 }
 _TIMEOUT = 20
 
+# BSE publishes hundreds of procedural filings daily (trading window notices,
+# shareholding patterns, compliance certs, etc.) that are regulatory in nature
+# and never market-moving. Filtering these at scrape time saves LLM cost and
+# reduces signal noise before the pipeline even starts.
+# Rule: use a blacklist (not whitelist) so novel, genuinely material category
+# names we haven't seen yet still flow through to the classifier.
+_BSE_NOISE_CATEGORIES: frozenset[str] = frozenset({
+    "Trading Window",
+    "Newspaper Publication",
+    "Compliances-Certificate under Reg. 74 (5) of SEBI (DP) Regulations, 2018",
+    "Compliance Certificate",
+    "Shareholding Pattern",
+    "Postal Ballot",
+    "Notice Of Shareholders Meetings-AGM",
+    "Notice Of Shareholders Meetings-EGM",
+    "Notice Of Shareholders Meetings-Postal Ballot",
+    "Loss of Share Certificate",
+    "Duplicate Share Certificate",
+    "Reg. 39 (3) - Loss of Share Certificates",
+    "Investor Presentation",       # always accompanies results — priced simultaneously
+    "Analyst / Investor Meet - Outcome",  # retrospective, market has already digested
+    "Investor Meet",
+})
+
 
 def _parse_dt(raw: str | None) -> datetime | None:
     if not raw:
@@ -71,6 +95,9 @@ async def fetch_bse_announcements() -> list[dict[str, Any]]:
             scrip_name = (item.get("SLONGNAME") or item.get("SNAME", "")).strip()
             category = item.get("CATEGORYNAME", "")
             if not headline:
+                continue
+            if category in _BSE_NOISE_CATEGORIES:
+                logger.debug("bse_noise_skip category=%r headline=%r", category, headline[:80])
                 continue
             full_headline = f"{scrip_name}: {headline}" if scrip_name else headline
             published_at = _parse_dt(item.get("DissemDT") or item.get("ANNOUNCEMENTDATE"))
