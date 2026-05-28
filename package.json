@@ -8,11 +8,13 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "format": "prettier --check .",
-    "format:write": "prettier --write ."
+    "format:write": "prettier --write .",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "eslint": "^8.57.1",
+    "husky": "^9.1.7",
     "prettier": "^3.4.2",
     "serverless": "^4.5.0",
     "serverless-dotenv-plugin": "^6.0.0",
