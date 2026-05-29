@@ -7,6 +7,7 @@ Live mode (future): replace get_ltp() body with Kite Connect WebSocket tick.
 import logging
 from typing import Any
 
+import pandas as pd
 import yfinance as yf
 
 logger = logging.getLogger(__name__)
@@ -32,8 +33,30 @@ def get_ltp(symbol: str) -> float | None:
 
 
 def get_ltps(symbols: list[str]) -> dict[str, float]:
-    """Batch price fetch. Returns only symbols with valid prices."""
-    return {s: p for s in symbols if (p := get_ltp(s)) is not None}
+    """Batch price fetch via yf.download. Falls back to per-symbol get_ltp on error."""
+    if not symbols:
+        return {}
+    tickers = [f"{s.upper()}.NS" for s in symbols]
+    try:
+        data = yf.download(tickers, period="1d", interval="1m", progress=False, threads=True)
+        if data.empty:
+            raise ValueError("empty response")
+        result: dict[str, float] = {}
+        if len(tickers) > 1:
+            closes = data["Close"]
+            for sym, ticker in zip(symbols, tickers):
+                if ticker in closes.columns:
+                    series = closes[ticker].dropna()
+                    if not series.empty:
+                        result[sym] = float(series.iloc[-1])
+        else:
+            series = data["Close"].dropna()
+            if not series.empty:
+                result[symbols[0]] = float(series.iloc[-1])
+        return result
+    except Exception as exc:
+        logger.warning("get_ltps_batch_failed symbols=%s err=%s — falling back to per-symbol", symbols, exc)
+        return {s: p for s in symbols if (p := get_ltp(s)) is not None}
 
 
 # NSE sector index tickers on Yahoo Finance

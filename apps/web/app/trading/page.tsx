@@ -828,9 +828,9 @@ const SIG_PAGE_SIZE = 25;
 
 function MagnitudeBadge({ magnitude }: { magnitude: NtSignal['magnitude'] }) {
   const map: Record<NtSignal['magnitude'], string> = {
-    major: 'bg-rose-100 text-rose-700',
-    moderate: 'bg-amber-100 text-amber-700',
-    minor: 'bg-black/5 text-ink/50',
+    major: 'bg-green-100 text-green-700',
+    moderate: 'bg-yellow-100 text-yellow-700',
+    minor: 'bg-gray-100 text-gray-500',
   };
   return (
     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold capitalize ${map[magnitude]}`}>

@@ -58,20 +58,18 @@ async def _run(settings: Settings, run_id: str | None = None) -> dict[str, Any]:
     db = get_db()
     await ensure_indexes(db)
 
-    logger.info("[INGESTER] fetching RSS feeds...")
-    rss_articles, feed_health = await fetch_all_rss()
-    logger.info("[INGESTER] RSS done — %d articles from %d feeds (%d failed)",
-                len(rss_articles),
-                len(feed_health),
-                sum(1 for ok in feed_health.values() if not ok))
-
-    logger.info("[INGESTER] fetching NSE announcements...")
-    nse_articles = await fetch_nse_announcements()
-    logger.info("[INGESTER] NSE done — %d announcements", len(nse_articles))
-
-    logger.info("[INGESTER] fetching BSE announcements...")
-    bse_articles = await fetch_bse_announcements()
-    logger.info("[INGESTER] BSE done — %d announcements", len(bse_articles))
+    logger.info("[INGESTER] fetching RSS, NSE and BSE concurrently...")
+    (rss_articles, feed_health), nse_articles, bse_articles = await asyncio.gather(
+        fetch_all_rss(),
+        fetch_nse_announcements(),
+        fetch_bse_announcements(),
+    )
+    logger.info(
+        "[INGESTER] fetch done — rss=%d (%d feeds, %d failed) nse=%d bse=%d",
+        len(rss_articles), len(feed_health),
+        sum(1 for ok in feed_health.values() if not ok),
+        len(nse_articles), len(bse_articles),
+    )
 
     all_articles = rss_articles + nse_articles + bse_articles
     logger.info("[INGESTER] total fetched=%d (rss=%d nse=%d bse=%d) — deduplicating...",
@@ -108,21 +106,34 @@ async def _run(settings: Settings, run_id: str | None = None) -> dict[str, Any]:
                     len(all_articles))
         return {"new_articles": 0}
 
-    # Enqueue to SQS
+    # Enqueue to SQS — send_message_batch cuts N HTTP calls to ceil(N/10)
     if settings.news_raw_queue_url:
         logger.info("[INGESTER] enqueuing %d new articles to SQS...", len(inserted_ids))
         sqs = boto3.client("sqs")
-        for news_id in inserted_ids:
-            msg: dict[str, Any] = {
-                "QueueUrl": settings.news_raw_queue_url,
-                "MessageBody": json.dumps({"news_id": news_id}),
-            }
-            if run_id:
-                msg["MessageAttributes"] = {
-                    "run_id": {"DataType": "String", "StringValue": run_id}
+        total_sent = 0
+        for batch_start in range(0, len(inserted_ids), 10):
+            batch = inserted_ids[batch_start:batch_start + 10]
+            entries: list[dict[str, Any]] = []
+            for i, news_id in enumerate(batch):
+                entry: dict[str, Any] = {
+                    "Id": str(i),
+                    "MessageBody": json.dumps({"news_id": news_id}),
                 }
-            sqs.send_message(**msg)
-        logger.info("[INGESTER] enqueued %d messages", len(inserted_ids))
+                if run_id:
+                    entry["MessageAttributes"] = {
+                        "run_id": {"DataType": "String", "StringValue": run_id}
+                    }
+                entries.append(entry)
+            resp = sqs.send_message_batch(
+                QueueUrl=settings.news_raw_queue_url, Entries=entries
+            )
+            total_sent += len(resp.get("Successful", []))
+            for failure in resp.get("Failed", []):
+                logger.warning(
+                    "[INGESTER] SQS batch failure Id=%s Code=%s Message=%s",
+                    failure["Id"], failure["Code"], failure["Message"],
+                )
+        logger.info("[INGESTER] enqueued %d messages", total_sent)
     else:
         logger.warning("[INGESTER] NEWS_RAW_QUEUE_URL not set — skipping SQS enqueue")
 

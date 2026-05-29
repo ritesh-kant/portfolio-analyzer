@@ -21,7 +21,7 @@ from bson import ObjectId
 from src.config import Settings
 from src.db.client import get_db
 from src.news_trader.db import ensure_indexes, positions, signals
-from src.news_trader.prices import get_ltp, get_market_snapshot
+from src.news_trader.prices import get_ltps, get_market_snapshot
 from src.news_trader.telegram import alert_trade_entered
 from src.news_trader.trailing_sl import calc_qty, initial_trailing_sl
 from src.news_trader.nifty500 import NIFTY_500
@@ -53,6 +53,13 @@ def _apply_conviction_gates(
     direction = (signal_doc.get("signal") or "").lower()
     source_count = int(signal_doc.get("source_count", 1))
 
+    # Gate 0 — direction filter. This is a long-only system: every position is
+    # opened as a long (target above entry, SL below). A bearish thesis can't be
+    # expressed without shorting, so trading a bearish signal long would bet
+    # against the AI's own call. Skip anything that isn't bullish.
+    if direction != "bullish":
+        return False, 0.0, f"non-bullish signal ({direction or 'unknown'}) — long-only system"
+
     # Gate 1 — conviction floor for medium-confidence signals.
     # Medium-conf + single-source has been the noisiest combination; require
     # at least 2 independent outlets to corroborate before risking capital.
@@ -67,15 +74,14 @@ def _apply_conviction_gates(
     if magnitude == "minor":
         return False, 0.0, "minor magnitude — expected <0.5% move, negative EV after costs"
 
-    # Gate 2 — Nifty regime filter (applies to bullish entries only, since the
-    # current trade_decision opens longs regardless of signal direction).
+    # Gate 2 — Nifty regime filter. All entries are bullish longs (guaranteed by
+    # Gate 0), so a falling/weak market is a headwind we screen against.
     nifty_change = regime.get("nifty_change_pct")
     nifty_above_ema50 = regime.get("nifty_above_ema50")
-    if direction == "bullish":
-        if nifty_change is not None and nifty_change < _NIFTY_CRASH_PCT:
-            return False, 0.0, f"nifty crash gate (Δ={nifty_change:.2f}%)"
-        if nifty_above_ema50 is False and confidence != "high":
-            return False, 0.0, "Nifty below EMA50 + not high-conf"
+    if nifty_change is not None and nifty_change < _NIFTY_CRASH_PCT:
+        return False, 0.0, f"nifty crash gate (Δ={nifty_change:.2f}%)"
+    if nifty_above_ema50 is False and confidence != "high":
+        return False, 0.0, "Nifty below EMA50 + not high-conf"
 
     # Gate 3 — VIX-based sizing. Extreme vol = no entries; elevated = half size.
     vix = regime.get("vix")
@@ -150,6 +156,16 @@ async def _process_signal(
         return 0
 
     logger.info("[TRADE] evaluating %d stock(s): %s", len(candidates), candidates)
+
+    # Pre-fetch all candidate prices and the market snapshot concurrently —
+    # avoids N+1 serial yfinance calls (one per stock + one per iteration for snapshot).
+    sector = signal_doc.get("sector")
+    price_map, market_ctx = await asyncio.gather(
+        asyncio.to_thread(get_ltps, candidates),
+        asyncio.to_thread(get_market_snapshot, sector),
+    )
+    logger.info("[TRADE] prices fetched: %s", {s: f"₹{p:.2f}" for s, p in price_map.items()})
+
     for symbol in candidates:
         # Check if we already have an open position in this symbol
         existing = await positions(db).find_one({"symbol": symbol, "status": "open"})
@@ -157,8 +173,7 @@ async def _process_signal(
             logger.info("[TRADE] skip %s — already have open position", symbol)
             continue
 
-        logger.info("[TRADE] fetching LTP for %s...", symbol)
-        price = get_ltp(symbol)
+        price = price_map.get(symbol)
         if not price:
             logger.warning("[TRADE] no price for %s — skipping", symbol)
             continue
@@ -173,7 +188,6 @@ async def _process_signal(
         target = price * (1.0 + settings.nt_target_pct)
         sl = initial_trailing_sl(price, settings.nt_sl_pct)
         now = datetime.now(tz=timezone.utc)
-        market_ctx = get_market_snapshot(sector=signal_doc.get("sector"))
 
         position_doc = {
             "symbol": symbol,

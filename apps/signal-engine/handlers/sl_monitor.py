@@ -17,7 +17,7 @@ from src.config import Settings
 from src.db.client import get_db
 from src.news_trader.db import ensure_indexes, positions
 from src.news_trader.market_calendar import is_trading_day
-from src.news_trader.prices import get_ltp
+from src.news_trader.prices import get_ltps
 from src.news_trader.telegram import alert_sl_updated, alert_trade_closed
 from src.news_trader.trailing_sl import calc_pnl, check_exit, update_trailing_sl
 
@@ -60,15 +60,14 @@ def _is_market_hours(bypass_holiday: bool = False) -> bool:
     return 9 * 60 + 15 <= total_minutes <= 15 * 60 + 25
 
 
-async def _monitor_position(pos: dict, settings: Settings) -> str:
-    """Returns 'closed:<reason>', 'sl_raised', or 'unchanged'."""
+async def _monitor_position(pos: dict, settings: Settings, price: float) -> str:
+    """Returns 'closed:<reason>', 'sl_raised', or 'unchanged'.
+
+    The current price is supplied by the caller, which batch-fetches every open
+    symbol in a single network call (see _run).
+    """
     db = get_db()
     symbol = pos["symbol"]
-    price = get_ltp(symbol)
-
-    if not price:
-        logger.warning("sl_monitor_no_price symbol=%s pos_id=%s", symbol, pos["_id"])
-        return "no_price"
 
     paper = pos.get("paper", True)
 
@@ -121,7 +120,8 @@ async def _monitor_position(pos: dict, settings: Settings) -> str:
             "position_closed symbol=%s reason=%s entry=%.2f exit=%.2f net_pnl=%.0f paper=%s",
             symbol, exit_reason, pos["entry_price"], price, net_pnl, paper,
         )
-        alert_trade_closed(
+        await asyncio.to_thread(
+            alert_trade_closed,
             bot_token=settings.telegram_bot_token,
             chat_id=settings.telegram_chat_id,
             symbol=symbol,
@@ -152,7 +152,8 @@ async def _monitor_position(pos: dict, settings: Settings) -> str:
     if sl_raised:
         logger.info("sl_raised symbol=%s old=%.2f new=%.2f price=%.2f",
                     symbol, pos["trailing_sl"], new_sl, price)
-        alert_sl_updated(
+        await asyncio.to_thread(
+            alert_sl_updated,
             bot_token=settings.telegram_bot_token,
             chat_id=settings.telegram_chat_id,
             symbol=symbol,
@@ -180,8 +181,30 @@ async def _run(settings: Settings) -> dict:
         return {"open_positions": 0}
 
     results: dict[str, int] = {"unchanged": 0, "sl_raised": 0, "closed": 0, "no_price": 0}
+
+    # Batch-fetch every open symbol's price in ONE yf.download call rather than
+    # N concurrent get_ltp() calls — a single round-trip, and it avoids many
+    # parallel yfinance requests tripping Yahoo's rate limiter.
+    symbols = list({pos["symbol"] for pos in open_positions})
+    price_map = await asyncio.to_thread(get_ltps, symbols)
+
+    priced: list[tuple[dict, float]] = []
     for pos in open_positions:
-        outcome = await _monitor_position(pos, settings)
+        price = price_map.get(pos["symbol"])
+        if not price:
+            logger.warning("sl_monitor_no_price symbol=%s pos_id=%s", pos["symbol"], pos["_id"])
+            results["no_price"] += 1
+        else:
+            priced.append((pos, price))
+
+    outcomes = await asyncio.gather(
+        *[_monitor_position(pos, settings, price) for pos, price in priced],
+        return_exceptions=True,
+    )
+    for outcome in outcomes:
+        if isinstance(outcome, Exception):
+            logger.error("monitor_position_failed err=%s", outcome)
+            continue
         if outcome.startswith("closed"):
             results["closed"] += 1
         elif outcome in results:

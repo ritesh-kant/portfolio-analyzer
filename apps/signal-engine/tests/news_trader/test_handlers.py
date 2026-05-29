@@ -460,7 +460,7 @@ class TestTradeDecisionHandler:
 
     @patch("handlers.trade_decision.fetch_nifty_vix_sync", return_value={})
     @patch("handlers.trade_decision.get_db")
-    @patch("handlers.trade_decision.get_ltp", return_value=1500.0)
+    @patch("handlers.trade_decision.get_ltps", return_value={"HDFCBANK": 1500.0})
     @patch("handlers.trade_decision.alert_trade_entered")
     def test_opens_position_in_paper_mode(self, mock_alert, mock_price, mock_get_db, _regime):
         from bson import ObjectId
@@ -521,7 +521,7 @@ class TestTradeDecisionHandler:
 
     @patch("handlers.trade_decision.fetch_nifty_vix_sync", return_value={})
     @patch("handlers.trade_decision.get_db")
-    @patch("handlers.trade_decision.get_ltp", return_value=1500.0)
+    @patch("handlers.trade_decision.get_ltps", return_value={"SBIN": 1500.0})
     @patch("handlers.trade_decision.alert_trade_entered")
     def test_respects_max_positions_limit(self, mock_alert, mock_price, mock_get_db, _regime):
         """When already at max, no new position should be opened."""

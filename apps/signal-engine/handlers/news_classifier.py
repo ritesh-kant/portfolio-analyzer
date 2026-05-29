@@ -29,6 +29,15 @@ logger = logging.getLogger(__name__)
 
 _ACTIONABLE_CONFIDENCE = {"high", "medium"}
 
+# Cap concurrent LLM calls per Lambda invocation — prevents rate-limit errors
+# on providers with low RPM budgets (e.g. Anthropic free tier ~60 RPM).
+# NOTE: the Semaphore is created per-invocation inside _run(), not at module
+# scope. asyncio primitives bind to the running loop on first use, and the
+# handler calls asyncio.run() (a fresh loop) on every Lambda invocation — a
+# module-global semaphore would raise "bound to a different event loop" on the
+# second (warm) invocation.
+_LLM_MAX_CONCURRENCY = 5
+
 # Articles older than this at classification time are skipped — the market has
 # already had time to price in the news. Especially important for BSE backfills
 # that arrive hours after the actual announcement.
@@ -39,7 +48,12 @@ def _hour_bucket(ts: datetime) -> datetime:
     return ts.replace(minute=0, second=0, microsecond=0)
 
 
-async def _process_message(msg: dict[str, Any], settings: Settings, run_id: str | None = None) -> bool:
+async def _process_message(
+    msg: dict[str, Any],
+    settings: Settings,
+    llm_semaphore: asyncio.Semaphore,
+    run_id: str | None = None,
+) -> bool:
     """Returns True if a NEW signal was created and enqueued.
 
     Dedup contract: at most one nt_signals row per (story_hash, hour-bucket).
@@ -114,7 +128,8 @@ async def _process_message(msg: dict[str, Any], settings: Settings, run_id: str 
 
     raw_text = article.get("raw_text", headline)
     logger.info("[CLASSIFIER] calling LLM (provider=%s) for news_id=%s...", settings.ai_provider, news_id)
-    result = classify(raw_text, settings)
+    async with llm_semaphore:
+        result = await asyncio.to_thread(classify, raw_text, settings)
 
     if result is None:
         logger.warning("[CLASSIFIER] LLM failed for news_id=%s headline=%.80s — marking classified",
@@ -197,7 +212,7 @@ async def _process_message(msg: dict[str, Any], settings: Settings, run_id: str 
             enqueue_kwargs["MessageAttributes"] = {
                 "run_id": {"DataType": "String", "StringValue": run_id}
             }
-        sqs.send_message(**enqueue_kwargs)
+        await asyncio.to_thread(sqs.send_message, **enqueue_kwargs)
         logger.info("[CLASSIFIER] enqueued signal_id=%s to trade-decision queue delay=%ds",
                     signal_id, settings.nt_news_delay_seconds)
     else:
@@ -212,16 +227,24 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
 
     records = event.get("Records", [])
     logger.info("[CLASSIFIER] processing %d SQS record(s)", len(records))
-    acted = 0
-    for record in records:
+
+    # Created here (not at module scope) so it binds to this invocation's loop.
+    llm_semaphore = asyncio.Semaphore(_LLM_MAX_CONCURRENCY)
+
+    async def _handle_record(record: dict[str, Any]) -> bool:
         try:
             msg = json.loads(record["body"])
             attrs = record.get("messageAttributes", {})
             run_id: str | None = attrs.get("run_id", {}).get("stringValue")
-            if await _process_message(msg, settings, run_id=run_id):
-                acted += 1
+            return await _process_message(msg, settings, llm_semaphore, run_id=run_id)
         except Exception as exc:
             logger.error("[CLASSIFIER] record error err=%s record=%.200s", exc, record)
+            return False
+
+    results = await asyncio.gather(
+        *[_handle_record(r) for r in records], return_exceptions=True
+    )
+    acted = sum(1 for r in results if r is True)
 
     logger.info("[CLASSIFIER] done — processed=%d actionable=%d", len(records), acted)
     return {"processed": len(records), "acted_on": acted}

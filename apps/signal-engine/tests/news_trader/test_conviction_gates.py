@@ -211,13 +211,50 @@ class TestGateInteractions:
         assert allow is False
         assert "single-source" in reason
 
-    def test_bearish_signal_skips_nifty_direction_gates(self):
-        # The Nifty-down and EMA50 gates only apply to bullish entries today
-        # (since trade_decision opens longs regardless of direction, gating
-        # bearish on a falling Nifty would be backwards).
-        allow, _, _ = _apply_conviction_gates(
+    def test_direction_rejected_before_other_gates(self):
+        # A bearish signal must be rejected for direction, not for the regime
+        # gates, even when the regime would also block — keeps reject ordering
+        # stable for log readability.
+        allow, _, reason = _apply_conviction_gates(
             _signal(signal="bearish", confidence="high"),
-            _regime(nifty_change_pct=-3.0, nifty_above_ema50=False),
+            _regime(nifty_change_pct=-3.0, nifty_above_ema50=False, vix=99.0),
             _BASE_SIZE,
         )
+        assert allow is False
+        assert "non-bullish" in reason
+
+
+class TestDirectionGate:
+    """Long-only system: only bullish signals may trade."""
+
+    def test_bullish_allowed(self):
+        allow, _, _ = _apply_conviction_gates(
+            _signal(signal="bullish"), _regime(), _BASE_SIZE
+        )
         assert allow is True
+
+    def test_bearish_blocked(self):
+        allow, size, reason = _apply_conviction_gates(
+            _signal(signal="bearish", confidence="high", magnitude="major"),
+            _regime(),
+            _BASE_SIZE,
+        )
+        assert allow is False
+        assert size == 0.0
+        assert "non-bullish" in reason
+
+    def test_neutral_blocked(self):
+        allow, size, reason = _apply_conviction_gates(
+            _signal(signal="neutral"), _regime(), _BASE_SIZE
+        )
+        assert allow is False
+        assert size == 0.0
+        assert "non-bullish" in reason
+
+    def test_missing_direction_blocked(self):
+        # No direction → can't confirm it's a long opportunity → skip.
+        allow, _, reason = _apply_conviction_gates(
+            _signal(signal=None), _regime(), _BASE_SIZE
+        )
+        assert allow is False
+        assert "non-bullish" in reason

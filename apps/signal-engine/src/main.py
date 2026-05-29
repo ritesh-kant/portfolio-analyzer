@@ -71,7 +71,7 @@ async def trigger_pipeline(run_id: str | None = Query(None)) -> dict[str, Any]:
     from datetime import datetime, timezone
 
     from handlers.news_ingester import _run as _ingest
-    from handlers.news_classifier import _process_message
+    from handlers.news_classifier import _process_message, _LLM_MAX_CONCURRENCY
     from handlers.trade_decision import _process_signal
     from src.db.client import get_db
     from src.news_trader.db import ensure_indexes, signals as signals_coll
@@ -108,9 +108,10 @@ async def trigger_pipeline(run_id: str | None = Query(None)) -> dict[str, Any]:
         logger.info("[PIPELINE] classifying %d articles...", len(new_ids))
 
         acted_signals = 0
+        llm_semaphore = asyncio.Semaphore(_LLM_MAX_CONCURRENCY)
         for news_id in new_ids:
             try:
-                if await _process_message({"news_id": news_id}, settings):
+                if await _process_message({"news_id": news_id}, settings, llm_semaphore):
                     acted_signals += 1
             except Exception as exc:
                 logger.error("[PIPELINE] classifier error news_id=%s err=%s", news_id, exc)
