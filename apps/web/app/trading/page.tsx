@@ -179,6 +179,7 @@ function StageDot({ status }: { status: StageStatus }) {
   if (status === 'done')    return <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 shrink-0" />;
   if (status === 'running') return <span className="h-2.5 w-2.5 rounded-full bg-accent animate-pulse shrink-0" />;
   if (status === 'waiting') return <span className="h-2.5 w-2.5 rounded-full bg-amber-400 animate-pulse shrink-0" />;
+  if (status === 'skipped') return <span className="h-2.5 w-2.5 rounded-full bg-black/10 shrink-0" />;
   return <span className="h-2.5 w-2.5 rounded-full bg-black/15 shrink-0" />;
 }
 
@@ -186,6 +187,13 @@ function PipelineStatusPanel({ pipelineStatus }: { pipelineStatus: PipelineStatu
   if (!pipelineStatus?.run) return null;
 
   const { run, stages, is_active, elapsed_ms } = pipelineStatus;
+
+  const noNews = stages?.ingester.status === 'done' && stages.ingester.count === 0;
+
+  function effectiveStatus(key: keyof NonNullable<PipelineStatus['stages']>): StageStatus {
+    if (noNews && key !== 'ingester') return 'skipped';
+    return stages?.[key]?.status ?? 'pending';
+  }
 
   return (
     <div className="metric-chip space-y-3">
@@ -209,7 +217,7 @@ function PipelineStatusPanel({ pipelineStatus }: { pipelineStatus: PipelineStatu
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {STAGE_META.map(({ key, label, detail }) => {
-          const status = stages?.[key]?.status ?? 'pending';
+          const status = effectiveStatus(key);
           return (
             <div
               key={key}
@@ -221,10 +229,13 @@ function PipelineStatusPanel({ pipelineStatus }: { pipelineStatus: PipelineStatu
               </div>
               <span
                 className={`text-[10px] tabular-nums ${
-                  status === 'done' ? 'text-emerald-700' : status === 'waiting' ? 'text-amber-600' : 'text-ink/40'
+                  status === 'done' ? 'text-emerald-700' :
+                  status === 'waiting' ? 'text-amber-600' :
+                  status === 'skipped' ? 'text-ink/30' :
+                  'text-ink/40'
                 }`}
               >
-                {stages ? detail(stages) : status}
+                {status === 'skipped' ? 'skipped — no news' : stages ? detail(stages) : status}
               </span>
             </div>
           );

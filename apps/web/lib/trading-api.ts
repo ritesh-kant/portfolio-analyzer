@@ -138,7 +138,7 @@ export const fetchNews = (limit = 30) =>
 
 export const fetchStats = () => get<NtStats>('/nt/stats');
 
-export type StageStatus = 'pending' | 'running' | 'waiting' | 'done';
+export type StageStatus = 'pending' | 'running' | 'waiting' | 'done' | 'skipped';
 
 export interface PipelineStatus {
   run: { _id: string; triggered_at: string; source: string } | null;
