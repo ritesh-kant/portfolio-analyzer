@@ -17,7 +17,7 @@ provider:
   name: aws
   runtime: nodejs20.x
   architecture: arm64
-  stage: dev
+  stage: ${opt:stage, 'dev'}
   region: ap-south-1
   logRetentionInDays: 14
   environment:
@@ -144,4 +144,10 @@ functions:
     events:
       - httpApi:
           path: /nt/pipeline/history
+          method: get
+  ntPipelinePositions:
+    handler: src/handlers/nt-pipeline-positions.handler
+    events:
+      - httpApi:
+          path: /nt/pipeline/{id}/positions
           method: get

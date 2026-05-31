@@ -133,7 +133,7 @@ async def trigger_pipeline(run_id: str | None = Query(None)) -> dict[str, Any]:
         total_entered = 0
         async for sig in sig_cursor:
             try:
-                n = await _process_signal(sig, settings)
+                n = await _process_signal(sig, settings, pipeline_run_id=run_id)
                 total_entered += n
                 await signals_coll(db).update_one(
                     {"_id": sig["_id"]}, {"$set": {"acted_on": True}}

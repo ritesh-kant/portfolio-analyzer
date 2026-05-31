@@ -18,12 +18,13 @@ import {
   fetchStats,
   fetchPipelineStatus,
   fetchPipelineHistory,
+  fetchPipelinePositions,
   triggerPipeline,
   type NtPosition,
   type NtSignal,
   type NtNews,
   type NtStats,
-type PipelineStatus,
+  type PipelineStatus,
   type PipelineRun,
   type StageStatus,
 } from '../../lib/trading-api';
@@ -264,10 +265,82 @@ function Stat({ label, value }: { label: string; value: string | number | null }
   );
 }
 
+function PipelineRunModal({ run, onClose }: { run: PipelineRun; onClose: () => void }) {
+  const [positions, setPositions] = useState<NtPosition[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchPipelinePositions(run._id)
+      .then((d) => setPositions(d.positions))
+      .catch(() => setPositions([]))
+      .finally(() => setLoading(false));
+  }, [run._id]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center bg-black/30 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 bg-white flex items-center justify-between px-5 py-4 border-b border-black/5">
+          <div>
+            <p className="text-sm font-semibold">Positions — {fmtDate(run.triggered_at)}</p>
+            <p className="text-xs text-ink/40 mt-0.5">{run.source} · <RunStatusBadge status={run.status} /></p>
+          </div>
+          <button onClick={onClose} className="text-ink/40 hover:text-ink text-lg leading-none px-2">✕</button>
+        </div>
+
+        <div className="px-5 py-4">
+          {loading && <p className="text-xs text-ink/40 py-4 text-center">Loading…</p>}
+          {!loading && positions?.length === 0 && (
+            <p className="text-xs text-ink/40 py-4 text-center">
+              No positions linked to this run.{' '}
+              {run.positions_opened && run.positions_opened > 0
+                ? 'Positions opened before run-id tracking was added.'
+                : ''}
+            </p>
+          )}
+          {!loading && positions && positions.length > 0 && (
+            <div className="space-y-2">
+              {positions.map((p) => {
+                const netPnl = p.net_pnl ?? 0;
+                const isOpen = p.status === 'open';
+                return (
+                  <div key={p._id} className="rounded-xl border border-black/5 px-4 py-3 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-sm">{p.symbol}</span>
+                      {isOpen ? (
+                        <span className="text-[10px] rounded-full bg-sky-100 text-sky-700 px-2 py-0.5 font-bold">open</span>
+                      ) : (
+                        <span className={`tabular-nums text-sm font-semibold ${pnlColor(netPnl)}`}>
+                          {pnlSign(netPnl)}{formatCurrency(netPnl)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-ink/50">
+                      <span>Entry {fmtPrice(p.entry_price)} × {p.qty}</span>
+                      <span className="capitalize">{p.confidence} · {p.sector}</span>
+                      {p.exit_reason && <span className="capitalize">{p.exit_reason.replace(/_/g, ' ')}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PipelineHistory() {
   const [page, setPage] = useState(1);
   const [data, setData] = useState<{ runs: PipelineRun[]; total: number; pages: number } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedRun, setSelectedRun] = useState<PipelineRun | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -288,6 +361,7 @@ function PipelineHistory() {
   };
 
   return (
+    <>
     <div className="metric-chip space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold">Pipeline History</h2>
@@ -309,7 +383,11 @@ function PipelineHistory() {
           </thead>
           <tbody>
             {data.runs.map((run) => (
-              <tr key={run._id} className="border-b border-black/5 last:border-0 hover:bg-black/[0.02]">
+              <tr
+                key={run._id}
+                className="border-b border-black/5 last:border-0 hover:bg-black/[0.03] cursor-pointer"
+                onClick={() => setSelectedRun(run)}
+              >
                 <td className="px-4 py-2.5 text-xs text-ink/60">{fmtDate(run.triggered_at)}</td>
                 <td className="px-4 py-2.5 text-xs text-ink/50">{run.source}</td>
                 <td className="px-4 py-2.5"><RunStatusBadge status={run.status} /></td>
@@ -343,6 +421,8 @@ function PipelineHistory() {
         </div>
       )}
     </div>
+    {selectedRun && <PipelineRunModal run={selectedRun} onClose={() => setSelectedRun(null)} />}
+    </>
   );
 }
 

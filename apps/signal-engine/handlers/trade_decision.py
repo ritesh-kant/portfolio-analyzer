@@ -103,6 +103,7 @@ async def _process_signal(
     signal_doc: dict[str, Any],
     settings: Settings,
     regime: dict[str, Any] | None = None,
+    pipeline_run_id: str | None = None,
 ) -> int:
     """Returns number of positions opened."""
     db = get_db()
@@ -224,6 +225,7 @@ async def _process_signal(
             "sl_pct_used": settings.nt_sl_pct,
             "target_pct_used": settings.nt_target_pct,
             "max_hold_days_used": settings.nt_max_hold_days,
+            "pipeline_run_id": pipeline_run_id,
         }
 
         if paper:
@@ -342,7 +344,7 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
                 logger.info("[TRADE] signal already acted on id=%s — skipping", signal_id)
                 continue
 
-            n = await _process_signal(signal_doc, settings, regime=regime)
+            n = await _process_signal(signal_doc, settings, regime=regime, pipeline_run_id=run_id)
             total_entered += n
 
             await signals_coll(db).update_one(

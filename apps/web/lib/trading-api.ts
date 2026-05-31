@@ -173,3 +173,6 @@ export const fetchPipelineHistory = (page = 1) =>
   get<{ runs: PipelineRun[]; total: number; page: number; pages: number }>(
     `/nt/pipeline/history?page=${page}`,
   );
+
+export const fetchPipelinePositions = (runId: string) =>
+  get<{ positions: NtPosition[]; count: number }>(`/nt/pipeline/${runId}/positions`);
