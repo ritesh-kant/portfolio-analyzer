@@ -67,6 +67,29 @@ function Empty({ msg }: { msg: string }) {
   );
 }
 
+function InfoTip({ text }: { text: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span className="relative inline-flex">
+      <button
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+        onFocus={() => setShow(true)}
+        onBlur={() => setShow(false)}
+        className="flex h-4 w-4 items-center justify-center rounded-full bg-black/10 text-[9px] font-bold text-ink/50 hover:bg-black/20"
+        aria-label="Info"
+      >
+        i
+      </button>
+      {show && (
+        <span className="absolute left-5 top-0 z-10 w-56 rounded-lg border border-black/10 bg-white px-3 py-2 text-xs leading-relaxed text-ink/70 shadow-lg">
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function TabBtn({
   active,
   onClick,
@@ -181,6 +204,7 @@ function StageDot({ status }: { status: StageStatus }) {
   if (status === 'running') return <span className="h-2.5 w-2.5 rounded-full bg-accent animate-pulse shrink-0" />;
   if (status === 'waiting') return <span className="h-2.5 w-2.5 rounded-full bg-amber-400 animate-pulse shrink-0" />;
   if (status === 'skipped') return <span className="h-2.5 w-2.5 rounded-full bg-black/10 shrink-0" />;
+  if (status === 'failed')  return <span className="h-2.5 w-2.5 rounded-full bg-rose-500 shrink-0" />;
   return <span className="h-2.5 w-2.5 rounded-full bg-black/15 shrink-0" />;
 }
 
@@ -205,6 +229,10 @@ function PipelineStatusPanel({ pipelineStatus }: { pipelineStatus: PipelineStatu
             <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent animate-pulse">
               running
             </span>
+          ) : run.status === 'failed' ? (
+            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+              failed
+            </span>
           ) : (
             <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
               complete
@@ -215,6 +243,12 @@ function PipelineStatusPanel({ pipelineStatus }: { pipelineStatus: PipelineStatu
           triggered {fmt(elapsed_ms)} ago · {run.source}
         </span>
       </div>
+
+      {run.status === 'failed' && run.error && (
+        <p className="rounded-lg bg-rose-50 px-3 py-2 text-[11px] text-rose-700 break-words">
+          {run.error}
+        </p>
+      )}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {STAGE_META.map(({ key, label, detail }) => {
@@ -233,10 +267,11 @@ function PipelineStatusPanel({ pipelineStatus }: { pipelineStatus: PipelineStatu
                   status === 'done' ? 'text-emerald-700' :
                   status === 'waiting' ? 'text-amber-600' :
                   status === 'skipped' ? 'text-ink/30' :
+                  status === 'failed' ? 'text-rose-600' :
                   'text-ink/40'
                 }`}
               >
-                {status === 'skipped' ? 'skipped — no news' : stages ? detail(stages) : status}
+                {status === 'skipped' ? 'skipped — no news' : status === 'failed' ? 'stage failed' : stages ? detail(stages) : status}
               </span>
             </div>
           );
@@ -651,6 +686,412 @@ function PnlAttributionPanel({ stats }: { stats: NtStats }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Risk metrics ─────────────────────────────────────────────────────────────
+
+function RiskMetricsPanel({ positions }: { positions: NtPosition[] }) {
+  const closed = positions.filter((p) => p.status === 'closed' && p.net_pnl != null);
+  if (closed.length < 3) return null;
+
+  const sorted = [...closed].sort(
+    (a, b) => new Date(a.exit_at!).getTime() - new Date(b.exit_at!).getTime(),
+  );
+  const pnls = sorted.map((p) => p.net_pnl!);
+
+  const mean = pnls.reduce((s, v) => s + v, 0) / pnls.length;
+  const variance = pnls.reduce((s, v) => s + (v - mean) ** 2, 0) / pnls.length;
+  const stdDev = Math.sqrt(variance);
+  const downside = pnls.filter((v) => v < 0);
+  const downsideVariance =
+    downside.length > 0 ? downside.reduce((s, v) => s + v ** 2, 0) / downside.length : 0;
+  const downsideDev = Math.sqrt(downsideVariance);
+
+  const sharpe = stdDev > 0 ? mean / stdDev : null;
+  const sortino = downsideDev > 0 ? mean / downsideDev : null;
+
+  let maxWin = 0,
+    maxLoss = 0,
+    curWin = 0,
+    curLoss = 0;
+  for (const p of pnls) {
+    if (p > 0) {
+      curWin++;
+      curLoss = 0;
+      maxWin = Math.max(maxWin, curWin);
+    } else {
+      curLoss++;
+      curWin = 0;
+      maxLoss = Math.max(maxLoss, curLoss);
+    }
+  }
+  const lastPnl = pnls[pnls.length - 1] ?? 0;
+  const streak = lastPnl > 0 ? curWin : -curLoss;
+
+  let peak = 0,
+    cumul = 0,
+    maxDD = 0;
+  for (const p of pnls) {
+    cumul += p;
+    if (cumul > peak) peak = cumul;
+    const dd = peak - cumul;
+    if (dd > maxDD) maxDD = dd;
+  }
+  const calmar = maxDD > 0 ? (mean * closed.length) / maxDD : null;
+
+  const metrics = [
+    {
+      label: 'Sharpe (trade)',
+      value: sharpe != null ? sharpe.toFixed(2) : '—',
+      color: sharpe != null && sharpe >= 1 ? 'text-emerald-700' : sharpe != null && sharpe < 0 ? 'text-rose-600' : '',
+      tip: 'Trade-level Sharpe: mean P&L ÷ std dev of all trade P&Ls. ≥1.0 is good. Not annualised — computed per trade, not per day.',
+    },
+    {
+      label: 'Sortino (trade)',
+      value: sortino != null ? sortino.toFixed(2) : '—',
+      color: sortino != null && sortino >= 1 ? 'text-emerald-700' : sortino != null && sortino < 0 ? 'text-rose-600' : '',
+      tip: 'Like Sharpe but only penalises losing trades. A higher Sortino vs Sharpe means losses are small relative to wins.',
+    },
+    {
+      label: 'Calmar',
+      value: calmar != null ? calmar.toFixed(2) : '—',
+      color: calmar != null && calmar >= 1 ? 'text-emerald-700' : calmar != null && calmar < 0 ? 'text-rose-600' : '',
+      tip: 'Total net P&L ÷ max drawdown. Measures how much you earned per rupee of peak-to-trough loss. Higher is better.',
+    },
+    {
+      label: 'Max Win Streak',
+      value: String(maxWin),
+      color: 'text-emerald-700',
+      tip: 'Longest consecutive winning trade run across all closed trades.',
+    },
+    {
+      label: 'Max Loss Streak',
+      value: String(maxLoss),
+      color: 'text-rose-600',
+      tip: 'Longest consecutive losing trade run across all closed trades.',
+    },
+    {
+      label: 'Current Streak',
+      value: streak > 0 ? `+${streak}W` : streak < 0 ? `${Math.abs(streak)}L` : '—',
+      color: streak > 0 ? 'text-emerald-700' : streak < 0 ? 'text-rose-600' : '',
+      tip: 'Current run counting from the latest closed trade. +2W means 2 consecutive wins.',
+    },
+  ];
+
+  return (
+    <div className="metric-chip space-y-3">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-semibold">Risk Metrics</h2>
+        <InfoTip text="Risk-adjusted performance metrics computed from all closed trades. Sharpe and Sortino are trade-level (not annualised daily returns)." />
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {metrics.map(({ label, value, color, tip }) => (
+          <div
+            key={label}
+            className="rounded-xl border border-black/5 bg-bg px-3 py-2.5 space-y-0.5"
+          >
+            <div className="flex items-center gap-1">
+              <p className="text-[10px] text-ink/50">{label}</p>
+              <InfoTip text={tip} />
+            </div>
+            <p className={`font-display text-lg font-bold tabular-nums ${color}`}>{value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Confidence tier breakdown ────────────────────────────────────────────────
+
+function ConfidenceTierPanel({ positions }: { positions: NtPosition[] }) {
+  const closed = positions.filter((p) => p.status === 'closed' && p.net_pnl != null);
+  if (closed.length === 0) return null;
+
+  type Tier = { trades: number; wins: number; totalPnl: number };
+  const tiers = new Map<string, Tier>([
+    ['high', { trades: 0, wins: 0, totalPnl: 0 }],
+    ['medium', { trades: 0, wins: 0, totalPnl: 0 }],
+    ['low', { trades: 0, wins: 0, totalPnl: 0 }],
+  ]);
+  for (const p of closed) {
+    const k = p.confidence ?? 'low';
+    const t = tiers.get(k) ?? { trades: 0, wins: 0, totalPnl: 0 };
+    t.trades++;
+    if ((p.net_pnl ?? 0) > 0) t.wins++;
+    t.totalPnl += p.net_pnl ?? 0;
+    tiers.set(k, t);
+  }
+
+  const rows = (['high', 'medium', 'low'] as const)
+    .map((tier) => {
+      const t = tiers.get(tier)!;
+      return {
+        tier,
+        trades: t.trades,
+        wins: t.wins,
+        totalPnl: t.totalPnl,
+        winRate: t.trades > 0 ? (t.wins / t.trades) * 100 : null,
+        avgPnl: t.trades > 0 ? t.totalPnl / t.trades : null,
+      };
+    })
+    .filter((r) => r.trades > 0);
+
+  if (rows.length === 0) return null;
+
+  const colorMap = { high: 'text-emerald-700', medium: 'text-amber-600', low: 'text-ink/50' };
+  const bgMap = { high: 'bg-emerald-100', medium: 'bg-amber-100', low: 'bg-black/5' };
+
+  return (
+    <div className="metric-chip space-y-3">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-semibold">Performance by LLM Confidence</h2>
+        <InfoTip text="How well the AI's confidence tiers predict actual outcomes. High-confidence signals should show better win rates and P&L than medium/low — if they don't, the confidence scoring needs recalibration." />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-ink/40">
+              <th className="pb-2 font-semibold">Confidence</th>
+              <th className="pb-2 text-right font-semibold">Trades</th>
+              <th className="pb-2 text-right font-semibold">Win Rate</th>
+              <th className="pb-2 text-right font-semibold">Avg P&amp;L</th>
+              <th className="pb-2 text-right font-semibold">Total Net P&amp;L</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-black/5">
+            {rows.map(({ tier, trades, winRate, avgPnl, totalPnl }) => (
+              <tr key={tier}>
+                <td className="py-2">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${bgMap[tier]} ${colorMap[tier]}`}
+                  >
+                    {tier}
+                  </span>
+                </td>
+                <td className="py-2 text-right tabular-nums font-semibold">{trades}</td>
+                <td className="py-2 text-right tabular-nums">
+                  <span
+                    className={
+                      winRate != null && winRate >= 50
+                        ? 'font-semibold text-emerald-700'
+                        : 'font-semibold text-rose-600'
+                    }
+                  >
+                    {winRate != null ? `${winRate.toFixed(0)}%` : '—'}
+                  </span>
+                </td>
+                <td
+                  className={`py-2 text-right tabular-nums font-semibold ${avgPnl != null ? pnlColor(avgPnl) : ''}`}
+                >
+                  {avgPnl != null ? `${pnlSign(avgPnl)}${formatCurrency(avgPnl)}` : '—'}
+                </td>
+                <td className={`py-2 text-right tabular-nums font-semibold ${pnlColor(totalPnl)}`}>
+                  {pnlSign(totalPnl)}
+                  {formatCurrency(totalPnl)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sector P&L ───────────────────────────────────────────────────────────────
+
+function SectorPnlPanel({ positions }: { positions: NtPosition[] }) {
+  const closed = positions.filter((p) => p.status === 'closed' && p.net_pnl != null && p.sector);
+  if (closed.length === 0) return null;
+
+  const byS: Record<string, { total: number; count: number }> = {};
+  for (const p of closed) {
+    const s = p.sector ?? 'Unknown';
+    if (!byS[s]) byS[s] = { total: 0, count: 0 };
+    byS[s].total += p.net_pnl ?? 0;
+    byS[s].count++;
+  }
+
+  const rows = Object.entries(byS)
+    .map(([sector, d]) => ({ sector, ...d }))
+    .sort((a, b) => b.total - a.total);
+
+  const maxAbs = Math.max(...rows.map((r) => Math.abs(r.total)), 1);
+
+  return (
+    <div className="metric-chip space-y-3">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-semibold">P&amp;L by Sector</h2>
+        <InfoTip text="Net P&L grouped by the sector the LLM tagged on the originating news signal. Identifies which market sectors your strategy works best in." />
+      </div>
+      <div className="space-y-2">
+        {rows.map(({ sector, total, count }) => {
+          const pct = (Math.abs(total) / maxAbs) * 100;
+          return (
+            <div key={sector} className="flex items-center gap-3">
+              <span className="w-28 shrink-0 truncate text-xs text-ink/70" title={sector}>
+                {sector}
+              </span>
+              <div className="flex-1 h-4 rounded-full bg-black/5 overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${total >= 0 ? 'bg-emerald-400' : 'bg-rose-400'}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span
+                className={`w-24 text-right tabular-nums text-xs font-semibold ${pnlColor(total)}`}
+              >
+                {pnlSign(total)}
+                {formatCurrency(total)}
+              </span>
+              <span className="w-12 text-right text-[10px] text-ink/40">{count} trades</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Signal → Trade funnel ────────────────────────────────────────────────────
+
+function SignalFunnelPanel({
+  signals,
+  positions,
+}: {
+  signals: NtSignal[];
+  positions: NtPosition[];
+}) {
+  if (signals.length === 0) return null;
+
+  const total = signals.length;
+  const evaluated = signals.filter((s) => s.acted_on).length;
+  const tradedSignalIds = new Set(positions.map((p) => p.signal_id).filter(Boolean));
+  const traded = tradedSignalIds.size;
+
+  const evalRate = total > 0 ? (evaluated / total) * 100 : 0;
+  const tradeRate = evaluated > 0 ? (traded / evaluated) * 100 : 0;
+
+  const steps = [
+    {
+      label: 'Classified',
+      value: total,
+      pct: 100,
+      tip: 'Total news signals the LLM classified and stored in this session.',
+    },
+    {
+      label: 'Evaluated',
+      value: evaluated,
+      pct: evalRate,
+      tip: 'Signals that passed confidence/freshness gates and were sent to the trade-decision Lambda for evaluation.',
+    },
+    {
+      label: 'Traded',
+      value: traded,
+      pct: tradeRate,
+      tip: 'Distinct signals that resulted in at least one position being opened (passed regime + conviction gates, had a liquid stock with a valid price).',
+    },
+  ];
+
+  return (
+    <div className="metric-chip space-y-3">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-semibold">Signal → Trade Funnel</h2>
+        <InfoTip text="How many news signals survive each stage of the pipeline. Low Traded % means the regime or conviction gates are filtering aggressively — which may be intentional." />
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        {steps.map(({ label, value, pct, tip }, i) => (
+          <div
+            key={label}
+            className="rounded-xl border border-black/5 bg-bg px-4 py-3 text-center space-y-1"
+          >
+            <div className="flex items-center justify-center gap-1">
+              {i > 0 && <span className="text-[10px] text-ink/30">▶&nbsp;</span>}
+              <p className="text-[10px] text-ink/50">{label}</p>
+              <InfoTip text={tip} />
+            </div>
+            <p className="font-display text-2xl font-bold tabular-nums">{value}</p>
+            <p className="text-[10px] tabular-nums text-ink/40">
+              {i === 0 ? '100%' : `${pct.toFixed(0)}% of prev`}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── R-multiple distribution ──────────────────────────────────────────────────
+
+function RMultiplePanel({ positions }: { positions: NtPosition[] }) {
+  const closed = positions.filter(
+    (p) => p.status === 'closed' && p.net_pnl != null && p.sl_pct_used && p.entry_price && p.qty,
+  );
+  if (closed.length < 3) return null;
+
+  const rmultiples = closed
+    .map((p) => {
+      const risk = p.entry_price * (p.sl_pct_used ?? 0.015) * p.qty;
+      return risk > 0 ? (p.net_pnl ?? 0) / risk : null;
+    })
+    .filter((r): r is number => r != null);
+
+  if (rmultiples.length === 0) return null;
+
+  const buckets = [
+    { label: '<−1R', min: -Infinity, max: -1, color: 'bg-rose-500' },
+    { label: '−1–0R', min: -1, max: 0, color: 'bg-rose-300' },
+    { label: '0–1R', min: 0, max: 1, color: 'bg-emerald-200' },
+    { label: '1–3R', min: 1, max: 3, color: 'bg-emerald-400' },
+    { label: '3–5R', min: 3, max: 5, color: 'bg-emerald-600' },
+    { label: '>5R', min: 5, max: Infinity, color: 'bg-emerald-800' },
+  ];
+
+  const counts = buckets.map((b) => ({
+    ...b,
+    count: rmultiples.filter((r) => r >= b.min && r < b.max).length,
+  }));
+  const maxCount = Math.max(...counts.map((b) => b.count), 1);
+  const avgR = rmultiples.reduce((s, v) => s + v, 0) / rmultiples.length;
+
+  return (
+    <div className="metric-chip space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold">R-Multiple Distribution</h2>
+          <InfoTip text="Each trade's P&L expressed as a multiple of its initial risk (1R = entry × SL%). A 2R win means you made 2× what you risked. Positive expectancy requires avg R > 0. Bars right of 0 are wins, left are losses." />
+        </div>
+        <span className="text-xs text-ink/50">
+          Avg R:{' '}
+          <span
+            className={`tabular-nums font-semibold ${avgR >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}
+          >
+            {avgR >= 0 ? '+' : ''}
+            {avgR.toFixed(2)}R
+          </span>
+        </span>
+      </div>
+      <div className="flex items-end gap-2" style={{ height: 80 }}>
+        {counts.map(({ label, count, color }) => (
+          <div key={label} className="flex flex-1 flex-col items-center gap-1">
+            <span className="text-[10px] tabular-nums text-ink/50">{count > 0 ? count : ''}</span>
+            <div
+              className={`w-full rounded-t ${color}`}
+              style={{ height: count > 0 ? `${(count / maxCount) * 56}px` : '2px', opacity: count > 0 ? 1 : 0.15 }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        {counts.map(({ label }) => (
+          <div key={label} className="flex-1 text-center text-[10px] text-ink/40">
+            {label}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1569,6 +2010,21 @@ export default function TradingPage() {
 
           {/* ── P&L attribution ────────────────────────────────────────── */}
           {stats && <PnlAttributionPanel stats={stats} />}
+
+          {/* ── Risk metrics ───────────────────────────────────────────── */}
+          <RiskMetricsPanel positions={positions} />
+
+          {/* ── Confidence tier breakdown ──────────────────────────────── */}
+          <ConfidenceTierPanel positions={positions} />
+
+          {/* ── Sector P&L ─────────────────────────────────────────────── */}
+          <SectorPnlPanel positions={positions} />
+
+          {/* ── Signal funnel ──────────────────────────────────────────── */}
+          <SignalFunnelPanel signals={signals} positions={positions} />
+
+          {/* ── R-multiple distribution ────────────────────────────────── */}
+          <RMultiplePanel positions={positions} />
 
           {/* ── Tab bar ────────────────────────────────────────────────── */}
           <div className="flex w-fit items-center gap-1 rounded-full bg-panel p-1 shadow-card">

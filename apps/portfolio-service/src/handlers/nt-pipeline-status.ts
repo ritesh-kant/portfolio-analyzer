@@ -70,19 +70,41 @@ export const handler = requireAuth(async () => {
   const isActive =
     elapsedMs < RUN_TTL_MS && !(tradeDone || (delayStatus === 'done' && elapsedMs > 18 * 60 * 1000));
 
+  const runStatus = (run.status as string) ?? 'running';
+  const runError = (run.error as string | null) ?? null;
+
+  // When the run itself is marked failed, determine which stage to flag red
+  let stages;
+  if (runStatus === 'failed') {
+    const failedStage =
+      newArticles === 0 ? 'ingester' :
+      newSignals === 0  ? 'classifier' :
+                          'trade';
+    stages = {
+      ingester:  { status: failedStage === 'ingester'  ? 'failed' : 'done',    count: newArticles },
+      classifier: { status: failedStage === 'classifier' ? 'failed' : newArticles > 0 ? 'done' : 'pending', count: newSignals },
+      sqs_delay:  { status: 'pending' as const, remain_ms: 0 },
+      trade:      { status: failedStage === 'trade'    ? 'failed' : 'pending',  count: newPositions },
+    };
+  } else {
+    stages = {
+      ingester:   { status: ingesterStatus,  count: newArticles },
+      classifier: { status: classifierStatus, count: newSignals },
+      sqs_delay:  { status: delayStatus,      remain_ms: delayRemainMs },
+      trade:      { status: tradeStatus,      count: newPositions },
+    };
+  }
+
   return json(200, {
     run: {
       _id: String(run._id),
       triggered_at: triggeredAt.toISOString(),
       source: run.source ?? 'manual',
+      status: runStatus,
+      error: runError,
     },
-    stages: {
-      ingester: { status: ingesterStatus, count: newArticles },
-      classifier: { status: classifierStatus, count: newSignals },
-      sqs_delay: { status: delayStatus, remain_ms: delayRemainMs },
-      trade: { status: tradeStatus, count: newPositions },
-    },
-    is_active: isActive,
+    stages,
+    is_active: runStatus === 'failed' ? false : isActive,
     elapsed_ms: elapsedMs,
   });
 });

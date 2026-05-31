@@ -65,6 +65,7 @@ export interface NtPosition {
   exit_at?: string;
   signal_id?: string;
   paper?: boolean;
+  sl_pct_used?: number;
 }
 
 export interface NtSignal {
@@ -138,10 +139,10 @@ export const fetchNews = (limit = 30) =>
 
 export const fetchStats = () => get<NtStats>('/nt/stats');
 
-export type StageStatus = 'pending' | 'running' | 'waiting' | 'done' | 'skipped';
+export type StageStatus = 'pending' | 'running' | 'waiting' | 'done' | 'skipped' | 'failed';
 
 export interface PipelineStatus {
-  run: { _id: string; triggered_at: string; source: string } | null;
+  run: { _id: string; triggered_at: string; source: string; status: string; error: string | null } | null;
   stages: {
     ingester: { status: StageStatus; count: number };
     classifier: { status: StageStatus; count: number };
