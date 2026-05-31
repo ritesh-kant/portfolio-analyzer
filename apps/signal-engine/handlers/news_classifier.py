@@ -24,7 +24,7 @@ from src.db.client import get_db
 from src.news_trader.classifier import classify
 from src.news_trader.db import ensure_indexes, news_raw, signals
 
-logging.basicConfig(level=logging.INFO)
+logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 _ACTIONABLE_CONFIDENCE = {"high", "medium"}

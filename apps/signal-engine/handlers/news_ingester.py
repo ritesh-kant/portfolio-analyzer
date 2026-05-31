@@ -22,7 +22,7 @@ from src.scrapers.bse import fetch_bse_announcements
 from src.scrapers.nse import fetch_nse_announcements
 from src.scrapers.rss import fetch_all_rss
 
-logging.basicConfig(level=logging.INFO)
+logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 _IST_OFFSET = 5.5 * 3600  # seconds

@@ -21,7 +21,7 @@ from src.news_trader.prices import get_ltps
 from src.news_trader.telegram import alert_sl_updated, alert_trade_closed
 from src.news_trader.trailing_sl import calc_pnl, check_exit, update_trailing_sl
 
-logging.basicConfig(level=logging.INFO)
+logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 _IST_OFFSET = 5.5 * 3600
@@ -71,23 +71,26 @@ async def _monitor_position(pos: dict, settings: Settings, price: float) -> str:
 
     paper = pos.get("paper", True)
 
-    # Update trailing SL
+    # Update trailing SL — use the sl_pct frozen at entry, not the live config.
+    # If nt_sl_pct is changed during tuning, open positions keep their original SL width.
+    sl_pct = pos.get("sl_pct_used") or settings.nt_sl_pct
     new_highest, new_sl = update_trailing_sl(
         current_price=price,
         highest_price=pos["highest_price"],
         current_sl=pos["trailing_sl"],
-        sl_pct=settings.nt_sl_pct,
+        sl_pct=sl_pct,
     )
 
     sl_raised = new_sl > pos["trailing_sl"]
 
-    # Check exit
+    # Check exit — use max_hold_days frozen at entry for the same reason.
+    max_hold_days = pos.get("max_hold_days_used") or settings.nt_max_hold_days
     exit_reason = check_exit(
         current_price=price,
         trailing_sl=new_sl,
         target_price=pos["target_price"],
         held_sessions=_trading_days_held(pos["entry_at"]),
-        max_hold_days=settings.nt_max_hold_days,
+        max_hold_days=max_hold_days,
     )
 
     if exit_reason:
@@ -189,11 +192,13 @@ async def _run(settings: Settings) -> dict:
     price_map = await asyncio.to_thread(get_ltps, symbols)
 
     priced: list[tuple[dict, float]] = []
+    no_priced: list[dict] = []
     for pos in open_positions:
         price = price_map.get(pos["symbol"])
         if not price:
             logger.warning("sl_monitor_no_price symbol=%s pos_id=%s", pos["symbol"], pos["_id"])
             results["no_price"] += 1
+            no_priced.append(pos)
         else:
             priced.append((pos, price))
 
@@ -209,6 +214,49 @@ async def _run(settings: Settings) -> dict:
             results["closed"] += 1
         elif outcome in results:
             results[outcome] += 1
+
+    # Day5 force-close for positions where live price is unavailable.
+    # SL/target can't be checked without a price, but time-based exit can still fire.
+    # Use the last known current_price (from a previous tick) or fall back to entry_price
+    # so P&L can be calculated — better a stale-price close than a stuck-open position.
+    for pos in no_priced:
+        held = _trading_days_held(pos["entry_at"])
+        max_hold = pos.get("max_hold_days_used") or settings.nt_max_hold_days
+        if held >= max_hold:
+            fallback_price: float = pos.get("current_price") or pos["entry_price"]
+            gross_pnl, net_pnl, costs = calc_pnl(pos["entry_price"], fallback_price, pos["qty"])
+            now = datetime.now(tz=timezone.utc)
+            await positions(db).update_one(
+                {"_id": pos["_id"]},
+                {
+                    "$set": {
+                        "status": "closed",
+                        "exit_reason": "day5",
+                        "exit_price": fallback_price,
+                        "exit_at": now,
+                        "gross_pnl": gross_pnl,
+                        "net_pnl": net_pnl,
+                        "costs": costs,
+                    }
+                },
+            )
+            logger.warning(
+                "day5_force_close_no_price symbol=%s held=%d fallback_price=%.2f net_pnl=%.0f",
+                pos["symbol"], held, fallback_price, net_pnl,
+            )
+            await asyncio.to_thread(
+                alert_trade_closed,
+                bot_token=settings.telegram_bot_token,
+                chat_id=settings.telegram_chat_id,
+                symbol=pos["symbol"],
+                exit_reason="day5",
+                entry_price=pos["entry_price"],
+                exit_price=fallback_price,
+                qty=pos["qty"],
+                net_pnl=net_pnl,
+                paper=pos.get("paper", True),
+            )
+            results["closed"] += 1
 
     logger.info("sl_monitor_done open=%d %s", len(open_positions), results)
     return {"open_positions": len(open_positions), **results}

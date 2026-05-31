@@ -27,7 +27,7 @@ from src.news_trader.trailing_sl import calc_qty, initial_trailing_sl
 from src.news_trader.nifty500 import NIFTY_500
 from src.scrapers.nse_market import fetch_nifty_vix_sync
 
-logging.basicConfig(level=logging.INFO)
+logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Conviction & regime gate thresholds. See plan notes — these are noise-reduction
