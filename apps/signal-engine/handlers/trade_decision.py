@@ -1,12 +1,18 @@
 """Lambda: trade-decision — SQS trigger from news-signals queue (delayed 15 min).
 
+Capital allocation: one knob, nt_total_capital_inr. Per-trade size is derived
+as total / nt_max_positions (equal-weight per slot), so total exposure is
+bounded by construction. A backstop additionally refuses any entry that would
+push summed open entry_value over nt_total_capital_inr.
+
 For each signal:
   1. Check open position count < nt_max_positions
   2. For each stock in signal (up to nt_max_stocks_per_signal):
      a. Fetch current price
-     b. Calculate qty = floor(nt_position_size_inr / price)
-     c. In paper mode: insert open position to nt_positions
-     d. Send Telegram alert
+     b. Calculate qty = floor(per_slot_size / price)
+     c. Backstop: skip if it would breach nt_total_capital_inr
+     d. In paper mode: insert open position to nt_positions
+     e. Send Telegram alert
   3. Mark signal as acted_on
 """
 
@@ -116,16 +122,23 @@ async def _process_signal(
                 signal_doc.get("confidence"), int(signal_doc.get("source_count", 1)),
                 signal_doc.get("stocks"))
 
+    # Single source of truth for sizing: total capital split equally across slots.
+    # Logged loudly so the effective per-trade size is never invisible (the ₹50k
+    # surprise happened because nobody could see what each trade was actually using).
+    per_slot_size = settings.nt_total_capital_inr / settings.nt_max_positions
+    logger.info("[TRADE] capital=₹%.0f → ₹%.0f/slot across %d slots",
+                settings.nt_total_capital_inr, per_slot_size, settings.nt_max_positions)
+
     # Conviction & regime gates run before any DB / price work — cheap rejects.
     allow, position_size_inr, reason = _apply_conviction_gates(
-        signal_doc, regime, settings.nt_position_size_inr
+        signal_doc, regime, per_slot_size
     )
     if not allow:
         logger.info("[TRADE] skip signal_id=%s — gate rejected: %s", signal_id, reason)
         return 0
-    if position_size_inr != settings.nt_position_size_inr:
+    if position_size_inr != per_slot_size:
         logger.info("[TRADE] signal_id=%s position size scaled %.0f → %.0f (reason: %s)",
-                    signal_id, settings.nt_position_size_inr, position_size_inr, reason)
+                    signal_id, per_slot_size, position_size_inr, reason)
 
     # Check available capacity
     open_count = await positions(db).count_documents({"status": "open"})
@@ -160,12 +173,33 @@ async def _process_signal(
 
     # Pre-fetch all candidate prices and the market snapshot concurrently —
     # avoids N+1 serial yfinance calls (one per stock + one per iteration for snapshot).
+    # 20-second hard timeout guards against yfinance hanging on Yahoo Finance throttling.
     sector = signal_doc.get("sector")
-    price_map, market_ctx = await asyncio.gather(
-        asyncio.to_thread(get_ltps, candidates),
-        asyncio.to_thread(get_market_snapshot, sector),
-    )
+    try:
+        price_map, market_ctx = await asyncio.wait_for(
+            asyncio.gather(
+                asyncio.to_thread(get_ltps, candidates),
+                asyncio.to_thread(get_market_snapshot, sector),
+            ),
+            timeout=20.0,
+        )
+    except TimeoutError:
+        logger.warning("[TRADE] price fetch timed out for signal_id=%s candidates=%s — skipping",
+                       signal_id, candidates)
+        return 0
     logger.info("[TRADE] prices fetched: %s", {s: f"₹{p:.2f}" for s, p in price_map.items()})
+
+    # Backstop: total cash already deployed across open positions. Equal-weight
+    # sizing already keeps us under nt_total_capital_inr by construction, so this
+    # guard should never fire in normal operation — it's defense-in-depth against
+    # out-of-band inserts or future sizing bugs. Basis is entry_value (cash
+    # committed at entry), not mark-to-market, since the cap is about deployed cash.
+    agg = await positions(db).aggregate([
+        {"$match": {"status": "open"}},
+        {"$group": {"_id": None, "total": {"$sum": "$entry_value"}}},
+    ]).to_list(1)
+    projected_invested = float(agg[0]["total"]) if agg else 0.0
+    logger.info("[TRADE] deployed=₹%.0f / cap=₹%.0f", projected_invested, settings.nt_total_capital_inr)
 
     for symbol in candidates:
         # Check if we already have an open position in this symbol
@@ -186,6 +220,16 @@ async def _process_signal(
 
         logger.info("[TRADE] %s LTP=%.2f — calculating position size...", symbol, price)
         qty = calc_qty(position_size_inr, price)
+        trade_value = price * qty
+
+        # Backstop: refuse (don't shrink) any entry that would breach the total
+        # cap. Shrinking would let one early trade balloon and starve the rest —
+        # the opposite of equal-weight diversification.
+        if projected_invested + trade_value > settings.nt_total_capital_inr:
+            logger.info("[TRADE] skip %s — would breach capital cap (deployed=₹%.0f + ₹%.0f > ₹%.0f)",
+                        symbol, projected_invested, trade_value, settings.nt_total_capital_inr)
+            continue
+
         target = price * (1.0 + settings.nt_target_pct)
         sl = initial_trailing_sl(price, settings.nt_sl_pct)
         now = datetime.now(tz=timezone.utc)
@@ -198,7 +242,7 @@ async def _process_signal(
             "confidence": signal_doc.get("confidence"),
             "entry_price": price,
             "qty": qty,
-            "entry_value": price * qty,
+            "entry_value": trade_value,
             "entry_at": now,
             "highest_price": price,
             "trailing_sl": sl,
@@ -253,6 +297,7 @@ async def _process_signal(
             reasoning=signal_doc.get("reasoning", ""),
             paper=paper,
         )
+        projected_invested += trade_value
         entered += 1
 
     logger.info("[TRADE] signal_id=%s done — %d position(s) opened", signal_id, entered)
@@ -312,7 +357,9 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
     # Regime snapshot fetched once per batch (yfinance download ~250d, ~2-5s).
     # All signals in this batch trade against the same market state.
     try:
-        regime = fetch_nifty_vix_sync()
+        regime = await asyncio.wait_for(
+            asyncio.to_thread(fetch_nifty_vix_sync), timeout=15.0
+        )
     except Exception as exc:
         # Fail-open: never block trading because yfinance hiccuped. Gates that
         # depend on missing fields will simply be no-ops.

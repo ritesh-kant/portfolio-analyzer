@@ -371,7 +371,7 @@ function PipelineRunModal({ run, onClose }: { run: PipelineRun; onClose: () => v
   );
 }
 
-function PipelineHistory() {
+function PipelineHistory({ refreshKey }: { refreshKey: number }) {
   const [page, setPage] = useState(1);
   const [data, setData] = useState<{ runs: PipelineRun[]; total: number; pages: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -383,7 +383,7 @@ function PipelineHistory() {
       .then(setData)
       .catch(() => null)
       .finally(() => setLoading(false));
-  }, [page]);
+  }, [page, refreshKey]);
 
   if (!data && loading) return null;
   if (!data || data.total === 0) return null;
@@ -1357,6 +1357,7 @@ type SortDir = 'asc' | 'desc';
 const MAGNITUDE_ORDER: Record<string, number> = { major: 3, moderate: 2, minor: 1 };
 const CONFIDENCE_ORDER: Record<string, number> = { high: 3, medium: 2, low: 1 };
 const SIG_PAGE_SIZE = 25;
+const NEWS_PAGE_SIZE = 20;
 
 function MagnitudeBadge({ magnitude }: { magnitude: NtSignal['magnitude'] }) {
   const map: Record<NtSignal['magnitude'], string> = {
@@ -1588,7 +1589,9 @@ function SignalsTab({ signals, positions }: { signals: NtSignal[]; positions: Nt
 
 // ─── News tab ─────────────────────────────────────────────────────────────────
 
-function NewsTab({ news, signals }: { news: NtNews[]; signals: NtSignal[] }) {
+function NewsTab({ news, signals, newsTotal }: { news: NtNews[]; signals: NtSignal[]; newsTotal: number }) {
+  const [page, setPage] = useState(1);
+
   // Sector analysis derived from signals
   const sectorStats: Record<string, { bullish: number; bearish: number; neutral: number }> = {};
   for (const s of signals) {
@@ -1599,6 +1602,10 @@ function NewsTab({ news, signals }: { news: NtNews[]; signals: NtSignal[] }) {
   const sectorEntries = Object.entries(sectorStats).sort(
     (a, b) => b[1].bullish + b[1].bearish - (a[1].bullish + a[1].bearish),
   );
+
+  const totalPages = Math.ceil(news.length / NEWS_PAGE_SIZE);
+  const paginated = news.slice((page - 1) * NEWS_PAGE_SIZE, page * NEWS_PAGE_SIZE);
+  const classifiedCount = news.filter((a) => a.classified).length;
 
   return (
     <div className="space-y-4">
@@ -1642,43 +1649,72 @@ function NewsTab({ news, signals }: { news: NtNews[]; signals: NtSignal[] }) {
       {news.length === 0 ? (
         <Empty msg="No news ingested yet." />
       ) : (
-        <div className="metric-chip space-y-3">
-          <h2 className="text-sm font-semibold">
-            Ingested News{' '}
-            <span className="text-xs font-normal text-ink/40">
-              ({news.filter((a) => a.classified).length}/{news.length} classified)
-            </span>
-          </h2>
-          {news.map((article) => (
-            <div
-              key={article._id}
-              className="flex items-start gap-3 border-b border-black/5 pb-3 last:border-0 last:pb-0"
-            >
-              <div className="flex-1 min-w-0">
-                {article.url ? (
-                  <a
-                    href={article.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-medium hover:text-accent"
-                  >
-                    {article.headline}
-                  </a>
-                ) : (
-                  <p className="text-sm font-medium">{article.headline}</p>
-                )}
-                <p className="mt-0.5 text-xs text-ink/40">
-                  {article.source} · {fmtDate(article.ingested_at)}
-                </p>
-              </div>
-              {article.classified && (
-                <span className="shrink-0 rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-bold text-accent">
-                  analysed
+        <>
+          <div className="metric-chip space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold">
+                Ingested News{' '}
+                <span className="text-xs font-normal text-ink/40">
+                  ({classifiedCount}/{newsTotal} classified)
+                </span>
+              </h2>
+              {totalPages > 1 && (
+                <span className="text-xs text-ink/40">
+                  {(page - 1) * NEWS_PAGE_SIZE + 1}–{Math.min(page * NEWS_PAGE_SIZE, news.length)} of {newsTotal}
                 </span>
               )}
             </div>
-          ))}
-        </div>
+            {paginated.map((article) => (
+              <div
+                key={article._id}
+                className="flex items-start gap-3 border-b border-black/5 pb-3 last:border-0 last:pb-0"
+              >
+                <div className="flex-1 min-w-0">
+                  {article.url ? (
+                    <a
+                      href={article.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-medium hover:text-accent"
+                    >
+                      {article.headline}
+                    </a>
+                  ) : (
+                    <p className="text-sm font-medium">{article.headline}</p>
+                  )}
+                  <p className="mt-0.5 text-xs text-ink/40">
+                    {article.source} · {fmtDate(article.ingested_at)}
+                  </p>
+                </div>
+                {article.classified && (
+                  <span className="shrink-0 rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-bold text-accent">
+                    analysed
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="rounded px-2.5 py-1 text-xs font-semibold disabled:opacity-30 hover:bg-black/5"
+              >
+                ← Prev
+              </button>
+              <span className="text-xs text-ink/40">page {page} of {totalPages}</span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="rounded px-2.5 py-1 text-xs font-semibold disabled:opacity-30 hover:bg-black/5"
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -1689,16 +1725,23 @@ function NewsTab({ news, signals }: { news: NtNews[]; signals: NtSignal[] }) {
 function OverviewTab({
   positions,
   signals,
-  news,
+  stats,
+  pipelineStatus,
+  historyRefreshKey,
 }: {
   positions: NtPosition[];
   signals: NtSignal[];
-  news: NtNews[];
+  stats: NtStats | null;
+  pipelineStatus: PipelineStatus | null;
+  historyRefreshKey: number;
 }) {
   const open = positions.filter((p) => p.status === 'open');
 
   return (
     <div className="space-y-5">
+      <PipelineStatusPanel pipelineStatus={pipelineStatus} />
+      <StatsRow stats={stats} />
+
       {/* Open positions mini-table */}
       {open.length > 0 ? (
         <div className="metric-chip space-y-2">
@@ -1757,72 +1800,16 @@ function OverviewTab({
         </div>
       )}
 
-      {/* Recent signals */}
-      {signals.slice(0, 6).length > 0 && (
-        <div className="metric-chip space-y-2">
-          <h2 className="text-sm font-semibold">Recent Signals</h2>
-          {signals.slice(0, 6).map((s) => (
-            <div
-              key={s._id}
-              className="flex items-start justify-between gap-3 border-b border-black/5 pb-2 last:border-0 last:pb-0"
-            >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <SignalBadge signal={s.signal} />
-                  <span className="text-sm font-semibold">{s.sector}</span>
-                  <span className="text-xs text-ink/40 capitalize">{s.magnitude}</span>
-                </div>
-                <p className="mt-0.5 truncate text-xs text-ink/60">
-                  {s.stocks.slice(0, 4).join(', ')}
-                  {s.stocks.length > 4 && ` +${s.stocks.length - 4}`}
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-1">
-                <ConfBadge confidence={s.confidence} />
-                <span className="text-[10px] text-ink/40">{fmtDate(s.created_at)}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <SignalFunnelPanel signals={signals} positions={positions} />
+      {stats && <EquityCurvePanel stats={stats} />}
+      {stats && <PnlAttributionPanel stats={stats} />}
+      <RiskMetricsPanel positions={positions} />
+      <ConfidenceTierPanel positions={positions} />
+      <SectorPnlPanel positions={positions} />
+      <RMultiplePanel positions={positions} />
+      <PipelineHistory refreshKey={historyRefreshKey} />
 
-      {/* Recent news */}
-      {news.slice(0, 5).length > 0 && (
-        <div className="metric-chip space-y-2">
-          <h2 className="text-sm font-semibold">Recent News</h2>
-          {news.slice(0, 5).map((article) => (
-            <div
-              key={article._id}
-              className="flex items-start gap-3 border-b border-black/5 pb-2 last:border-0 last:pb-0"
-            >
-              <div className="flex-1 min-w-0">
-                {article.url ? (
-                  <a
-                    href={article.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-medium hover:text-accent"
-                  >
-                    {article.headline}
-                  </a>
-                ) : (
-                  <p className="text-sm font-medium">{article.headline}</p>
-                )}
-                <p className="mt-0.5 text-xs text-ink/40">
-                  {article.source} · {fmtDate(article.ingested_at)}
-                </p>
-              </div>
-              {article.classified && (
-                <span className="shrink-0 rounded-full bg-accent/10 px-1.5 py-0.5 text-[9px] font-bold text-accent">
-                  analysed
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {positions.length === 0 && signals.length === 0 && news.length === 0 && (
+      {positions.length === 0 && signals.length === 0 && (
         <Empty msg="No data yet — the ingester runs every 5 min during market hours (09:00–15:35 IST)." />
       )}
     </div>
@@ -1838,12 +1825,15 @@ export default function TradingPage() {
 
   const [positions, setPositions] = useState<NtPosition[]>([]);
   const [signals, setSignals] = useState<NtSignal[]>([]);
+  const [signalsTotal, setSignalsTotal] = useState(0);
   const [news, setNews] = useState<NtNews[]>([]);
+  const [newsTotal, setNewsTotal] = useState(0);
   const [stats, setStats] = useState<NtStats | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [triggering, setTriggering] = useState(false);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [triggerMsg, setTriggerMsg] = useState<{ text: string; kind: 'info' | 'success' | 'error' } | null>(null);
   const triggerMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1877,8 +1867,8 @@ export default function TradingPage() {
         fetchStats(),
       ]);
       if (pRes.status === 'fulfilled') setPositions(pRes.value.positions ?? []);
-      if (sRes.status === 'fulfilled') setSignals(sRes.value.signals ?? []);
-      if (nRes.status === 'fulfilled') setNews(nRes.value.articles ?? []);
+      if (sRes.status === 'fulfilled') { setSignals(sRes.value.signals ?? []); setSignalsTotal(sRes.value.count ?? 0); }
+      if (nRes.status === 'fulfilled') { setNews(nRes.value.articles ?? []); setNewsTotal(nRes.value.count ?? 0); }
       if (stRes.status === 'fulfilled') setStats(stRes.value);
       setError(null);
     } catch (err) {
@@ -1963,10 +1953,14 @@ export default function TradingPage() {
               void loadPipelineStatus().then((s) => {
                 if (s?.is_active) startStatusPoll();
               });
+              setHistoryRefreshKey((k) => k + 1);
             }}
-            className="rounded-lg border border-black/10 px-3 py-2 text-sm font-semibold transition hover:bg-black/5"
+            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
           >
-            ↻ Refresh
+            <svg xmlns="http://www.w3.org/2000/svg" className="inline-block h-4 w-4 mr-1.5 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
           </button>
           <button
             onClick={() => void handleTrigger()}
@@ -2006,77 +2000,53 @@ export default function TradingPage() {
         </div>
       )}
 
+      {/* ── Tab bar ────────────────────────────────────────────────────── */}
+      <div className="flex w-fit items-center gap-1 rounded-full bg-panel p-1 shadow-card">
+        <TabBtn active={tab === 'overview'} onClick={() => setTab('overview')}>
+          Overview
+        </TabBtn>
+        <TabBtn
+          active={tab === 'positions'}
+          onClick={() => setTab('positions')}
+          count={openPositions.length}
+        >
+          Orders
+        </TabBtn>
+        <TabBtn
+          active={tab === 'signals'}
+          onClick={() => setTab('signals')}
+          count={signalsTotal}
+        >
+          Signals
+        </TabBtn>
+        <TabBtn
+          active={tab === 'news'}
+          onClick={() => setTab('news')}
+          count={newsTotal}
+        >
+          News
+        </TabBtn>
+      </div>
+
+      {/* ── Tab content ────────────────────────────────────────────────── */}
       {loading ? (
         <div className="metric-chip flex items-center justify-center py-10 text-sm text-ink/40">
           Loading…
         </div>
       ) : (
         <>
-          {/* ── Pipeline status ────────────────────────────────────────── */}
-          <PipelineStatusPanel pipelineStatus={pipelineStatus} />
-
-          {/* ── Pipeline history ───────────────────────────────────────── */}
-          <PipelineHistory />
-
-          {/* ── Stats row ──────────────────────────────────────────────── */}
-          <StatsRow stats={stats} />
-
-          {/* ── Equity curve ───────────────────────────────────────────── */}
-          {stats && <EquityCurvePanel stats={stats} />}
-
-          {/* ── P&L attribution ────────────────────────────────────────── */}
-          {stats && <PnlAttributionPanel stats={stats} />}
-
-          {/* ── Risk metrics ───────────────────────────────────────────── */}
-          <RiskMetricsPanel positions={positions} />
-
-          {/* ── Confidence tier breakdown ──────────────────────────────── */}
-          <ConfidenceTierPanel positions={positions} />
-
-          {/* ── Sector P&L ─────────────────────────────────────────────── */}
-          <SectorPnlPanel positions={positions} />
-
-          {/* ── Signal funnel ──────────────────────────────────────────── */}
-          <SignalFunnelPanel signals={signals} positions={positions} />
-
-          {/* ── R-multiple distribution ────────────────────────────────── */}
-          <RMultiplePanel positions={positions} />
-
-          {/* ── Tab bar ────────────────────────────────────────────────── */}
-          <div className="flex w-fit items-center gap-1 rounded-full bg-panel p-1 shadow-card">
-            <TabBtn active={tab === 'overview'} onClick={() => setTab('overview')}>
-              Overview
-            </TabBtn>
-            <TabBtn
-              active={tab === 'positions'}
-              onClick={() => setTab('positions')}
-              count={openPositions.length}
-            >
-              Orders
-            </TabBtn>
-            <TabBtn
-              active={tab === 'signals'}
-              onClick={() => setTab('signals')}
-              count={signals.length}
-            >
-              Signals
-            </TabBtn>
-            <TabBtn
-              active={tab === 'news'}
-              onClick={() => setTab('news')}
-              count={news.length}
-            >
-              News
-            </TabBtn>
-          </div>
-
-          {/* ── Tab content ──────────────────────────────────────────── */}
           {tab === 'overview' && (
-            <OverviewTab positions={positions} signals={signals} news={news} />
+            <OverviewTab
+              positions={positions}
+              signals={signals}
+              stats={stats}
+              pipelineStatus={pipelineStatus}
+              historyRefreshKey={historyRefreshKey}
+            />
           )}
           {tab === 'positions' && <PositionsTab positions={positions} />}
           {tab === 'signals' && <SignalsTab signals={signals} positions={positions} />}
-          {tab === 'news' && <NewsTab news={news} signals={signals} />}
+          {tab === 'news' && <NewsTab news={news} signals={signals} newsTotal={newsTotal} />}
         </>
       )}
     </div>

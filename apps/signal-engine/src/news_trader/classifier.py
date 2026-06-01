@@ -50,6 +50,32 @@ Rules:
 _HUMAN_TMPL = "NEWS:\n{text}"
 
 
+def _partial_parse(raw: str) -> dict[str, Any] | None:
+    """Salvage scalar fields from a truncated JSON response.
+
+    When the LLM hits a token limit mid-array (e.g. stocks list cut off), the
+    scalar fields (signal, confidence, magnitude, sector) are still usable.
+    Returns a valid result dict with stocks=[] if all required scalars are present.
+    """
+    result: dict[str, Any] = {}
+    for field in ("sector", "signal", "magnitude", "confidence", "reasoning"):
+        m = re.search(rf'"{field}"\s*:\s*"([^"]*)"', raw)
+        if m:
+            result[field] = m.group(1)
+    required = {"sector", "signal", "magnitude", "confidence", "reasoning"}
+    if not required.issubset(result.keys()):
+        return None
+    # Try to extract stocks if present, else fall back to empty
+    stocks_m = re.search(r'"stocks"\s*:\s*\[([^\]]*)', raw)
+    if stocks_m:
+        raw_stocks = stocks_m.group(1)
+        # Extract quoted strings that are complete (have both opening and closing quote)
+        result["stocks"] = [s.upper().strip() for s in re.findall(r'"([^"]+)"', raw_stocks)]
+    else:
+        result["stocks"] = []
+    return result
+
+
 def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
     """Classify a news article. Returns parsed dict or None on failure."""
     try:
@@ -95,6 +121,11 @@ def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
         recovered = _partial_parse(raw if 'raw' in dir() else '')
         if recovered:
             logger.info("[LLM] partial parse succeeded — recovered fields: %s", list(recovered.keys()))
+            recovered["signal"] = str(recovered["signal"] or "neutral").lower()
+            recovered["confidence"] = str(recovered["confidence"] or "low").lower()
+            recovered["magnitude"] = str(recovered["magnitude"] or "minor").lower()
+            recovered["llm_model"] = llm_model
+            recovered["prompt_version"] = getattr(settings, "nt_classifier_prompt_version", _DEFAULT_PROMPT_VERSION)
             return recovered
         return None
     except Exception as exc:

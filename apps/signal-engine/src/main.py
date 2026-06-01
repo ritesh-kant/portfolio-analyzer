@@ -107,20 +107,23 @@ async def trigger_pipeline(run_id: str | None = Query(None)) -> dict[str, Any]:
         new_ids = [str(doc["_id"]) async for doc in cursor]
         logger.info("[PIPELINE] classifying %d articles...", len(new_ids))
 
-        acted_signals = 0
+        actionable_signals = 0
         llm_semaphore = asyncio.Semaphore(_LLM_MAX_CONCURRENCY)
         for news_id in new_ids:
             try:
                 if await _process_message({"news_id": news_id}, settings, llm_semaphore):
-                    acted_signals += 1
+                    actionable_signals += 1
             except Exception as exc:
                 logger.error("[PIPELINE] classifier error news_id=%s err=%s", news_id, exc)
             await asyncio.sleep(0.05)  # small gap between articles
 
-        logger.info("[PIPELINE] classification done — %d actionable signals", acted_signals)
+        # Count all signals created (matches what nt-pipeline-status live view counts)
+        signals_created = await signals_coll(db).count_documents({"created_at": {"$gte": run_start}})
+        logger.info("[PIPELINE] classification done — %d total signals (%d actionable)",
+                    signals_created, actionable_signals)
 
-        if acted_signals == 0:
-            result = {"new_articles": n_new, "signals": 0, "positions_opened": 0}
+        if actionable_signals == 0:
+            result = {"new_articles": n_new, "signals": signals_created, "positions_opened": 0}
             if run_id:
                 await finalise_run(run_id, result)
             return result
@@ -142,8 +145,8 @@ async def trigger_pipeline(run_id: str | None = Query(None)) -> dict[str, Any]:
                 logger.error("[PIPELINE] trade error signal_id=%s err=%s", sig["_id"], exc)
 
         logger.info("[PIPELINE] done — articles=%d signals=%d positions=%d",
-                    n_new, acted_signals, total_entered)
-        result = {"new_articles": n_new, "signals": acted_signals, "positions_opened": total_entered}
+                    n_new, signals_created, total_entered)
+        result = {"new_articles": n_new, "signals": signals_created, "positions_opened": total_entered}
         if run_id:
             await finalise_run(run_id, result)
         return result

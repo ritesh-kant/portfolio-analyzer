@@ -39,6 +39,9 @@ export const handler = requireAuth(async () => {
   const delayWindowEndMs = triggeredAt.getTime() + DELAY_MS;
   const delayRemainMs = Math.max(0, delayWindowEndMs - now.getTime());
 
+  const runStatus = (run.status as string) ?? 'running';
+  const runError = (run.error as string | null) ?? null;
+
   // Derive stage statuses ─────────────────────────────────────────────────────
   // Ingester: done if articles appeared, or 3 min elapsed (may have found no new news)
   const ingesterDone = newArticles > 0 || elapsedMs > 3 * 60 * 1000;
@@ -62,16 +65,13 @@ export const handler = requireAuth(async () => {
       ? 'done'
       : 'waiting';
 
-  // Trade decision: done if positions appeared, or skipped if no signals ever queued
-  const tradeDone = newPositions > 0 || nothingToTrade;
+  // Trade decision: done if positions appeared, no signals to trade, or run already completed
+  const tradeDone = newPositions > 0 || nothingToTrade || runStatus === 'completed';
   const tradeStatus =
     delayStatus !== 'done' ? 'pending' : tradeDone ? 'done' : 'running';
 
   const isActive =
     elapsedMs < RUN_TTL_MS && !(tradeDone || (delayStatus === 'done' && elapsedMs > 18 * 60 * 1000));
-
-  const runStatus = (run.status as string) ?? 'running';
-  const runError = (run.error as string | null) ?? null;
 
   // When the run itself is marked failed, determine which stage to flag red
   let stages;

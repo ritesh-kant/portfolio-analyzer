@@ -46,6 +46,7 @@ def get_llm(provider: str | None = None, settings: Settings | None = None) -> Ba
         return ChatGoogleGenerativeAI(
             model=s.gemini_model,
             google_api_key=s.gemini_api_key,
+            max_output_tokens=512,
         )
 
     if name == "kimi":

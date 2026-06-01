@@ -482,6 +482,10 @@ class TestTradeDecisionHandler:
         mock_pos_coll.count_documents = AsyncMock(return_value=0)   # 0 open positions
         mock_pos_coll.find_one = AsyncMock(return_value=None)        # no existing position
         mock_pos_coll.insert_one = AsyncMock(return_value=MagicMock(inserted_id=ObjectId()))
+        # Backstop aggregation: ₹0 currently deployed.
+        _agg_cursor = MagicMock()
+        _agg_cursor.to_list = AsyncMock(return_value=[])
+        mock_pos_coll.aggregate = MagicMock(return_value=_agg_cursor)
 
         mock_sig_coll = MagicMock()
         mock_sig_coll.create_index = AsyncMock()
@@ -508,7 +512,7 @@ class TestTradeDecisionHandler:
             s.trading_mode = "paper"
             s.nt_max_positions = 10
             s.nt_max_stocks_per_signal = 2
-            s.nt_position_size_inr = 50_000.0
+            s.nt_total_capital_inr = 100_000.0
             s.nt_sl_pct = 0.015
             s.nt_target_pct = 0.08
             s.telegram_bot_token = ""
@@ -541,7 +545,7 @@ class TestTradeDecisionHandler:
         mock_db = MagicMock()
         mock_pos_coll = MagicMock()
         mock_pos_coll.create_index = AsyncMock()
-        mock_pos_coll.count_documents = AsyncMock(return_value=7)  # already full
+        mock_pos_coll.count_documents = AsyncMock(return_value=10)  # at max_positions → full
 
         mock_sig_coll = MagicMock()
         mock_sig_coll.create_index = AsyncMock()
@@ -564,7 +568,7 @@ class TestTradeDecisionHandler:
             s.trading_mode = "paper"
             s.nt_max_positions = 10
             s.nt_max_stocks_per_signal = 2
-            s.nt_position_size_inr = 50_000.0
+            s.nt_total_capital_inr = 100_000.0
             s.nt_sl_pct = 0.015
             s.nt_target_pct = 0.08
             s.telegram_bot_token = ""

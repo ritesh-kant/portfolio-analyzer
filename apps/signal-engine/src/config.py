@@ -65,8 +65,15 @@ class Settings(BaseSettings):
     nt_bypass_market_holiday: bool = False    # set true in .env to test on NSE holidays
 
     # News-trader position rules
-    nt_position_size_inr: float = 1_000.0   # fixed rupees per trade
-    nt_max_positions: int = 10                 # max simultaneous open positions
+    #
+    # Capital allocation has a single source of truth: nt_total_capital_inr.
+    # Per-trade size is *derived* as total / max_positions (equal-weight per
+    # slot), so the per-trade and total controls can never drift out of sync —
+    # the failure that once sized every trade at ₹50k when ₹3k was intended.
+    # A hard backstop in trade_decision additionally refuses any entry that
+    # would push total deployed capital over nt_total_capital_inr.
+    nt_total_capital_inr: float = 100_000.0   # max cash deployed across all open positions
+    nt_max_positions: int = 10                 # max open positions == number of equal-weight slots
     nt_max_stocks_per_signal: int = 2         # max entries from a single news event
     nt_sl_pct: float = 0.015                  # trailing stop-loss distance (1.5%)
     nt_target_pct: float = 0.08               # profit target (8%)

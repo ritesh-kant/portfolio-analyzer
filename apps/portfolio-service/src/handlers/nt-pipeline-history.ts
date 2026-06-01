@@ -17,14 +17,14 @@ export const handler = requireAuth(async (event) => {
   const qs = (event as { queryStringParameters?: Record<string, string> })
     .queryStringParameters ?? {};
   const page = Math.max(1, parseInt(qs.page ?? '1', 10));
-  const pageSize = 8;
+  const pageSize = 5;
   const skip = (page - 1) * pageSize;
 
   const [runs, total] = await Promise.all([
     db
       .collection('nt_pipeline_runs')
       .find({})
-      .sort({ triggered_at: -1 })
+      .sort({ positions_opened: -1, triggered_at: -1 })
       .skip(skip)
       .limit(pageSize)
       .toArray(),
