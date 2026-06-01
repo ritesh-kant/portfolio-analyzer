@@ -170,6 +170,18 @@ async def _monitor_position(pos: dict, settings: Settings, price: float) -> str:
 
 
 async def _run(settings: Settings) -> dict:
+    # Backstop run finalization runs on every tick, independent of the market-hours
+    # gate below. On AWS, runs whose signals were all non-actionable never trigger
+    # tradeDecision (nothing is enqueued to the signals queue), so they'd stay
+    # 'running' forever without this sweep. See pipeline_lifecycle.sweep_stale_runs.
+    try:
+        from src.news_trader.pipeline_lifecycle import sweep_stale_runs
+        swept = await sweep_stale_runs(settings.nt_news_delay_seconds)
+        if swept:
+            logger.info("sl_monitor_swept_stale_runs n=%d", swept)
+    except Exception as exc:
+        logger.error("sl_monitor_sweep_failed err=%s", exc)
+
     if not _is_market_hours(bypass_holiday=settings.nt_bypass_market_holiday):
         logger.info("sl_monitor_skipped outside_market_hours")
         return {"skipped": "outside_market_hours"}

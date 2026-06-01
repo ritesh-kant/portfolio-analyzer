@@ -159,6 +159,16 @@ async def _process_message(
                 news_id, result["signal"], result["confidence"], result["magnitude"],
                 result["stocks"], result["sector"])
 
+    # Determine actionability before inserting so acted_on is set correctly from the start.
+    # Non-actionable signals are never enqueued to trade-decision, so _maybe_finalise_run
+    # must not count them as "pending" — marking acted_on=True immediately prevents runs
+    # from being permanently stuck in status "running".
+    _actionable = (
+        result["confidence"] in _ACTIONABLE_CONFIDENCE
+        and result["signal"] != "neutral"
+        and bool(result["stocks"])
+    )
+
     signal_doc = {
         "story_hash": story_hash,
         "window_bucket": window_bucket,
@@ -177,7 +187,7 @@ async def _process_message(
         "llm_model": result["llm_model"],
         "prompt_version": result["prompt_version"],
         "created_at": now,
-        "acted_on": False,
+        "acted_on": not _actionable,
     }
     try:
         insert_result = await signals(db).insert_one(signal_doc)
@@ -206,15 +216,14 @@ async def _process_message(
     )
 
     # Only actionable signals go to the trade-decision queue
-    if result["confidence"] not in _ACTIONABLE_CONFIDENCE:
-        logger.info("[CLASSIFIER] signal not actionable confidence=%s — saved but not enqueued",
-                    result["confidence"])
-        return False, None
-    if result["signal"] == "neutral":
-        logger.info("[CLASSIFIER] signal is neutral — saved but not enqueued")
-        return False, None
-    if not result["stocks"]:
-        logger.info("[CLASSIFIER] no stocks identified — saved but not enqueued")
+    if not _actionable:
+        if result["confidence"] not in _ACTIONABLE_CONFIDENCE:
+            logger.info("[CLASSIFIER] signal not actionable confidence=%s — saved but not enqueued",
+                        result["confidence"])
+        elif result["signal"] == "neutral":
+            logger.info("[CLASSIFIER] signal is neutral — saved but not enqueued")
+        else:
+            logger.info("[CLASSIFIER] no stocks identified — saved but not enqueued")
         return False, None
 
     if settings.news_signals_queue_url:
