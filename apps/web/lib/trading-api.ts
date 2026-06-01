@@ -77,6 +77,7 @@ export interface NtSignal {
   confidence: 'high' | 'medium' | 'low';
   reasoning: string;
   acted_on: boolean;
+  gate_result?: string;
   created_at: string;
 }
 
@@ -132,7 +133,7 @@ export const fetchPositions = (status?: 'open' | 'closed' | 'all') => {
 };
 
 export const fetchSignals = (limit = 50) =>
-  get<{ signals: NtSignal[]; count: number }>(`/nt/signals?limit=${limit}`);
+  get<{ signals: NtSignal[]; count: number; gate_passed_count: number }>(`/nt/signals?limit=${limit}`);
 
 export const fetchNews = (limit = 30) =>
   get<{ articles: NtNews[]; count: number }>(`/nt/news?limit=${limit}`);

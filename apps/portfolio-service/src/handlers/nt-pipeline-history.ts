@@ -24,7 +24,7 @@ export const handler = requireAuth(async (event) => {
     db
       .collection('nt_pipeline_runs')
       .find({})
-      .sort({ positions_opened: -1, triggered_at: -1 })
+      .sort({ triggered_at: -1 })
       .skip(skip)
       .limit(pageSize)
       .toArray(),

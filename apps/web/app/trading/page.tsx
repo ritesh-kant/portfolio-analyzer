@@ -960,39 +960,45 @@ function SectorPnlPanel({ positions }: { positions: NtPosition[] }) {
 
 function SignalFunnelPanel({
   signals,
+  signalsTotal,
+  gatePassedTotal,
   positions,
 }: {
   signals: NtSignal[];
+  signalsTotal: number;
+  gatePassedTotal: number;
   positions: NtPosition[];
 }) {
-  if (signals.length === 0) return null;
+  if (signalsTotal === 0) return null;
 
-  const total = signals.length;
-  const evaluated = signals.filter((s) => s.acted_on).length;
+  const total = signalsTotal;
+  const gatePassed = gatePassedTotal;
   const tradedSignalIds = new Set(positions.map((p) => p.signal_id).filter(Boolean));
   const traded = tradedSignalIds.size;
 
-  const evalRate = total > 0 ? (evaluated / total) * 100 : 0;
-  const tradeRate = evaluated > 0 ? (traded / evaluated) * 100 : 0;
+  const pending = signals.filter((s) => !s.acted_on).length;
+
+  const gateRate = total > 0 ? (gatePassed / total) * 100 : 0;
+  const tradeRate = gatePassed > 0 ? (traded / gatePassed) * 100 : 0;
 
   const steps = [
     {
       label: 'Classified',
       value: total,
       pct: 100,
-      tip: 'Total news signals the LLM classified and stored in this session.',
+      tip: `Total news signals the LLM classified and stored. ${pending > 0 ? `${pending} still pending trade evaluation.` : 'All evaluated.'}`,
     },
     {
-      label: 'Evaluated',
-      value: evaluated,
-      pct: evalRate,
-      tip: 'Signals that passed confidence/freshness gates and were sent to the trade-decision Lambda for evaluation.',
+      label: 'Gate-passed',
+      value: gatePassed,
+      pct: gateRate,
+      tip: 'Signals that passed all conviction + regime gates: bullish direction, non-minor magnitude, sufficient source count, Nifty/VIX within bounds, and portfolio capacity available.',
     },
     {
       label: 'Traded',
       value: traded,
       pct: tradeRate,
-      tip: 'Distinct signals that resulted in at least one position being opened (passed regime + conviction gates, had a liquid stock with a valid price).',
+      tip: 'Distinct signals that resulted in at least one position being opened (had a liquid Nifty 500 stock with a valid price within the position budget).',
     },
   ];
 
@@ -1000,7 +1006,7 @@ function SignalFunnelPanel({
     <div className="metric-chip space-y-3">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-semibold">Signal → Trade Funnel</h2>
-        <InfoTip text="How many news signals survive each stage of the pipeline. Low Traded % means the regime or conviction gates are filtering aggressively — which may be intentional." />
+        <InfoTip text="How many signals survive each stage. Gate-passed shows how many cleared all conviction + regime filters (direction, magnitude, source count, Nifty/VIX). Traded shows how many gate-passed signals actually opened a position." />
       </div>
       <div className="grid grid-cols-3 gap-3">
         {steps.map(({ label, value, pct, tip }, i) => (
@@ -1466,7 +1472,7 @@ function SignalsTab({ signals, positions }: { signals: NtSignal[]; positions: Nt
           </SubTab>
         ))}
         <span className="ml-auto text-xs text-ink/40">
-          {tradedSignalIds.size} traded · {signals.filter((s) => s.acted_on).length} evaluated
+          {tradedSignalIds.size} traded · {signals.filter((s) => s.gate_result === 'ok').length} gate-passed
         </span>
       </div>
 
@@ -1725,12 +1731,16 @@ function NewsTab({ news, signals, newsTotal }: { news: NtNews[]; signals: NtSign
 function OverviewTab({
   positions,
   signals,
+  signalsTotal,
+  gatePassedTotal,
   stats,
   pipelineStatus,
   historyRefreshKey,
 }: {
   positions: NtPosition[];
   signals: NtSignal[];
+  signalsTotal: number;
+  gatePassedTotal: number;
   stats: NtStats | null;
   pipelineStatus: PipelineStatus | null;
   historyRefreshKey: number;
@@ -1800,7 +1810,7 @@ function OverviewTab({
         </div>
       )}
 
-      <SignalFunnelPanel signals={signals} positions={positions} />
+      <SignalFunnelPanel signals={signals} signalsTotal={signalsTotal} gatePassedTotal={gatePassedTotal} positions={positions} />
       {stats && <EquityCurvePanel stats={stats} />}
       {stats && <PnlAttributionPanel stats={stats} />}
       <RiskMetricsPanel positions={positions} />
@@ -1826,6 +1836,7 @@ export default function TradingPage() {
   const [positions, setPositions] = useState<NtPosition[]>([]);
   const [signals, setSignals] = useState<NtSignal[]>([]);
   const [signalsTotal, setSignalsTotal] = useState(0);
+  const [gatePassedTotal, setGatePassedTotal] = useState(0);
   const [news, setNews] = useState<NtNews[]>([]);
   const [newsTotal, setNewsTotal] = useState(0);
   const [stats, setStats] = useState<NtStats | null>(null);
@@ -1867,7 +1878,7 @@ export default function TradingPage() {
         fetchStats(),
       ]);
       if (pRes.status === 'fulfilled') setPositions(pRes.value.positions ?? []);
-      if (sRes.status === 'fulfilled') { setSignals(sRes.value.signals ?? []); setSignalsTotal(sRes.value.count ?? 0); }
+      if (sRes.status === 'fulfilled') { setSignals(sRes.value.signals ?? []); setSignalsTotal(sRes.value.count ?? 0); setGatePassedTotal(sRes.value.gate_passed_count ?? 0); }
       if (nRes.status === 'fulfilled') { setNews(nRes.value.articles ?? []); setNewsTotal(nRes.value.count ?? 0); }
       if (stRes.status === 'fulfilled') setStats(stRes.value);
       setError(null);
@@ -1955,7 +1966,7 @@ export default function TradingPage() {
               });
               setHistoryRefreshKey((k) => k + 1);
             }}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 active:scale-95 active:shadow-none active:bg-gray-100"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="inline-block h-4 w-4 mr-1.5 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -2039,6 +2050,8 @@ export default function TradingPage() {
             <OverviewTab
               positions={positions}
               signals={signals}
+              signalsTotal={signalsTotal}
+              gatePassedTotal={gatePassedTotal}
               stats={stats}
               pipelineStatus={pipelineStatus}
               historyRefreshKey={historyRefreshKey}

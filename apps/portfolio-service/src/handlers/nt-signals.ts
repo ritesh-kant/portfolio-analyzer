@@ -15,12 +15,14 @@ export const handler = requireAuth(async (event) => {
   await connect();
   const db = mongoose.connection.db!;
   const col = db.collection('nt_signals');
-  const [docs, total] = await Promise.all([
+  const [docs, total, gatePassed] = await Promise.all([
     col.find({}).sort({ created_at: -1 }).limit(limit).toArray(),
     col.countDocuments(),
+    col.countDocuments({ gate_result: 'ok' }),
   ]);
   return json(200, {
     signals: docs.map((d) => ({ ...d, _id: String(d._id) })),
     count: total,
+    gate_passed_count: gatePassed,
   });
 });

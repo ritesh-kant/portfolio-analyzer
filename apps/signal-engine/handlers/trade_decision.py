@@ -110,8 +110,9 @@ async def _process_signal(
     settings: Settings,
     regime: dict[str, Any] | None = None,
     pipeline_run_id: str | None = None,
-) -> int:
-    """Returns number of positions opened."""
+) -> tuple[int, str]:
+    """Returns (positions_opened, gate_result). gate_result is 'ok' when conviction
+    gates passed; otherwise a short rejection reason string stored on the signal."""
     db = get_db()
     paper = settings.trading_mode.lower() != "live"
     signal_id = str(signal_doc.get("_id", "?"))
@@ -135,7 +136,7 @@ async def _process_signal(
     )
     if not allow:
         logger.info("[TRADE] skip signal_id=%s — gate rejected: %s", signal_id, reason)
-        return 0
+        return 0, reason
     if position_size_inr != per_slot_size:
         logger.info("[TRADE] signal_id=%s position size scaled %.0f → %.0f (reason: %s)",
                     signal_id, per_slot_size, position_size_inr, reason)
@@ -147,12 +148,12 @@ async def _process_signal(
                 open_count, settings.nt_max_positions, capacity)
     if capacity <= 0:
         logger.info("[TRADE] skip — portfolio full open=%d max=%d", open_count, settings.nt_max_positions)
-        return 0
+        return 0, "portfolio_full"
 
     stocks = signal_doc.get("stocks", [])
     if not stocks:
         logger.info("[TRADE] skip — no stocks in signal")
-        return 0
+        return 0, "no_stocks"
 
     entered = 0
     candidates = stocks[: min(settings.nt_max_stocks_per_signal, capacity)]
@@ -167,7 +168,7 @@ async def _process_signal(
         logger.info("[TRADE] signal_id=%s dropped illiquid stocks: %s", signal_id, illiquid)
     if not candidates:
         logger.info("[TRADE] skip signal_id=%s — no Nifty 500 stocks after universe filter", signal_id)
-        return 0
+        return 0, "no_nifty500_stocks"
 
     logger.info("[TRADE] evaluating %d stock(s): %s", len(candidates), candidates)
 
@@ -186,7 +187,7 @@ async def _process_signal(
     except TimeoutError:
         logger.warning("[TRADE] price fetch timed out for signal_id=%s candidates=%s — skipping",
                        signal_id, candidates)
-        return 0
+        return 0, "price_fetch_timeout"
     logger.info("[TRADE] prices fetched: %s", {s: f"₹{p:.2f}" for s, p in price_map.items()})
 
     # Backstop: total cash already deployed across open positions. Equal-weight
@@ -301,7 +302,7 @@ async def _process_signal(
         entered += 1
 
     logger.info("[TRADE] signal_id=%s done — %d position(s) opened", signal_id, entered)
-    return entered
+    return entered, "ok"
 
 
 async def _maybe_finalise_run(run_id: str, db: object) -> None:
@@ -391,11 +392,12 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
                 logger.info("[TRADE] signal already acted on id=%s — skipping", signal_id)
                 continue
 
-            n = await _process_signal(signal_doc, settings, regime=regime, pipeline_run_id=run_id)
+            n, gate_result = await _process_signal(signal_doc, settings, regime=regime, pipeline_run_id=run_id)
             total_entered += n
 
             await signals_coll(db).update_one(
-                {"_id": ObjectId(signal_id)}, {"$set": {"acted_on": True}}
+                {"_id": ObjectId(signal_id)},
+                {"$set": {"acted_on": True, "gate_result": gate_result}},
             )
         except Exception as exc:
             logger.error("[TRADE] error processing record err=%s", exc)
