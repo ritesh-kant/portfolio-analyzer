@@ -18,6 +18,9 @@ provider:
   runtime: nodejs20.x
   architecture: arm64
   stage: dev
+  deploymentBucket:
+    versioning: false
+    maxPreviousDeploymentArtifacts: 1
   region: ap-south-1
   logRetentionInDays: 14
   timeout: 15

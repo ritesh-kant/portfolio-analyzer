@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LineChart,
   Line,
@@ -67,24 +68,45 @@ function Empty({ msg }: { msg: string }) {
   );
 }
 
-function InfoTip({ text }: { text: string }) {
+function InfoTip({ text, direction = 'right' }: { text: string; direction?: 'right' | 'down' }) {
   const [show, setShow] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+
+  const open = () => {
+    if (direction === 'down' && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setCoords({ top: r.bottom + 6, left: r.left + r.width / 2 });
+    }
+    setShow(true);
+  };
+
   return (
     <span className="relative inline-flex">
       <button
-        onMouseEnter={() => setShow(true)}
+        ref={btnRef}
+        onMouseEnter={open}
         onMouseLeave={() => setShow(false)}
-        onFocus={() => setShow(true)}
+        onFocus={open}
         onBlur={() => setShow(false)}
         className="flex h-4 w-4 items-center justify-center rounded-full bg-black/10 text-[9px] font-bold text-ink/50 hover:bg-black/20"
         aria-label="Info"
       >
         i
       </button>
-      {show && (
+      {show && direction === 'right' && (
         <span className="absolute left-5 top-0 z-10 w-56 rounded-lg border border-black/10 bg-white px-3 py-2 text-xs leading-relaxed text-ink/70 shadow-lg">
           {text}
         </span>
+      )}
+      {show && direction === 'down' && typeof document !== 'undefined' && createPortal(
+        <span
+          className="fixed z-[9999] w-52 -translate-x-1/2 rounded-lg border border-black/10 bg-white px-3 py-2 text-xs leading-relaxed text-ink/70 shadow-lg"
+          style={{ top: coords.top, left: coords.left }}
+        >
+          {text}
+        </span>,
+        document.body
       )}
     </span>
   );
@@ -1488,7 +1510,14 @@ function SignalsTab({ signals, positions }: { signals: NtSignal[]; positions: Nt
                 <ThSort col="signal">Signal</ThSort>
                 <ThSort col="confidence">Confidence</ThSort>
                 <th className="px-4 py-3 text-left font-semibold">Stocks</th>
-                <ThSort col="magnitude">Magnitude</ThSort>
+                <ThSort col="magnitude">
+                  <span className="inline-flex items-center gap-1">
+                    Magnitude
+                    <span onClick={(e) => e.stopPropagation()}>
+                      <InfoTip direction="down" text="LLM's estimate of how much the stock price will move: Major (>2%), Moderate (0.5–2%), Minor (<0.5%). Higher magnitude = larger position size." />
+                    </span>
+                  </span>
+                </ThSort>
                 <th className="px-4 py-3 text-left font-semibold">Action</th>
                 <ThSort col="created_at">Time</ThSort>
               </tr>

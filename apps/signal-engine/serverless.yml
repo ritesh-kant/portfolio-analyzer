@@ -16,6 +16,9 @@ provider:
   memorySize: 2048
   timeout: 900 # max Lambda timeout; pipeline can take ~10 min
   logRetentionInDays: 14
+  deploymentBucket:
+    versioning: false
+    maxPreviousDeploymentArtifacts: 1
 
   ecr:
     images:
