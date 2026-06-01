@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # Per-provider model names
     anthropic_model: str = "claude-sonnet-4-5"
     openai_model: str = "gpt-4o"
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.5-flash"
     kimi_model: str = "moonshotai/kimi-k2"
     ollama_model: str = "llama3.1"
 
