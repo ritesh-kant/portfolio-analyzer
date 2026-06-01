@@ -28,7 +28,7 @@ provider:
   environment:
     MONGODB_URI: ${ssm:/portfolio-analyzer/${sls:stage}/MONGODB_URI}
     SIGNAL_ENGINE_API_KEY: ${ssm:/portfolio-analyzer/${sls:stage}/SIGNAL_ENGINE_API_KEY}
-    AI_PROVIDER: ${env:AI_PROVIDER, 'anthropic'}
+    AI_PROVIDER: ${env:AI_PROVIDER, 'gemini'}
     ANTHROPIC_API_KEY: ${ssm:/portfolio-analyzer/${sls:stage}/ANTHROPIC_API_KEY, ''}
     OPENAI_API_KEY: ${ssm:/portfolio-analyzer/${sls:stage}/OPENAI_API_KEY, ''}
     GEMINI_API_KEY: ${ssm:/portfolio-analyzer/${sls:stage}/GEMINI_API_KEY, ''}

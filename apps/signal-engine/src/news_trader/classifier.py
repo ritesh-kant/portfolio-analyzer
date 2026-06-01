@@ -55,6 +55,12 @@ Rules:
 
 _HUMAN_TMPL = "NEWS:\n{text}"
 
+# Headline + lead paragraphs carry virtually all the signal needed to classify
+# sector/direction/stocks. Capping the article body keeps input tokens down
+# without hurting classification quality (the tail of an article rarely changes
+# the call). Was 2000; tightened as part of LLM cost reduction.
+_MAX_ARTICLE_CHARS = 800
+
 
 def _partial_parse(raw: str) -> dict[str, Any] | None:
     """Salvage scalar fields from a truncated JSON response.
@@ -89,7 +95,7 @@ def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
         llm_model = _resolve_model_name(settings)
         messages = [
             SystemMessage(content=_SYSTEM),
-            HumanMessage(content=_HUMAN_TMPL.format(text=raw_text[:2000])),
+            HumanMessage(content=_HUMAN_TMPL.format(text=raw_text[:_MAX_ARTICLE_CHARS])),
         ]
         response = llm.invoke(messages)
         raw = response.content if isinstance(response.content, str) else str(response.content)

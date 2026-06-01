@@ -43,10 +43,16 @@ def get_llm(provider: str | None = None, settings: Settings | None = None) -> Ba
         )
 
     if name == "gemini":
+        # thinking_budget=0 disables Gemini 2.5 Flash's default "thinking" pass.
+        # Classification only needs a small JSON object — thinking tokens add no
+        # accuracy here but are billed as output (~$2.50/1M on 2.5 Flash, ~8x the
+        # input rate), which dominated per-call cost. Disabling it is the single
+        # biggest lever on classifier spend.
         return ChatGoogleGenerativeAI(
             model=s.gemini_model,
             google_api_key=s.gemini_api_key,
             max_output_tokens=512,
+            thinking_budget=0,
         )
 
     if name == "kimi":
