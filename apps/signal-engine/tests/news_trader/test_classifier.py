@@ -3,8 +3,10 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.config import Settings
-from src.news_trader.classifier import classify
+from src.news_trader.classifier import LLMProviderError, classify
 
 
 def _settings() -> Settings:
@@ -106,8 +108,8 @@ def test_classify_truncates_stocks_to_5(mock_get_llm):
 
 
 @patch("src.news_trader.classifier.get_llm")
-def test_classify_returns_none_on_llm_exception(mock_get_llm):
+def test_classify_raises_provider_error_on_llm_exception(mock_get_llm):
     mock_get_llm.return_value.invoke.side_effect = Exception("network error")
 
-    result = classify("some headline", _settings())
-    assert result is None
+    with pytest.raises(LLMProviderError, match="network error"):
+        classify("some headline", _settings())

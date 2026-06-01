@@ -2,11 +2,16 @@
 
 For each message:
   1. Load article from nt_news_raw
-  2. Call Gemini 1.5 Flash for structured classification
+  2. Call Gemini Flash for structured classification
   3. Save signal to nt_signals
   4. If confidence is high/medium: enqueue to news-signals queue with
      nt_news_delay_seconds delay so trade_decision fires 15 min later
   5. Mark article as classified
+
+Error propagation: if the LLM provider call fails (e.g. model deprecated, auth error),
+LLMProviderError is raised by classify(). The handler tracks these per run_id and calls
+fail_run() when all classification attempts for a run fail, surfacing the error to the
+frontend pipeline status panel.
 """
 
 import asyncio
@@ -21,7 +26,7 @@ from pymongo.errors import DuplicateKeyError
 
 from src.config import Settings
 from src.db.client import get_db
-from src.news_trader.classifier import classify
+from src.news_trader.classifier import LLMProviderError, classify
 from src.news_trader.db import ensure_indexes, news_raw, signals
 
 logging.getLogger().setLevel(logging.INFO)
@@ -53,8 +58,11 @@ async def _process_message(
     settings: Settings,
     llm_semaphore: asyncio.Semaphore,
     run_id: str | None = None,
-) -> bool:
-    """Returns True if a NEW signal was created and enqueued.
+) -> tuple[bool, str | None]:
+    """Returns (signal_enqueued, llm_error_message).
+
+    signal_enqueued is True only when a NEW signal was created and enqueued.
+    llm_error_message is non-None only when the LLM provider call itself failed.
 
     Dedup contract: at most one nt_signals row per (story_hash, hour-bucket).
     A second raw article in the same bucket bumps source_count + appends to
@@ -64,16 +72,16 @@ async def _process_message(
     news_id = msg.get("news_id")
     if not news_id:
         logger.warning("[CLASSIFIER] bad message — no news_id: %s", msg)
-        return False
+        return False, None
 
     article = await news_raw(db).find_one({"_id": ObjectId(news_id)})
     if not article:
         logger.warning("[CLASSIFIER] article not found news_id=%s", news_id)
-        return False
+        return False, None
 
     if article.get("classified"):
         logger.debug("[CLASSIFIER] already classified news_id=%s", news_id)
-        return False
+        return False, None
 
     # Filter B — freshness gate.
     # Use published_at (when the story actually broke) not ingested_at.
@@ -94,13 +102,13 @@ async def _process_message(
             await news_raw(db).update_one(
                 {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
             )
-            return False
+            return False, None
 
     headline = article.get("headline", "")
     story_hash = article.get("story_hash") or article.get("topic_hash")
     if not story_hash:
         logger.warning("[CLASSIFIER] no story_hash/topic_hash on article news_id=%s — skipping", news_id)
-        return False
+        return False, None
 
     window_bucket = _hour_bucket(now)
 
@@ -122,22 +130,30 @@ async def _process_message(
         await news_raw(db).update_one(
             {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
         )
-        return False
+        return False, None
 
     logger.info("[CLASSIFIER] processing news_id=%s headline=%.80s", news_id, headline)
 
     raw_text = article.get("raw_text", headline)
     logger.info("[CLASSIFIER] calling LLM (provider=%s) for news_id=%s...", settings.ai_provider, news_id)
-    async with llm_semaphore:
-        result = await asyncio.to_thread(classify, raw_text, settings)
+
+    try:
+        async with llm_semaphore:
+            result = await asyncio.to_thread(classify, raw_text, settings)
+    except LLMProviderError as exc:
+        logger.error("[CLASSIFIER] LLM provider error news_id=%s err=%s — marking classified", news_id, exc)
+        await news_raw(db).update_one(
+            {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
+        )
+        return False, str(exc)
 
     if result is None:
-        logger.warning("[CLASSIFIER] LLM failed for news_id=%s headline=%.80s — marking classified",
+        logger.warning("[CLASSIFIER] LLM parse/validation failed news_id=%s headline=%.80s — marking classified",
                        news_id, headline)
         await news_raw(db).update_one(
             {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
         )
-        return False
+        return False, None
 
     logger.info("[CLASSIFIER] LLM result news_id=%s signal=%s confidence=%s magnitude=%s stocks=%s sector=%s",
                 news_id, result["signal"], result["confidence"], result["magnitude"],
@@ -181,7 +197,7 @@ async def _process_message(
         )
         logger.info("[CLASSIFIER] dedup race resolved story_hash=%s — absorbed news_id=%s",
                     story_hash, news_id)
-        return False
+        return False, None
 
     signal_id = str(insert_result.inserted_id)
 
@@ -193,13 +209,13 @@ async def _process_message(
     if result["confidence"] not in _ACTIONABLE_CONFIDENCE:
         logger.info("[CLASSIFIER] signal not actionable confidence=%s — saved but not enqueued",
                     result["confidence"])
-        return False
+        return False, None
     if result["signal"] == "neutral":
         logger.info("[CLASSIFIER] signal is neutral — saved but not enqueued")
-        return False
+        return False, None
     if not result["stocks"]:
         logger.info("[CLASSIFIER] no stocks identified — saved but not enqueued")
-        return False
+        return False, None
 
     if settings.news_signals_queue_url:
         sqs = boto3.client("sqs")
@@ -218,7 +234,7 @@ async def _process_message(
     else:
         logger.warning("[CLASSIFIER] NEWS_SIGNALS_QUEUE_URL not set — skipping SQS enqueue")
 
-    return True
+    return True, None
 
 
 async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
@@ -231,12 +247,26 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
     # Created here (not at module scope) so it binds to this invocation's loop.
     llm_semaphore = asyncio.Semaphore(_LLM_MAX_CONCURRENCY)
 
+    # Track per-run_id outcomes to detect full LLM provider failures.
+    # Keyed by run_id: {"llm_errors": int, "signals": int, "first_error": str}
+    run_stats: dict[str, dict[str, Any]] = {}
+
     async def _handle_record(record: dict[str, Any]) -> bool:
+        run_id: str | None = None
         try:
             msg = json.loads(record["body"])
             attrs = record.get("messageAttributes", {})
-            run_id: str | None = attrs.get("run_id", {}).get("stringValue")
-            return await _process_message(msg, settings, llm_semaphore, run_id=run_id)
+            run_id = attrs.get("run_id", {}).get("stringValue")
+            signal_created, llm_error = await _process_message(msg, settings, llm_semaphore, run_id=run_id)
+            if run_id:
+                stats = run_stats.setdefault(run_id, {"llm_errors": 0, "signals": 0, "first_error": ""})
+                if llm_error:
+                    stats["llm_errors"] += 1
+                    if not stats["first_error"]:
+                        stats["first_error"] = llm_error
+                if signal_created:
+                    stats["signals"] += 1
+            return signal_created
         except Exception as exc:
             logger.error("[CLASSIFIER] record error err=%s record=%.200s", exc, record)
             return False
@@ -245,6 +275,19 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
         *[_handle_record(r) for r in records], return_exceptions=True
     )
     acted = sum(1 for r in results if r is True)
+
+    # Call fail_run for any run where every LLM attempt failed and no signals were created.
+    # Skipped/stale/dedup articles don't count against this — only actual LLM provider errors.
+    if run_stats:
+        from src.news_trader.pipeline_lifecycle import fail_run
+        for run_id, stats in run_stats.items():
+            if stats["llm_errors"] > 0 and stats["signals"] == 0:
+                error_msg = f"LLM provider error ({stats['llm_errors']} failed): {stats['first_error']}"
+                logger.error("[CLASSIFIER] failing run_id=%s — %s", run_id, error_msg)
+                try:
+                    await fail_run(run_id, error_msg)
+                except Exception as exc:
+                    logger.error("[CLASSIFIER] fail_run error run_id=%s err=%s", run_id, exc)
 
     logger.info("[CLASSIFIER] done — processed=%d actionable=%d", len(records), acted)
     return {"processed": len(records), "acted_on": acted}

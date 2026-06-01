@@ -1,6 +1,7 @@
 """News classifier — calls the configured LLM and returns a structured signal.
 
-Returns None on any failure so the caller can skip gracefully.
+Returns None when the LLM response can't be parsed or validated (not an error).
+Raises LLMProviderError when the provider call itself fails (HTTP error, auth, quota).
 
 Output schema:
     {
@@ -10,7 +11,7 @@ Output schema:
         "stocks": list[str],           # NSE symbols, max 5
         "confidence": "high" | "medium" | "low",
         "reasoning": str,
-        "llm_model": str,              # model name used (e.g. "gemini-2.0-flash")
+        "llm_model": str,              # model name used (e.g. "gemini-2.5-flash")
         "prompt_version": str,         # semver — bump when _SYSTEM prompt changes
     }
 """
@@ -26,6 +27,11 @@ from src.config import Settings
 from src.providers.llm_factory import get_llm
 
 logger = logging.getLogger(__name__)
+
+
+class LLMProviderError(Exception):
+    """Raised when the LLM provider call fails (HTTP error, auth failure, quota, etc.)."""
+
 
 # Fallback used when Settings is unavailable (tests, one-off scripts).
 # The canonical value lives in Settings.nt_classifier_prompt_version (env: NT_CLASSIFIER_PROMPT_VERSION).
@@ -130,7 +136,7 @@ def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
         return None
     except Exception as exc:
         logger.error("[LLM] unexpected error err=%s", exc)
-        return None
+        raise LLMProviderError(str(exc)) from exc
 
 
 def _resolve_model_name(settings: Settings) -> str:
