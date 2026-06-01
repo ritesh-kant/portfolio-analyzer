@@ -22,15 +22,17 @@ async def with_retry(
     *,
     max_attempts: int = 3,
     base_delay: float = 1.0,
-    max_delay: float = 30.0,
+    max_delay: float = 10.0,
     jitter: float = 0.5,
     label: str = "",
 ) -> T | None:
     """Run `fn` up to max_attempts times with exponential backoff.
 
+    Hard-capped at 3 attempts to avoid burning Lambda execution time.
     Delay after attempt k = min(base_delay * 2^(k-1) + uniform(0, jitter), max_delay).
     Returns None if all attempts fail — never raises.
     """
+    max_attempts = min(max_attempts, 3)
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:

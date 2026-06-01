@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 def get_ltp(symbol: str) -> float | None:
     """Return last traded price for an NSE symbol. Returns None on failure."""
-    ticker_str = f"{symbol.upper()}.NS"
+    # Index symbols (^NSEI, ^NSEBANK, etc.) must NOT get the .NS suffix
+    ticker_str = symbol if symbol.startswith("^") else f"{symbol.upper()}.NS"
     try:
         t = yf.Ticker(ticker_str)
         fi: Any = t.fast_info
@@ -25,7 +26,8 @@ def get_ltp(symbol: str) -> float | None:
         # Fallback: 1-day 1-min bar close
         hist = t.history(period="1d", interval="1m")
         if not hist.empty:
-            return float(hist["Close"].iloc[-1])
+            v = hist["Close"].iloc[-1]
+            return float(v.item()) if hasattr(v, "item") else float(v)
         return None
     except Exception as exc:
         logger.warning("price_fetch_failed symbol=%s err=%s", symbol, exc)
@@ -36,7 +38,7 @@ def get_ltps(symbols: list[str]) -> dict[str, float]:
     """Batch price fetch via yf.download. Falls back to per-symbol get_ltp on error."""
     if not symbols:
         return {}
-    tickers = [f"{s.upper()}.NS" for s in symbols]
+    tickers = [s if s.startswith("^") else f"{s.upper()}.NS" for s in symbols]
     try:
         data = yf.download(tickers, period="1d", interval="1m", progress=False, threads=True)
         if data.empty:
@@ -48,11 +50,13 @@ def get_ltps(symbols: list[str]) -> dict[str, float]:
                 if ticker in closes.columns:
                     series = closes[ticker].dropna()
                     if not series.empty:
-                        result[sym] = float(series.iloc[-1])
+                        v = series.iloc[-1]
+                        result[sym] = float(v.item()) if hasattr(v, "item") else float(v)
         else:
             series = data["Close"].dropna()
             if not series.empty:
-                result[symbols[0]] = float(series.iloc[-1])
+                v = series.iloc[-1]
+                result[symbols[0]] = float(v.item()) if hasattr(v, "item") else float(v)
         return result
     except Exception as exc:
         logger.warning("get_ltps_batch_failed symbols=%s err=%s — falling back to per-symbol", symbols, exc)

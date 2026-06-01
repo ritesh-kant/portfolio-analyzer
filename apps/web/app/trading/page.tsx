@@ -1845,6 +1845,15 @@ export default function TradingPage() {
   const [error, setError] = useState<string | null>(null);
   const [triggering, setTriggering] = useState(false);
   const [triggerMsg, setTriggerMsg] = useState<{ text: string; kind: 'info' | 'success' | 'error' } | null>(null);
+  const triggerMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const setTriggerMsgWithAutoDismiss = (msg: { text: string; kind: 'info' | 'success' | 'error' } | null) => {
+    if (triggerMsgTimerRef.current) clearTimeout(triggerMsgTimerRef.current);
+    setTriggerMsg(msg);
+    if (msg) {
+      triggerMsgTimerRef.current = setTimeout(() => setTriggerMsg(null), 5000);
+    }
+  };
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const statusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1906,26 +1915,26 @@ export default function TradingPage() {
 
   async function handleTrigger() {
     setTriggering(true);
-    setTriggerMsg(null);
+    setTriggerMsgWithAutoDismiss(null);
     try {
       const res = await triggerPipeline();
       if (res.status === 'local_dev') {
-        setTriggerMsg({
+        setTriggerMsgWithAutoDismiss({
           text: res.message ?? 'Run `pnpm nt:ingester` from apps/signal-engine/ to invoke locally.',
           kind: 'info',
         });
       } else if (res.status === 'skipped') {
-        setTriggerMsg({
+        setTriggerMsgWithAutoDismiss({
           text: res.message ?? 'Skipped — outside market hours.',
           kind: 'info',
         });
       } else {
-        setTriggerMsg({ text: 'Pipeline started — tracking progress below.', kind: 'success' });
+        setTriggerMsgWithAutoDismiss({ text: 'Pipeline started — tracking progress below.', kind: 'success' });
         await loadPipelineStatus();
         startStatusPoll();
       }
     } catch (err) {
-      setTriggerMsg({
+      setTriggerMsgWithAutoDismiss({
         text: err instanceof Error ? err.message : 'Failed to trigger pipeline',
         kind: 'error',
       });
@@ -1972,7 +1981,7 @@ export default function TradingPage() {
       {/* Trigger feedback */}
       {triggerMsg && (
         <div
-          className={`rounded-xl border p-3 text-sm ${
+          className={`flex items-center justify-between rounded-xl border p-3 text-sm ${
             triggerMsg.kind === 'success'
               ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
               : triggerMsg.kind === 'info'
@@ -1980,7 +1989,14 @@ export default function TradingPage() {
                 : 'border-rose-200 bg-rose-50 text-rose-700'
           }`}
         >
-          {triggerMsg.text}
+          <span>{triggerMsg.text}</span>
+          <button
+            onClick={() => setTriggerMsgWithAutoDismiss(null)}
+            className="ml-3 shrink-0 opacity-60 hover:opacity-100"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
         </div>
       )}
 

@@ -17,6 +17,7 @@ Output schema:
 
 import json
 import logging
+import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -77,10 +78,10 @@ def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
             logger.warning("[LLM] incomplete response — missing keys, got: %s", list(result.keys()))
             return None
 
-        # Normalise
-        result["signal"] = result["signal"].lower()
-        result["confidence"] = result["confidence"].lower()
-        result["magnitude"] = result["magnitude"].lower()
+        # Normalise — guard against LLM returning null for these fields
+        result["signal"] = str(result["signal"] or "neutral").lower()
+        result["confidence"] = str(result["confidence"] or "low").lower()
+        result["magnitude"] = str(result["magnitude"] or "minor").lower()
         result["stocks"] = [s.upper().strip() for s in result.get("stocks", [])[:5]]
 
         result["llm_model"] = llm_model
@@ -90,6 +91,11 @@ def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
 
     except json.JSONDecodeError as exc:
         logger.warning("[LLM] JSON parse failed err=%s raw=%.200s", exc, raw if 'raw' in dir() else '?')
+        # Partial-recovery: salvage scalar fields from truncated JSON (e.g. stocks array cut off)
+        recovered = _partial_parse(raw if 'raw' in dir() else '')
+        if recovered:
+            logger.info("[LLM] partial parse succeeded — recovered fields: %s", list(recovered.keys()))
+            return recovered
         return None
     except Exception as exc:
         logger.error("[LLM] unexpected error err=%s", exc)
