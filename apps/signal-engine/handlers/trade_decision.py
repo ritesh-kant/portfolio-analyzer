@@ -27,11 +27,9 @@ from bson import ObjectId
 from src.config import Settings
 from src.db.client import get_db
 from src.news_trader.db import ensure_indexes, positions, signals
-from src.news_trader.prices import get_ltps, get_market_snapshot
 from src.news_trader.telegram import alert_trade_entered
 from src.news_trader.trailing_sl import calc_qty, initial_trailing_sl
 from src.news_trader.nifty500 import NIFTY_500
-from src.scrapers.nse_market import fetch_nifty_vix_sync
 
 logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
@@ -176,6 +174,7 @@ async def _process_signal(
     # avoids N+1 serial yfinance calls (one per stock + one per iteration for snapshot).
     # 20-second hard timeout guards against yfinance hanging on Yahoo Finance throttling.
     sector = signal_doc.get("sector")
+    from src.news_trader.prices import get_ltps, get_market_snapshot  # lazy: yfinance/pandas
     try:
         price_map, market_ctx = await asyncio.wait_for(
             asyncio.gather(
@@ -357,6 +356,7 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
 
     # Regime snapshot fetched once per batch (yfinance download ~250d, ~2-5s).
     # All signals in this batch trade against the same market state.
+    from src.scrapers.nse_market import fetch_nifty_vix_sync  # lazy: yfinance/pandas
     try:
         regime = await asyncio.wait_for(
             asyncio.to_thread(fetch_nifty_vix_sync), timeout=15.0

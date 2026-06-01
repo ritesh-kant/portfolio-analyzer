@@ -118,7 +118,7 @@ functions:
       command:
         - handlers.trade_decision.handler
     description: Check capacity, fetch price, open paper position, send Telegram alert
-    memorySize: 512
+    memorySize: 1024
     timeout: 60
     events:
       - sqs:
