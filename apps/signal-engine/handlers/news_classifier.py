@@ -17,6 +17,7 @@ frontend pipeline status panel.
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -47,6 +48,47 @@ _LLM_MAX_CONCURRENCY = 5
 # already had time to price in the news. Especially important for BSE backfills
 # that arrive hours after the actual announcement.
 _MAX_NEWS_AGE_SECONDS = 2 * 3600  # 2 hours
+
+# Pre-LLM noise filter — headline patterns that are provably non-price-moving.
+# Articles matching any pattern are skipped before hitting the LLM semaphore,
+# saving the API call entirely. Two categories:
+#
+#   1. BSE/NSE admin filings: AGM notices, trading-window closures, postal-ballot
+#      admin, scrutinizer reports, board-meeting invites (future date), audio-link
+#      postings, SEBI Reg-30(11) rumour-verification boilerplate, IEPF transfers,
+#      exchange fines, newspaper-publication compliance ads.
+#
+#   2. External market noise: foreign index wraps (Nikkei, S&P 500, etc.), broad
+#      Sensex/Nifty end-of-day summaries, standalone INR/forex-reserve moves.
+#      These never resolve to actionable Indian equities — the LLM would either
+#      output low-confidence or hallucinate foreign tickers (NVDA, MSFT).
+_NOISE_PATTERNS: list[str] = [
+    # BSE/NSE admin filings
+    r"trading window (?:closure|opening)",
+    r"(?:agm|annual general meeting) notice",
+    r"\bannual report \d{4}",
+    r"scrutinizer[s']? report",
+    r"postal ballot",
+    r"\bnon-applicability\b",
+    r"\bcorrigendum\b",
+    r"board of directors.{0,60}scheduled on",
+    r"\baudio (?:recordings?|link)\b",
+    r"regulation 30\(11\)",
+    r"\bfines imposed by (?:nse|bse)\b",
+    r"\biepf authority\b",
+    r"newspaper (?:publication|advertisement)",
+    r"publication.{0,30}newspapers?",
+    # Foreign market indices
+    r"\b(?:nikkei|hang seng|dow jones|s&p 500|nasdaq|ftse|kospi|cac 40|dax)\b",
+    r"\bshanghai (?:composite|stocks?|index)\b",
+    # Broad Sensex/Nifty end-of-day wraps (not sector-index moves like "Nifty IT")
+    r"\b(?:sensex|nifty)\b.{0,35}\b(?:end|close|open|fall|rise|slip|surge|tumble|gain|drop)s?\b",
+    r"\b(?:nifty|sensex)\b.{0,15}\b(?:futures?|options?)\b",
+    # Standalone forex moves with no specific equity trigger
+    r"\b(?:rupee|inr)\b.{0,30}\b(?:slide|fall|rise|drop|weaken|strengthen|slip|gain)s?\b",
+    r"\bforex reserves?\b",
+]
+_NOISE_RE = re.compile("|".join(_NOISE_PATTERNS), re.IGNORECASE)
 
 
 def _hour_bucket(ts: datetime) -> datetime:
@@ -126,6 +168,19 @@ async def _process_message(
         logger.info(
             "[CLASSIFIER] dedup hit story_hash=%s window=%s source_count→%d news_id=%s — skipping LLM",
             story_hash, window_bucket.isoformat(), existing.get("source_count", 1) + 1, news_id,
+        )
+        await news_raw(db).update_one(
+            {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
+        )
+        return False, None
+
+    # Pre-LLM noise filter: skip admin filings and foreign-market wraps before
+    # acquiring the semaphore. These reliably produce low-confidence signals
+    # anyway — skipping avoids the API call entirely.
+    if _NOISE_RE.search(headline):
+        logger.info(
+            "[CLASSIFIER] noise filter news_id=%s headline=%.80s — skipping LLM",
+            news_id, headline,
         )
         await news_raw(db).update_one(
             {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}

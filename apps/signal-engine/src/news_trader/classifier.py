@@ -55,11 +55,12 @@ Rules:
 
 _HUMAN_TMPL = "NEWS:\n{text}"
 
-# Headline + lead paragraphs carry virtually all the signal needed to classify
-# sector/direction/stocks. Capping the article body keeps input tokens down
-# without hurting classification quality (the tail of an article rarely changes
-# the call). Was 2000; tightened as part of LLM cost reduction.
-_MAX_ARTICLE_CHARS = 800
+# Defensive upper bound on article body sent to the LLM. The scrapers already
+# cap raw_text at 1000 chars (rss.py / nse.py / bse.py), so this is a belt-and-
+# suspenders guard, not a cost lever — at 1000 it truncates nothing in practice.
+# The headline + lead carry the classification signal; lower this only if a
+# future source starts emitting much longer bodies and token cost matters.
+_MAX_ARTICLE_CHARS = 1000
 
 
 def _partial_parse(raw: str) -> dict[str, Any] | None:
