@@ -83,7 +83,7 @@ export default function SignalsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-bold tracking-tight">Signal Engine</h1>
           <p className="text-sm text-ink/60">AI-powered confluence analysis for Indian equities</p>

@@ -73,13 +73,15 @@ function InfoTip({ text, direction = 'right' }: { text: string; direction?: 'rig
   const btnRef = useRef<HTMLButtonElement>(null);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
 
-  const open = () => {
+  const computeCoords = () => {
     if (direction === 'down' && btnRef.current) {
       const r = btnRef.current.getBoundingClientRect();
       setCoords({ top: r.bottom + 6, left: r.left + r.width / 2 });
     }
-    setShow(true);
   };
+
+  const open = () => { computeCoords(); setShow(true); };
+  const toggle = () => { if (!show) computeCoords(); setShow((v) => !v); };
 
   return (
     <span className="relative inline-flex">
@@ -89,8 +91,10 @@ function InfoTip({ text, direction = 'right' }: { text: string; direction?: 'rig
         onMouseLeave={() => setShow(false)}
         onFocus={open}
         onBlur={() => setShow(false)}
+        onClick={(e) => { e.stopPropagation(); toggle(); }}
         className="flex h-4 w-4 items-center justify-center rounded-full bg-black/10 text-[9px] font-bold text-ink/50 hover:bg-black/20"
         aria-label="Info"
+        aria-expanded={show}
       >
         i
       </button>
@@ -126,18 +130,20 @@ function TabBtn({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
-        active ? 'bg-accent text-white shadow-sm' : 'hover:bg-black/5'
+      className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 pb-2.5 pt-2 text-sm font-semibold transition-colors ${
+        active
+          ? 'border-accent text-accent'
+          : 'border-transparent text-ink/50 hover:text-ink/80'
       }`}
     >
       {children}
       {count !== undefined && count > 0 && (
         <span
           className={`rounded-full px-1.5 py-px text-[10px] font-bold ${
-            active ? 'bg-white/20 text-white' : 'bg-black/10 text-ink/60'
+            active ? 'bg-accent/10 text-accent' : 'bg-black/8 text-ink/50'
           }`}
         >
-          {count}
+          {count > 999 ? '999+' : count}
         </span>
       )}
     </button>
@@ -1809,15 +1815,12 @@ function OverviewTab({
         <div className="metric-chip space-y-2">
           <h2 className="text-sm font-semibold">Open Positions</h2>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <thead>
                 <tr className="border-b border-black/5 text-xs text-ink/50">
-                  <th className="py-2 text-left font-semibold">Symbol</th>
-                  <th className="py-2 text-right font-semibold">Entry</th>
-                  <th className="py-2 text-right font-semibold">Current</th>
-                  <th className="py-2 text-right font-semibold">P&L</th>
-                  <th className="py-2 text-right font-semibold">SL</th>
-                  <th className="py-2 text-right font-semibold">Target</th>
+                  <th className="py-2 pr-4 text-left font-semibold">Symbol</th>
+                  <th className="px-4 py-2 text-right font-semibold">Entry</th>
+                  <th className="pl-4 py-2 text-right font-semibold">Current · P&L</th>
                 </tr>
               </thead>
               <tbody>
@@ -1828,26 +1831,26 @@ function OverviewTab({
                       : null;
                   return (
                     <tr key={p._id} className="border-b border-black/5 last:border-0">
-                      <td className="py-2">
-                        <span className="font-display font-bold">{p.symbol}</span>
-                        <SignalBadge signal={p.signal} />
+                      <td className="py-2.5 pr-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-display font-bold">{p.symbol}</span>
+                          <SignalBadge signal={p.signal} />
+                        </div>
                       </td>
-                      <td className="py-2 text-right tabular-nums">{fmtPrice(p.entry_price)}</td>
-                      <td className="py-2 text-right tabular-nums">
-                        {p.current_price != null ? fmtPrice(p.current_price) : '—'}
+                      <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap text-sm">
+                        {fmtPrice(p.entry_price)}
                       </td>
-                      <td className="py-2 text-right tabular-nums font-semibold">
+                      <td className="pl-4 py-2.5 text-right whitespace-nowrap">
+                        <span className="block tabular-nums text-sm">
+                          {p.current_price != null ? fmtPrice(p.current_price) : '—'}
+                        </span>
                         {unrealPnl != null ? (
-                          <span className={pnlColor(unrealPnl)}>
+                          <span className={`block tabular-nums text-xs font-semibold ${pnlColor(unrealPnl)}`}>
                             {pnlSign(unrealPnl)}{formatCurrency(unrealPnl)}
                           </span>
-                        ) : '—'}
-                      </td>
-                      <td className="py-2 text-right tabular-nums text-rose-600">
-                        {fmtPrice(p.trailing_sl)}
-                      </td>
-                      <td className="py-2 text-right tabular-nums text-emerald-700">
-                        {fmtPrice(p.target_price)}
+                        ) : (
+                          <span className="block text-xs text-ink/30">no price</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -2000,45 +2003,43 @@ export default function TradingPage() {
   const pipelineActive = pipelineStatus?.is_active ?? false;
 
   return (
-    <div className="space-y-4">
-      {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight">News Trader</h1>
-          <p className="text-sm text-ink/60">
-            Paper · NSE/BSE · Event-driven · Trailing SL · AI classifier
-          </p>
+    <div className="space-y-0">
+      {/* ── Header: title + actions, subtitle below ─────────────────────── */}
+      <div className="pb-1">
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="font-display text-xl font-bold tracking-tight">News Trader</h1>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              onClick={() => {
+                void loadAll();
+                void loadPipelineStatus().then((s) => {
+                  if (s?.is_active) startStatusPoll();
+                });
+                setHistoryRefreshKey((k) => k + 1);
+              }}
+              className="flex items-center justify-center rounded-lg border border-black/10 bg-panel p-2 text-ink/60 shadow-sm transition hover:bg-black/5 active:scale-95"
+              title="Refresh"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+            <button
+              onClick={() => void handleTrigger()}
+              disabled={triggering || pipelineActive}
+              className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {triggering ? 'Starting…' : pipelineActive ? '⏳ Running…' : '▶ Run Pipeline'}
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              void loadAll();
-              void loadPipelineStatus().then((s) => {
-                if (s?.is_active) startStatusPoll();
-              });
-              setHistoryRefreshKey((k) => k + 1);
-            }}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 active:scale-95 active:shadow-none active:bg-gray-100"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="inline-block h-4 w-4 mr-1.5 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Refresh
-          </button>
-          <button
-            onClick={() => void handleTrigger()}
-            disabled={triggering || pipelineActive}
-            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {triggering ? 'Starting…' : pipelineActive ? '⏳ Running…' : '▶ Run Pipeline'}
-          </button>
-        </div>
+        <p className="mt-0.5 text-xs text-ink/50">Paper · NSE/BSE · Event-driven · Trailing SL</p>
       </div>
 
       {/* Trigger feedback */}
       {triggerMsg && (
         <div
-          className={`flex items-center justify-between rounded-xl border p-3 text-sm ${
+          className={`flex items-center justify-between rounded-xl border p-3 text-sm mb-3 ${
             triggerMsg.kind === 'success'
               ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
               : triggerMsg.kind === 'info'
@@ -2058,13 +2059,14 @@ export default function TradingPage() {
       )}
 
       {error && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 mb-3 text-sm text-rose-700">
           {error}
         </div>
       )}
 
-      {/* ── Tab bar ────────────────────────────────────────────────────── */}
-      <div className="flex w-fit items-center gap-1 rounded-full bg-panel p-1 shadow-card">
+      {/* ── Underline tab bar ───────────────────────────────────────────── */}
+      <div className="scrollbar-none -mx-4 overflow-x-auto px-4">
+      <div className="flex min-w-max border-b border-black/8 sm:min-w-0">
         <TabBtn active={tab === 'overview'} onClick={() => setTab('overview')}>
           Overview
         </TabBtn>
@@ -2090,6 +2092,9 @@ export default function TradingPage() {
           News
         </TabBtn>
       </div>
+      </div>
+
+      <div className="pt-4">
 
       {/* ── Tab content ────────────────────────────────────────────────── */}
       {loading ? (
@@ -2114,6 +2119,7 @@ export default function TradingPage() {
           {tab === 'news' && <NewsTab news={news} signals={signals} newsTotal={newsTotal} />}
         </>
       )}
+      </div>
     </div>
   );
 }

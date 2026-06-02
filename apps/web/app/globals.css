@@ -23,3 +23,11 @@ body {
 .metric-chip {
   @apply rounded-xl border border-black/5 bg-panel px-3 py-2 shadow-card;
 }
+
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
