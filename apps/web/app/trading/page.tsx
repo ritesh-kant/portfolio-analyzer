@@ -763,24 +763,40 @@ function RiskMetricsPanel({ positions }: { positions: NtPosition[] }) {
   }
   const calmar = maxDD > 0 ? (mean * closed.length) / maxDD : null;
 
+  // Ratio metrics (Sharpe, Sortino, Calmar) are statistically meaningless below
+  // ~30 trades — showing them in confident red/green at n=7 actively misleads.
+  // Below the threshold: show the number greyed out with a sample-size label.
+  const RATIO_MIN_TRADES = 30;
+  const ratiosMature = closed.length >= RATIO_MIN_TRADES;
+
+  const ratioValue = (v: number | null) =>
+    v != null ? v.toFixed(2) : '—';
+  const ratioColor = (v: number | null, good: (n: number) => boolean) => {
+    if (!ratiosMature || v == null) return 'text-ink/30';
+    return good(v) ? 'text-emerald-700' : v < 0 ? 'text-rose-600' : '';
+  };
+  const ratioTipSuffix = ratiosMature
+    ? ''
+    : ` — greyed: only ${closed.length} of ${RATIO_MIN_TRADES} trades needed for a reliable reading.`;
+
   const metrics = [
     {
       label: 'Sharpe (trade)',
-      value: sharpe != null ? sharpe.toFixed(2) : '—',
-      color: sharpe != null && sharpe >= 1 ? 'text-emerald-700' : sharpe != null && sharpe < 0 ? 'text-rose-600' : '',
-      tip: 'Trade-level Sharpe: mean P&L ÷ std dev of all trade P&Ls. ≥1.0 is good. Not annualised — computed per trade, not per day.',
+      value: ratioValue(sharpe),
+      color: ratioColor(sharpe, (v) => v >= 1),
+      tip: `Trade-level Sharpe: mean P&L ÷ std dev of all trade P&Ls. ≥1.0 is good. Not annualised — computed per trade, not per day.${ratioTipSuffix}`,
     },
     {
       label: 'Sortino (trade)',
-      value: sortino != null ? sortino.toFixed(2) : '—',
-      color: sortino != null && sortino >= 1 ? 'text-emerald-700' : sortino != null && sortino < 0 ? 'text-rose-600' : '',
-      tip: 'Like Sharpe but only penalises losing trades. A higher Sortino vs Sharpe means losses are small relative to wins.',
+      value: ratioValue(sortino),
+      color: ratioColor(sortino, (v) => v >= 1),
+      tip: `Like Sharpe but only penalises losing trades. A higher Sortino vs Sharpe means losses are small relative to wins.${ratioTipSuffix}`,
     },
     {
       label: 'Calmar',
-      value: calmar != null ? calmar.toFixed(2) : '—',
-      color: calmar != null && calmar >= 1 ? 'text-emerald-700' : calmar != null && calmar < 0 ? 'text-rose-600' : '',
-      tip: 'Total net P&L ÷ max drawdown. Measures how much you earned per rupee of peak-to-trough loss. Higher is better.',
+      value: ratioValue(calmar),
+      color: ratioColor(calmar, (v) => v >= 1),
+      tip: `Total net P&L ÷ max drawdown. Measures how much you earned per rupee of peak-to-trough loss. Higher is better.${ratioTipSuffix}`,
     },
     {
       label: 'Max Win Streak',
@@ -804,9 +820,16 @@ function RiskMetricsPanel({ positions }: { positions: NtPosition[] }) {
 
   return (
     <div className="metric-chip space-y-3">
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold">Risk Metrics</h2>
-        <InfoTip text="Risk-adjusted performance metrics computed from all closed trades. Sharpe and Sortino are trade-level (not annualised daily returns)." />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold">Risk Metrics</h2>
+          <InfoTip text="Risk-adjusted performance metrics computed from all closed trades. Sharpe and Sortino are trade-level (not annualised daily returns)." />
+        </div>
+        {!ratiosMature && (
+          <span className="text-[10px] text-ink/40">
+            ratios need {RATIO_MIN_TRADES} trades · {closed.length} so far
+          </span>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {metrics.map(({ label, value, color, tip }) => (

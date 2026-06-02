@@ -37,10 +37,43 @@ def update_trailing_sl(
     current_sl: float,
     sl_pct: float,
 ) -> tuple[float, float]:
-    """Returns (new_highest_price, new_sl). SL never decreases."""
+    """LEGACY pure-trailing stop. Retained for positions opened before the
+    split-stop change (see update_stop). Returns (new_highest_price, new_sl).
+    SL never decreases."""
     new_highest = max(highest_price, current_price)
     new_sl = new_highest * (1.0 - sl_pct)
     return new_highest, max(current_sl, new_sl)
+
+
+def initial_stop(entry_price: float, initial_sl_pct: float) -> float:
+    """Wide initial stop placed at entry, before trailing activates."""
+    return entry_price * (1.0 - initial_sl_pct)
+
+
+def update_stop(
+    entry_price: float,
+    current_price: float,
+    highest_price: float,
+    current_sl: float,
+    initial_sl_pct: float,
+    trail_sl_pct: float,
+    trail_activate_pct: float,
+) -> tuple[float, float]:
+    """Split stop: wide initial stop until the trade is in profit, then a tight
+    trailing stop below the high. Returns (new_highest_price, new_sl).
+
+    - Before the high reaches entry*(1 + trail_activate_pct): stop sits at the
+      wide floor entry*(1 - initial_sl_pct) — room to survive entry noise.
+    - Once activated: stop trails at high*(1 - trail_sl_pct), locking in profit.
+    - SL never decreases (max against current_sl), so activation can only raise it.
+    """
+    new_highest = max(highest_price, current_price)
+    activated = new_highest >= entry_price * (1.0 + trail_activate_pct)
+    if activated:
+        candidate = new_highest * (1.0 - trail_sl_pct)
+    else:
+        candidate = entry_price * (1.0 - initial_sl_pct)
+    return new_highest, max(current_sl, candidate)
 
 
 def check_exit(

@@ -69,8 +69,18 @@ class Settings(BaseSettings):
     nt_total_capital_inr: float = 100_000.0   # max cash deployed across all open positions
     nt_max_positions: int = 10                 # max open positions == number of equal-weight slots
     nt_max_stocks_per_signal: int = 2         # max entries from a single news event
-    nt_sl_pct: float = 0.015                  # trailing stop-loss distance (1.5%)
-    nt_target_pct: float = 0.08               # profit target (8%)
+    # Split stop-loss (see trailing_sl.update_stop). A position gets a WIDE
+    # initial stop to survive normal post-entry noise, then switches to a TIGHT
+    # trailing stop only once it is genuinely in profit. The old single 1.5%
+    # trailing stop fired on entry-timing wiggle before the thesis could play
+    # out (every closed trade on 2026-06-02 exited via SL, none hit target).
+    nt_initial_sl_pct: float = 0.03           # wide stop at entry (3%) — breathing room
+    nt_trail_sl_pct: float = 0.015            # tight trail (1.5%) below the high, once active
+    nt_trail_activate_pct: float = 0.02       # start trailing only after +2% in profit
+    nt_sl_pct: float = 0.015                  # LEGACY: pure-trail width for positions opened
+                                              #   before the split-stop change (sl_monitor fallback)
+    nt_target_pct: float = 0.05               # profit target (5%) — was 8%, unreachable under a
+                                              #   1.5% trail; now a sane ceiling, trail is primary exit
     nt_max_hold_days: int = 5                 # force-close on day 5
     nt_news_delay_seconds: int = 900          # SQS delay after classification (15 min)
     nt_classifier_prompt_version: str = "1.0.0"  # bump when classifier prompt changes

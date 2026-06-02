@@ -7,7 +7,9 @@ from src.news_trader.trailing_sl import (
     calc_pnl,
     calc_qty,
     check_exit,
+    initial_stop,
     initial_trailing_sl,
+    update_stop,
     update_trailing_sl,
 )
 
@@ -56,6 +58,83 @@ def test_sl_staircase_three_steps():
 
     assert high == 106.0
     assert sl == pytest.approx(106.0 * 0.985)   # 104.41
+
+
+# ── split stop: initial_stop + update_stop ────────────────────────────────────
+
+def test_initial_stop_is_wide():
+    # 3% below entry, not the 1.5% trail width
+    assert initial_stop(100.0, initial_sl_pct=0.03) == pytest.approx(97.0)
+
+
+def test_split_stop_sits_at_wide_floor_before_activation():
+    # Price ticks up but hasn't crossed +2% yet → stop stays at the wide 3% floor,
+    # NOT trailing. This is the breathing room that the old pure-trail lacked.
+    high, sl = update_stop(
+        entry_price=100.0, current_price=101.0, highest_price=100.0,
+        current_sl=97.0, initial_sl_pct=0.03, trail_sl_pct=0.015, trail_activate_pct=0.02,
+    )
+    assert high == 101.0
+    assert sl == pytest.approx(97.0)  # unchanged — trailing not yet active
+
+
+def test_split_stop_dip_before_activation_holds_wide_floor():
+    # Entry 100, dips to 98.5 before ever going up. Old pure-trail would have a
+    # stop at 98.5 and exit; split stop sits at 97.0 and survives.
+    high, sl = update_stop(
+        entry_price=100.0, current_price=98.5, highest_price=100.0,
+        current_sl=97.0, initial_sl_pct=0.03, trail_sl_pct=0.015, trail_activate_pct=0.02,
+    )
+    assert high == 100.0
+    assert sl == pytest.approx(97.0)  # still the wide floor — not stopped out
+
+
+def test_split_stop_activates_and_locks_profit_at_threshold():
+    # High reaches exactly +2% → trailing switches on, stop jumps to lock ~+0.5%.
+    high, sl = update_stop(
+        entry_price=100.0, current_price=102.0, highest_price=100.0,
+        current_sl=97.0, initial_sl_pct=0.03, trail_sl_pct=0.015, trail_activate_pct=0.02,
+    )
+    assert high == 102.0
+    assert sl == pytest.approx(102.0 * 0.985)  # 100.47 — now in profit
+
+
+def test_split_stop_trails_up_once_active():
+    high, sl = update_stop(
+        entry_price=100.0, current_price=105.0, highest_price=102.0,
+        current_sl=100.47, initial_sl_pct=0.03, trail_sl_pct=0.015, trail_activate_pct=0.02,
+    )
+    assert high == 105.0
+    assert sl == pytest.approx(105.0 * 0.985)  # 103.425
+
+
+def test_split_stop_never_decreases_on_dip_after_activation():
+    high, sl = update_stop(
+        entry_price=100.0, current_price=101.0, highest_price=105.0,
+        current_sl=103.425, initial_sl_pct=0.03, trail_sl_pct=0.015, trail_activate_pct=0.02,
+    )
+    assert high == 105.0
+    assert sl == pytest.approx(103.425)  # held
+
+
+def test_split_stop_full_lifecycle():
+    # buy 100 → wide floor 97; dip to 98 survives; run to 103 activates+trails;
+    # pull back to 101.5 holds the trailed stop.
+    entry = 100.0
+    high = entry
+    sl = initial_stop(entry, initial_sl_pct=0.03)
+    assert sl == pytest.approx(97.0)
+
+    for price in [99.0, 98.0, 100.5]:  # noise below +2% — floor holds
+        high, sl = update_stop(entry, price, high, sl, 0.03, 0.015, 0.02)
+        assert sl == pytest.approx(97.0)
+
+    high, sl = update_stop(entry, 103.0, high, sl, 0.03, 0.015, 0.02)  # activates
+    assert sl == pytest.approx(103.0 * 0.985)  # 101.455
+
+    high, sl = update_stop(entry, 101.5, high, sl, 0.03, 0.015, 0.02)  # pullback
+    assert high == 103.0
+    assert sl == pytest.approx(103.0 * 0.985)  # unchanged
 
 
 # ── check_exit ────────────────────────────────────────────────────────────────

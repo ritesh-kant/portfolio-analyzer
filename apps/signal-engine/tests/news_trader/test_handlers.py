@@ -463,11 +463,15 @@ class TestFreshnessGate:
 
 class TestTradeDecisionHandler:
 
-    @patch("handlers.trade_decision.fetch_nifty_vix_sync", return_value={})
+    # get_ltps / get_market_snapshot / fetch_nifty_vix_sync are lazy-imported inside
+    # the handler (yfinance/pandas cost), so they must be patched at their source
+    # modules — they are not module-level attributes of handlers.trade_decision.
+    @patch("src.scrapers.nse_market.fetch_nifty_vix_sync", return_value={})
+    @patch("src.news_trader.prices.get_market_snapshot", return_value={"nifty50": None, "sector_index": None})
     @patch("handlers.trade_decision.get_db")
-    @patch("handlers.trade_decision.get_ltps", return_value={"HDFCBANK": 1500.0})
+    @patch("src.news_trader.prices.get_ltps", return_value={"HDFCBANK": 1500.0})
     @patch("handlers.trade_decision.alert_trade_entered")
-    def test_opens_position_in_paper_mode(self, mock_alert, mock_price, mock_get_db, _regime):
+    def test_opens_position_in_paper_mode(self, mock_alert, mock_price, mock_get_db, mock_snapshot, _regime):
         from bson import ObjectId
 
         signal_id = str(ObjectId())
@@ -519,6 +523,9 @@ class TestTradeDecisionHandler:
             s.nt_max_stocks_per_signal = 2
             s.nt_total_capital_inr = 100_000.0
             s.nt_sl_pct = 0.015
+            s.nt_initial_sl_pct = 0.03
+            s.nt_trail_sl_pct = 0.015
+            s.nt_trail_activate_pct = 0.02
             s.nt_target_pct = 0.08
             s.telegram_bot_token = ""
             s.telegram_chat_id = ""
@@ -528,9 +535,11 @@ class TestTradeDecisionHandler:
         mock_pos_coll.insert_one.assert_called_once()
         mock_alert.assert_called_once()
 
-    @patch("handlers.trade_decision.fetch_nifty_vix_sync", return_value={})
+    # Patched at source modules — these are lazy imports inside the handler.
+    # (Prices aren't actually fetched here: the capacity check returns first.)
+    @patch("src.scrapers.nse_market.fetch_nifty_vix_sync", return_value={})
     @patch("handlers.trade_decision.get_db")
-    @patch("handlers.trade_decision.get_ltps", return_value={"SBIN": 1500.0})
+    @patch("src.news_trader.prices.get_ltps", return_value={"SBIN": 1500.0})
     @patch("handlers.trade_decision.alert_trade_entered")
     def test_respects_max_positions_limit(self, mock_alert, mock_price, mock_get_db, _regime):
         """When already at max, no new position should be opened."""
@@ -575,6 +584,9 @@ class TestTradeDecisionHandler:
             s.nt_max_stocks_per_signal = 2
             s.nt_total_capital_inr = 100_000.0
             s.nt_sl_pct = 0.015
+            s.nt_initial_sl_pct = 0.03
+            s.nt_trail_sl_pct = 0.015
+            s.nt_trail_activate_pct = 0.02
             s.nt_target_pct = 0.08
             s.telegram_bot_token = ""
             s.telegram_chat_id = ""

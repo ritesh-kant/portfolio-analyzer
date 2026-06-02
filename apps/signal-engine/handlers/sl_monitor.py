@@ -19,7 +19,7 @@ from src.news_trader.db import ensure_indexes, positions
 from src.news_trader.market_calendar import is_trading_day
 from src.news_trader.prices import get_ltps
 from src.news_trader.telegram import alert_sl_updated, alert_trade_closed
-from src.news_trader.trailing_sl import calc_pnl, check_exit, update_trailing_sl
+from src.news_trader.trailing_sl import calc_pnl, check_exit, update_stop, update_trailing_sl
 
 logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ def _is_market_hours(bypass_holiday: bool = False) -> bool:
     return 9 * 60 + 15 <= total_minutes <= 15 * 60 + 25
 
 
-async def _monitor_position(pos: dict, settings: Settings, price: float) -> str:
+async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50: float | None = None) -> str:
     """Returns 'closed:<reason>', 'sl_raised', or 'unchanged'.
 
     The current price is supplied by the caller, which batch-fetches every open
@@ -71,17 +71,45 @@ async def _monitor_position(pos: dict, settings: Settings, price: float) -> str:
 
     paper = pos.get("paper", True)
 
-    # Update trailing SL — use the sl_pct frozen at entry, not the live config.
-    # If nt_sl_pct is changed during tuning, open positions keep their original SL width.
-    sl_pct = pos.get("sl_pct_used") or settings.nt_sl_pct
-    new_highest, new_sl = update_trailing_sl(
-        current_price=price,
-        highest_price=pos["highest_price"],
-        current_sl=pos["trailing_sl"],
-        sl_pct=sl_pct,
-    )
+    # Update the stop using params frozen at entry, not live config — open
+    # positions keep the geometry they were opened with, so a tuning change
+    # never moves an existing trade's stop mid-flight.
+    #
+    # Positions opened after the split-stop change carry initial_sl_pct_used and
+    # take the wide-initial → tight-trail path (update_stop). Older positions have
+    # no such field and keep the original pure-trailing behavior (update_trailing_sl).
+    initial_sl_pct = pos.get("initial_sl_pct_used")
+    if initial_sl_pct is not None:
+        trail_sl_pct = pos.get("trail_sl_pct_used")
+        if trail_sl_pct is None:
+            trail_sl_pct = settings.nt_trail_sl_pct
+        trail_activate_pct = pos.get("trail_activate_pct_used")
+        if trail_activate_pct is None:
+            trail_activate_pct = settings.nt_trail_activate_pct
+        new_highest, new_sl = update_stop(
+            entry_price=pos["entry_price"],
+            current_price=price,
+            highest_price=pos["highest_price"],
+            current_sl=pos["trailing_sl"],
+            initial_sl_pct=initial_sl_pct,
+            trail_sl_pct=trail_sl_pct,
+            trail_activate_pct=trail_activate_pct,
+        )
+    else:
+        # Legacy pure-trail position (opened before the split-stop change).
+        sl_pct = pos.get("sl_pct_used") or settings.nt_sl_pct
+        new_highest, new_sl = update_trailing_sl(
+            current_price=price,
+            highest_price=pos["highest_price"],
+            current_sl=pos["trailing_sl"],
+            sl_pct=sl_pct,
+        )
 
     sl_raised = new_sl > pos["trailing_sl"]
+
+    # Track the low-water mark (MAE) alongside the high. Positions opened before
+    # lowest_price shipped have no baseline, so fall back to entry_price.
+    new_lowest = min(pos.get("lowest_price") or pos["entry_price"], price)
 
     # Check exit — use max_hold_days frozen at entry for the same reason.
     max_hold_days = pos.get("max_hold_days_used") or settings.nt_max_hold_days
@@ -105,11 +133,15 @@ async def _monitor_position(pos: dict, settings: Settings, price: float) -> str:
                     "exit_price": price,
                     "exit_at": now,
                     "highest_price": new_highest,
+                    "lowest_price": new_lowest,
                     "trailing_sl": new_sl,
                     "current_price": price,
                     "gross_pnl": gross_pnl,
                     "net_pnl": net_pnl,
                     "costs": costs,
+                    # NIFTY 50 level at exit — pairs with entry_nifty50 to compute
+                    # market-adjusted (alpha) P&L over the holding period.
+                    "exit_nifty50": nifty50,
                 },
                 "$push": {
                     "price_snapshots": {
@@ -142,7 +174,7 @@ async def _monitor_position(pos: dict, settings: Settings, price: float) -> str:
     await positions(db).update_one(
         {"_id": pos["_id"]},
         {
-            "$set": {"highest_price": new_highest, "trailing_sl": new_sl, "current_price": price},
+            "$set": {"highest_price": new_highest, "lowest_price": new_lowest, "trailing_sl": new_sl, "current_price": price},
             "$push": {
                 "price_snapshots": {
                     "$each": [{"t": now.isoformat(), "p": price}],
@@ -200,8 +232,12 @@ async def _run(settings: Settings) -> dict:
     # Batch-fetch every open symbol's price in ONE yf.download call rather than
     # N concurrent get_ltp() calls — a single round-trip, and it avoids many
     # parallel yfinance requests tripping Yahoo's rate limiter.
+    # Fold the NIFTY 50 level into the same batch call (no extra round-trip) so
+    # each closing trade can freeze the index level at exit. "^NSEI" is never a
+    # position symbol, so it won't be mistaken for one in the loop below.
     symbols = list({pos["symbol"] for pos in open_positions})
-    price_map = await asyncio.to_thread(get_ltps, symbols)
+    price_map = await asyncio.to_thread(get_ltps, symbols + ["^NSEI"])
+    nifty50 = price_map.get("^NSEI")
 
     priced: list[tuple[dict, float]] = []
     no_priced: list[dict] = []
@@ -215,7 +251,7 @@ async def _run(settings: Settings) -> dict:
             priced.append((pos, price))
 
     outcomes = await asyncio.gather(
-        *[_monitor_position(pos, settings, price) for pos, price in priced],
+        *[_monitor_position(pos, settings, price, nifty50) for pos, price in priced],
         return_exceptions=True,
     )
     for outcome in outcomes:
@@ -249,6 +285,7 @@ async def _run(settings: Settings) -> dict:
                         "gross_pnl": gross_pnl,
                         "net_pnl": net_pnl,
                         "costs": costs,
+                        "exit_nifty50": nifty50,
                     }
                 },
             )

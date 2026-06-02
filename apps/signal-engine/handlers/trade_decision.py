@@ -28,7 +28,7 @@ from src.config import Settings
 from src.db.client import get_db
 from src.news_trader.db import ensure_indexes, positions, signals
 from src.news_trader.telegram import alert_trade_entered
-from src.news_trader.trailing_sl import calc_qty, initial_trailing_sl
+from src.news_trader.trailing_sl import calc_qty, initial_stop
 from src.news_trader.nifty500 import NIFTY_500
 
 logging.getLogger().setLevel(logging.INFO)
@@ -231,7 +231,7 @@ async def _process_signal(
             continue
 
         target = price * (1.0 + settings.nt_target_pct)
-        sl = initial_trailing_sl(price, settings.nt_sl_pct)
+        sl = initial_stop(price, settings.nt_initial_sl_pct)
         now = datetime.now(tz=timezone.utc)
 
         position_doc = {
@@ -240,11 +240,17 @@ async def _process_signal(
             "signal": signal_doc.get("signal"),
             "sector": signal_doc.get("sector"),
             "confidence": signal_doc.get("confidence"),
+            # Expected-move-size label frozen alongside confidence so closed-trade
+            # analysis can bucket outcomes by magnitude (do "major" calls move more?).
+            "magnitude": signal_doc.get("magnitude"),
             "entry_price": price,
             "qty": qty,
             "entry_value": trade_value,
             "entry_at": now,
             "highest_price": price,
+            # Low-water mark (MAE) seed — mirrors highest_price. sl_monitor ratchets
+            # this down each tick so we can later see how far winners dipped first.
+            "lowest_price": price,
             "trailing_sl": sl,
             "target_price": target,
             "status": "open",
@@ -266,6 +272,12 @@ async def _process_signal(
             "entry_nifty_above_ema50": regime.get("nifty_above_ema50"),
             # Strategy params frozen at entry — allows backtesting "what if SL
             # was 2.5% instead of 1.5%" by querying nt_positions directly.
+            # Split-stop params (see trailing_sl.update_stop). sl_monitor keys off
+            # initial_sl_pct_used to pick the split-stop path; positions missing it
+            # are treated as legacy pure-trail (sl_pct_used).
+            "initial_sl_pct_used": settings.nt_initial_sl_pct,
+            "trail_sl_pct_used": settings.nt_trail_sl_pct,
+            "trail_activate_pct_used": settings.nt_trail_activate_pct,
             "sl_pct_used": settings.nt_sl_pct,
             "target_pct_used": settings.nt_target_pct,
             "max_hold_days_used": settings.nt_max_hold_days,
