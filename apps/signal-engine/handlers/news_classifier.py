@@ -28,7 +28,7 @@ from pymongo.errors import DuplicateKeyError
 from src.config import Settings
 from src.db.client import get_db
 from src.news_trader.classifier import LLMProviderError, classify
-from src.news_trader.db import ensure_indexes, news_raw, signals
+from src.news_trader.db import ensure_indexes, news_raw, positions, signals
 
 logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
@@ -100,6 +100,7 @@ async def _process_message(
     settings: Settings,
     llm_semaphore: asyncio.Semaphore,
     run_id: str | None = None,
+    open_positions: int = 0,
 ) -> tuple[bool, str | None]:
     """Returns (signal_enqueued, llm_error_message).
 
@@ -181,6 +182,19 @@ async def _process_message(
         logger.info(
             "[CLASSIFIER] noise filter news_id=%s headline=%.80s — skipping LLM",
             news_id, headline,
+        )
+        await news_raw(db).update_one(
+            {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
+        )
+        return False, None
+
+    # Portfolio capacity gate: skip the LLM when all position slots are occupied.
+    # With 5-day holds a full book typically stays full for days, so classifying
+    # those articles burns tokens with no realistic path to a trade.
+    if open_positions >= settings.nt_max_positions:
+        logger.info(
+            "[CLASSIFIER] portfolio full (%d/%d) news_id=%s — skipping LLM",
+            open_positions, settings.nt_max_positions, news_id,
         )
         await news_raw(db).update_one(
             {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
@@ -308,6 +322,11 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
     records = event.get("Records", [])
     logger.info("[CLASSIFIER] processing %d SQS record(s)", len(records))
 
+    # Snapshot open position count once per invocation — one DB call for the
+    # whole batch rather than one per message.
+    open_positions = await positions(db).count_documents({"status": "open"})
+    logger.info("[CLASSIFIER] open positions=%d / max=%d", open_positions, settings.nt_max_positions)
+
     # Created here (not at module scope) so it binds to this invocation's loop.
     llm_semaphore = asyncio.Semaphore(_LLM_MAX_CONCURRENCY)
 
@@ -321,7 +340,9 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
             msg = json.loads(record["body"])
             attrs = record.get("messageAttributes", {})
             run_id = attrs.get("run_id", {}).get("stringValue")
-            signal_created, llm_error = await _process_message(msg, settings, llm_semaphore, run_id=run_id)
+            signal_created, llm_error = await _process_message(
+                msg, settings, llm_semaphore, run_id=run_id, open_positions=open_positions
+            )
             if run_id:
                 stats = run_stats.setdefault(run_id, {"llm_errors": 0, "signals": 0, "first_error": ""})
                 if llm_error:

@@ -46,12 +46,6 @@ class Settings(BaseSettings):
     trading_mode: str = "paper"
     virtual_portfolio_initial: float = 100_000.0
     min_signal_confidence: float = 60.0
-    max_positions: int = 8
-    position_size_pct: float = 12.0
-    max_sector_positions: int = 3       # max open positions in any single sector
-    daily_loss_limit_pct: float = 3.0   # halt new orders if portfolio drops ≥3% today
-    portfolio_floor_pct: float = 70.0   # absolute halt if total_value < 70% of initial
-
     # News-trader Telegram alerts
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
@@ -67,7 +61,7 @@ class Settings(BaseSettings):
     # News-trader position rules
     #
     # Capital allocation has a single source of truth: nt_total_capital_inr.
-    # Per-trade size is *derived* as total / max_positions (equal-weight per
+    # Per-trade size is *derived* as total / nt_max_positions (equal-weight per
     # slot), so the per-trade and total controls can never drift out of sync —
     # the failure that once sized every trade at ₹50k when ₹3k was intended.
     # A hard backstop in trade_decision additionally refuses any entry that

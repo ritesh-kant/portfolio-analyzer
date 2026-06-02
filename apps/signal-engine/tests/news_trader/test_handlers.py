@@ -172,7 +172,7 @@ class TestNewsClassifierHandler:
                 return mock_news_coll
             if name == "nt_signals":
                 return mock_sig_coll
-            c = MagicMock(); c.create_index = AsyncMock(); return c
+            c = MagicMock(); c.create_index = AsyncMock(); c.count_documents = AsyncMock(return_value=0); return c
 
         mock_db.__getitem__ = MagicMock(side_effect=_get_coll)
         mock_get_db.return_value = mock_db
@@ -190,6 +190,7 @@ class TestNewsClassifierHandler:
             s.gemini_model = "gemini-1.5-flash"
             s.news_signals_queue_url = "https://sqs.example.com/signals"
             s.nt_news_delay_seconds = 900
+            s.nt_max_positions = 10
             handler(event, None)
 
         # Dedup hit: LLM never called, no new signal inserted, no SQS dispatch.
@@ -247,7 +248,7 @@ class TestNewsClassifierHandler:
                 return mock_news_coll
             if name == "nt_signals":
                 return mock_sig_coll
-            c = MagicMock(); c.create_index = AsyncMock(); return c
+            c = MagicMock(); c.create_index = AsyncMock(); c.count_documents = AsyncMock(return_value=0); return c
 
         mock_db.__getitem__ = MagicMock(side_effect=_get_coll)
         mock_get_db.return_value = mock_db
@@ -265,6 +266,7 @@ class TestNewsClassifierHandler:
             s.gemini_model = "gemini-1.5-flash"
             s.news_signals_queue_url = "https://sqs.example.com/signals"
             s.nt_news_delay_seconds = 900
+            s.nt_max_positions = 10
             handler(event, None)
 
         mock_sig_coll.insert_one.assert_called_once()
@@ -315,6 +317,7 @@ class TestNewsClassifierHandler:
         mock_coll.find_one_and_update = AsyncMock(return_value=None)  # new story
         mock_coll.insert_one = AsyncMock(return_value=MagicMock(inserted_id=ObjectId()))
         mock_coll.update_one = AsyncMock()
+        mock_coll.count_documents = AsyncMock(return_value=0)
         mock_db.__getitem__ = MagicMock(return_value=mock_coll)
         mock_get_db.return_value = mock_db
 
@@ -328,6 +331,7 @@ class TestNewsClassifierHandler:
             s.gemini_model = "gemini-1.5-flash"
             s.news_signals_queue_url = "https://sqs.example.com/signals"
             s.nt_news_delay_seconds = 900
+            s.nt_max_positions = 10
             handler(event, None)
 
         # SQS send_message must NOT have been called
@@ -372,7 +376,7 @@ class TestFreshnessGate:
         def _get_coll(name):
             if name == "nt_news_raw": return mock_news_coll
             if name == "nt_signals": return mock_sig_coll
-            c = MagicMock(); c.create_index = AsyncMock(); return c
+            c = MagicMock(); c.create_index = AsyncMock(); c.count_documents = AsyncMock(return_value=0); return c
 
         mock_db.__getitem__ = MagicMock(side_effect=_get_coll)
         mock_get_db.return_value = mock_db
@@ -389,6 +393,7 @@ class TestFreshnessGate:
             s.gemini_model = "gemini-1.5-flash"
             s.news_signals_queue_url = "https://sqs.example.com/signals"
             s.nt_news_delay_seconds = 900
+            s.nt_max_positions = 10
             handler(event, None)
         return mock_get_llm, mock_sig_coll
 
