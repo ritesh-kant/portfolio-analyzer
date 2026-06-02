@@ -25,6 +25,15 @@ provider:
       signal-engine:
         uri: ${env:SIGNAL_ENGINE_IMAGE_URI}
 
+  # Required SSM parameters (must exist under /portfolio-analyzer/<stage>/):
+  #   MONGODB_URI           — MongoDB Atlas connection string
+  #   SIGNAL_ENGINE_API_KEY — internal API key for Lambda-to-Lambda calls
+  #   GEMINI_API_KEY        — primary LLM (Gemini 1.5 Flash classifier)
+  #   TELEGRAM_BOT_TOKEN    — Telegram bot token from @BotFather
+  #   TELEGRAM_CHAT_ID      — Telegram chat ID to receive trade alerts
+  # Optional SSM parameters (fallback to empty string if absent):
+  #   ANTHROPIC_API_KEY     — Claude (unused while AI_PROVIDER=gemini)
+  #   OPENAI_API_KEY        — OpenAI (unused while AI_PROVIDER=gemini)
   environment:
     MONGODB_URI: ${ssm:/portfolio-analyzer/${sls:stage}/MONGODB_URI}
     SIGNAL_ENGINE_API_KEY: ${ssm:/portfolio-analyzer/${sls:stage}/SIGNAL_ENGINE_API_KEY}

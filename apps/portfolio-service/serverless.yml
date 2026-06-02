@@ -24,13 +24,16 @@ provider:
   region: ap-south-1
   logRetentionInDays: 14
   timeout: 15
+  # Required SSM parameters (must exist under /portfolio-analyzer/<stage>/):
+  #   MONGODB_URI      — MongoDB Atlas connection string
+  #   AUTH_SECRET      — NextAuth secret (base64, min 32 bytes)
   environment:
-    MONGODB_URI: ${env:MONGODB_URI, 'mongodb://admin:admin123@localhost:27017/portfolio_analyzer?authSource=admin'}
+    MONGODB_URI: ${ssm:/portfolio-analyzer/${sls:stage}/MONGODB_URI, 'mongodb://admin:admin123@localhost:27017/portfolio_analyzer?authSource=admin'}
     ZERODHA_API_KEY: ${env:ZERODHA_API_KEY, ''}
     ZERODHA_API_SECRET: ${env:ZERODHA_API_SECRET, ''}
     ZERODHA_ACCESS_TOKEN: ${env:ZERODHA_ACCESS_TOKEN, ''}
     MFAPI_SCHEME_CODE: '120716'
-    AUTH_SECRET: ${env:AUTH_SECRET, 'local-dev-secret-change-in-prod'}
+    AUTH_SECRET: ${ssm:/portfolio-analyzer/${sls:stage}/AUTH_SECRET, 'local-dev-secret-change-in-prod'}
     ALLOWED_ORIGIN: ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
     SIGNAL_ENGINE_INGESTER_FN: signal-engine-${self:provider.stage}-newsIngester
     NT_NEWS_DELAY_SECONDS: ${env:NT_NEWS_DELAY_SECONDS, '900'}
