@@ -20,7 +20,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from bson import ObjectId
 
@@ -197,7 +197,11 @@ async def _process_signal(
     # avoids N+1 serial yfinance calls (one per stock + one per iteration for snapshot).
     # 20-second hard timeout guards against yfinance hanging on Yahoo Finance throttling.
     sector = signal_doc.get("sector")
-    from src.news_trader.prices import get_ltps, get_market_snapshot  # lazy: yfinance/pandas
+    from src.news_trader.prices import get_ltps, get_market_snapshot, get_volume_data  # lazy: yfinance/pandas
+    # Kick off volume fetches before awaiting prices so both run concurrently.
+    # Separate from the price gather to preserve mypy's typed inference on price_map/market_ctx
+    # (asyncio.gather with *args spread loses all return-type info for every element).
+    _vol_tasks = [asyncio.create_task(asyncio.to_thread(get_volume_data, sym)) for sym in candidates]
     try:
         price_map, market_ctx = await asyncio.wait_for(
             asyncio.gather(
@@ -207,10 +211,20 @@ async def _process_signal(
             timeout=20.0,
         )
     except TimeoutError:
+        for t in _vol_tasks:
+            t.cancel()
         logger.warning("[TRADE] price fetch timed out for signal_id=%s candidates=%s — skipping",
                        signal_id, candidates)
         return 0, "price_fetch_timeout"
     logger.info("[TRADE] prices fetched: %s", {s: f"₹{p:.2f}" for s, p in price_map.items()})
+
+    volume_map: dict[str, dict[str, Any]] = {}
+    try:
+        _vol_results = await asyncio.wait_for(asyncio.gather(*_vol_tasks), timeout=10.0)
+        volume_map = dict(zip(candidates, cast(list[dict[str, Any]], _vol_results)))
+        logger.info("[TRADE] volume fetched: %s", {s: v.get("volume_ratio") for s, v in volume_map.items()})
+    except Exception as exc:
+        logger.warning("[TRADE] volume fetch failed err=%s — proceeding without", exc)
 
     # Backstop: total cash already deployed across open positions. Equal-weight
     # sizing already keeps us under nt_total_capital_inr by construction, so this
@@ -296,6 +310,12 @@ async def _process_signal(
                 if (sp := (signal_doc.get("price_at_signal") or {}).get(symbol))
                 else None
             ),
+            # Volume confirmation: ratio > 1 means above-average activity on entry day.
+            # Raw values stored separately so analysis can apply time-of-day normalization.
+            # Note: yfinance volume is ~15 min delayed; ratio reflects delayed snapshot.
+            "volume_current_day": volume_map.get(symbol, {}).get("current_day_volume"),
+            "volume_avg_daily": volume_map.get(symbol, {}).get("avg_daily_volume"),
+            "volume_ratio_at_entry": volume_map.get(symbol, {}).get("volume_ratio"),
             "qty": qty,
             "entry_value": trade_value,
             "entry_at": now,

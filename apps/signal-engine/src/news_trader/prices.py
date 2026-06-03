@@ -63,6 +63,36 @@ def get_ltps(symbols: list[str]) -> dict[str, float]:
         return {s: p for s in symbols if (p := get_ltp(s)) is not None}
 
 
+def get_volume_data(symbol: str) -> dict[str, int | float | None]:
+    """Return current-day volume, 3-month avg daily volume, and their ratio.
+
+    volume_ratio_at_entry > 1.0 means above-average activity — news is being
+    traded. Values well below 1.0 suggest the market is ignoring the signal.
+    Returns None values on failure — never raises.
+    """
+    ticker_str = symbol if symbol.startswith("^") else f"{symbol.upper()}.NS"
+    result: dict[str, int | float | None] = {
+        "current_day_volume": None,
+        "avg_daily_volume": None,
+        "volume_ratio": None,
+    }
+    try:
+        t = yf.Ticker(ticker_str)
+        fi: Any = t.fast_info
+        avg_vol = getattr(fi, "three_month_average_volume", None)
+        if avg_vol:
+            result["avg_daily_volume"] = int(avg_vol)
+        hist = t.history(period="1d", interval="1d")
+        if not hist.empty and "Volume" in hist.columns:
+            current_vol = int(hist["Volume"].iloc[-1])
+            result["current_day_volume"] = current_vol
+            if avg_vol and float(avg_vol) > 0:
+                result["volume_ratio"] = round(current_vol / float(avg_vol), 3)
+    except Exception as exc:
+        logger.warning("volume_fetch_failed symbol=%s err=%s", symbol, exc)
+    return result
+
+
 # NSE sector index tickers on Yahoo Finance
 _SECTOR_TICKERS: dict[str, str] = {
     "Banking": "^NSEBANK",

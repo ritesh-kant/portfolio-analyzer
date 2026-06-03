@@ -71,6 +71,10 @@ export interface NtPosition {
   signal_price?: number;        // LTP at classification time (15 min before entry)
   entry_chase_pct?: number;     // (entry_price - signal_price) / signal_price × 100
   magnitude?: string;           // LLM expected-move label: major | moderate | minor
+  // Volume confirmation (populated on positions opened after 2026-06-04)
+  volume_current_day?: number;  // accumulated volume for entry day (yfinance ~15 min delayed)
+  volume_avg_daily?: number;    // 3-month average daily volume
+  volume_ratio_at_entry?: number; // volume_current_day / volume_avg_daily; >1 = above-avg activity
 }
 
 export interface NtSignal {
