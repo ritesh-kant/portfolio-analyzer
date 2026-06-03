@@ -66,6 +66,10 @@ export interface NtPosition {
   signal_id?: string;
   paper?: boolean;
   sl_pct_used?: number;
+  // Entry-timing capture (populated on positions opened after 2026-06-03)
+  signal_price?: number;        // LTP at classification time (15 min before entry)
+  entry_chase_pct?: number;     // (entry_price - signal_price) / signal_price × 100
+  magnitude?: string;           // LLM expected-move label: major | moderate | minor
 }
 
 export interface NtSignal {

@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     nt_total_capital_inr: float = 100_000.0   # max cash deployed across all open positions
     nt_max_positions: int = 10                 # max open positions == number of equal-weight slots
     nt_max_stocks_per_signal: int = 2         # max entries from a single news event
+    nt_max_positions_per_sector: int = 2     # per-sector open position cap — prevents
+                                             #   sector concentration (e.g. 3 Pharma
+                                             #   positions all losing on one bad news day)
     # Split stop-loss (see trailing_sl.update_stop). A position gets a WIDE
     # initial stop to survive normal post-entry noise, then switches to a TIGHT
     # trailing stop only once it is genuinely in profit. The old single 1.5%
@@ -83,6 +86,12 @@ class Settings(BaseSettings):
                                               #   1.5% trail; now a sane ceiling, trail is primary exit
     nt_max_hold_days: int = 5                 # force-close on day 5
     nt_news_delay_seconds: int = 900          # SQS delay after classification (15 min)
+    # Hard cutoff: no new entries after this IST minute-of-day (870 = 14:30).
+    # Primary control is the EventBridge schedule (ingester stops at 08:45 UTC =
+    # 14:15 IST), but SQS messages can sit in the queue longer than expected.
+    # This gate in trade_decision catches any stragglers. Bypassed when
+    # nt_bypass_market_hours=true so dev/test runs are not affected.
+    nt_entry_cutoff_ist: int = 870            # 14:30 IST (14×60+30)
     nt_classifier_prompt_version: str = "1.0.0"  # bump when classifier prompt changes
 
     # Auth

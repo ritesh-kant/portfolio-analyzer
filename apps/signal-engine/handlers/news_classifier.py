@@ -238,6 +238,24 @@ async def _process_message(
         and bool(result["stocks"])
     )
 
+    # Capture stock prices at the moment of signal creation (before the 15-min
+    # SQS delay). Paired with entry_price in trade_decision, this lets us compute
+    # entry_chase_pct — how far the entry chased the move during the delay window.
+    # Only fetched for actionable signals (~7–20/day) so yfinance load is negligible.
+    # Fail-open: price fetch failure stores {} and never blocks classification.
+    price_at_signal: dict[str, float] = {}
+    if _actionable and result["stocks"]:
+        try:
+            from src.news_trader.prices import get_ltps  # lazy: yfinance/pandas
+            price_at_signal = await asyncio.wait_for(
+                asyncio.to_thread(get_ltps, result["stocks"]),
+                timeout=15.0,
+            )
+            logger.info("[CLASSIFIER] price_at_signal news_id=%s %s",
+                        news_id, {s: f"₹{p:.2f}" for s, p in price_at_signal.items()})
+        except Exception as exc:
+            logger.warning("[CLASSIFIER] price_at_signal fetch failed news_id=%s err=%s — continuing", news_id, exc)
+
     signal_doc = {
         "story_hash": story_hash,
         "window_bucket": window_bucket,
@@ -257,6 +275,10 @@ async def _process_message(
         "prompt_version": result["prompt_version"],
         "created_at": now,
         "acted_on": not _actionable,
+        # Price of each named stock at classification time. Empty dict when fetch
+        # failed or signal is non-actionable. trade_decision uses this to compute
+        # entry_chase_pct = (entry_price - signal_price) / signal_price.
+        "price_at_signal": price_at_signal,
     }
     try:
         insert_result = await signals(db).insert_one(signal_doc)

@@ -34,6 +34,16 @@ from src.news_trader.nifty500 import NIFTY_500
 logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
+_IST_OFFSET_SEC = 5 * 3600 + 30 * 60  # UTC+5:30
+
+
+def _ist_minute_of_day() -> int:
+    """Current IST time expressed as minutes since midnight (0–1439)."""
+    ts = datetime.now(tz=timezone.utc).timestamp() + _IST_OFFSET_SEC
+    ist = datetime.fromtimestamp(ts)
+    return ist.hour * 60 + ist.minute
+
+
 # Conviction & regime gate thresholds. See plan notes — these are noise-reduction
 # heuristics layered on top of the LLM signal, not formal model parameters.
 _MEDIUM_CONF_MIN_SOURCES = 2   # medium-confidence signal needs ≥2 sources to trade
@@ -121,6 +131,19 @@ async def _process_signal(
                 signal_doc.get("confidence"), int(signal_doc.get("source_count", 1)),
                 signal_doc.get("stocks"))
 
+    # Entry cutoff — safety net for SQS messages that linger past the EventBridge
+    # schedule cutoff (which already stops the ingester at 14:15 IST). If a signal
+    # somehow reaches trade-decision after 14:30 IST, reject it rather than open a
+    # position with <60 min left and overnight gap risk, no time to build cushion.
+    # Bypassed in dev (nt_bypass_market_hours) so local testing isn't blocked.
+    if not settings.nt_bypass_market_hours:
+        ist_min = _ist_minute_of_day()
+        if ist_min > settings.nt_entry_cutoff_ist:
+            cutoff_hhmm = f"{settings.nt_entry_cutoff_ist // 60:02d}:{settings.nt_entry_cutoff_ist % 60:02d}"
+            logger.info("[TRADE] skip signal_id=%s — entry cutoff (ist=%d > %d = %s IST)",
+                        signal_id, ist_min, settings.nt_entry_cutoff_ist, cutoff_hhmm)
+            return 0, f"entry_cutoff (after {cutoff_hhmm} IST)"
+
     # Single source of truth for sizing: total capital split equally across slots.
     # Logged loudly so the effective per-trade size is never invisible (the ₹50k
     # surprise happened because nobody could see what each trade was actually using).
@@ -201,7 +224,26 @@ async def _process_signal(
     projected_invested = float(agg[0]["total"]) if agg else 0.0
     logger.info("[TRADE] deployed=₹%.0f / cap=₹%.0f", projected_invested, settings.nt_total_capital_inr)
 
+    # Sector cap — count open positions in the same sector before the loop so we
+    # don't open a 3rd Pharma position just because three signals fired in sequence.
+    # We track `sector_entered_this_call` separately because a single SQS batch
+    # can open multiple positions (up to nt_max_stocks_per_signal) and each one
+    # bumps the effective sector count before the next DB read.
+    # (`sector` was already assigned above for the market snapshot fetch.)
+    sector_open = await positions(db).count_documents({"status": "open", "sector": sector}) if sector else 0
+    sector_entered_this_call = 0
+    logger.info("[TRADE] sector=%s open=%d cap=%d", sector, sector_open, settings.nt_max_positions_per_sector)
+
     for symbol in candidates:
+        # Sector cap — reject if this entry would exceed nt_max_positions_per_sector.
+        # Checked per-symbol so a single signal opening 2 stocks doesn't bypass the cap
+        # (sector_entered_this_call tracks entries already committed this batch).
+        if sector and (sector_open + sector_entered_this_call) >= settings.nt_max_positions_per_sector:
+            logger.info("[TRADE] skip %s — sector cap hit sector=%s open=%d+%d >= %d",
+                        symbol, sector, sector_open, sector_entered_this_call,
+                        settings.nt_max_positions_per_sector)
+            continue
+
         # Check if we already have an open position in this symbol
         existing = await positions(db).find_one({"symbol": symbol, "status": "open"})
         if existing:
@@ -244,6 +286,16 @@ async def _process_signal(
             # analysis can bucket outcomes by magnitude (do "major" calls move more?).
             "magnitude": signal_doc.get("magnitude"),
             "entry_price": price,
+            # Entry-timing analysis: how far did we chase the move during the
+            # 15-min SQS delay? signal_price is the LTP at classification time;
+            # entry_chase_pct > 0 means we bought after a rise (chasing).
+            # None when price_at_signal wasn't captured (old signals, fetch fail).
+            "signal_price": (signal_doc.get("price_at_signal") or {}).get(symbol),
+            "entry_chase_pct": (
+                round((price - sp) / sp * 100, 3)
+                if (sp := (signal_doc.get("price_at_signal") or {}).get(symbol))
+                else None
+            ),
             "qty": qty,
             "entry_value": trade_value,
             "entry_at": now,
@@ -310,6 +362,7 @@ async def _process_signal(
             paper=paper,
         )
         projected_invested += trade_value
+        sector_entered_this_call += 1
         entered += 1
 
     logger.info("[TRADE] signal_id=%s done — %d position(s) opened", signal_id, entered)

@@ -102,9 +102,13 @@ functions:
     environment:
       NEWS_RAW_QUEUE_URL: !Ref NewsRawQueue
     events:
-      # Market hours: 09:00–15:35 IST = 03:30–10:05 UTC, Mon–Fri
+      # Market hours: 09:00–14:15 IST = 03:30–08:45 UTC, Mon–Fri
+      # Stops at 08:45 UTC (14:15 IST) so the last signal, after the 15-min SQS
+      # delay, fires trade-decision by 14:30 IST — well before the 15:30 close.
+      # The code-level entry_cutoff gate in trade_decision is a second safety net
+      # for any SQS messages that linger in the queue past the cutoff.
       - schedule:
-          rate: cron(*/5 3-10 ? * MON-FRI *)
+          rate: cron(*/5 3-8 ? * MON-FRI *)
           enabled: true
 
   newsClassifier:

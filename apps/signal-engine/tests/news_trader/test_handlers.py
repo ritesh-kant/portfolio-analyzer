@@ -521,12 +521,15 @@ class TestTradeDecisionHandler:
             s.trading_mode = "paper"
             s.nt_max_positions = 10
             s.nt_max_stocks_per_signal = 2
+            s.nt_max_positions_per_sector = 2
             s.nt_total_capital_inr = 100_000.0
             s.nt_sl_pct = 0.015
             s.nt_initial_sl_pct = 0.03
             s.nt_trail_sl_pct = 0.015
             s.nt_trail_activate_pct = 0.02
             s.nt_target_pct = 0.08
+            s.nt_bypass_market_hours = True   # skip entry-cutoff gate in tests
+            s.nt_entry_cutoff_ist = 870
             s.telegram_bot_token = ""
             s.telegram_chat_id = ""
             result = handler(event, None)
