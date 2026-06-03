@@ -61,6 +61,7 @@ export interface NtPosition {
   exit_price?: number;
   gross_pnl?: number;
   net_pnl?: number;
+  costs?: { total: number };
   entry_at: string;
   exit_at?: string;
   signal_id?: string;

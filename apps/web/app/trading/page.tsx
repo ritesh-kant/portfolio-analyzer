@@ -68,20 +68,36 @@ function Empty({ msg }: { msg: string }) {
   );
 }
 
+const TIP_W = 224; // w-56 = 14rem
+
 function InfoTip({ text, direction = 'right' }: { text: string; direction?: 'right' | 'down' }) {
   const [show, setShow] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState<{ top: number; left: number; transform?: string }>({ top: 0, left: 0 });
 
-  const computeCoords = () => {
-    if (direction === 'down' && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setCoords({ top: r.bottom + 6, left: r.left + r.width / 2 });
+  const computePos = () => {
+    if (!btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (direction === 'down') {
+      // centre below; clamp so tip stays within left/right bounds
+      const cx = r.left + r.width / 2;
+      const clampedLeft = Math.min(Math.max(cx, TIP_W / 2 + 4), vw - TIP_W / 2 - 4);
+      setPos({ top: r.bottom + 6, left: clampedLeft, transform: 'translateX(-50%)' });
+    } else {
+      // Prefer right of button; clamp so right edge never exits viewport
+      const rawLeft = r.right + 4;
+      const clampedLeft = Math.min(rawLeft, vw - TIP_W - 4);
+      // Prefer below button top; clamp so bottom edge never exits viewport
+      const estTipH = 80; // rough estimate so we don't need layout
+      const clampedTop = Math.min(r.top, vh - estTipH - 4);
+      setPos({ top: Math.max(4, clampedTop), left: Math.max(4, clampedLeft) });
     }
   };
 
-  const open = () => { computeCoords(); setShow(true); };
-  const toggle = () => { if (!show) computeCoords(); setShow((v) => !v); };
+  const open = () => { computePos(); setShow(true); };
+  const toggle = () => { if (!show) computePos(); setShow((v) => !v); };
 
   return (
     <span className="relative inline-flex">
@@ -98,19 +114,19 @@ function InfoTip({ text, direction = 'right' }: { text: string; direction?: 'rig
       >
         i
       </button>
-      {show && direction === 'right' && (
-        <span className="absolute left-5 top-0 z-10 w-56 rounded-lg border border-black/10 bg-white px-3 py-2 text-xs leading-relaxed text-ink/70 shadow-lg">
-          {text}
-        </span>
-      )}
-      {show && direction === 'down' && typeof document !== 'undefined' && createPortal(
+      {show && typeof document !== 'undefined' && createPortal(
         <span
-          className="fixed z-[9999] w-52 -translate-x-1/2 rounded-lg border border-black/10 bg-white px-3 py-2 text-xs leading-relaxed text-ink/70 shadow-lg"
-          style={{ top: coords.top, left: coords.left }}
+          className="fixed z-[9999] w-56 rounded-lg border border-black/10 bg-white px-3 py-2 text-xs leading-relaxed text-ink/70 shadow-lg"
+          style={{
+            top: pos.top,
+            left: pos.left,
+            transform: pos.transform,
+            maxWidth: 'calc(100vw - 8px)',
+          }}
         >
           {text}
         </span>,
-        document.body
+        document.body,
       )}
     </span>
   );
@@ -1293,7 +1309,10 @@ function PositionsTab({ positions }: { positions: NtPosition[] }) {
                 {sub !== 'open' && (
                   <>
                     <th className="px-4 py-3 text-right font-semibold">Exit</th>
-                    <th className="px-4 py-3 text-right font-semibold">Net P&L</th>
+                    <th className="px-4 py-3 text-right font-semibold">
+                      <div>Net P&L</div>
+                      <div className="text-[10px] font-normal text-ink/40">gross / costs</div>
+                    </th>
                     <th className="px-4 py-3 text-left font-semibold">Reason</th>
                   </>
                 )}
@@ -1363,11 +1382,23 @@ function PositionsTab({ positions }: { positions: NtPosition[] }) {
                         <td className="px-4 py-3 text-right tabular-nums">
                           {p.exit_price ? fmtPrice(p.exit_price) : '—'}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums font-semibold">
+                        <td className="px-4 py-3 text-right tabular-nums">
                           {p.net_pnl != null ? (
-                            <span className={pnlColor(p.net_pnl)}>
-                              {pnlSign(p.net_pnl)}{formatCurrency(p.net_pnl)}
-                            </span>
+                            <div className="flex flex-col items-end gap-0.5">
+                              <span className={`font-semibold ${pnlColor(p.net_pnl)}`}>
+                                {pnlSign(p.net_pnl)}{formatCurrency(p.net_pnl)}
+                              </span>
+                              {p.gross_pnl != null && (
+                                <span className="text-[10px] text-ink/40 tabular-nums">
+                                  {pnlSign(p.gross_pnl)}{formatCurrency(p.gross_pnl)} gross
+                                </span>
+                              )}
+                              {p.costs?.total != null && (
+                                <span className="text-[10px] text-rose-400 tabular-nums">
+                                  −{formatCurrency(p.costs.total)} costs
+                                </span>
+                              )}
+                            </div>
                           ) : (
                             '—'
                           )}
