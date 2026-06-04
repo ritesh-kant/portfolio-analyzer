@@ -144,6 +144,20 @@ async def _run(settings: Settings, run_id: str | None = None) -> dict[str, Any]:
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     settings = Settings()
     run_id: str | None = event.get("run_id")
+
+    # EventBridge invocations carry no run_id — create our own so the status panel
+    # and history tab track scheduled runs just like manual ones.
+    # Skip creating a record if we're clearly outside market hours to avoid DB noise
+    # from the 5-min EventBridge tick running all day.
+    if not run_id:
+        will_process = (
+            _is_market_hours(bypass_holiday=settings.nt_bypass_market_holiday)
+            or settings.nt_bypass_market_hours
+        )
+        if will_process:
+            from src.news_trader.pipeline_lifecycle import insert_run
+            run_id = asyncio.run(insert_run("scheduled"))
+
     try:
         result = asyncio.run(_run(settings, run_id=run_id))
         if run_id:

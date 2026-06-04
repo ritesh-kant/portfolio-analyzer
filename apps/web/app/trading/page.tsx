@@ -41,6 +41,17 @@ function fmtDate(iso: string) {
   });
 }
 
+function fmtAgo(iso: string): string {
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (secs < 45) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hr${hrs === 1 ? '' : 's'} ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
 function holdDays(entryIso: string, exitIso?: string): number {
   const end = exitIso ? new Date(exitIso) : new Date();
   return Math.floor((end.getTime() - new Date(entryIso).getTime()) / 86_400_000);
@@ -65,6 +76,20 @@ function Empty({ msg }: { msg: string }) {
     <div className="metric-chip flex items-center justify-center py-10 text-sm text-ink/40">
       {msg}
     </div>
+  );
+}
+
+function LastRunBadge({ triggeredAt }: { triggeredAt: string }) {
+  // Re-render every 30s so the relative time stays fresh while idle.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <span title={`Pipeline last ran ${fmtDate(triggeredAt)}`}>
+      · updated {fmtAgo(triggeredAt)}
+    </span>
   );
 }
 
@@ -2064,7 +2089,10 @@ export default function TradingPage() {
             </button>
           </div>
         </div>
-        <p className="mt-0.5 text-xs text-ink/50">Paper · NSE/BSE · Event-driven · Trailing SL</p>
+        <p className="mt-0.5 text-xs text-ink/50">
+          Paper · NSE/BSE · Event-driven · Trailing SL{' '}
+          {pipelineStatus?.run && <LastRunBadge triggeredAt={pipelineStatus.run.triggered_at} />}
+        </p>
       </div>
 
       {/* Trigger feedback */}

@@ -15,6 +15,18 @@ from src.db.client import get_db
 logger = logging.getLogger(__name__)
 
 
+async def insert_run(source: str) -> str:
+    db = get_db()
+    result = await db["nt_pipeline_runs"].insert_one({
+        "triggered_at": datetime.now(timezone.utc),
+        "source": source,
+        "status": "running",
+    })
+    run_id = str(result.inserted_id)
+    logger.info("[LIFECYCLE] run_id=%s created source=%s", run_id, source)
+    return run_id
+
+
 async def finalise_run(run_id: str, result: dict[str, Any]) -> None:
     db = get_db()
     await db["nt_pipeline_runs"].update_one(
