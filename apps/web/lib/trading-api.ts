@@ -172,6 +172,7 @@ export interface PipelineRun {
   _id: string;
   triggered_at: string;
   completed_at: string | null;
+  processing_completed_at: string | null;
   source: string;
   status: 'running' | 'completed' | 'failed';
   new_articles: number | null;

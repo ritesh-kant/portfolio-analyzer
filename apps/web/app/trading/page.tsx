@@ -458,8 +458,11 @@ function PipelineHistory({ refreshKey }: { refreshKey: number }) {
   if (!data || data.total === 0) return null;
 
   const durationStr = (run: PipelineRun) => {
-    if (!run.completed_at) return null;
-    const ms = new Date(run.completed_at).getTime() - new Date(run.triggered_at).getTime();
+    // Prefer processing_completed_at (stamped immediately when ingestion finishes)
+    // over completed_at (which is set by the 22-min stale-run sweep for no-signal runs).
+    const endTime = run.processing_completed_at ?? run.completed_at;
+    if (!endTime) return null;
+    const ms = new Date(endTime).getTime() - new Date(run.triggered_at).getTime();
     const s = Math.floor(ms / 1000);
     return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
   };

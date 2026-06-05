@@ -394,7 +394,7 @@ async def _maybe_finalise_run(run_id: str, db: object) -> None:
     from src.news_trader.pipeline_lifecycle import finalise_run
 
     run = await db["nt_pipeline_runs"].find_one(  # type: ignore[index]
-        {"_id": ObjectId(run_id)}, {"triggered_at": 1, "status": 1}
+        {"_id": ObjectId(run_id)}, {"triggered_at": 1, "status": 1, "new_articles": 1}
     )
     if not run:
         logger.warning("[TRADE] run_id=%s not found in nt_pipeline_runs — skipping finalise", run_id)
@@ -412,15 +412,19 @@ async def _maybe_finalise_run(run_id: str, db: object) -> None:
         logger.info("[TRADE] run_id=%s — %d signal(s) still pending, not finalising yet", run_id, remaining)
         return
 
-    # All signals acted on — collect final counts and finalize
-    new_articles = await db["nt_news_raw"].count_documents(  # type: ignore[index]
-        {"ingested_at": {"$gte": triggered_at}}
+    # All signals acted on — collect final counts and finalize.
+    # new_articles was stored by the ingester via stamp_processing_done; fall back
+    # to a bounded recount for runs that predate that field.
+    now = datetime.now(timezone.utc)
+    new_articles = run.get("new_articles") or await db["nt_news_raw"].count_documents(  # type: ignore[index]
+        {"ingested_at": {"$gte": triggered_at, "$lte": now}}
     )
     signals_created = await signals(db).count_documents(  # type: ignore[arg-type]
-        {"created_at": {"$gte": triggered_at}}
+        {"created_at": {"$gte": triggered_at, "$lte": now}}
     )
+    # positions carry pipeline_run_id — exact match, no time window needed
     positions_opened = await positions(db).count_documents(  # type: ignore[arg-type]
-        {"entry_at": {"$gte": triggered_at}}
+        {"pipeline_run_id": run_id}
     )
 
     await finalise_run(run_id, {

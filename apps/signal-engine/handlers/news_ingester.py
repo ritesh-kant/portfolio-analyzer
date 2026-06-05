@@ -161,12 +161,14 @@ def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
     try:
         result = asyncio.run(_run(settings, run_id=run_id))
         if run_id:
-            from src.news_trader.pipeline_lifecycle import delete_run, finalise_run
+            from src.news_trader.pipeline_lifecycle import delete_run, finalise_run, stamp_processing_done
             if result.get("skipped"):
                 asyncio.run(delete_run(run_id))
-            elif result.get("new_articles", 0) == 0:
-                # No articles to enqueue — trade_decision will never run, finalize here
-                asyncio.run(finalise_run(run_id, result))
+            else:
+                asyncio.run(stamp_processing_done(run_id, result.get("new_articles", 0)))
+                if result.get("new_articles", 0) == 0:
+                    # No articles to enqueue — trade_decision will never run, finalize here
+                    asyncio.run(finalise_run(run_id, result))
         return result
     except Exception as exc:
         if run_id:

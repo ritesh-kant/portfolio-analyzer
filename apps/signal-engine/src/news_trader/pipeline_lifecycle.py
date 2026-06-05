@@ -61,6 +61,22 @@ async def fail_run(run_id: str, error: str) -> None:
     logger.info("[LIFECYCLE] run_id=%s marked failed: %s", run_id, error)
 
 
+async def stamp_processing_done(run_id: str, new_articles: int = 0) -> None:
+    """Record when actual ingestion/classification work finished.
+
+    Called immediately after news_ingester._run() returns so the duration
+    shown in the UI reflects real work, not the 22-min sweep delay that
+    finalizes no-signal runs. Stores new_articles so _maybe_finalise_run
+    can read the ingester's count rather than recounting with an open-ended window.
+    """
+    db = get_db()
+    await db["nt_pipeline_runs"].update_one(
+        {"_id": ObjectId(run_id)},
+        {"$set": {"processing_completed_at": datetime.now(timezone.utc), "new_articles": new_articles}},
+    )
+    logger.info("[LIFECYCLE] run_id=%s processing_completed_at stamped articles=%d", run_id, new_articles)
+
+
 async def delete_run(run_id: str) -> None:
     db = get_db()
     await db["nt_pipeline_runs"].delete_one({"_id": ObjectId(run_id)})
@@ -91,17 +107,21 @@ async def sweep_stale_runs(delay_seconds: int) -> int:
         {"triggered_at": 1},
     ).to_list(length=50)
 
+    now = datetime.now(timezone.utc)
     for run in stale:
         run_id = str(run["_id"])
         triggered_at = run["triggered_at"]
-        new_articles = await db["nt_news_raw"].count_documents(
-            {"ingested_at": {"$gte": triggered_at}}
+        # new_articles was stored by the ingester via stamp_processing_done; fall back
+        # to a bounded recount only for older runs that predate that field.
+        new_articles = run.get("new_articles") or await db["nt_news_raw"].count_documents(
+            {"ingested_at": {"$gte": triggered_at, "$lte": now}}
         )
         signals_created = await db["nt_signals"].count_documents(
-            {"created_at": {"$gte": triggered_at}}
+            {"created_at": {"$gte": triggered_at, "$lte": now}}
         )
+        # positions carry pipeline_run_id — exact match, no time window needed
         positions_opened = await db["nt_positions"].count_documents(
-            {"entry_at": {"$gte": triggered_at}}
+            {"pipeline_run_id": run_id}
         )
         logger.warning(
             "[LIFECYCLE] sweeping stale run_id=%s triggered_at=%s — tradeDecision never finalised it",

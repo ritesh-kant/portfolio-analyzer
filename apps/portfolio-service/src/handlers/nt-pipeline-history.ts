@@ -36,6 +36,7 @@ export const handler = requireAuth(async (event) => {
       _id: String(r._id),
       triggered_at: r.triggered_at,
       completed_at: r.completed_at ?? null,
+      processing_completed_at: r.processing_completed_at ?? null,
       source: r.source ?? 'unknown',
       status: r.status ?? 'completed',
       new_articles: r.new_articles ?? null,
