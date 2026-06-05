@@ -275,6 +275,10 @@ async def _process_message(
         "prompt_version": result["prompt_version"],
         "created_at": now,
         "acted_on": not _actionable,
+        # Links this signal back to the pipeline run that ingested its article.
+        # Used by _maybe_finalise_run and sweep_stale_runs to count signals per
+        # run without time-window overlap across concurrent runs.
+        "pipeline_run_id": run_id,
         # Price of each named stock at classification time. Empty dict when fetch
         # failed or signal is non-actionable. trade_decision uses this to compute
         # entry_chase_pct = (entry_price - signal_price) / signal_price.

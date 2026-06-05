@@ -117,7 +117,7 @@ async def sweep_stale_runs(delay_seconds: int) -> int:
             {"ingested_at": {"$gte": triggered_at, "$lte": now}}
         )
         signals_created = await db["nt_signals"].count_documents(
-            {"created_at": {"$gte": triggered_at, "$lte": now}}
+            {"pipeline_run_id": run_id}
         )
         # positions carry pipeline_run_id — exact match, no time window needed
         positions_opened = await db["nt_positions"].count_documents(

@@ -406,7 +406,7 @@ async def _maybe_finalise_run(run_id: str, db: object) -> None:
     triggered_at = run["triggered_at"]
 
     remaining = await signals(db).count_documents(  # type: ignore[arg-type]
-        {"created_at": {"$gte": triggered_at}, "acted_on": False}
+        {"pipeline_run_id": run_id, "acted_on": False}
     )
     if remaining > 0:
         logger.info("[TRADE] run_id=%s — %d signal(s) still pending, not finalising yet", run_id, remaining)
@@ -420,7 +420,7 @@ async def _maybe_finalise_run(run_id: str, db: object) -> None:
         {"ingested_at": {"$gte": triggered_at, "$lte": now}}
     )
     signals_created = await signals(db).count_documents(  # type: ignore[arg-type]
-        {"created_at": {"$gte": triggered_at, "$lte": now}}
+        {"pipeline_run_id": run_id}
     )
     # positions carry pipeline_run_id — exact match, no time window needed
     positions_opened = await positions(db).count_documents(  # type: ignore[arg-type]
