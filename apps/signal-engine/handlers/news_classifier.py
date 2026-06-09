@@ -391,6 +391,7 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
     # Skipped/stale/dedup articles don't count against this — only actual LLM provider errors.
     if run_stats:
         from src.news_trader.pipeline_lifecycle import fail_run
+        from src.news_trader.telegram import alert_classifier_failure
         for run_id, stats in run_stats.items():
             if stats["llm_errors"] > 0 and stats["signals"] == 0:
                 error_msg = f"LLM provider error ({stats['llm_errors']} failed): {stats['first_error']}"
@@ -399,6 +400,15 @@ async def _run(event: dict[str, Any], settings: Settings) -> dict[str, int]:
                     await fail_run(run_id, error_msg)
                 except Exception as exc:
                     logger.error("[CLASSIFIER] fail_run error run_id=%s err=%s", run_id, exc)
+                await asyncio.to_thread(
+                    alert_classifier_failure,
+                    settings.telegram_bot_token,
+                    settings.telegram_chat_id,
+                    settings.ai_provider,
+                    stats["first_error"],
+                    stats["llm_errors"],
+                    run_id,
+                )
 
     logger.info("[CLASSIFIER] done — processed=%d actionable=%d", len(records), acted)
     return {"processed": len(records), "acted_on": acted}

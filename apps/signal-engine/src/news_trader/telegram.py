@@ -4,6 +4,7 @@ All functions are fire-and-forget: they log on failure but never raise.
 """
 
 import logging
+import time
 
 import httpx
 
@@ -11,6 +12,13 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)
 _API_BASE = "https://api.telegram.org/bot{token}/sendMessage"
+
+# Per-process debounce for failure alerts — prevents alert storms when many
+# Lambda invocations fail in the same outage window. Keyed by "category:provider".
+# Lambda warm starts reuse the module, so this persists across invocations within
+# the same execution environment.
+_last_alert_time: dict[str, float] = {}
+_ALERT_COOLDOWN_S = 1800  # 30 minutes per error category
 
 
 def _send(bot_token: str, chat_id: str, text: str) -> None:
@@ -88,5 +96,36 @@ def alert_sl_updated(
     text = (
         f"🔒 <b>SL RAISED</b> {symbol}\n"
         f"Price: ₹{current_price:,.2f}  SL: ₹{old_sl:,.2f} → ₹{new_sl:,.2f}"
+    )
+    _send(bot_token, chat_id, text)
+
+
+def alert_classifier_failure(
+    bot_token: str,
+    chat_id: str,
+    provider: str,
+    error: str,
+    failed_count: int,
+    run_id: str,
+) -> None:
+    """Alert when the LLM classifier fails an entire pipeline run (quota, auth, etc.).
+
+    Debounced per provider — at most one alert per 30 minutes per execution
+    environment, so a prolonged outage (e.g. 38 consecutive failed runs) sends
+    one Telegram message, not 38.
+    """
+    category = f"classifier_failure:{provider}"
+    now = time.monotonic()
+    if now - _last_alert_time.get(category, 0) < _ALERT_COOLDOWN_S:
+        logger.debug("telegram_classifier_alert_debounced provider=%s", provider)
+        return
+    _last_alert_time[category] = now
+
+    excerpt = error[:150]
+    text = (
+        f"🚨 <b>CLASSIFIER DOWN — {provider.upper()}</b>\n"
+        f"Failed articles: {failed_count}\n"
+        f"Error: <code>{excerpt}</code>\n"
+        f"Run: <code>{run_id}</code>"
     )
     _send(bot_token, chat_id, text)
