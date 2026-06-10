@@ -60,7 +60,7 @@ def _is_market_hours(bypass_holiday: bool = False) -> bool:
     return 9 * 60 + 15 <= total_minutes <= 15 * 60 + 25
 
 
-async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50: float | None = None) -> str:
+async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50: float | None = None, eod_close: bool = False) -> str:
     """Returns 'closed:<reason>', 'sl_raised', or 'unchanged'.
 
     The current price is supplied by the caller, which batch-fetches every open
@@ -111,14 +111,19 @@ async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50
     # lowest_price shipped have no baseline, so fall back to entry_price.
     new_lowest = min(pos.get("lowest_price") or pos["entry_price"], price)
 
-    # Check exit — use max_hold_days frozen at entry for the same reason.
+    # Check exit — use params frozen at entry for the same reason as stop params.
     max_hold_days = pos.get("max_hold_days_used") or settings.nt_max_hold_days
+    max_hold_minutes = pos.get("max_hold_minutes_used") or settings.nt_max_hold_minutes
+    held_minutes = (datetime.now(tz=timezone.utc) - pos["entry_at"]).total_seconds() / 60
     exit_reason = check_exit(
         current_price=price,
         trailing_sl=new_sl,
         target_price=pos["target_price"],
         held_sessions=_trading_days_held(pos["entry_at"]),
         max_hold_days=max_hold_days,
+        held_minutes=held_minutes,
+        max_hold_minutes=max_hold_minutes,
+        eod_close=eod_close,
     )
 
     if exit_reason:
@@ -239,6 +244,18 @@ async def _run(settings: Settings) -> dict:
     price_map = await asyncio.to_thread(get_ltps, symbols + ["^NSEI"])
     nifty50 = price_map.get("^NSEI")
 
+    # EOD force-close: if nt_force_close_eod is enabled and wall-clock IST >= 15:15,
+    # all open positions are closed regardless of SL/target state. Eliminates overnight
+    # gap risk (the primary source of large losses in this system).
+    eod_close = False
+    if settings.nt_force_close_eod:
+        now_ist = datetime.fromtimestamp(datetime.now(tz=timezone.utc).timestamp() + _IST_OFFSET)
+        ist_min = now_ist.hour * 60 + now_ist.minute
+        eod_close = ist_min >= 15 * 60 + 15  # 15:15 IST
+        if eod_close:
+            logger.info("sl_monitor_eod_close_active ist_min=%d forcing close of all %d positions",
+                        ist_min, len(open_positions))
+
     priced: list[tuple[dict, float]] = []
     no_priced: list[dict] = []
     for pos in open_positions:
@@ -251,7 +268,7 @@ async def _run(settings: Settings) -> dict:
             priced.append((pos, price))
 
     outcomes = await asyncio.gather(
-        *[_monitor_position(pos, settings, price, nifty50) for pos, price in priced],
+        *[_monitor_position(pos, settings, price, nifty50, eod_close=eod_close) for pos, price in priced],
         return_exceptions=True,
     )
     for outcome in outcomes:

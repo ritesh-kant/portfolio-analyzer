@@ -353,6 +353,8 @@ async def _process_signal(
             "sl_pct_used": settings.nt_sl_pct,
             "target_pct_used": settings.nt_target_pct,
             "max_hold_days_used": settings.nt_max_hold_days,
+            "max_hold_minutes_used": settings.nt_max_hold_minutes,
+            "force_close_eod_used": settings.nt_force_close_eod,
             "pipeline_run_id": pipeline_run_id,
         }
 

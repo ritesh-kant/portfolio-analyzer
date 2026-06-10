@@ -5,26 +5,33 @@ Rules (from plan):
   - SL = highest_price_seen * (1 - SL_PCT)
   - SL only moves UP, never down
   - Target = entry_price * (1 + TARGET_PCT)
-  - Day 5 force-close at market open
+  - EOD force-close at 15:15 IST; day-5 backstop
 
-Cost model: Indian equity delivery round-trip.
-  Brokerage ₹20/order (Zerodha flat), STT 0.1% each side, NSE exchange ~0.00345%,
-  stamp duty 0.015% buy-side, GST 18% on (brokerage + exchange), slippage 5 bps/side.
+Cost model: Indian equity INTRADAY (MIS) round-trip on NSE/Zerodha.
+  All positions are now same-day (EOD force-close + 90-min time-stop), so
+  intraday rates apply — NOT delivery rates. Key differences vs delivery:
+    STT:   0.025% sell-side only  (delivery was 0.1% each side — 8× more)
+    Stamp: 0.003% buy-side        (delivery was 0.015% — 5× more)
+  Brokerage ₹20/order (Zerodha flat, same as delivery), NSE exchange ~0.00345%/side,
+  GST 18% on (brokerage + exchange), slippage 5 bps/side.
 """
 
 import math
 from typing import Literal
 
-# Indian equity delivery cost constants
-_BROKERAGE_PER_ORDER = 20.0   # ₹20 flat per order, capped at 0.03% of turnover
+# Indian equity intraday (MIS) cost constants — NSE/Zerodha
+_BROKERAGE_PER_ORDER = 20.0   # ₹20 flat per order, capped at 0.03% of turnover (Zerodha flat)
 _BROKERAGE_CAP_RATE = 0.0003  # 0.03% cap
-_STT_RATE = 0.001              # 0.1% each side (delivery)
-_EXCHANGE_RATE = 0.0000345     # NSE exchange + SEBI per side (~0.00345%)
-_STAMP_RATE = 0.00015          # 0.015% on buy-side only
-_GST_RATE = 0.18               # 18% on (brokerage + exchange charges)
+_STT_RATE = 0.00025            # 0.025% sell-side only (intraday MIS; delivery is 0.1% each side)
+_EXCHANGE_RATE = 0.0000297     # NSE exchange transaction charge per side — slab-based since Oct 2024;
+                               #   Zerodha passes through at ~0.00297% for equity intraday/delivery
+_SEBI_RATE = 0.000001          # SEBI turnover fee: ₹10/crore = 0.0001% per side (revised Jul 2024
+                               #   from ₹5/crore); shown separately on Zerodha contract notes
+_STAMP_RATE = 0.00003          # 0.003% buy-side only (intraday; delivery is 0.015%)
+_GST_RATE = 0.18               # 18% on (brokerage + exchange charges); NOT on STT/stamp/SEBI
 _SLIPPAGE_RATE = 0.0005        # 5 bps per side (market impact estimate)
 
-ExitReason = Literal["sl_hit", "target_hit", "day5"]
+ExitReason = Literal["sl_hit", "target_hit", "time_stop", "eod_close", "day5"]
 
 
 def initial_trailing_sl(entry_price: float, sl_pct: float) -> float:
@@ -82,19 +89,32 @@ def check_exit(
     target_price: float,
     held_sessions: int,
     max_hold_days: int,
+    held_minutes: float | None = None,
+    max_hold_minutes: int | None = None,
+    eod_close: bool = False,
 ) -> ExitReason | None:
     """Returns the exit reason if any exit condition is met, else None.
 
-    Priority: sl_hit > target_hit > day5.
+    Priority: sl_hit > target_hit > time_stop > eod_close > day5.
 
-    held_sessions must be pre-computed trading days (not calendar days) by the
-    caller — see sl_monitor._trading_days_held(). Keeping this function pure
-    avoids a calendar dependency and makes unit tests trivial.
+    - sl_hit / target_hit: price-based, take priority over time exits.
+    - time_stop: fires when held_minutes >= max_hold_minutes (intraday elapsed time).
+      Captures the ~97-min avg MFE peak; both must be supplied.
+    - eod_close: caller passes True when wall-clock IST >= 15:15 and
+      nt_force_close_eod is enabled.
+    - day5: calendar-session backstop (rarely fires when EOD-close is on).
+
+    held_sessions must be pre-computed trading days by the caller —
+    see sl_monitor._trading_days_held().
     """
     if current_price <= trailing_sl:
         return "sl_hit"
     if current_price >= target_price:
         return "target_hit"
+    if held_minutes is not None and max_hold_minutes is not None and held_minutes >= max_hold_minutes:
+        return "time_stop"
+    if eod_close:
+        return "eod_close"
     if held_sessions >= max_hold_days:
         return "day5"
     return None
@@ -105,7 +125,7 @@ def calc_costs(
     exit_price: float,
     qty: int,
 ) -> dict[str, float]:
-    """Returns itemised round-trip costs (INR) for Indian equity delivery."""
+    """Returns itemised round-trip costs (INR) for Indian equity intraday (MIS)."""
     entry_val = entry_price * qty
     exit_val = exit_price * qty
 
@@ -114,17 +134,19 @@ def calc_costs(
         + min(_BROKERAGE_PER_ORDER, exit_val * _BROKERAGE_CAP_RATE),
         2,
     )
-    stt = round((entry_val + exit_val) * _STT_RATE, 2)
+    stt = round(exit_val * _STT_RATE, 2)  # intraday: sell-side only
     exchange = round((entry_val + exit_val) * _EXCHANGE_RATE, 2)
+    sebi = round((entry_val + exit_val) * _SEBI_RATE, 2)
     stamp = round(entry_val * _STAMP_RATE, 2)
-    gst = round((brokerage + exchange) * _GST_RATE, 2)
+    gst = round((brokerage + exchange) * _GST_RATE, 2)  # GST not levied on STT/stamp/SEBI
     slippage = round((entry_val + exit_val) * _SLIPPAGE_RATE, 2)
-    total = round(brokerage + stt + exchange + stamp + gst + slippage, 2)
+    total = round(brokerage + stt + exchange + sebi + stamp + gst + slippage, 2)
 
     return {
         "brokerage": brokerage,
         "stt": stt,
         "exchange": exchange,
+        "sebi": sebi,
         "stamp": stamp,
         "gst": gst,
         "slippage": slippage,

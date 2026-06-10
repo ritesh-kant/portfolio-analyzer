@@ -82,9 +82,17 @@ class Settings(BaseSettings):
     nt_trail_activate_pct: float = 0.02       # start trailing only after +2% in profit
     nt_sl_pct: float = 0.015                  # LEGACY: pure-trail width for positions opened
                                               #   before the split-stop change (sl_monitor fallback)
-    nt_target_pct: float = 0.05               # profit target (5%) — was 8%, unreachable under a
-                                              #   1.5% trail; now a sane ceiling, trail is primary exit
-    nt_max_hold_days: int = 5                 # force-close on day 5
+    nt_target_pct: float = 0.01               # profit target — recalibrated to actual move distribution:
+                                              #   avg intraday MFE ~+0.5%, peak at ~97 min post-entry.
+                                              #   1% TP is the primary winner exit; trail/time-stop
+                                              #   handle everything else.
+    nt_max_hold_days: int = 5                 # force-close on day 5 (backstop, EOD-close supersedes)
+    nt_max_hold_minutes: int = 90             # intraday time-stop: close 90 min after entry.
+                                              #   Captures the ~97-min avg MFE peak; prevents holding
+                                              #   past the drift-decay window into negative territory.
+    nt_force_close_eod: bool = True           # close all open positions at 15:15 IST.
+                                              #   Eliminates overnight gap risk (D5: −₹1,184 from
+                                              #   gap-downs; D7: carry cohort −₹408).
     nt_news_delay_seconds: int = 900          # SQS delay after classification (15 min)
     # Hard cutoff: no new entries after this IST minute-of-day (870 = 14:30).
     # Primary control is the EventBridge schedule (ingester stops at 08:45 UTC =
