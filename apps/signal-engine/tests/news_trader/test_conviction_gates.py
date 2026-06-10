@@ -64,6 +64,50 @@ class TestSourceCountGate:
         assert allow is True
 
 
+class TestPublisherCorroboration:
+    """Gate 1 counts DISTINCT publishers, not raw articles. Two sections of one
+    outlet (publishers length 1) must not clear the medium-conf floor even when
+    source_count is high."""
+
+    def test_medium_conf_blocked_when_single_publisher_many_articles(self):
+        # 3 articles merged, but all from one outlet → publishers=["ET"] → blocked.
+        allow, _, reason = _apply_conviction_gates(
+            _signal(confidence="medium", source_count=3, publishers=["Economic Times"]),
+            _regime(),
+            _BASE_SIZE,
+        )
+        assert allow is False
+        assert "single-source" in reason
+        assert "publishers=1" in reason
+
+    def test_medium_conf_passes_with_two_distinct_publishers(self):
+        allow, _, _ = _apply_conviction_gates(
+            _signal(confidence="medium", source_count=2,
+                    publishers=["Economic Times", "Moneycontrol"]),
+            _regime(),
+            _BASE_SIZE,
+        )
+        assert allow is True
+
+    def test_publishers_takes_precedence_over_source_count(self):
+        # source_count says 5, but only 1 distinct publisher → still blocked.
+        allow, _, _ = _apply_conviction_gates(
+            _signal(confidence="medium", source_count=5, publishers=["Moneycontrol"]),
+            _regime(),
+            _BASE_SIZE,
+        )
+        assert allow is False
+
+    def test_falls_back_to_source_count_when_publishers_absent(self):
+        # Legacy signal with no publishers field → use source_count.
+        allow, _, _ = _apply_conviction_gates(
+            _signal(confidence="medium", source_count=2),
+            _regime(),
+            _BASE_SIZE,
+        )
+        assert allow is True
+
+
 class TestNiftyCrashGate:
     def test_bullish_blocked_when_nifty_crashing(self):
         allow, _, reason = _apply_conviction_gates(
@@ -212,20 +256,20 @@ class TestGateInteractions:
         assert "single-source" in reason
 
     def test_direction_rejected_before_other_gates(self):
-        # A bearish signal must be rejected for direction, not for the regime
-        # gates, even when the regime would also block — keeps reject ordering
-        # stable for log readability.
+        # A bearish signal (shorts off) must be rejected for direction, not for
+        # the regime gates, even when the regime would also block — keeps reject
+        # ordering stable for log readability.
         allow, _, reason = _apply_conviction_gates(
             _signal(signal="bearish", confidence="high"),
             _regime(nifty_change_pct=-3.0, nifty_above_ema50=False, vix=99.0),
             _BASE_SIZE,
         )
         assert allow is False
-        assert "non-bullish" in reason
+        assert "shorts disabled" in reason
 
 
 class TestDirectionGate:
-    """Long-only system: only bullish signals may trade."""
+    """Bullish trades long; bearish trades short only when allow_shorts is on."""
 
     def test_bullish_allowed(self):
         allow, _, _ = _apply_conviction_gates(
@@ -233,7 +277,8 @@ class TestDirectionGate:
         )
         assert allow is True
 
-    def test_bearish_blocked(self):
+    def test_bearish_blocked_when_shorts_disabled(self):
+        # Default allow_shorts=False preserves the long-only behavior.
         allow, size, reason = _apply_conviction_gates(
             _signal(signal="bearish", confidence="high", magnitude="major"),
             _regime(),
@@ -241,7 +286,7 @@ class TestDirectionGate:
         )
         assert allow is False
         assert size == 0.0
-        assert "non-bullish" in reason
+        assert "shorts disabled" in reason
 
     def test_neutral_blocked(self):
         allow, size, reason = _apply_conviction_gates(
@@ -251,10 +296,104 @@ class TestDirectionGate:
         assert size == 0.0
         assert "non-bullish" in reason
 
+    def test_neutral_blocked_even_with_shorts_enabled(self):
+        allow, _, reason = _apply_conviction_gates(
+            _signal(signal="neutral"), _regime(), _BASE_SIZE, allow_shorts=True
+        )
+        assert allow is False
+        assert "non-bullish" in reason
+
     def test_missing_direction_blocked(self):
-        # No direction → can't confirm it's a long opportunity → skip.
+        # No direction → can't confirm a side → skip.
         allow, _, reason = _apply_conviction_gates(
             _signal(signal=None), _regime(), _BASE_SIZE
         )
         assert allow is False
         assert "non-bullish" in reason
+
+
+class TestShortGates:
+    """Bearish signals trade as intraday shorts when allow_shorts=True.
+
+    Regime gates mirror per side: the melt-up that helps a long blocks a
+    short, and the falling tape that blocks a long is fine for a short.
+    """
+
+    def _short_regime(self, **overrides):
+        # Neutral-to-weak tape: no melt-up, below EMA50 (favourable for shorts).
+        r = {"nifty_change_pct": -0.5, "nifty_above_ema50": False, "vix": 15.0}
+        r.update(overrides)
+        return r
+
+    def test_bearish_high_conf_allowed(self):
+        allow, size, reason = _apply_conviction_gates(
+            _signal(signal="bearish", confidence="high"),
+            self._short_regime(),
+            _BASE_SIZE,
+            allow_shorts=True,
+        )
+        assert allow is True
+        assert size == _BASE_SIZE
+        assert reason == "ok"
+
+    def test_short_blocked_on_melt_up(self):
+        # Mirror of the crash gate: Nifty up > +1.5% intraday → no shorts.
+        allow, _, reason = _apply_conviction_gates(
+            _signal(signal="bearish", confidence="high"),
+            self._short_regime(nifty_change_pct=2.0),
+            _BASE_SIZE,
+            allow_shorts=True,
+        )
+        assert allow is False
+        assert "melt-up" in reason
+
+    def test_short_allowed_in_crash(self):
+        # The crash that blocks longs is a tailwind for shorts.
+        allow, _, _ = _apply_conviction_gates(
+            _signal(signal="bearish", confidence="high"),
+            self._short_regime(nifty_change_pct=-3.0),
+            _BASE_SIZE,
+            allow_shorts=True,
+        )
+        assert allow is True
+
+    def test_medium_conf_short_blocked_above_ema50(self):
+        # Mirror of the EMA50 gate: shorting an uptrend needs high conviction.
+        allow, _, reason = _apply_conviction_gates(
+            _signal(signal="bearish", confidence="medium", source_count=3),
+            self._short_regime(nifty_above_ema50=True),
+            _BASE_SIZE,
+            allow_shorts=True,
+        )
+        assert allow is False
+        assert "above EMA50" in reason
+
+    def test_short_vix_gates_apply(self):
+        # Vol gates are side-agnostic: extreme blocks, elevated halves.
+        allow, size, _ = _apply_conviction_gates(
+            _signal(signal="bearish", confidence="high"),
+            self._short_regime(vix=_VIX_ELEVATED + 1),
+            _BASE_SIZE,
+            allow_shorts=True,
+        )
+        assert allow is True
+        assert size == _BASE_SIZE * 0.5
+
+        allow, _, reason = _apply_conviction_gates(
+            _signal(signal="bearish", confidence="high"),
+            self._short_regime(vix=_VIX_EXTREME + 1),
+            _BASE_SIZE,
+            allow_shorts=True,
+        )
+        assert allow is False
+        assert "VIX extreme" in reason
+
+    def test_short_minor_magnitude_blocked(self):
+        allow, _, reason = _apply_conviction_gates(
+            _signal(signal="bearish", confidence="high", magnitude="minor"),
+            self._short_regime(),
+            _BASE_SIZE,
+            allow_shorts=True,
+        )
+        assert allow is False
+        assert "minor magnitude" in reason

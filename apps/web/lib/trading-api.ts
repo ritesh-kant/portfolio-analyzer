@@ -57,7 +57,9 @@ export interface NtPosition {
   trailing_sl: number;
   target_price: number;
   status: 'open' | 'closed';
-  exit_reason?: 'sl_hit' | 'target_hit' | 'day5';
+  // Trade side (positions opened after 2026-06-10; absent = long)
+  direction?: 'long' | 'short';
+  exit_reason?: 'sl_hit' | 'target_hit' | 'time_stop' | 'eod_close' | 'day5';
   exit_price?: number;
   gross_pnl?: number;
   net_pnl?: number;

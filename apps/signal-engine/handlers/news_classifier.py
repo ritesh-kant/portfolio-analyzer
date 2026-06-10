@@ -18,7 +18,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import boto3
@@ -48,6 +48,13 @@ _LLM_MAX_CONCURRENCY = 5
 # already had time to price in the news. Especially important for BSE backfills
 # that arrive hours after the actual announcement.
 _MAX_NEWS_AGE_SECONDS = 2 * 3600  # 2 hours
+
+# Entity-window merge lookback: a freshly classified non-neutral signal is
+# absorbed into an existing signal (same direction, ≥1 overlapping stock)
+# created within this window, instead of inserting a near-duplicate. 90 min
+# covers the freshness gate's 2-hour ceiling minus typical ingest lag, and
+# spans hour-bucket boundaries that the exact story_hash dedup cannot.
+_ENTITY_MERGE_WINDOW_SECONDS = 90 * 60
 
 # Pre-LLM noise filter — headline patterns that are provably non-price-moving.
 # Articles matching any pattern are skipped before hitting the LLM semaphore,
@@ -153,15 +160,23 @@ async def _process_message(
         logger.warning("[CLASSIFIER] no story_hash/topic_hash on article news_id=%s — skipping", news_id)
         return False, None
 
+    # Parent outlet for corroboration counting. Falls back to source (and then
+    # empty) for articles ingested before the publisher field existed, or from
+    # scrapers (NSE/BSE) that don't set one — each is then its own publisher.
+    publisher = article.get("publisher") or article.get("source", "")
+
     window_bucket = _hour_bucket(now)
 
     # Pre-LLM dedup check: another article for the same story has already been
     # classified in this hour. Just absorb this raw doc into the existing signal.
+    # source_count tracks raw articles merged; publishers tracks DISTINCT outlets
+    # ($addToSet) — the latter is what conviction gating reads for corroboration.
     existing = await signals(db).find_one_and_update(
         {"story_hash": story_hash, "window_bucket": window_bucket},
         {
             "$inc": {"source_count": 1},
             "$push": {"news_ids": news_id},
+            "$addToSet": {"publishers": publisher},
             "$set": {"last_seen_at": now},
         },
     )
@@ -228,6 +243,57 @@ async def _process_message(
                 news_id, result["signal"], result["confidence"], result["magnitude"],
                 result["stocks"], result["sector"])
 
+    # Entity-window merge — the real cross-source dedup. The pre-LLM story_hash
+    # check above only catches *identical* headlines (re-syndication); two
+    # outlets covering the same story write different headlines, so it almost
+    # never fires across sources (1 of 1,888 signals had source_count > 1).
+    # Here we match on what the LLM extracted instead: an existing recent
+    # signal with the same direction and at least one overlapping stock is the
+    # same story — absorb this article into it (bump source_count) rather than
+    # inserting a near-duplicate signal.
+    #
+    # Window is a created_at range, not window_bucket equality, so stories
+    # straddling an hour boundary still merge. Restricted to non-neutral
+    # signals with stocks: neutrals aren't traded and often have no entities
+    # to match on.
+    #
+    # acted_on=False restricts merge targets to actionable signals still in
+    # their 15-min SQS delay — the only window where a corroboration bump
+    # changes the trade decision (lets medium-conf + 2-publishers pass Gate 1).
+    # Without it, a strong article could be absorbed into a signal that will
+    # never trade (low-conf signals are acted_on=True at insert; rejected
+    # signals are acted_on=True post-decision) and the story would be lost.
+    # Once a story's signal has been decided, a later article creates a fresh
+    # signal instead — symbol-level dedup in trade_decision prevents double
+    # positions if the first one filled.
+    if result["signal"] != "neutral" and result["stocks"]:
+        merge_cutoff = now - timedelta(seconds=_ENTITY_MERGE_WINDOW_SECONDS)
+        merged = await signals(db).find_one_and_update(
+            {
+                "signal": result["signal"],
+                "stocks": {"$in": result["stocks"]},
+                "created_at": {"$gte": merge_cutoff},
+                "acted_on": False,
+            },
+            {
+                "$inc": {"source_count": 1},
+                "$push": {"news_ids": news_id},
+                "$addToSet": {"publishers": publisher},
+                "$set": {"last_seen_at": now},
+            },
+            sort=[("created_at", -1)],
+        )
+        if merged is not None:
+            logger.info(
+                "[CLASSIFIER] entity merge news_id=%s → signal_id=%s stocks=%s "
+                "source_count→%d — absorbed",
+                news_id, merged["_id"], result["stocks"], merged.get("source_count", 1) + 1,
+            )
+            await news_raw(db).update_one(
+                {"_id": ObjectId(news_id)}, {"$set": {"classified": True}}
+            )
+            return False, None
+
     # Determine actionability before inserting so acted_on is set correctly from the start.
     # Non-actionable signals are never enqueued to trade-decision, so _maybe_finalise_run
     # must not count them as "pending" — marking acted_on=True immediately prevents runs
@@ -261,6 +327,10 @@ async def _process_message(
         "window_bucket": window_bucket,
         "news_ids": [news_id],
         "source_count": 1,
+        # Distinct parent outlets corroborating this signal. Conviction gating
+        # reads len(publishers), so two sections of one outlet (or two Google
+        # News items) don't count as independent confirmation.
+        "publishers": [publisher],
         "first_seen_at": now,
         "last_seen_at": now,
         "headline": headline,
@@ -294,6 +364,7 @@ async def _process_message(
             {
                 "$inc": {"source_count": 1},
                 "$push": {"news_ids": news_id},
+                "$addToSet": {"publishers": publisher},
                 "$set": {"last_seen_at": now},
             },
         )

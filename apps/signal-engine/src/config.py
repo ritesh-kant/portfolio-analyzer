@@ -93,6 +93,14 @@ class Settings(BaseSettings):
     nt_force_close_eod: bool = True           # close all open positions at 15:15 IST.
                                               #   Eliminates overnight gap risk (D5: −₹1,184 from
                                               #   gap-downs; D7: carry cohort −₹408).
+    nt_enable_shorts: bool = True             # trade bearish signals as intraday (MIS) shorts.
+                                              #   BT6 (2026-06-10): 67 bearish high-conf mod/major
+                                              #   signals discarded in 7 days by the long-only
+                                              #   gate — roughly half the actionable universe.
+                                              #   Safe only because the system is pure intraday:
+                                              #   EOD force-close at 15:15 IST lands before
+                                              #   Zerodha's MIS auto square-off (~15:20), so no
+                                              #   overnight short exposure.
     nt_news_delay_seconds: int = 900          # SQS delay after classification (15 min)
     # Hard cutoff: no new entries after this IST minute-of-day (870 = 14:30).
     # Primary control is the EventBridge schedule (ingester stops at 08:45 UTC =

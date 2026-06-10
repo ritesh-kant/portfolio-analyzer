@@ -274,11 +274,111 @@ class TestNewsClassifierHandler:
         assert inserted["story_hash"] == "xyz789newstoryhash22aa"
         assert inserted["news_ids"] == [news_id]
         assert inserted["source_count"] == 1
+        # Publisher set seeded from the article (falls back to source here).
+        assert inserted["publishers"] == ["Economic Times"]
         assert "window_bucket" in inserted
         assert inserted["window_bucket"].minute == 0
         assert inserted["window_bucket"].second == 0
         # Actionable signal → SQS send_message called.
         sqs_client.send_message.assert_called_once()
+
+    @patch("handlers.news_classifier.get_db")
+    @patch("handlers.news_classifier.boto3")
+    @patch("src.news_trader.classifier.get_llm")
+    def test_entity_merge_absorbs_cross_source_story(self, mock_get_llm, mock_boto3, mock_get_db):
+        """Different headline (different story_hash) but same direction +
+        overlapping stock within the merge window: LLM IS called (we need the
+        entity list), but the result is absorbed into the existing signal —
+        no new insert, no SQS dispatch.
+        """
+        from bson import ObjectId
+        news_id = str(ObjectId())
+        article = {
+            "_id": ObjectId(news_id),
+            "raw_text": "HDFC Bank surges as RBI rate cut lifts lenders",
+            "headline": "HDFC Bank surges as RBI rate cut lifts lenders",
+            "source": "LiveMint",
+            "story_hash": "DIFFERENT-hash-from-et-version",
+            "topic_hash": "topic-lm-zzzzzzzzzzzzzzzz",
+            "classified": False,
+        }
+
+        mock_get_llm.return_value.invoke.return_value = MagicMock(content=json.dumps({
+            "sector": "Banking",
+            "signal": "bullish",
+            "magnitude": "major",
+            "stocks": ["HDFCBANK"],
+            "confidence": "high",
+            "reasoning": "Rate cut boosts margins.",
+        }))
+
+        existing_signal = {
+            "_id": ObjectId(),
+            "story_hash": "original-et-version-hash",
+            "stocks": ["HDFCBANK", "SBIN"],
+            "signal": "bullish",
+            "source_count": 1,
+            "news_ids": ["original-news-id"],
+        }
+
+        mock_db = MagicMock()
+        mock_news_coll = MagicMock()
+        mock_news_coll.create_index = AsyncMock()
+        mock_news_coll.find_one = AsyncMock(return_value=article)
+        mock_news_coll.update_one = AsyncMock()
+
+        mock_sig_coll = MagicMock()
+        mock_sig_coll.create_index = AsyncMock()
+        # 1st find_one_and_update = story_hash dedup (miss), 2nd = entity merge (hit).
+        mock_sig_coll.find_one_and_update = AsyncMock(side_effect=[None, existing_signal])
+        mock_sig_coll.insert_one = AsyncMock()  # must NOT be called
+
+        def _get_coll(name):
+            if name == "nt_news_raw":
+                return mock_news_coll
+            if name == "nt_signals":
+                return mock_sig_coll
+            c = MagicMock(); c.create_index = AsyncMock(); c.count_documents = AsyncMock(return_value=0); return c
+
+        mock_db.__getitem__ = MagicMock(side_effect=_get_coll)
+        mock_get_db.return_value = mock_db
+
+        sqs_client = MagicMock()
+        mock_boto3.client.return_value = sqs_client
+
+        from handlers.news_classifier import handler
+        event = _make_sqs_event([{"news_id": news_id}])
+
+        with patch("handlers.news_classifier.Settings") as MockSettings:
+            s = MockSettings.return_value
+            s.ai_provider = "ollama"
+            s.gemini_api_key = "fake"
+            s.gemini_model = "gemini-1.5-flash"
+            s.news_signals_queue_url = "https://sqs.example.com/signals"
+            s.nt_news_delay_seconds = 900
+            s.nt_max_positions = 10
+            handler(event, None)
+
+        # Absorbed: no new signal, no SQS dispatch, article marked classified.
+        mock_sig_coll.insert_one.assert_not_called()
+        sqs_client.send_message.assert_not_called()
+        mock_news_coll.update_one.assert_called_once()
+
+        # The merge query must match on direction + overlapping stocks + recency,
+        # and the update must bump source_count and append the news id.
+        assert mock_sig_coll.find_one_and_update.call_count == 2
+        merge_call = mock_sig_coll.find_one_and_update.call_args_list[1]
+        merge_filter, merge_update = merge_call[0][0], merge_call[0][1]
+        assert merge_filter["signal"] == "bullish"
+        assert merge_filter["stocks"] == {"$in": ["HDFCBANK"]}
+        assert "$gte" in merge_filter["created_at"]
+        # Only signals still awaiting trade-decision may absorb articles —
+        # otherwise a strong story could merge into a dead signal and never trade.
+        assert merge_filter["acted_on"] is False
+        assert merge_update["$inc"] == {"source_count": 1}
+        assert merge_update["$push"] == {"news_ids": news_id}
+        # Distinct-publisher set is grown on merge (LiveMint, here).
+        assert merge_update["$addToSet"] == {"publishers": "LiveMint"}
 
     @patch("handlers.news_classifier.get_db")
     @patch("handlers.news_classifier.boto3")

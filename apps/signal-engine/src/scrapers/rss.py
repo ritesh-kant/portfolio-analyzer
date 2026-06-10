@@ -18,52 +18,89 @@ from ._retry import with_retry
 
 logger = logging.getLogger(__name__)
 
+# `source` identifies the specific feed (one per row). `publisher` identifies
+# the parent outlet — multiple feeds can share one publisher (ET has Markets +
+# Economy; Moneycontrol and LiveMint each have two sections). The classifier
+# counts DISTINCT publishers for corroboration, so two sections of the same
+# outlet covering one story don't read as independent confirmation.
 RSS_FEEDS: list[dict[str, Any]] = [
     {
         "url": "https://economictimes.indiatimes.com/markets/rss.cms",
         "source": "Economic Times Markets",
+        "publisher": "Economic Times",
         "tier": "tier1",
     },
     {
         "url": "https://economictimes.indiatimes.com/news/economy/rssfeeds/1373380680.cms",
         "source": "Economic Times Economy",
+        "publisher": "Economic Times",
         "tier": "tier1",
     },
     {
         "url": "https://www.moneycontrol.com/rss/latestnews.xml",
         "source": "Moneycontrol",
+        "publisher": "Moneycontrol",
         "tier": "tier1",
     },
     {
         "url": "https://www.livemint.com/rss/markets",
         "source": "LiveMint",
+        "publisher": "LiveMint",
         "tier": "tier1",
     },
     {
         "url": "https://www.business-standard.com/rss/markets-106.rss",
         "source": "Business Standard",
+        "publisher": "Business Standard",
         "tier": "tier1",
         "headers": {"Referer": "https://www.business-standard.com/"},
     },
     {
         "url": "https://www.thehindubusinessline.com/markets/?service=rss",
         "source": "BusinessLine",
+        "publisher": "BusinessLine",
         "tier": "tier2",
     },
     {
         "url": "https://feeds.feedburner.com/ndtvprofit-latest",
         "source": "NDTV Business",
+        "publisher": "NDTV",
         "tier": "tier2",
     },
     {
         "url": "https://news.google.com/rss/search?q=india+stock+market+NSE&hl=en-IN&gl=IN&ceid=IN:en",
         "source": "Google News India Finance",
+        # Aggregator: republishes other outlets, so collapse all Google items to
+        # one publisher rather than letting them inflate corroboration counts.
+        "publisher": "Google News",
         "tier": "tier2",
     },
     {
         "url": "https://news.google.com/rss/search?q=global+markets+fed+rbi+rate&hl=en-IN&gl=IN&ceid=IN:en",
         "source": "Google News Global Macro",
+        "publisher": "Google News",
         "tier": "tier2",
+    },
+    # Added 2026-06-10 for cross-source corroboration. ToI is a new publisher;
+    # the MC/Mint rows are new sections of existing publishers — they widen
+    # coverage but share a publisher, so corroboration counting stays honest.
+    {
+        "url": "https://timesofindia.indiatimes.com/rssfeeds/1898055.cms",
+        "source": "Times of India Business",
+        "publisher": "Times of India",
+        "tier": "tier2",
+    },
+    {
+        "url": "https://www.moneycontrol.com/rss/buzzingstocks.xml",
+        "source": "Moneycontrol Buzzing Stocks",
+        "publisher": "Moneycontrol",
+        "tier": "tier1",
+    },
+    {
+        "url": "https://www.livemint.com/rss/companies",
+        "source": "LiveMint Companies",
+        "publisher": "LiveMint",
+        "tier": "tier1",
     },
 ]
 
@@ -103,7 +140,9 @@ def _make_story_hash(headline: str) -> str:
     return hashlib.sha256(normalised.encode()).hexdigest()[:24]
 
 
-def _parse_feed_content(content: str | bytes, source: str, tier: str) -> list[dict[str, Any]]:
+def _parse_feed_content(
+    content: str | bytes, source: str, tier: str, publisher: str | None = None
+) -> list[dict[str, Any]]:
     """Parse RSS/Atom XML string with feedparser — purely in-memory, no I/O."""
     feed = feedparser.parse(content)
     articles: list[dict[str, Any]] = []
@@ -121,6 +160,9 @@ def _parse_feed_content(content: str | bytes, source: str, tier: str) -> list[di
         articles.append(
             {
                 "source": source,
+                # Parent outlet for corroboration counting; falls back to source
+                # for any feed that predates the publisher field.
+                "publisher": publisher or source,
                 "tier": tier,
                 "headline": headline,
                 "url": url_link,
@@ -138,13 +180,14 @@ async def _fetch_one(
 ) -> tuple[str, list[dict[str, Any]], bool]:
     """Return (source_name, articles, success_bool)."""
     source = feed_cfg["source"]
+    publisher = feed_cfg.get("publisher", source)
 
     extra_headers: dict[str, str] = feed_cfg.get("headers", {})  # type: ignore[assignment]
 
     async def _do() -> list[dict[str, Any]]:
         resp = await client.get(feed_cfg["url"], headers=extra_headers)
         resp.raise_for_status()
-        articles = _parse_feed_content(resp.text, source, feed_cfg["tier"])
+        articles = _parse_feed_content(resp.text, source, feed_cfg["tier"], publisher)
         logger.info("rss_fetched source=%s count=%d", source, len(articles))
         return articles
 

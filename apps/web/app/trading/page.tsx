@@ -243,9 +243,17 @@ function ExitBadge({ reason }: { reason: NtPosition['exit_reason'] }) {
   const map = {
     sl_hit: 'bg-rose-100 text-rose-700',
     target_hit: 'bg-emerald-100 text-emerald-700',
+    time_stop: 'bg-sky-100 text-sky-700',
+    eod_close: 'bg-slate-200 text-slate-700',
     day5: 'bg-amber-100 text-amber-700',
   };
-  const label = { sl_hit: 'SL Hit', target_hit: 'Target', day5: 'Day 5 Expired' };
+  const label = {
+    sl_hit: 'SL Hit',
+    target_hit: 'Target',
+    time_stop: 'Time Stop',
+    eod_close: 'EOD Close',
+    day5: 'Day 5 Expired',
+  };
   return (
     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${map[reason]}`}>
       {label[reason]}
@@ -1351,9 +1359,10 @@ function PositionsTab({ positions }: { positions: NtPosition[] }) {
             </thead>
             <tbody>
               {filtered.map((p) => {
+                const dirSign = p.direction === 'short' ? -1 : 1;
                 const unrealPnl =
                   p.current_price != null
-                    ? (p.current_price - p.entry_price) * p.qty
+                    ? dirSign * (p.current_price - p.entry_price) * p.qty
                     : null;
                 const days = holdDays(p.entry_at, p.exit_at);
 
@@ -1398,7 +1407,8 @@ function PositionsTab({ positions }: { positions: NtPosition[] }) {
                         <td className="px-4 py-3 text-right tabular-nums text-emerald-700">
                           {fmtPrice(p.target_price)}
                           <span className="ml-0.5 text-[10px] text-ink/40">
-                            +{(((p.target_price - p.entry_price) / p.entry_price) * 100).toFixed(1)}%
+                            {p.target_price >= p.entry_price ? '+' : ''}
+                            {(((p.target_price - p.entry_price) / p.entry_price) * 100).toFixed(1)}%
                           </span>
                         </td>
                       </>
@@ -1886,7 +1896,7 @@ function OverviewTab({
                 {open.map((p) => {
                   const unrealPnl =
                     p.current_price != null
-                      ? (p.current_price - p.entry_price) * p.qty
+                      ? (p.direction === 'short' ? -1 : 1) * (p.current_price - p.entry_price) * p.qty
                       : null;
                   return (
                     <tr key={p._id} className="border-b border-black/5 last:border-0">

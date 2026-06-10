@@ -43,6 +43,12 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     # Reverse lookup: find which signal absorbed a given raw news doc.
     await signals(db).create_index("news_ids", background=True)
     await signals(db).create_index("created_at", background=True)
+    # Entity-window merge lookup (classifier): same direction + overlapping
+    # stocks within the recent window. Multikey on stocks; created_at bounds
+    # the scan to the merge window.
+    await signals(db).create_index(
+        [("stocks", 1), ("signal", 1), ("created_at", -1)], background=True
+    )
     # Sparse index for pipeline_run_id — only indexes documents that have this field,
     # so old signals without it don't bloat the index.
     await signals(db).create_index("pipeline_run_id", background=True, sparse=True)

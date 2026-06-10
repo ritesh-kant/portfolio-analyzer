@@ -10,6 +10,7 @@ from src.news_trader.trailing_sl import (
     initial_stop,
     initial_trailing_sl,
     update_stop,
+    update_stop_short,
     update_trailing_sl,
 )
 
@@ -182,19 +183,30 @@ def test_day5_triggers_on_session_beyond_max():
 
 def test_calc_costs_keys():
     costs = calc_costs(entry_price=100.0, exit_price=108.0, qty=500)
-    for key in ("brokerage", "stt", "exchange", "stamp", "gst", "slippage", "total"):
+    for key in ("brokerage", "stt", "exchange", "sebi", "stamp", "gst", "slippage", "total"):
         assert key in costs
 
 def test_calc_costs_total_equals_sum():
     costs = calc_costs(100.0, 108.0, 500)
-    components = costs["brokerage"] + costs["stt"] + costs["exchange"] + costs["stamp"] + costs["gst"] + costs["slippage"]
+    components = (costs["brokerage"] + costs["stt"] + costs["exchange"] + costs["sebi"]
+                  + costs["stamp"] + costs["gst"] + costs["slippage"])
     assert costs["total"] == pytest.approx(components, abs=0.02)
 
-def test_calc_costs_stt_dominates():
-    # STT = 0.1% each side on ₹50k + ₹54k = ₹104; should be the biggest line
+def test_calc_costs_intraday_slippage_dominates():
+    # Intraday (MIS): STT is 0.025% sell-side only (₹13.50 on ₹54k exit), so the
+    # modeled 5 bps/side slippage (₹52 on ₹104k turnover) is the biggest line.
     costs = calc_costs(100.0, 108.0, 500)
-    assert costs["stt"] > costs["brokerage"]
-    assert costs["stt"] > costs["slippage"]
+    assert costs["slippage"] > costs["brokerage"] > costs["stt"]
+
+def test_calc_costs_short_swaps_stt_and_stamp_legs():
+    # Short: entry is the SELL leg (STT) and exit is the BUY leg (stamp).
+    # With exit_price < entry_price, short STT (on entry) > long STT (on exit).
+    long_costs = calc_costs(100.0, 96.0, 500, direction="long")
+    short_costs = calc_costs(100.0, 96.0, 500, direction="short")
+    assert short_costs["stt"] == pytest.approx(100.0 * 500 * 0.00025, abs=0.01)
+    assert long_costs["stt"] == pytest.approx(96.0 * 500 * 0.00025, abs=0.01)
+    assert short_costs["stamp"] == pytest.approx(96.0 * 500 * 0.00003, abs=0.01)
+    assert long_costs["stamp"] == pytest.approx(100.0 * 500 * 0.00003, abs=0.01)
 
 
 # ── calc_pnl ──────────────────────────────────────────────────────────────────
@@ -217,6 +229,89 @@ def test_breakeven_requires_clearing_cost():
     gross, net, _costs = calc_pnl(100.0, 100.0, 500)
     assert gross == 0.0
     assert net < 0.0
+
+
+# ── shorts: initial_stop / update_stop_short / check_exit / calc_pnl ─────────
+
+def test_initial_stop_short_is_above_entry():
+    assert initial_stop(100.0, initial_sl_pct=0.03, direction="short") == pytest.approx(103.0)
+
+
+def test_short_stop_sits_at_wide_ceiling_before_activation():
+    # Price dips but hasn't fallen 2% yet → stop stays at the wide +3% ceiling.
+    low, sl = update_stop_short(
+        entry_price=100.0, current_price=99.0, lowest_price=100.0,
+        current_sl=103.0, initial_sl_pct=0.03, trail_sl_pct=0.015, trail_activate_pct=0.02,
+    )
+    assert low == 99.0
+    assert sl == pytest.approx(103.0)
+
+
+def test_short_stop_rally_before_activation_holds_wide_ceiling():
+    # Adverse move (price up) before any profit — ceiling holds, not stopped early.
+    low, sl = update_stop_short(
+        entry_price=100.0, current_price=101.5, lowest_price=100.0,
+        current_sl=103.0, initial_sl_pct=0.03, trail_sl_pct=0.015, trail_activate_pct=0.02,
+    )
+    assert low == 100.0
+    assert sl == pytest.approx(103.0)
+
+
+def test_short_stop_activates_and_locks_profit():
+    # Low reaches −2% → trail switches on at low*(1+1.5%), locking in profit.
+    low, sl = update_stop_short(
+        entry_price=100.0, current_price=98.0, lowest_price=100.0,
+        current_sl=103.0, initial_sl_pct=0.03, trail_sl_pct=0.015, trail_activate_pct=0.02,
+    )
+    assert low == 98.0
+    assert sl == pytest.approx(98.0 * 1.015)  # 99.47 — below entry, profit locked
+
+
+def test_short_stop_never_increases_on_bounce_after_activation():
+    low, sl = update_stop_short(
+        entry_price=100.0, current_price=99.0, lowest_price=95.0,
+        current_sl=96.425, initial_sl_pct=0.03, trail_sl_pct=0.015, trail_activate_pct=0.02,
+    )
+    assert low == 95.0
+    assert sl == pytest.approx(96.425)  # held — never moves up
+
+
+def test_short_sl_hit_when_price_at_or_above_sl():
+    assert check_exit(103.1, 103.0, 99.0, held_sessions=0, max_hold_days=5,
+                      direction="short") == "sl_hit"
+    assert check_exit(103.0, 103.0, 99.0, held_sessions=0, max_hold_days=5,
+                      direction="short") == "sl_hit"
+
+
+def test_short_target_hit_when_price_at_or_below_target():
+    assert check_exit(98.9, 103.0, 99.0, held_sessions=0, max_hold_days=5,
+                      direction="short") == "target_hit"
+
+
+def test_short_no_exit_between_target_and_sl():
+    assert check_exit(100.5, 103.0, 99.0, held_sessions=0, max_hold_days=5,
+                      direction="short") is None
+
+
+def test_short_time_exits_still_fire():
+    assert check_exit(100.5, 103.0, 99.0, held_sessions=0, max_hold_days=5,
+                      held_minutes=95.0, max_hold_minutes=90,
+                      direction="short") == "time_stop"
+    assert check_exit(100.5, 103.0, 99.0, held_sessions=0, max_hold_days=5,
+                      eod_close=True, direction="short") == "eod_close"
+
+
+def test_short_pnl_profits_when_price_falls():
+    gross, net, costs = calc_pnl(entry_price=100.0, exit_price=98.0, qty=500, direction="short")
+    assert gross == pytest.approx(1000.0)   # (100-98) * 500
+    assert net == pytest.approx(gross - costs["total"])
+    assert net < gross
+
+
+def test_short_pnl_loses_when_price_rises():
+    gross, net, _costs = calc_pnl(entry_price=100.0, exit_price=102.0, qty=500, direction="short")
+    assert gross == pytest.approx(-1000.0)
+    assert net < gross
 
 
 # ── calc_qty ──────────────────────────────────────────────────────────────────

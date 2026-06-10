@@ -56,29 +56,42 @@ def _apply_conviction_gates(
     signal_doc: dict[str, Any],
     regime: dict[str, Any],
     base_position_size: float,
+    allow_shorts: bool = False,
 ) -> tuple[bool, float, str]:
     """Pure decision function: should we trade this signal, and at what size?
 
     Returns (allow, effective_position_size, reason). Kept pure so it can be
-    unit-tested without DB or yfinance mocks.
+    unit-tested without DB or yfinance mocks. The trade side is derived by the
+    caller from the signal direction (bullish→long, bearish→short).
     """
     signal_id = str(signal_doc.get("_id", "?"))
     confidence = (signal_doc.get("confidence") or "").lower()
     direction = (signal_doc.get("signal") or "").lower()
-    source_count = int(signal_doc.get("source_count", 1))
+    # Corroboration = distinct parent outlets, not raw articles. publishers is a
+    # set maintained by the classifier ($addToSet); two sections of one outlet
+    # therefore count once. Fall back to source_count for signals created before
+    # the publishers field existed (then default 1).
+    publishers = signal_doc.get("publishers")
+    corroboration = len(publishers) if publishers else int(signal_doc.get("source_count", 1))
 
-    # Gate 0 — direction filter. This is a long-only system: every position is
-    # opened as a long (target above entry, SL below). A bearish thesis can't be
-    # expressed without shorting, so trading a bearish signal long would bet
-    # against the AI's own call. Skip anything that isn't bullish.
-    if direction != "bullish":
+    # Gate 0 — direction filter. Bullish signals trade long. Bearish signals
+    # trade as intraday (MIS) shorts when nt_enable_shorts is on — safe only
+    # because EOD force-close (15:15 IST) guarantees no overnight short.
+    # Neutral / unknown direction never trades.
+    if direction == "bullish":
+        pass
+    elif direction == "bearish" and allow_shorts:
+        pass
+    elif direction == "bearish":
+        return False, 0.0, "bearish signal — shorts disabled (nt_enable_shorts=false)"
+    else:
         return False, 0.0, f"non-bullish signal ({direction or 'unknown'}) — long-only system"
 
     # Gate 1 — conviction floor for medium-confidence signals.
     # Medium-conf + single-source has been the noisiest combination; require
     # at least 2 independent outlets to corroborate before risking capital.
-    if confidence == "medium" and source_count < _MEDIUM_CONF_MIN_SOURCES:
-        return False, 0.0, f"medium-conf single-source (sources={source_count})"
+    if confidence == "medium" and corroboration < _MEDIUM_CONF_MIN_SOURCES:
+        return False, 0.0, f"medium-conf single-source (publishers={corroboration})"
 
     # Gate C — magnitude floor.
     # LLM labels "minor" when expected move is <0.5%. Round-trip cost is ~0.3%
@@ -88,14 +101,20 @@ def _apply_conviction_gates(
     if magnitude == "minor":
         return False, 0.0, "minor magnitude — expected <0.5% move, negative EV after costs"
 
-    # Gate 2 — Nifty regime filter. All entries are bullish longs (guaranteed by
-    # Gate 0), so a falling/weak market is a headwind we screen against.
+    # Gate 2 — Nifty regime filter, mirrored per side: the headwind for a long
+    # (falling/weak market) is the tailwind for a short, and vice versa.
     nifty_change = regime.get("nifty_change_pct")
     nifty_above_ema50 = regime.get("nifty_above_ema50")
-    if nifty_change is not None and nifty_change < _NIFTY_CRASH_PCT:
-        return False, 0.0, f"nifty crash gate (Δ={nifty_change:.2f}%)"
-    if nifty_above_ema50 is False and confidence != "high":
-        return False, 0.0, "Nifty below EMA50 + not high-conf"
+    if direction == "bullish":
+        if nifty_change is not None and nifty_change < _NIFTY_CRASH_PCT:
+            return False, 0.0, f"nifty crash gate (Δ={nifty_change:.2f}%)"
+        if nifty_above_ema50 is False and confidence != "high":
+            return False, 0.0, "Nifty below EMA50 + not high-conf"
+    else:  # bearish short
+        if nifty_change is not None and nifty_change > -_NIFTY_CRASH_PCT:
+            return False, 0.0, f"nifty melt-up gate for short (Δ=+{nifty_change:.2f}%)"
+        if nifty_above_ema50 is True and confidence != "high":
+            return False, 0.0, "Nifty above EMA50 + not high-conf (short)"
 
     # Gate 3 — VIX-based sizing. Extreme vol = no entries; elevated = half size.
     vix = regime.get("vix")
@@ -107,8 +126,8 @@ def _apply_conviction_gates(
             position_size = base_position_size * 0.5
 
     logger.debug(
-        "[TRADE] gates passed signal_id=%s conf=%s sources=%d nifty_Δ=%s vix=%s size=%.0f",
-        signal_id, confidence, source_count, nifty_change, vix, position_size,
+        "[TRADE] gates passed signal_id=%s conf=%s publishers=%d nifty_Δ=%s vix=%s size=%.0f",
+        signal_id, confidence, corroboration, nifty_change, vix, position_size,
     )
     return True, position_size, "ok"
 
@@ -153,8 +172,14 @@ async def _process_signal(
 
     # Conviction & regime gates run before any DB / price work — cheap rejects.
     allow, position_size_inr, reason = _apply_conviction_gates(
-        signal_doc, regime, per_slot_size
+        signal_doc, regime, per_slot_size, allow_shorts=settings.nt_enable_shorts
     )
+    # Side is implied by the (gate-validated) signal direction: bearish→short.
+    side = "short" if (signal_doc.get("signal") or "").lower() == "bearish" else "long"
+    # Distinct-publisher corroboration, frozen onto the position below. Mirrors
+    # the gate's computation (set length, fall back to source_count for old docs).
+    _pubs = signal_doc.get("publishers")
+    publisher_count = len(_pubs) if _pubs else int(signal_doc.get("source_count", 1))
     if not allow:
         logger.info("[TRADE] skip signal_id=%s — gate rejected: %s", signal_id, reason)
         return 0, reason
@@ -286,14 +311,22 @@ async def _process_signal(
                         symbol, projected_invested, trade_value, settings.nt_total_capital_inr)
             continue
 
-        target = price * (1.0 + settings.nt_target_pct)
-        sl = initial_stop(price, settings.nt_initial_sl_pct)
+        # Mirrored geometry for shorts: target below entry, stop above.
+        if side == "short":
+            target = price * (1.0 - settings.nt_target_pct)
+        else:
+            target = price * (1.0 + settings.nt_target_pct)
+        sl = initial_stop(price, settings.nt_initial_sl_pct, direction=side)
         now = datetime.now(tz=timezone.utc)
 
         position_doc = {
             "symbol": symbol,
             "signal_id": str(signal_doc["_id"]),
             "signal": signal_doc.get("signal"),
+            # Trade side: "long" (bullish) or "short" (bearish, intraday MIS).
+            # sl_monitor keys all stop/exit/P&L math off this; absent on
+            # positions opened before shorts existed → treated as "long".
+            "direction": side,
             "sector": signal_doc.get("sector"),
             "confidence": signal_doc.get("confidence"),
             # Expected-move-size label frozen alongside confidence so closed-trade
@@ -336,8 +369,10 @@ async def _process_signal(
             "entry_nifty50": market_ctx["nifty50"],
             "entry_sector_index": market_ctx["sector_index"],
             # Gate inputs frozen at entry — lets post-hoc analysis bucket trades
-            # by conviction (source_count) and regime (VIX, Nifty Δ).
+            # by conviction and regime (VIX, Nifty Δ). source_count = raw articles
+            # merged; publisher_count = distinct outlets (what Gate 1 acts on).
             "entry_source_count": int(signal_doc.get("source_count", 1)),
+            "entry_publisher_count": publisher_count,
             "entry_position_size_inr": position_size_inr,
             "entry_vix": regime.get("vix"),
             "entry_nifty_change_pct": regime.get("nifty_change_pct"),

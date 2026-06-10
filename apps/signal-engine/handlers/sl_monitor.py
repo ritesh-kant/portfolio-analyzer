@@ -19,7 +19,13 @@ from src.news_trader.db import ensure_indexes, positions
 from src.news_trader.market_calendar import is_trading_day
 from src.news_trader.prices import get_ltps
 from src.news_trader.telegram import alert_sl_updated, alert_trade_closed
-from src.news_trader.trailing_sl import calc_pnl, check_exit, update_stop, update_trailing_sl
+from src.news_trader.trailing_sl import (
+    calc_pnl,
+    check_exit,
+    update_stop,
+    update_stop_short,
+    update_trailing_sl,
+)
 
 logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
@@ -71,6 +77,10 @@ async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50
 
     paper = pos.get("paper", True)
 
+    # Trade side. Positions opened before shorts existed have no direction
+    # field — they are all longs.
+    direction = pos.get("direction", "long")
+
     # Update the stop using params frozen at entry, not live config — open
     # positions keep the geometry they were opened with, so a tuning change
     # never moves an existing trade's stop mid-flight.
@@ -79,7 +89,21 @@ async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50
     # take the wide-initial → tight-trail path (update_stop). Older positions have
     # no such field and keep the original pure-trailing behavior (update_trailing_sl).
     initial_sl_pct = pos.get("initial_sl_pct_used")
-    if initial_sl_pct is not None:
+    if direction == "short":
+        # Shorts always postdate the split-stop change, so frozen params exist.
+        # Favourable extreme is the LOW; the stop trails above it and only moves down.
+        new_lowest, new_sl = update_stop_short(
+            entry_price=pos["entry_price"],
+            current_price=price,
+            lowest_price=pos.get("lowest_price") or pos["entry_price"],
+            current_sl=pos["trailing_sl"],
+            initial_sl_pct=initial_sl_pct or settings.nt_initial_sl_pct,
+            trail_sl_pct=pos.get("trail_sl_pct_used") or settings.nt_trail_sl_pct,
+            trail_activate_pct=pos.get("trail_activate_pct_used") or settings.nt_trail_activate_pct,
+        )
+        new_highest = max(pos["highest_price"], price)  # MAE side for a short
+        sl_improved = new_sl < pos["trailing_sl"]
+    elif initial_sl_pct is not None:
         trail_sl_pct = pos.get("trail_sl_pct_used")
         if trail_sl_pct is None:
             trail_sl_pct = settings.nt_trail_sl_pct
@@ -95,6 +119,7 @@ async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50
             trail_sl_pct=trail_sl_pct,
             trail_activate_pct=trail_activate_pct,
         )
+        sl_improved = new_sl > pos["trailing_sl"]
     else:
         # Legacy pure-trail position (opened before the split-stop change).
         sl_pct = pos.get("sl_pct_used") or settings.nt_sl_pct
@@ -104,12 +129,12 @@ async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50
             current_sl=pos["trailing_sl"],
             sl_pct=sl_pct,
         )
+        sl_improved = new_sl > pos["trailing_sl"]
 
-    sl_raised = new_sl > pos["trailing_sl"]
-
-    # Track the low-water mark (MAE) alongside the high. Positions opened before
-    # lowest_price shipped have no baseline, so fall back to entry_price.
-    new_lowest = min(pos.get("lowest_price") or pos["entry_price"], price)
+    # Track the low-water mark alongside the high. For longs this is the MAE
+    # side; for shorts update_stop_short already computed it (MFE side).
+    if direction != "short":
+        new_lowest = min(pos.get("lowest_price") or pos["entry_price"], price)
 
     # Check exit — use params frozen at entry for the same reason as stop params.
     max_hold_days = pos.get("max_hold_days_used") or settings.nt_max_hold_days
@@ -124,10 +149,13 @@ async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50
         held_minutes=held_minutes,
         max_hold_minutes=max_hold_minutes,
         eod_close=eod_close,
+        direction=direction,
     )
 
     if exit_reason:
-        gross_pnl, net_pnl, costs = calc_pnl(pos["entry_price"], price, pos["qty"])
+        gross_pnl, net_pnl, costs = calc_pnl(
+            pos["entry_price"], price, pos["qty"], direction=direction
+        )
         now = datetime.now(tz=timezone.utc)
         await positions(db).update_one(
             {"_id": pos["_id"]},
@@ -189,9 +217,9 @@ async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50
         },
     )
 
-    if sl_raised:
-        logger.info("sl_raised symbol=%s old=%.2f new=%.2f price=%.2f",
-                    symbol, pos["trailing_sl"], new_sl, price)
+    if sl_improved:
+        logger.info("sl_raised symbol=%s direction=%s old=%.2f new=%.2f price=%.2f",
+                    symbol, direction, pos["trailing_sl"], new_sl, price)
         await asyncio.to_thread(
             alert_sl_updated,
             bot_token=settings.telegram_bot_token,
@@ -289,7 +317,10 @@ async def _run(settings: Settings) -> dict:
         max_hold = pos.get("max_hold_days_used") or settings.nt_max_hold_days
         if held >= max_hold:
             fallback_price: float = pos.get("current_price") or pos["entry_price"]
-            gross_pnl, net_pnl, costs = calc_pnl(pos["entry_price"], fallback_price, pos["qty"])
+            gross_pnl, net_pnl, costs = calc_pnl(
+                pos["entry_price"], fallback_price, pos["qty"],
+                direction=pos.get("direction", "long"),
+            )
             now = datetime.now(tz=timezone.utc)
             await positions(db).update_one(
                 {"_id": pos["_id"]},

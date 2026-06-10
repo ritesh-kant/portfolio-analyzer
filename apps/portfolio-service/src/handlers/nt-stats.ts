@@ -27,7 +27,9 @@ export const handler = requireAuth(async () => {
 
   const unrealizedPnl = open.reduce((s, p) => {
     if (p.current_price == null) return s;
-    return s + (p.current_price - p.entry_price) * p.qty;
+    // Shorts profit when price falls; positions without direction are longs.
+    const sign = p.direction === 'short' ? -1 : 1;
+    return s + sign * (p.current_price - p.entry_price) * p.qty;
   }, 0);
 
   const wins = closed.filter((p) => (p.net_pnl ?? 0) > 0);
