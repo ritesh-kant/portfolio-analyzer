@@ -238,6 +238,17 @@ function SignalBadge({ signal }: { signal: NtSignal['signal'] | NtPosition['sign
   );
 }
 
+// Shorts are the exception in a mostly-long book — flag them explicitly and
+// leave longs unbadged so the table stays clean. Absent direction = long.
+function DirectionBadge({ direction }: { direction?: NtPosition['direction'] }) {
+  if (direction !== 'short') return null;
+  return (
+    <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">
+      ▼ SHORT
+    </span>
+  );
+}
+
 function ExitBadge({ reason }: { reason: NtPosition['exit_reason'] }) {
   if (!reason) return null;
   const map = {
@@ -423,7 +434,10 @@ function PipelineRunModal({ run, onClose }: { run: PipelineRun; onClose: () => v
                 return (
                   <div key={p._id} className="rounded-xl border border-black/5 px-4 py-3 space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="font-semibold text-sm">{p.symbol}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold text-sm">{p.symbol}</span>
+                        <DirectionBadge direction={p.direction} />
+                      </div>
                       {isOpen ? (
                         <span className="text-[10px] rounded-full bg-sky-100 text-sky-700 px-2 py-0.5 font-bold">open</span>
                       ) : (
@@ -1095,7 +1109,7 @@ function SignalFunnelPanel({
       label: 'Gate-passed',
       value: gatePassed,
       pct: gateRate,
-      tip: 'Signals that passed all conviction + regime gates: bullish direction, non-minor magnitude, sufficient source count, Nifty/VIX within bounds, and portfolio capacity available.',
+      tip: 'Signals that passed all conviction + regime gates: a tradable direction (bullish→long or bearish→short), non-minor magnitude, sufficient source count, Nifty/VIX within bounds, and portfolio capacity available.',
     },
     {
       label: 'Traded',
@@ -1372,8 +1386,11 @@ function PositionsTab({ positions }: { positions: NtPosition[] }) {
                     className="border-b border-black/5 last:border-0 hover:bg-black/[0.02]"
                   >
                     <td className="px-4 py-3">
-                      <span className="font-display font-bold">{p.symbol}</span>
-                      <span className="ml-1.5 text-xs text-ink/40">{p.sector}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-display font-bold">{p.symbol}</span>
+                        <DirectionBadge direction={p.direction} />
+                      </div>
+                      <span className="text-xs text-ink/40">{p.sector}</span>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col gap-0.5">
@@ -1401,6 +1418,7 @@ function PositionsTab({ positions }: { positions: NtPosition[] }) {
                         <td className="px-4 py-3 text-right tabular-nums text-rose-600">
                           {fmtPrice(p.trailing_sl)}
                           <span className="ml-0.5 text-[10px] text-ink/40">
+                            {p.trailing_sl >= p.entry_price ? '+' : ''}
                             {(((p.trailing_sl - p.entry_price) / p.entry_price) * 100).toFixed(1)}%
                           </span>
                         </td>
@@ -1903,6 +1921,7 @@ function OverviewTab({
                       <td className="py-2.5 pr-4">
                         <div className="flex items-center gap-1.5">
                           <span className="font-display font-bold">{p.symbol}</span>
+                          <DirectionBadge direction={p.direction} />
                           <SignalBadge signal={p.signal} />
                         </div>
                       </td>
