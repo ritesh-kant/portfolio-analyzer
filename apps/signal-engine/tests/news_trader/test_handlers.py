@@ -68,6 +68,55 @@ class TestTrailingSLInSlMonitor:
         assert result == "target_hit"
 
 
+class TestMonitorPositionNaiveDatetime:
+    """entry_at comes back from Mongo as a NAIVE UTC datetime. The held_minutes
+    computation must not raise (offset-naive vs offset-aware TypeError) — this
+    exact bug silently killed every monitor cycle on 2026-06-11."""
+
+    @pytest.mark.asyncio
+    @patch("handlers.sl_monitor.alert_trade_closed")
+    @patch("handlers.sl_monitor.get_db")
+    async def test_naive_entry_at_time_stop_fires(self, mock_get_db, mock_alert):
+        from datetime import timedelta
+        from bson import ObjectId
+        from handlers.sl_monitor import _monitor_position
+
+        mock_db = MagicMock()
+        mock_pos_coll = MagicMock()
+        mock_pos_coll.update_one = AsyncMock()
+        mock_db.__getitem__ = MagicMock(return_value=mock_pos_coll)
+        mock_get_db.return_value = mock_db
+
+        pos = {
+            "_id": ObjectId(),
+            "symbol": "TESTSTOCK",
+            "paper": True,
+            "entry_price": 100.0,
+            "current_price": 100.5,
+            "highest_price": 100.5,
+            "lowest_price": 99.8,
+            "trailing_sl": 97.0,
+            "target_price": 101.0,
+            "qty": 10,
+            # naive, 2 hours old — past the 90-min time-stop
+            "entry_at": datetime.utcnow() - timedelta(minutes=120),
+            "initial_sl_pct_used": 0.03,
+            "trail_sl_pct_used": 0.015,
+            "trail_activate_pct_used": 0.02,
+            "max_hold_minutes_used": 90,
+            "force_close_eod_used": True,
+        }
+
+        settings = MagicMock()
+        settings.nt_max_hold_days = 5
+        settings.nt_max_hold_minutes = 90
+        settings.telegram_bot_token = ""
+        settings.telegram_chat_id = ""
+
+        result = await _monitor_position(pos, settings, price=100.5)
+        assert result == "closed:time_stop"
+
+
 # ---------------------------------------------------------------------------
 # news_ingester handler (mocked scrapers + mocked DB)
 # ---------------------------------------------------------------------------

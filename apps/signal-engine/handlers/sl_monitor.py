@@ -139,7 +139,11 @@ async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50
     # Check exit — use params frozen at entry for the same reason as stop params.
     max_hold_days = pos.get("max_hold_days_used") or settings.nt_max_hold_days
     max_hold_minutes = pos.get("max_hold_minutes_used") or settings.nt_max_hold_minutes
-    held_minutes = (datetime.now(tz=timezone.utc) - pos["entry_at"]).total_seconds() / 60
+    # Motor returns BSON dates as naive UTC datetimes; normalize before subtracting.
+    entry_at: datetime = pos["entry_at"]
+    if entry_at.tzinfo is None:
+        entry_at = entry_at.replace(tzinfo=timezone.utc)
+    held_minutes = (datetime.now(tz=timezone.utc) - entry_at).total_seconds() / 60
     exit_reason = check_exit(
         current_price=price,
         trailing_sl=new_sl,
