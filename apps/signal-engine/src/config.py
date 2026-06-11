@@ -101,6 +101,12 @@ class Settings(BaseSettings):
                                               #   EOD force-close at 15:15 IST lands before
                                               #   Zerodha's MIS auto square-off (~15:20), so no
                                               #   overnight short exposure.
+    nt_nifty50_exclusion: bool = True         # skip NIFTY50 large-caps entirely.
+                                              #   BT5 (2026-06-10, n=33): large-caps had
+                                              #   NEGATIVE GROSS P&L (−₹363 on 7 trades,
+                                              #   14% wins) — news is priced in before our
+                                              #   15-min delayed entry, no drift left to
+                                              #   capture. Non-large-caps were gross-positive.
     nt_news_delay_seconds: int = 900          # SQS delay after classification (15 min)
     # Hard cutoff: no new entries after this IST minute-of-day (870 = 14:30).
     # Primary control is the EventBridge schedule (ingester stops at 08:45 UTC =

@@ -29,6 +29,7 @@ from src.db.client import get_db
 from src.news_trader.db import ensure_indexes, positions, signals
 from src.news_trader.telegram import alert_trade_entered
 from src.news_trader.trailing_sl import calc_qty, initial_stop
+from src.news_trader.nifty50 import NIFTY_50
 from src.news_trader.nifty500 import NIFTY_500
 
 logging.getLogger().setLevel(logging.INFO)
@@ -215,6 +216,21 @@ async def _process_signal(
     if not candidates:
         logger.info("[TRADE] skip signal_id=%s — no Nifty 500 stocks after universe filter", signal_id)
         return 0, "no_nifty500_stocks"
+
+    # Filter E — NIFTY50 large-cap exclusion (BT5, 2026-06-10, n=33 closed).
+    # Large-caps had NEGATIVE GROSS P&L (−₹363 on 7 trades, 14% wins): the news
+    # is fully priced in before our 15-min delayed entry, so there is no drift
+    # left to capture. Non-large-caps were gross-positive over the same window.
+    # Excluded signals stay visible in the funnel via the gate_result below, so
+    # they double as a zero-risk counterfactual cohort for forward validation.
+    if settings.nt_nifty50_exclusion:
+        largecaps = [s for s in candidates if s in NIFTY_50]
+        candidates = [s for s in candidates if s not in NIFTY_50]
+        if largecaps:
+            logger.info("[TRADE] signal_id=%s dropped NIFTY50 large-caps: %s", signal_id, largecaps)
+        if not candidates:
+            logger.info("[TRADE] skip signal_id=%s — all stocks are NIFTY50 large-caps", signal_id)
+            return 0, "nifty50_excluded"
 
     logger.info("[TRADE] evaluating %d stock(s): %s", len(candidates), candidates)
 

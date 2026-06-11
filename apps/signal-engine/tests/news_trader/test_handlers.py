@@ -615,10 +615,13 @@ class TestTradeDecisionHandler:
     # get_ltps / get_market_snapshot / fetch_nifty_vix_sync are lazy-imported inside
     # the handler (yfinance/pandas cost), so they must be patched at their source
     # modules — they are not module-level attributes of handlers.trade_decision.
+    # CANBK not HDFCBANK: the position symbol must be in NIFTY_500 but NOT in
+    # NIFTY_50 — the large-cap exclusion (Filter E, default-on) would otherwise
+    # reject the entry before it reaches the insert.
     @patch("src.scrapers.nse_market.fetch_nifty_vix_sync", return_value={})
     @patch("src.news_trader.prices.get_market_snapshot", return_value={"nifty50": None, "sector_index": None})
     @patch("handlers.trade_decision.get_db")
-    @patch("src.news_trader.prices.get_ltps", return_value={"HDFCBANK": 1500.0})
+    @patch("src.news_trader.prices.get_ltps", return_value={"CANBK": 1500.0})
     @patch("handlers.trade_decision.alert_trade_entered")
     def test_opens_position_in_paper_mode(self, mock_alert, mock_price, mock_get_db, mock_snapshot, _regime):
         from bson import ObjectId
@@ -626,7 +629,7 @@ class TestTradeDecisionHandler:
         signal_id = str(ObjectId())
         signal_doc = {
             "_id": ObjectId(signal_id),
-            "stocks": ["HDFCBANK"],
+            "stocks": ["CANBK"],
             "signal": "bullish",
             "sector": "Banking",
             "confidence": "high",
@@ -677,6 +680,7 @@ class TestTradeDecisionHandler:
             s.nt_trail_sl_pct = 0.015
             s.nt_trail_activate_pct = 0.02
             s.nt_target_pct = 0.08
+            s.nt_nifty50_exclusion = True     # default-on; CANBK is not NIFTY50 so passes
             s.nt_bypass_market_hours = True   # skip entry-cutoff gate in tests
             s.nt_entry_cutoff_ist = 870
             s.telegram_bot_token = ""
@@ -747,3 +751,143 @@ class TestTradeDecisionHandler:
         assert result["positions_opened"] == 0
         mock_pos_coll.insert_one.assert_not_called()
         mock_alert.assert_not_called()
+
+
+class TestNifty50Exclusion:
+    """Filter E — NIFTY50 large-cap exclusion (BT5: large-caps have negative
+    gross P&L; news is priced in before the 15-min delayed entry)."""
+
+    @staticmethod
+    def _mock_db(signal_doc):
+        mock_db = MagicMock()
+        mock_pos_coll = MagicMock()
+        mock_pos_coll.create_index = AsyncMock()
+        mock_pos_coll.count_documents = AsyncMock(return_value=0)
+        mock_pos_coll.find_one = AsyncMock(return_value=None)
+        mock_pos_coll.insert_one = AsyncMock(return_value=MagicMock(inserted_id=None))
+        _agg_cursor = MagicMock()
+        _agg_cursor.to_list = AsyncMock(return_value=[])
+        mock_pos_coll.aggregate = MagicMock(return_value=_agg_cursor)
+
+        mock_sig_coll = MagicMock()
+        mock_sig_coll.create_index = AsyncMock()
+        mock_sig_coll.find_one = AsyncMock(return_value=signal_doc)
+        mock_sig_coll.update_one = AsyncMock()
+
+        def _get_coll(name):
+            if name == "nt_positions":
+                return mock_pos_coll
+            if name == "nt_signals":
+                return mock_sig_coll
+            c = MagicMock()
+            c.create_index = AsyncMock()
+            return c
+
+        mock_db.__getitem__ = MagicMock(side_effect=_get_coll)
+        return mock_db, mock_pos_coll, mock_sig_coll
+
+    @staticmethod
+    def _signal_doc(stocks):
+        from bson import ObjectId
+
+        return {
+            "_id": ObjectId(),
+            "stocks": stocks,
+            "signal": "bullish",
+            "sector": "Energy",
+            "confidence": "high",
+            "magnitude": "moderate",
+            "reasoning": "test",
+            "acted_on": False,
+        }
+
+    @staticmethod
+    def _configure_settings(s, exclusion: bool):
+        s.trading_mode = "paper"
+        s.nt_max_positions = 10
+        s.nt_max_stocks_per_signal = 2
+        s.nt_max_positions_per_sector = 2
+        s.nt_total_capital_inr = 100_000.0
+        s.nt_sl_pct = 0.015
+        s.nt_initial_sl_pct = 0.03
+        s.nt_trail_sl_pct = 0.015
+        s.nt_trail_activate_pct = 0.02
+        s.nt_target_pct = 0.01
+        s.nt_nifty50_exclusion = exclusion
+        s.nt_bypass_market_hours = True
+        s.nt_entry_cutoff_ist = 870
+        s.telegram_bot_token = ""
+        s.telegram_chat_id = ""
+
+    @patch("src.scrapers.nse_market.fetch_nifty_vix_sync", return_value={})
+    @patch("src.news_trader.prices.get_market_snapshot", return_value={"nifty50": None, "sector_index": None})
+    @patch("handlers.trade_decision.get_db")
+    @patch("src.news_trader.prices.get_ltps", return_value={"RELIANCE": 1500.0})
+    @patch("handlers.trade_decision.alert_trade_entered")
+    def test_all_nifty50_signal_rejected_with_gate_reason(
+        self, mock_alert, mock_price, mock_get_db, mock_snapshot, _regime
+    ):
+        signal_doc = self._signal_doc(["RELIANCE"])
+        mock_db, mock_pos_coll, mock_sig_coll = self._mock_db(signal_doc)
+        mock_get_db.return_value = mock_db
+
+        from handlers.trade_decision import handler
+        event = _make_sqs_event([{"signal_id": str(signal_doc["_id"])}])
+
+        with patch("handlers.trade_decision.Settings") as MockSettings:
+            self._configure_settings(MockSettings.return_value, exclusion=True)
+            result = handler(event, None)
+
+        assert result["positions_opened"] == 0
+        mock_pos_coll.insert_one.assert_not_called()
+        # Rejection must be visible in the signal funnel as its own gate reason —
+        # excluded signals are the zero-risk counterfactual cohort for validation.
+        update = mock_sig_coll.update_one.call_args.args[1]
+        assert update["$set"]["gate_result"] == "nifty50_excluded"
+
+    @patch("src.scrapers.nse_market.fetch_nifty_vix_sync", return_value={})
+    @patch("src.news_trader.prices.get_market_snapshot", return_value={"nifty50": None, "sector_index": None})
+    @patch("handlers.trade_decision.get_db")
+    @patch("src.news_trader.prices.get_ltps", return_value={"ONGC": 250.0, "OIL": 450.0})
+    @patch("handlers.trade_decision.alert_trade_entered")
+    def test_mixed_signal_trades_only_non_nifty50(
+        self, mock_alert, mock_price, mock_get_db, mock_snapshot, _regime
+    ):
+        # ONGC is NIFTY50, OIL is not — only OIL should fill.
+        signal_doc = self._signal_doc(["ONGC", "OIL"])
+        mock_db, mock_pos_coll, _ = self._mock_db(signal_doc)
+        mock_get_db.return_value = mock_db
+
+        from handlers.trade_decision import handler
+        event = _make_sqs_event([{"signal_id": str(signal_doc["_id"])}])
+
+        with patch("handlers.trade_decision.Settings") as MockSettings:
+            self._configure_settings(MockSettings.return_value, exclusion=True)
+            result = handler(event, None)
+
+        assert result["positions_opened"] == 1
+        inserted = mock_pos_coll.insert_one.call_args.args[0]
+        assert inserted["symbol"] == "OIL"
+
+    @patch("src.scrapers.nse_market.fetch_nifty_vix_sync", return_value={})
+    @patch("src.news_trader.prices.get_market_snapshot", return_value={"nifty50": None, "sector_index": None})
+    @patch("handlers.trade_decision.get_db")
+    @patch("src.news_trader.prices.get_ltps", return_value={"RELIANCE": 1500.0})
+    @patch("handlers.trade_decision.alert_trade_entered")
+    def test_flag_off_allows_nifty50(
+        self, mock_alert, mock_price, mock_get_db, mock_snapshot, _regime
+    ):
+        signal_doc = self._signal_doc(["RELIANCE"])
+        mock_db, mock_pos_coll, _ = self._mock_db(signal_doc)
+        mock_get_db.return_value = mock_db
+
+        from handlers.trade_decision import handler
+        event = _make_sqs_event([{"signal_id": str(signal_doc["_id"])}])
+
+        with patch("handlers.trade_decision.Settings") as MockSettings:
+            self._configure_settings(MockSettings.return_value, exclusion=False)
+            result = handler(event, None)
+
+        assert result["positions_opened"] == 1
+        inserted = mock_pos_coll.insert_one.call_args.args[0]
+        assert inserted["symbol"] == "RELIANCE"
