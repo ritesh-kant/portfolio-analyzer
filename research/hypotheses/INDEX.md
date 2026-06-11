@@ -10,6 +10,10 @@
 | [qf-momentum-spread](2026-05-26-qf-momentum-spread.md)               | qf_momentum_r | killed | 2026-05-26 | 2026-05-26 | KILL (holdout) — Sharpe −0.325, MaxDD −36.4%; cross-sectional spread survived (DSR 0.598) but absolute return inverted |
 
 | [low-volatility](2026-05-26-low-volatility.md) | low_vol | killed | 2026-05-26 | 2026-05-26 | KILL — Strategy Sharpe 2.175 < Anti Sharpe 3.201; high-vol beats low-vol in bull-market dev period by design |
+| [news-shorts-replay](2026-06-11-news-shorts-replay.md) | news_trader_shorts | killed | 2026-06-11 | 2026-06-11 | KILL — gross +0.045%/trade < +0.15% marginality floor with anti-strategy also gross-negative (= noise, no bearish drift); cost-stress −₹24/trade also breaches −₹10 viability floor |
+| [largecap-fade](2026-06-11-largecap-fade.md) | news_trader_largecap_fade | killed | 2026-06-11 | 2026-06-11 | KILL — fade gross −0.026%/trade ≤ 0; momentum control gross-POSITIVE (+0.019%) voids overreaction story; large-caps are simply efficient both directions |
+| [bullish-signal-replay](2026-06-11-bullish-signal-replay.md) | news_trader_long | killed | 2026-06-11 | 2026-06-11 | KILL — cohort gross −0.251%/trade (kill line +0.10%); never-traded subset −0.296%; majors WORSE than moderates; core selectivity has no drift on real bars — prior positive readings were censored/delayed-quote artifacts |
+| [limit-entry](2026-06-11-limit-entry.md) | news_trader_limit_entry | shipped | 2026-06-11 | 2026-06-11 | SHIP — limit net −₹1,930 vs market −₹2,273 (+₹343), 96% fill, missed trades were losers; adopt for live Kite order design (execution-layer only; cannot rescue a negative-gross signal) |
 
 ## Status legend
 
