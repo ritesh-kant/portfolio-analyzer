@@ -15,10 +15,20 @@ export const handler = requireAuth(async (event) => {
   await connect();
   const db = mongoose.connection.db!;
   const col = db.collection('nt_signals');
+
+  // Optional rolling window (?days=N): the funnel counts must reflect the window,
+  // not just the loaded page — ~400 signals/day means client-side counting would
+  // badly undercount. So filter both the docs query and the counts server-side.
+  const days = Number(event.queryStringParameters?.days);
+  const dateFilter: Record<string, unknown> =
+    Number.isFinite(days) && days > 0
+      ? { created_at: { $gte: new Date(Date.now() - days * 86_400_000) } }
+      : {};
+
   const [docs, total, gatePassed] = await Promise.all([
-    col.find({}).sort({ created_at: -1 }).limit(limit).toArray(),
-    col.countDocuments(),
-    col.countDocuments({ gate_result: 'ok' }),
+    col.find(dateFilter).sort({ created_at: -1 }).limit(limit).toArray(),
+    col.countDocuments(dateFilter),
+    col.countDocuments({ ...dateFilter, gate_result: 'ok' }),
   ]);
   return json(200, {
     signals: docs.map((d) => ({ ...d, _id: String(d._id) })),

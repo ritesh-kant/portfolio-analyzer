@@ -138,18 +138,29 @@ export interface NtStats {
 
 // ─── API calls ────────────────────────────────────────────────────────────────
 
-export const fetchPositions = (status?: 'open' | 'closed' | 'all') => {
-  const qs = status ? `?status=${status}` : '';
-  return get<{ positions: NtPosition[]; count: number }>(`/nt/positions${qs}`);
+// `days` (when > 0) applies a rolling N×24h window. It restricts closed/realized
+// data only — open positions are always returned as the current book.
+export const fetchPositions = (status?: 'open' | 'closed' | 'all', days?: number) => {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (days && days > 0) params.set('days', String(days));
+  const qs = params.toString();
+  return get<{ positions: NtPosition[]; count: number }>(`/nt/positions${qs ? `?${qs}` : ''}`);
 };
 
-export const fetchSignals = (limit = 50) =>
-  get<{ signals: NtSignal[]; count: number; gate_passed_count: number }>(`/nt/signals?limit=${limit}`);
+export const fetchSignals = (limit = 50, days?: number) => {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (days && days > 0) params.set('days', String(days));
+  return get<{ signals: NtSignal[]; count: number; gate_passed_count: number }>(
+    `/nt/signals?${params.toString()}`,
+  );
+};
 
 export const fetchNews = (limit = 30) =>
   get<{ articles: NtNews[]; count: number }>(`/nt/news?limit=${limit}`);
 
-export const fetchStats = () => get<NtStats>('/nt/stats');
+export const fetchStats = (days?: number) =>
+  get<NtStats>(days && days > 0 ? `/nt/stats?days=${days}` : '/nt/stats');
 
 export type StageStatus = 'pending' | 'running' | 'waiting' | 'done' | 'skipped' | 'failed';
 

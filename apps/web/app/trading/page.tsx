@@ -52,11 +52,6 @@ function fmtAgo(iso: string): string {
   return `${days} day${days === 1 ? '' : 's'} ago`;
 }
 
-function holdDays(entryIso: string, exitIso?: string): number {
-  const end = exitIso ? new Date(exitIso) : new Date();
-  return Math.floor((end.getTime() - new Date(entryIso).getTime()) / 86_400_000);
-}
-
 function fmtPrice(n: number) {
   return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 }
@@ -209,6 +204,41 @@ function SubTab({
     >
       {children}
     </button>
+  );
+}
+
+// ─── Time-range filter ────────────────────────────────────────────────────────
+// Rolling N×24h windows. `days: null` = no window (all-time). The window restricts
+// closed/realized metrics + signal counts server-side; open positions stay current.
+type RangeId = 'all' | '7d' | '3d' | '1d';
+const RANGES: { id: RangeId; label: string; days: number | null }[] = [
+  { id: 'all', label: 'All', days: null },
+  { id: '7d', label: '7D', days: 7 },
+  { id: '3d', label: '3D', days: 3 },
+  { id: '1d', label: '1D', days: 1 },
+];
+const rangeDays = (id: RangeId): number | null =>
+  RANGES.find((r) => r.id === id)?.days ?? null;
+
+function RangeFilter({ range, onChange }: { range: RangeId; onChange: (r: RangeId) => void }) {
+  return (
+    <div
+      className="inline-flex items-center gap-0.5 rounded-lg border border-black/10 bg-panel p-0.5 shadow-sm"
+      title="Filter realized metrics & signals to a rolling window"
+    >
+      {RANGES.map(({ id, label }) => (
+        <button
+          key={id}
+          onClick={() => onChange(id)}
+          className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+            range === id ? 'bg-accent text-white shadow-sm' : 'text-ink/50 hover:text-ink/80'
+          }`}
+          aria-pressed={range === id}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -1221,13 +1251,25 @@ function RMultiplePanel({ positions }: { positions: NtPosition[] }) {
 
 // ─── Stats row ────────────────────────────────────────────────────────────────
 
+const EXIT_BAR_COLOR: Record<string, string> = {
+  sl_hit: 'bg-rose-400',
+  target_hit: 'bg-emerald-400',
+  time_stop: 'bg-sky-400',
+  eod_close: 'bg-slate-400',
+  day5: 'bg-amber-400',
+};
+
 function StatsRow({ stats }: { stats: NtStats | null }) {
   if (!stats) return null;
 
   const totalPnl = stats.total_realized_net_pnl + (stats.has_live_prices ? stats.unrealized_pnl : 0);
+  const exitRows = Object.entries(stats.by_exit_reason ?? {})
+    .map(([reason, d]) => ({ reason, count: d.count, pnl: d.total_net_pnl }))
+    .sort((a, b) => b.count - a.count);
 
   return (
-    <div className="metric-chip grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="metric-chip space-y-4">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-5">
       <div>
         <p className="text-xs text-ink/50">Open Positions</p>
         <p className="mt-0.5 font-display text-xl font-bold">{stats.open_count}</p>
@@ -1290,24 +1332,39 @@ function StatsRow({ stats }: { stats: NtStats | null }) {
         )}
       </div>
 
-      <div>
-        <p className="text-xs text-ink/50">By Exit</p>
-        <div className="mt-1 space-y-0.5">
-          {Object.entries(stats.by_exit_reason ?? {}).map(([reason, d]) => (
-            <div key={reason} className="flex items-center justify-between gap-2 text-xs">
-              <ExitBadge reason={reason as NtPosition['exit_reason']} />
-              <span
-                className={`tabular-nums font-semibold ${pnlColor(d.total_net_pnl)}`}
-              >
-                {d.count} ({pnlSign(d.total_net_pnl)}{formatCurrency(d.total_net_pnl)})
-              </span>
-            </div>
-          ))}
-          {Object.keys(stats.by_exit_reason ?? {}).length === 0 && (
-            <p className="text-xs text-ink/30">no closed trades</p>
-          )}
-        </div>
       </div>
+
+      {/* Exit breakdown — proportion bar + legend, given a full-width row of its own */}
+      {exitRows.length > 0 && (
+        <div className="border-t border-black/5 pt-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold text-ink/50">Exit Breakdown</p>
+            <p className="text-[10px] text-ink/40">{stats.closed_count} closed</p>
+          </div>
+          <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-black/5">
+            {exitRows.map(({ reason, count }) => (
+              <div
+                key={reason}
+                className={EXIT_BAR_COLOR[reason] ?? 'bg-black/20'}
+                style={{ width: `${(count / stats.closed_count) * 100}%` }}
+                title={`${reason.replace(/_/g, ' ')}: ${count}`}
+              />
+            ))}
+          </div>
+          <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-2">
+            {exitRows.map(({ reason, count, pnl }) => (
+              <div key={reason} className="flex items-center gap-1.5 text-xs">
+                <ExitBadge reason={reason as NtPosition['exit_reason']} />
+                <span className="tabular-nums text-ink/50">{count}</span>
+                <span className="text-ink/20">·</span>
+                <span className={`tabular-nums font-semibold ${pnlColor(pnl)}`}>
+                  {pnlSign(pnl)}{formatCurrency(pnl)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1318,7 +1375,13 @@ type PosFilter = 'open' | 'closed' | 'all';
 
 function PositionsTab({ positions }: { positions: NtPosition[] }) {
   const [sub, setSub] = useState<PosFilter>('open');
+  // Sort by order (entry) date; default newest-first to match the API ordering.
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const filtered = sub === 'all' ? positions : positions.filter((p) => p.status === sub);
+  const sorted = [...filtered].sort((a, b) => {
+    const cmp = new Date(a.entry_at).getTime() - new Date(b.entry_at).getTime();
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
   const openCount = positions.filter((p) => p.status === 'open').length;
   const closedCount = positions.filter((p) => p.status === 'closed').length;
 
@@ -1367,18 +1430,24 @@ function PositionsTab({ positions }: { positions: NtPosition[] }) {
                   </>
                 )}
                 <th className="px-4 py-3 text-right font-semibold">Qty</th>
-                <th className="px-4 py-3 text-right font-semibold">Days</th>
+                <th
+                  className="cursor-pointer select-none whitespace-nowrap px-4 py-3 text-right font-semibold transition-colors hover:text-ink"
+                  onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                  title="Sort by order date"
+                >
+                  Order Date
+                  <span className="ml-1 text-accent">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                </th>
                 {sub === 'all' && <th className="px-4 py-3 text-left font-semibold">Status</th>}
               </tr>
             </thead>
             <tbody>
-              {filtered.map((p) => {
+              {sorted.map((p) => {
                 const dirSign = p.direction === 'short' ? -1 : 1;
                 const unrealPnl =
                   p.current_price != null
                     ? dirSign * (p.current_price - p.entry_price) * p.qty
                     : null;
-                const days = holdDays(p.entry_at, p.exit_at);
 
                 return (
                   <tr
@@ -1466,7 +1535,9 @@ function PositionsTab({ positions }: { positions: NtPosition[] }) {
                     )}
 
                     <td className="px-4 py-3 text-right tabular-nums text-ink/60">{p.qty}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-ink/60">{days}d</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-ink/60">
+                      {fmtDate(p.entry_at)}
+                    </td>
 
                     {sub === 'all' && (
                       <td className="px-4 py-3">
@@ -1975,6 +2046,11 @@ type TabId = 'overview' | 'positions' | 'signals' | 'news';
 
 export default function TradingPage() {
   const [tab, setTab] = useState<TabId>('overview');
+  const [range, setRange] = useState<RangeId>('all');
+  // loadAll runs from stable intervals/callbacks, so read the live range via a ref
+  // rather than recreating the polling timers whenever the window changes.
+  const rangeRef = useRef<RangeId>('all');
+  rangeRef.current = range;
 
   const [positions, setPositions] = useState<NtPosition[]>([]);
   const [signals, setSignals] = useState<NtSignal[]>([]);
@@ -2014,11 +2090,12 @@ export default function TradingPage() {
 
   const loadAll = useCallback(async () => {
     try {
+      const days = rangeDays(rangeRef.current) ?? undefined;
       const [pRes, sRes, nRes, stRes] = await Promise.allSettled([
-        fetchPositions('all'),
-        fetchSignals(100),
+        fetchPositions('all', days),
+        fetchSignals(100, days),
         fetchNews(50),
-        fetchStats(),
+        fetchStats(days),
       ]);
       if (pRes.status === 'fulfilled') setPositions(pRes.value.positions ?? []);
       if (sRes.status === 'fulfilled') { setSignals(sRes.value.signals ?? []); setSignalsTotal(sRes.value.count ?? 0); setGatePassedTotal(sRes.value.gate_passed_count ?? 0); }
@@ -2056,6 +2133,16 @@ export default function TradingPage() {
       if (statusPollRef.current) clearInterval(statusPollRef.current);
     };
   }, [loadAll, loadPipelineStatus, startStatusPoll]);
+
+  // Re-fetch when the time window changes (mount load is handled above).
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
+    void loadAll();
+  }, [range, loadAll]);
 
   async function handleTrigger() {
     setTriggering(true);
@@ -2121,10 +2208,18 @@ export default function TradingPage() {
             </button>
           </div>
         </div>
-        <p className="mt-0.5 text-xs text-ink/50">
-          Paper · NSE/BSE · Event-driven · Trailing SL{' '}
-          {pipelineStatus?.run && <LastRunBadge triggeredAt={pipelineStatus.run.triggered_at} />}
-        </p>
+        <div className="mt-0.5 flex items-center justify-between gap-2">
+          <p className="min-w-0 text-xs text-ink/50">
+            Paper<span className="hidden sm:inline"> · NSE/BSE · Event-driven · Trailing SL</span>{' '}
+            {pipelineStatus?.run && <LastRunBadge triggeredAt={pipelineStatus.run.triggered_at} />}
+          </p>
+          {/* Time-range filter — windows realized metrics, signal counts & closed orders */}
+          {tab !== 'news' && (
+            <div className="shrink-0">
+              <RangeFilter range={range} onChange={setRange} />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Trigger feedback */}

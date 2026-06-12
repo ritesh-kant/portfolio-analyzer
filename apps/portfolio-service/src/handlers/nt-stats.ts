@@ -10,17 +10,21 @@ async function connect() {
   await mongoose.connect(config.mongodbUri, { serverSelectionTimeoutMS: 3000 });
 }
 
-export const handler = requireAuth(async () => {
+export const handler = requireAuth(async (event) => {
   await connect();
   const db = mongoose.connection.db!;
 
+  // Optional rolling window (?days=N): restricts the *closed/realized* metrics to
+  // trades exited within the last N×24h. Open positions are always current state.
+  const days = Number(event.queryStringParameters?.days);
+  const closedFilter: Record<string, unknown> = { status: 'closed' };
+  if (Number.isFinite(days) && days > 0) {
+    closedFilter.exit_at = { $gte: new Date(Date.now() - days * 86_400_000) };
+  }
+
   const [open, closed] = await Promise.all([
     db.collection('nt_positions').find({ status: 'open' }).toArray(),
-    db
-      .collection('nt_positions')
-      .find({ status: 'closed' })
-      .sort({ exit_at: 1 })
-      .toArray(),
+    db.collection('nt_positions').find(closedFilter).sort({ exit_at: 1 }).toArray(),
   ]);
 
   const totalInvestedInr = open.reduce((s, p) => s + (p.entry_value ?? p.entry_price * p.qty), 0);

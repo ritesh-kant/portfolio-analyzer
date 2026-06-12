@@ -14,7 +14,21 @@ export const handler = requireAuth(async (event) => {
   const status = event.queryStringParameters?.status ?? 'open';
   await connect();
   const db = mongoose.connection.db!;
-  const filter = status === 'all' ? {} : { status };
+
+  // Optional rolling window (?days=N) applies only to closed trades (by exit_at);
+  // open positions are the current book and are never windowed out.
+  const days = Number(event.queryStringParameters?.days);
+  const cutoff =
+    Number.isFinite(days) && days > 0 ? new Date(Date.now() - days * 86_400_000) : null;
+  const closedFilter = cutoff
+    ? { status: 'closed', exit_at: { $gte: cutoff } }
+    : { status: 'closed' };
+
+  let filter: Record<string, unknown>;
+  if (status === 'open') filter = { status: 'open' };
+  else if (status === 'closed') filter = closedFilter;
+  else filter = cutoff ? { $or: [{ status: 'open' }, closedFilter] } : {};
+
   const docs = await db
     .collection('nt_positions')
     .find(filter)
