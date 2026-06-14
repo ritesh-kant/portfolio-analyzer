@@ -17,6 +17,12 @@ def paper_positions(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:
     return db["opt_paper_positions"]
 
 
+def eod_markers(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:
+    """Once-per-day EOD-summary guard. _id is the IST date string (natural
+    uniqueness), so a duplicate-key insert means the summary already fired."""
+    return db["opt_eod_markers"]
+
+
 async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await chain_snapshots(db).create_index(
         [("signal_id", 1), ("snapshot_at", 1)], background=True

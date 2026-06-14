@@ -20,6 +20,7 @@ from src.options_trader.paper_straddle import (
     build_entry_doc,
     nearest_monthly_expiry,
 )
+from src.options_trader.telegram import alert_straddle_entered
 
 logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
@@ -139,6 +140,18 @@ async def _run(cfg: Settings) -> None:
                     "opt_trade_decision: opened straddle sym=%s strike=%.1f "
                     "entry_prem=%.2f lots=%d exp=%s",
                     sym, doc["strike"], doc["entry_total_prem"], lots, exp_date.isoformat()
+                )
+                alert_straddle_entered(
+                    bot_token=cfg.telegram_bot_token,
+                    chat_id=cfg.telegram_chat_id,
+                    symbol=sym,
+                    signal_type=doc["signal_type"],
+                    strike=doc["strike"],
+                    expiry=exp_date.isoformat(),
+                    lots=lots,
+                    lot_size=ls,
+                    entry_total_prem=doc["entry_total_prem"],
+                    spot=spot,
                 )
             except Exception as exc:
                 logger.warning("opt_trade_decision: insert_failed sym=%s err=%s", sym, exc)
