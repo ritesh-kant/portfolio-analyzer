@@ -50,7 +50,12 @@ def _is_market_hours(cfg: Settings) -> bool:
 
 async def _run(cfg: Settings) -> None:
     db = await get_db()
-    await opt_db.ensure_indexes(db)
+    try:
+        await opt_db.ensure_indexes(db)
+    except Exception as exc:
+        # Index setup must never take down the run — app-level dedup (find_one
+        # below) still protects against duplicate positions.
+        logger.warning("opt_trade_decision: ensure_indexes failed (continuing): %s", exc)
 
     # Find signals from the last signal window (last 30 min after 15-min entry delay)
     since = datetime.now(tz=timezone.utc) - timedelta(minutes=30)

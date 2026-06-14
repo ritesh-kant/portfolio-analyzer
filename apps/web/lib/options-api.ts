@@ -92,6 +92,8 @@ export interface ChainSnapshot {
   _id: string;
   symbol: string;
   signal_id: string;
+  signal_created_at?: string;
+  signal_type?: 'bullish' | 'bearish';
   snapshot_at: string;
   spot_price: number;
   atm_strike: number;
