@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useVisibilityRefresh } from '../../lib/use-visibility-refresh';
+import { useMarketRefresh } from '../../lib/use-market-refresh';
 import {
   LineChart,
   Line,
@@ -344,7 +344,7 @@ export default function OptionsPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-  useVisibilityRefresh(load, 30_000);
+  const { marketOpen } = useMarketRefresh(load, 30_000);
 
   const open = positions.filter((p) => p.status === 'open');
   const closed = positions.filter((p) => p.status === 'closed');
@@ -381,7 +381,7 @@ export default function OptionsPage() {
               ● Active
             </span>
           )}
-          <span className="text-xs text-ink/40">auto-refresh 30s</span>
+          <span className="text-xs text-ink/40">{marketOpen ? 'auto-refresh 30s' : 'market closed'}</span>
         </div>
       </div>
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
-import { useVisibilityRefresh } from '../../lib/use-visibility-refresh';
+import { useMarketRefresh } from '../../lib/use-market-refresh';
 import { createPortal } from 'react-dom';
 import {
   LineChart,
@@ -2131,8 +2131,9 @@ export default function TradingPage() {
     };
   }, [loadAll, loadPipelineStatus, startStatusPoll]);
 
-  // Slow poll every 3 min for sl_monitor price updates; paused when tab is hidden.
-  useVisibilityRefresh(loadAll, 3 * 60 * 1000);
+  // Slow poll every 3 min for sl_monitor price updates; paused when the tab is
+  // hidden or the market is closed.
+  useMarketRefresh(loadAll, 3 * 60 * 1000);
 
   // Re-fetch when the time window changes (mount load is handled above).
   const didMountRef = useRef(false);
