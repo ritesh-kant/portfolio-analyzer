@@ -156,6 +156,37 @@ functions:
           rate: cron(*/3 3-10 ? * MON-FRI *)
           enabled: true
 
+  # ── Options-trader Lambdas ───────────────────────────────────────────────────
+  # Completely isolated from the equity (nt_*) Lambdas.
+
+  optTradeDecision:
+    image:
+      name: signal-engine
+      command:
+        - handlers.opt_trade_decision.handler
+    description: Open paper short-straddle positions from nt_signals (read-only); writes opt_paper_positions
+    memorySize: 512
+    timeout: 60
+    events:
+      # Same market-hours window as newsIngester; runs every 5 min
+      - schedule:
+          rate: cron(*/5 3-8 ? * MON-FRI *)
+          enabled: true
+
+  optPositionMonitor:
+    image:
+      name: signal-engine
+      command:
+        - handlers.opt_position_monitor.handler
+    description: Reprice + exit open straddles; log opt_chain_snapshots every 3 min
+    memorySize: 512
+    timeout: 90
+    events:
+      # Same schedule as slMonitor
+      - schedule:
+          rate: cron(*/3 3-10 ? * MON-FRI *)
+          enabled: true
+
 resources:
   Resources:
     # ── SQS Queues ────────────────────────────────────────────────────────────

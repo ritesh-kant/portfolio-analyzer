@@ -8,6 +8,7 @@ const LINKS = [
   { href: '/tax', label: 'Tax' },
   { href: '/signals', label: 'Signals' },
   { href: '/trading', label: 'Trading' },
+  { href: '/options', label: 'Options' },
 ] as const;
 
 export function NavLinks() {
@@ -20,7 +21,7 @@ export function NavLinks() {
           <Link
             key={href}
             href={href}
-            className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition sm:px-4 sm:py-1.5 sm:text-sm ${
               active ? 'bg-accent text-white shadow-sm' : 'hover:bg-black/5'
             }`}
           >
