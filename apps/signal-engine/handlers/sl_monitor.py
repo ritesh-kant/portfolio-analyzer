@@ -13,6 +13,7 @@ import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
 
 from src.config import Settings
@@ -240,7 +241,7 @@ async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50
     return "unchanged"
 
 
-async def _send_eod_summary(settings: Settings, db) -> None:
+async def _send_eod_summary(settings: Settings, db: AsyncIOMotorDatabase) -> None:
     """Once-per-day Telegram roll-up for the equity book. Fires after 15:18 IST
     — one monitor tick past the 15:15 force-close, so the day's closes are
     already persisted. Idempotent via a date-keyed marker (nt_eod_markers);
@@ -357,7 +358,7 @@ async def _run(settings: Settings) -> dict:
         return_exceptions=True,
     )
     for outcome in outcomes:
-        if isinstance(outcome, Exception):
+        if isinstance(outcome, BaseException):
             logger.error("monitor_position_failed err=%s", outcome)
             continue
         if outcome.startswith("closed"):
