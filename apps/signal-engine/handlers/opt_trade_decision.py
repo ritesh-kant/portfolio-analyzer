@@ -50,7 +50,7 @@ def _is_market_hours(cfg: Settings) -> bool:
 
 
 async def _run(cfg: Settings) -> None:
-    db = await get_db()
+    db = get_db()
     try:
         await opt_db.ensure_indexes(db)
     except Exception as exc:

@@ -100,6 +100,41 @@ def alert_sl_updated(
     _send(bot_token, chat_id, text)
 
 
+_EXIT_SHORT = {
+    "target_hit": "target",
+    "sl_hit": "sl",
+    "time_stop": "time",
+    "eod_close": "eod",
+    "day5": "day5",
+}
+
+
+def alert_eod_summary(
+    bot_token: str,
+    chat_id: str,
+    day: str,
+    closed_count: int,
+    wins: int,
+    losses: int,
+    net_pnl: float,
+    by_exit: dict[str, int],
+    open_count: int,
+) -> None:
+    """End-of-day roll-up for the equity (news-trader) book."""
+    pnl_icon = "✅" if net_pnl >= 0 else "❌"
+    breakdown = " · ".join(
+        f"{_EXIT_SHORT.get(r, r)} {n}" for r, n in sorted(by_exit.items(), key=lambda kv: -kv[1])
+    )
+    lines = [
+        f"📊 <b>TRADING EOD — {day}</b>",
+        f"{pnl_icon} Closed: {closed_count} ({wins}W/{losses}L)  Net: ₹{net_pnl:+,.0f}",
+    ]
+    if breakdown:
+        lines.append(f"By exit: {breakdown}")
+    lines.append(f"Open carried: {open_count}")
+    _send(bot_token, chat_id, "\n".join(lines))
+
+
 def alert_classifier_failure(
     bot_token: str,
     chat_id: str,

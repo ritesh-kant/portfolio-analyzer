@@ -263,7 +263,7 @@ async def _send_eod_summary(db, cfg: Settings, now: datetime) -> None:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def _run(cfg: Settings) -> None:
-    db = await get_db()
+    db = get_db()
     try:
         await opt_db.ensure_indexes(db)
     except Exception as exc:

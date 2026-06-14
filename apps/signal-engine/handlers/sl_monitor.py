@@ -13,12 +13,14 @@ import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 
+from pymongo.errors import DuplicateKeyError
+
 from src.config import Settings
 from src.db.client import get_db
-from src.news_trader.db import ensure_indexes, positions
+from src.news_trader.db import ensure_indexes, eod_markers, positions
 from src.news_trader.market_calendar import is_trading_day
 from src.news_trader.prices import get_ltps
-from src.news_trader.telegram import alert_sl_updated, alert_trade_closed
+from src.news_trader.telegram import alert_eod_summary, alert_sl_updated, alert_trade_closed
 from src.news_trader.trailing_sl import (
     calc_pnl,
     check_exit,
@@ -238,6 +240,53 @@ async def _monitor_position(pos: dict, settings: Settings, price: float, nifty50
     return "unchanged"
 
 
+async def _send_eod_summary(settings: Settings, db) -> None:
+    """Once-per-day Telegram roll-up for the equity book. Fires after 15:18 IST
+    — one monitor tick past the 15:15 force-close, so the day's closes are
+    already persisted. Idempotent via a date-keyed marker (nt_eod_markers);
+    placed before the no-open-positions early return so it still fires on days
+    whose trades all closed before this tick."""
+    now_ist = datetime.fromtimestamp(datetime.now(tz=timezone.utc).timestamp() + _IST_OFFSET)
+    if now_ist.hour * 60 + now_ist.minute < 15 * 60 + 18:  # before 15:18 IST
+        return
+
+    day = now_ist.date().isoformat()
+    try:
+        await eod_markers(db).insert_one({"_id": day, "sent_at": datetime.now(tz=timezone.utc)})
+    except DuplicateKeyError:
+        return  # already sent today
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+    day_start = datetime(now_ist.year, now_ist.month, now_ist.day, tzinfo=ist).astimezone(timezone.utc)
+    closed = await positions(db).find(
+        {"status": "closed", "exit_at": {"$gte": day_start}}
+    ).to_list(length=500)
+    open_count = await positions(db).count_documents({"status": "open"})
+
+    if not closed and open_count == 0:
+        return  # nothing traded today — stay quiet
+
+    wins = sum(1 for p in closed if (p.get("net_pnl") or 0) >= 0)
+    net = round(sum((p.get("net_pnl") or 0) for p in closed), 0)
+    by_exit: dict[str, int] = {}
+    for p in closed:
+        r = p.get("exit_reason") or "unknown"
+        by_exit[r] = by_exit.get(r, 0) + 1
+
+    await asyncio.to_thread(
+        alert_eod_summary,
+        bot_token=settings.telegram_bot_token,
+        chat_id=settings.telegram_chat_id,
+        day=day,
+        closed_count=len(closed),
+        wins=wins,
+        losses=len(closed) - wins,
+        net_pnl=net,
+        by_exit=by_exit,
+        open_count=open_count,
+    )
+
+
 async def _run(settings: Settings) -> dict:
     # Backstop run finalization runs on every tick, independent of the market-hours
     # gate below. On AWS, runs whose signals were all non-actionable never trigger
@@ -259,6 +308,10 @@ async def _run(settings: Settings) -> dict:
 
     db = get_db()
     await ensure_indexes(db)
+
+    # EOD roll-up runs before the no-open-positions early return so it fires
+    # even when the day's trades have all already closed.
+    await _send_eod_summary(settings, db)
 
     open_positions = await positions(db).find({"status": "open"}).to_list(length=100)
     if not open_positions:

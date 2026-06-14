@@ -25,6 +25,12 @@ def positions(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:
     return db["nt_positions"]
 
 
+def eod_markers(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:
+    """Once-per-day EOD-summary guard. _id is the IST date string (natural
+    uniqueness), so a duplicate-key insert means the summary already fired."""
+    return db["nt_eod_markers"]
+
+
 async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     # Unique dedup on topic_hash so concurrent ingester invocations are safe
     await news_raw(db).create_index("topic_hash", unique=True, background=True)
