@@ -10,6 +10,8 @@ import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 
+from pymongo.errors import DuplicateKeyError
+
 from src.config import Settings
 from src.db.client import get_db
 from src.news_trader.market_calendar import is_trading_day
@@ -25,6 +27,7 @@ from src.options_trader.paper_straddle import (
     price_straddle,
 )
 from src.options_trader.pricing import atm_strike, year_fraction
+from src.options_trader.telegram import alert_eod_summary, alert_straddle_closed
 
 logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
@@ -82,6 +85,15 @@ async def _monitor_positions(db, cfg: Settings, now: datetime) -> None:
             logger.info(
                 "opt_monitor: closed sym=%s reason=%s gross=%.0f net=%.0f",
                 sym, exit_reason, update["gross_pnl"], update["net_pnl"],
+            )
+            alert_straddle_closed(
+                bot_token=cfg.telegram_bot_token,
+                chat_id=cfg.telegram_chat_id,
+                symbol=sym,
+                exit_reason=exit_reason,
+                entry_total_prem=pos["entry_total_prem"],
+                exit_total_prem=update["exit_total_prem"],
+                net_pnl=update["net_pnl"],
             )
         else:
             current_pnl = round(
@@ -201,6 +213,53 @@ async def _log_chain_snapshots(db, cfg: Settings, now: datetime) -> None:
             logger.warning("opt_monitor: snapshot_insert_failed err=%s", exc)
 
 
+# ── Job 3: end-of-day summary (once per trading day) ─────────────────────────
+
+async def _send_eod_summary(db, cfg: Settings, now: datetime) -> None:
+    """Fire one Telegram roll-up after 15:15 IST. Idempotent via a date-keyed
+    marker — concurrent/later monitor ticks hit a duplicate-key and no-op."""
+    now_ist = now.astimezone(_IST)
+    if now_ist.hour * 60 + now_ist.minute < 915:  # before 15:15 IST — too early
+        return
+
+    day = now_ist.date().isoformat()
+    try:
+        await opt_db.eod_markers(db).insert_one({"_id": day, "sent_at": now})
+    except DuplicateKeyError:
+        return  # already sent today
+
+    day_start = datetime(now_ist.year, now_ist.month, now_ist.day, tzinfo=_IST).astimezone(timezone.utc)
+    closed = await opt_db.paper_positions(db).find(
+        {"status": "closed", "exit_at": {"$gte": day_start}}
+    ).to_list(length=500)
+    wins = sum(1 for p in closed if (p.get("net_pnl") or 0) >= 0)
+    net = round(sum((p.get("net_pnl") or 0) for p in closed), 0)
+    open_count = await opt_db.paper_positions(db).count_documents({"status": "open"})
+    nse = await opt_db.chain_snapshots(db).count_documents(
+        {"snapshot_at": {"$gte": day_start}, "iv_source": "nse"}
+    )
+    synth = await opt_db.chain_snapshots(db).count_documents(
+        {"snapshot_at": {"$gte": day_start}, "iv_source": "synthetic"}
+    )
+
+    # Skip on a fully dead day (no trades, no data) — nothing worth pinging about.
+    if not closed and open_count == 0 and (nse + synth) == 0:
+        return
+
+    alert_eod_summary(
+        bot_token=cfg.telegram_bot_token,
+        chat_id=cfg.telegram_chat_id,
+        day=day,
+        closed_count=len(closed),
+        wins=wins,
+        losses=len(closed) - wins,
+        net_pnl=net,
+        open_count=open_count,
+        nse_count=nse,
+        synth_count=synth,
+    )
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def _run(cfg: Settings) -> None:
@@ -211,10 +270,13 @@ async def _run(cfg: Settings) -> None:
         # Index setup must never take down monitoring/snapshot logging.
         logger.warning("opt_monitor: ensure_indexes failed (continuing): %s", exc)
     now = datetime.now(tz=timezone.utc)
+    # Monitor + snapshot first so any 15:15 force-closes are persisted before
+    # the EOD summary reads the day's closed book.
     await asyncio.gather(
         _monitor_positions(db, cfg, now),
         _log_chain_snapshots(db, cfg, now),
     )
+    await _send_eod_summary(db, cfg, now)
 
 
 def handler(event: dict, context: object) -> None:
