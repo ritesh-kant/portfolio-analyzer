@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
+import { useVisibilityRefresh } from '../../lib/use-visibility-refresh';
 import { createPortal } from 'react-dom';
 import {
   LineChart,
@@ -2075,7 +2076,6 @@ export default function TradingPage() {
     }
   };
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const statusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadPipelineStatus = useCallback(async () => {
@@ -2126,13 +2126,13 @@ export default function TradingPage() {
     void Promise.all([loadAll(), loadPipelineStatus().then(s => {
       if (s?.is_active) startStatusPoll();
     })]);
-    // Slow poll every 3 min for sl_monitor price updates
-    pollRef.current = setInterval(() => void loadAll(), 3 * 60 * 1000);
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
       if (statusPollRef.current) clearInterval(statusPollRef.current);
     };
   }, [loadAll, loadPipelineStatus, startStatusPoll]);
+
+  // Slow poll every 3 min for sl_monitor price updates; paused when tab is hidden.
+  useVisibilityRefresh(loadAll, 3 * 60 * 1000);
 
   // Re-fetch when the time window changes (mount load is handled above).
   const didMountRef = useRef(false);

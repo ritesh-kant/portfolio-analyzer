@@ -116,6 +116,27 @@ class Settings(BaseSettings):
     nt_entry_cutoff_ist: int = 870            # 14:30 IST (14×60+30)
     nt_classifier_prompt_version: str = "1.0.0"  # bump when classifier prompt changes
 
+    # ── Options-trader (opt_*) ────────────────────────────────────────────────
+    # All settings prefixed opt_* — completely isolated from nt_* config.
+
+    # Capital: separate budget from the equity system.
+    opt_total_capital_inr: float = 150_000.0   # margin budget across all open straddles
+    opt_max_positions: int = 3                 # max concurrent paper straddles
+    opt_max_stocks_per_signal: int = 1         # 1 straddle per signal (keep it simple)
+    opt_max_lots_per_position: int = 1         # 1 lot per straddle (min tradeable unit)
+
+    # Pricing
+    opt_iv_baseline: float = 0.30              # assumed IV for BS pricing (30%); no real IV yet
+
+    # Exit rules (applied to premium P&L, not underlying price)
+    opt_target_pct: float = 0.40               # exit when 40% of premium received (decayed away)
+    opt_stop_pct: float = 2.00                 # exit when premium doubles (2× loss)
+    opt_max_hold_minutes: int = 90             # time-stop (same as equity)
+    opt_force_close_eod: bool = True           # close all at 15:15 IST
+
+    # Timing
+    opt_entry_cutoff_ist: int = 810            # 13:30 IST (earlier than equity — needs monitor time)
+
     # Auth
     signal_engine_api_key: str = _DEFAULT_API_KEY
 

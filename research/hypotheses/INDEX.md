@@ -14,6 +14,7 @@
 | [largecap-fade](2026-06-11-largecap-fade.md) | news_trader_largecap_fade | killed | 2026-06-11 | 2026-06-11 | KILL — fade gross −0.026%/trade ≤ 0; momentum control gross-POSITIVE (+0.019%) voids overreaction story; large-caps are simply efficient both directions |
 | [bullish-signal-replay](2026-06-11-bullish-signal-replay.md) | news_trader_long | killed | 2026-06-11 | 2026-06-11 | KILL — cohort gross −0.251%/trade (kill line +0.10%); never-traded subset −0.296%; majors WORSE than moderates; core selectivity has no drift on real bars — prior positive readings were censored/delayed-quote artifacts |
 | [limit-entry](2026-06-11-limit-entry.md) | news_trader_limit_entry | shipped | 2026-06-11 | 2026-06-11 | SHIP — limit net −₹1,930 vs market −₹2,273 (+₹343), 96% fill, missed trades were losers; adopt for live Kite order design (execution-layer only; cannot rescue a negative-gross signal) |
+| [news-options-long](2026-06-13-news-options-long.md) | news_trader_options_long | killed | — | 2026-06-13 | KILL (synthetic screen) — all 8 strike×expiry×stop cells net-negative; baseline −₹2.0k to −₹3.1k/trade, vol-crush −₹9.7k to −₹13.8k, gross −3.4% to −5.2%/trade premium; options amplify BT9's negative underlying drift ~30–45×. No underlying edge → no option wrapper helps |
 
 ## Status legend
 

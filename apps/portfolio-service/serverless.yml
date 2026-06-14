@@ -158,3 +158,24 @@ functions:
       - httpApi:
           path: /nt/pipeline/{id}/positions
           method: get
+
+  # ── Options-trader API (opt/*) ───────────────────────────────────────────────
+  optPositions:
+    handler: src/handlers/opt-positions.handler
+    events:
+      - httpApi:
+          path: /opt/positions
+          method: get
+  optStats:
+    handler: src/handlers/opt-stats.handler
+    timeout: 60
+    events:
+      - httpApi:
+          path: /opt/stats
+          method: get
+  optChainSnapshots:
+    handler: src/handlers/opt-chain-snapshots.handler
+    events:
+      - httpApi:
+          path: /opt/chain-snapshots
+          method: get
