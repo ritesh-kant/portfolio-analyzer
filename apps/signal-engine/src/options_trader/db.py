@@ -21,9 +21,10 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await chain_snapshots(db).create_index(
         [("signal_id", 1), ("snapshot_at", 1)], background=True
     )
-    await chain_snapshots(db).create_index("snapshot_at", background=True)
     await chain_snapshots(db).create_index("symbol", background=True)
-    # TTL: keep chain logs for 180 days (enough for one full backtest window)
+    # TTL: keep chain logs for 180 days (enough for one full backtest window).
+    # This index also serves range queries on snapshot_at, so no separate
+    # plain index is needed — a second index on the same key would conflict.
     await chain_snapshots(db).create_index(
         "snapshot_at", expireAfterSeconds=180 * 24 * 3600, background=True, name="ttl_snapshot_at"
     )

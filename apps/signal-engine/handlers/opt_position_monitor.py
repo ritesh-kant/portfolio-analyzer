@@ -120,12 +120,18 @@ async def _log_chain_snapshots(db, cfg: Settings, now: datetime) -> None:
     exp_date = nearest_monthly_expiry()
     exp_dt = expiry_datetime(exp_date)
 
-    # Collect unique F&O-eligible symbols
-    sym_signal_map: dict[str, str] = {}
+    # Collect unique F&O-eligible symbols, carrying the signal anchor so each
+    # snapshot is self-contained for backtesting (exact minutes-since-signal,
+    # robust to any future change/pruning of nt_signals).
+    sym_signal_map: dict[str, dict] = {}
     for sig in signals:
         for s in (sig.get("stocks") or []):
             if has_options(s) and s not in sym_signal_map:
-                sym_signal_map[s] = str(sig["_id"])
+                sym_signal_map[s] = {
+                    "signal_id": str(sig["_id"]),
+                    "signal_created_at": sig.get("created_at"),
+                    "signal_type": sig.get("signal"),
+                }
 
     if not sym_signal_map:
         return
@@ -135,7 +141,7 @@ async def _log_chain_snapshots(db, cfg: Settings, now: datetime) -> None:
     iv = cfg.opt_iv_baseline
 
     docs = []
-    for sym, sig_id in sym_signal_map.items():
+    for sym, sig_meta in sym_signal_map.items():
         spot = prices.get(sym)
         if not spot:
             continue
@@ -148,7 +154,9 @@ async def _log_chain_snapshots(db, cfg: Settings, now: datetime) -> None:
         pe_bs = round(price_option(spot, K, t, iv, "PE"), 2)
 
         snap: dict = {
-            "signal_id": sig_id,
+            "signal_id": sig_meta["signal_id"],
+            "signal_created_at": sig_meta["signal_created_at"],
+            "signal_type": sig_meta["signal_type"],
             "symbol": sym,
             "snapshot_at": now,
             "spot_price": spot,
@@ -197,7 +205,11 @@ async def _log_chain_snapshots(db, cfg: Settings, now: datetime) -> None:
 
 async def _run(cfg: Settings) -> None:
     db = await get_db()
-    await opt_db.ensure_indexes(db)
+    try:
+        await opt_db.ensure_indexes(db)
+    except Exception as exc:
+        # Index setup must never take down monitoring/snapshot logging.
+        logger.warning("opt_monitor: ensure_indexes failed (continuing): %s", exc)
     now = datetime.now(tz=timezone.utc)
     await asyncio.gather(
         _monitor_positions(db, cfg, now),
