@@ -10,6 +10,7 @@ import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
 
 from src.config import Settings
@@ -53,7 +54,7 @@ def _is_market_hours(cfg: Settings) -> bool:
 
 # ── Job 1: reprice & exit open straddles ─────────────────────────────────────
 
-async def _monitor_positions(db, cfg: Settings, now: datetime) -> None:
+async def _monitor_positions(db: AsyncIOMotorDatabase, cfg: Settings, now: datetime) -> None:
     open_pos = await opt_db.paper_positions(db).find({"status": "open"}).to_list(length=200)
     if not open_pos:
         return
@@ -114,7 +115,7 @@ async def _monitor_positions(db, cfg: Settings, now: datetime) -> None:
 
 # ── Job 2: chain snapshot logger ─────────────────────────────────────────────
 
-async def _log_chain_snapshots(db, cfg: Settings, now: datetime) -> None:
+async def _log_chain_snapshots(db: AsyncIOMotorDatabase, cfg: Settings, now: datetime) -> None:
     # Log for signals fired in the last 2 hours (covers the full monitoring window)
     since = now - timedelta(hours=2)
     signals = await db["nt_signals"].find(
@@ -215,7 +216,7 @@ async def _log_chain_snapshots(db, cfg: Settings, now: datetime) -> None:
 
 # ── Job 3: end-of-day summary (once per trading day) ─────────────────────────
 
-async def _send_eod_summary(db, cfg: Settings, now: datetime) -> None:
+async def _send_eod_summary(db: AsyncIOMotorDatabase, cfg: Settings, now: datetime) -> None:
     """Fire one Telegram roll-up after 15:15 IST. Idempotent via a date-keyed
     marker — concurrent/later monitor ticks hit a duplicate-key and no-op."""
     now_ist = now.astimezone(_IST)
