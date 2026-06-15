@@ -107,6 +107,19 @@ async def _run(cfg: Settings) -> None:
             if exists:
                 continue
 
+            # Dedup: skip if any open straddle already exists for this symbol.
+            # Catches the case where two signals fire for the same news event
+            # (e.g. two NDTV headlines 113ms apart) — different signal_ids would
+            # both pass the check above, but only one open straddle per symbol
+            # makes sense.
+            open_straddle = await opt_db.paper_positions(db).find_one({"symbol": sym, "status": "open"})
+            if open_straddle:
+                logger.info(
+                    "opt_trade_decision: skip %s — already have open straddle orig_sig=%s",
+                    sym, open_straddle.get("signal_id"),
+                )
+                continue
+
             spot = get_ltp(sym)
             if not spot:
                 logger.warning("opt_trade_decision: no price for %s", sym)
@@ -118,12 +131,25 @@ async def _run(cfg: Settings) -> None:
             lots = max(1, int(per_slot / margin_per_lot))
             lots = min(lots, cfg.opt_max_lots_per_position)
 
+            # Real ATM IV from the latest NSE chain snapshot when available;
+            # average the two legs. Falls back to the baseline (the production
+            # reality today — see opt_db.latest_real_quote). Using real entry IV
+            # is also the prerequisite for ever modelling intraday vol-crush, the
+            # only intraday edge a short straddle has.
+            quote = await opt_db.latest_real_quote(db, sym, cfg.opt_quote_max_age_minutes)
+            if quote and quote.get("ce_iv") and quote.get("pe_iv"):
+                entry_iv = round((quote["ce_iv"] + quote["pe_iv"]) / 2.0, 4)
+                iv_source = "nse"
+            else:
+                entry_iv = cfg.opt_iv_baseline
+                iv_source = "baseline"
+
             now = datetime.now(tz=timezone.utc)
             doc = build_entry_doc(
                 signal_doc=sig,
                 symbol=sym,
                 spot=spot,
-                iv=cfg.opt_iv_baseline,
+                iv=entry_iv,
                 lots=lots,
                 lot_size=ls,
                 now=now,
@@ -132,6 +158,7 @@ async def _run(cfg: Settings) -> None:
                 stop_pct=cfg.opt_stop_pct,
                 max_hold_minutes=cfg.opt_max_hold_minutes,
                 force_close_eod=cfg.opt_force_close_eod,
+                iv_source=iv_source,
             )
             try:
                 await opt_db.paper_positions(db).insert_one(doc)

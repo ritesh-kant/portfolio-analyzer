@@ -126,12 +126,25 @@ class Settings(BaseSettings):
     opt_max_lots_per_position: int = 1         # 1 lot per straddle (min tradeable unit)
 
     # Pricing
-    opt_iv_baseline: float = 0.30              # assumed IV for BS pricing (30%); no real IV yet
+    opt_iv_baseline: float = 0.30              # fallback IV for BS pricing (30%) when no
+                                               #   live ATM IV is available from the NSE chain.
+    # Slippage: fraction of premium turnover charged per round trip ONLY when no
+    # real bid/ask is captured for the legs. When a live NSE quote exists, the
+    # cost model crosses the real half-spread instead (see calc_straddle_costs).
+    # 1% was the original flat guess; it dominated day-1 P&L (~80% of all costs).
+    opt_slippage_rate: float = 0.01
+    # Max age (minutes) of a chain snapshot still considered a usable live quote
+    # for entry IV / exit half-spread. Stale quotes fall back to baseline/rate.
+    opt_quote_max_age_minutes: int = 10
 
     # Exit rules (applied to premium P&L, not underlying price)
     opt_target_pct: float = 0.40               # exit when 40% of premium received (decayed away)
     opt_stop_pct: float = 2.00                 # exit when premium doubles (2× loss)
-    opt_max_hold_minutes: int = 90             # time-stop (same as equity)
+    # Time-stop. <= 0 DISABLES it so the theta strategy runs to EOD/target/stop.
+    # A short straddle harvests theta over the whole session, not in 90 min — the
+    # inherited 90-min equity stop force-closed 7/7 day-1 trades before any
+    # meaningful decay (see options_paper_trading_log). Default off.
+    opt_max_hold_minutes: int = 0
     opt_force_close_eod: bool = True           # close all at 15:15 IST
 
     # Timing
