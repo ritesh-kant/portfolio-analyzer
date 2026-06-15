@@ -29,7 +29,13 @@ _OPT_EXCHANGE_RATE = 0.0003503   # ~0.035% per side on premium
 _OPT_SEBI_RATE = 0.000001
 _OPT_STAMP_RATE = 0.00003        # buy-side only (the BUY-BACK at close)
 _GST_RATE = 0.18
-_OPT_SLIPPAGE_RATE = 0.01        # 100 bps / side (pessimistic — single-stock weeklies)
+# Fallback slippage rate, used ONLY when no real bid/ask is available for the
+# leg. Expressed as a fraction of premium turnover (see calc_straddle_costs).
+# This is a pure guess; the real cost is the half-spread actually crossed, which
+# is wired in from the chain snapshot when present. Keep in sync with
+# Settings.opt_slippage_rate (the config default overrides this constant at the
+# call sites that pass it through).
+_OPT_SLIPPAGE_RATE = 0.01
 
 
 def nearest_monthly_expiry(from_date: date | None = None) -> date:
@@ -78,8 +84,27 @@ def calc_straddle_costs(
     exit_total_prem: float,
     lots: int,
     lot_size: int,
-) -> dict[str, float]:
-    """Round-trip costs for a short-straddle seller (2 legs × 2 contracts = 4 orders)."""
+    *,
+    half_spread_points: float | None = None,
+    fallback_slippage_rate: float = _OPT_SLIPPAGE_RATE,
+) -> dict[str, Any]:
+    """Round-trip costs for a short-straddle seller (2 legs × 2 contracts = 4 orders).
+
+    Slippage model (the dominant, previously-unrealistic term):
+
+    * If ``half_spread_points`` is given, it is the *summed* half bid-ask spread
+      of both legs in premium points — i.e. ``(ce_ask-ce_bid)/2 + (pe_ask-pe_bid)/2``
+      observed from the real NSE chain. A seller crosses that spread twice over
+      a round trip (sell at bid on entry, buy at ask on exit), so
+      ``slippage = 2 * half_spread_points * qty``. This is the auditable, real
+      cost — no premium-relative guessing.
+    * If it is ``None`` (no live quote — the current production reality, since the
+      NSE chain fetch fails from Lambda), fall back to a configurable fraction of
+      premium turnover: ``fallback_slippage_rate * (entry_val + exit_val)``.
+
+    The chosen path is reported back via ``slippage_source`` so every closed
+    position is auditable.
+    """
     qty = lots * lot_size
     # Entry = SELL CE + SELL PE (two sell-side legs → STT on both)
     entry_val = entry_total_prem * qty
@@ -92,7 +117,14 @@ def calc_straddle_costs(
     sebi = round((entry_val + exit_val) * _OPT_SEBI_RATE, 2)
     stamp = round(exit_val * _OPT_STAMP_RATE, 2)             # buy-side at exit only
     gst = round((brokerage + exchange + sebi) * _GST_RATE, 2)
-    slippage = round((entry_val + exit_val) * _OPT_SLIPPAGE_RATE, 2)
+
+    if half_spread_points is not None and half_spread_points >= 0:
+        slippage = round(2.0 * half_spread_points * qty, 2)
+        slippage_source = "nse_halfspread"
+    else:
+        slippage = round((entry_val + exit_val) * fallback_slippage_rate, 2)
+        slippage_source = "fallback_rate"
+
     total = round(brokerage + stt + exchange + sebi + stamp + gst + slippage, 2)
     return {
         "brokerage": brokerage,
@@ -102,6 +134,7 @@ def calc_straddle_costs(
         "stamp": stamp,
         "gst": gst,
         "slippage": slippage,
+        "slippage_source": slippage_source,
         "total": total,
     }
 
@@ -119,8 +152,13 @@ def build_entry_doc(
     stop_pct: float,
     max_hold_minutes: int,
     force_close_eod: bool,
+    iv_source: str = "baseline",
 ) -> dict[str, Any]:
-    """Build the opt_paper_positions document for a new short-straddle entry."""
+    """Build the opt_paper_positions document for a new short-straddle entry.
+
+    ``iv`` is the volatility used to price entry premiums; ``iv_source`` records
+    where it came from ("nse" when a live ATM IV was available, else "baseline").
+    """
     step = _strike_step_for(symbol)
     K = atm_strike(spot, step)
     exp_dt = expiry_datetime(exp_date)
@@ -144,6 +182,7 @@ def build_entry_doc(
         "entry_pe_prem": pe_p,
         "entry_total_prem": total_p,
         "entry_iv": iv,
+        "entry_iv_source": iv_source,
         "entry_exposure_inr": exposure,
         "entry_delta_ce": round(g.delta, 3),
         "entry_theta_day": round(g.theta_per_day * 2, 2),  # straddle: 2 legs
@@ -187,13 +226,17 @@ def check_exit(
     if current_total_prem >= entry_prem * (1.0 + stop_pct):
         return "stop_hit"
 
-    # Time-stop
-    entry_at = pos["entry_at"]
-    if not entry_at.tzinfo:
-        entry_at = entry_at.replace(tzinfo=timezone.utc)
-    held = (now - entry_at).total_seconds() / 60
-    if held >= max_hold:
-        return "time_stop"
+    # Time-stop. A short straddle harvests theta over the session, not in 90 min,
+    # so a value <= 0 disables it entirely and lets the position run to EOD /
+    # target / stop. (Day-1 evidence: a 90-min stop force-closed 7/7 trades
+    # before any meaningful theta accrued — see options_paper_trading_log.)
+    if max_hold > 0:
+        entry_at = pos["entry_at"]
+        if not entry_at.tzinfo:
+            entry_at = entry_at.replace(tzinfo=timezone.utc)
+        held = (now - entry_at).total_seconds() / 60
+        if held >= max_hold:
+            return "time_stop"
 
     # EOD
     if force_eod:
@@ -211,15 +254,30 @@ def compute_close_update(
     exit_pe_prem: float,
     exit_reason: str,
     now: datetime,
+    *,
+    half_spread_points: float | None = None,
+    fallback_slippage_rate: float = _OPT_SLIPPAGE_RATE,
 ) -> dict[str, Any]:
-    """Build the $set dict for closing a position."""
+    """Build the $set dict for closing a position.
+
+    ``half_spread_points`` / ``fallback_slippage_rate`` are passed straight to
+    :func:`calc_straddle_costs` so slippage reflects the real crossed spread
+    when a live quote was captured, and a configurable fallback otherwise.
+    """
     exit_total = round(exit_ce_prem + exit_pe_prem, 2)
     lots = pos["lots"]
     ls = pos["lot_size"]
     qty = lots * ls
     # Seller P&L: received premium at entry, pay to close at exit
     gross = round((pos["entry_total_prem"] - exit_total) * qty, 2)
-    costs = calc_straddle_costs(pos["entry_total_prem"], exit_total, lots, ls)
+    costs = calc_straddle_costs(
+        pos["entry_total_prem"],
+        exit_total,
+        lots,
+        ls,
+        half_spread_points=half_spread_points,
+        fallback_slippage_rate=fallback_slippage_rate,
+    )
     net = round(gross - costs["total"], 2)
     return {
         "status": "closed",

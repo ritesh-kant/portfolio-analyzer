@@ -52,6 +52,22 @@ def _is_market_hours(cfg: Settings) -> bool:
     return 570 <= m <= 930
 
 
+def _half_spread_points(quote: dict | None) -> float | None:
+    """Summed half bid-ask spread of both legs (premium points) from an NSE
+    quote, or None when no usable two-sided market is present. Guards against
+    crossed/zero markets that would understate slippage."""
+    if not quote:
+        return None
+    try:
+        ce_hs = (float(quote["ce_ask"]) - float(quote["ce_bid"])) / 2.0
+        pe_hs = (float(quote["pe_ask"]) - float(quote["pe_bid"])) / 2.0
+    except (KeyError, TypeError, ValueError):
+        return None
+    if ce_hs <= 0 or pe_hs <= 0:
+        return None
+    return round(ce_hs + pe_hs, 4)
+
+
 # ── Job 1: reprice & exit open straddles ─────────────────────────────────────
 
 async def _monitor_positions(db: AsyncIOMotorDatabase, cfg: Settings, now: datetime) -> None:
@@ -79,7 +95,16 @@ async def _monitor_positions(db: AsyncIOMotorDatabase, cfg: Settings, now: datet
 
         exit_reason = check_exit(pos, total_p, now)
         if exit_reason:
-            update = compute_close_update(pos, spot, ce_p, pe_p, exit_reason, now)
+            # Real crossed half-spread from the latest NSE quote, if any; else
+            # the configurable fallback rate. (No live quote ever, in practice —
+            # the NSE fetch is blocked from Lambda — so this stays on fallback.)
+            quote = await opt_db.latest_real_quote(db, sym, cfg.opt_quote_max_age_minutes)
+            half_spread = _half_spread_points(quote)
+            update = compute_close_update(
+                pos, spot, ce_p, pe_p, exit_reason, now,
+                half_spread_points=half_spread,
+                fallback_slippage_rate=cfg.opt_slippage_rate,
+            )
             await opt_db.paper_positions(db).update_one(
                 {"_id": pos["_id"]}, {"$set": update}
             )

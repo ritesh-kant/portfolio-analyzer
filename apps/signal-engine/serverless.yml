@@ -168,10 +168,10 @@ functions:
     memorySize: 512
     timeout: 60
     events:
-      # Same market-hours window as newsIngester; runs every 5 min
+      # Paused 2026-06-15: single-stock monthly options not viable (spread > theta, no real NSE data from Lambda)
       - schedule:
           rate: cron(*/5 3-8 ? * MON-FRI *)
-          enabled: true
+          enabled: false
 
   optPositionMonitor:
     image:
@@ -182,10 +182,10 @@ functions:
     memorySize: 512
     timeout: 90
     events:
-      # Same schedule as slMonitor
+      # Paused 2026-06-15: single-stock monthly options not viable (spread > theta, no real NSE data from Lambda)
       - schedule:
           rate: cron(*/3 3-10 ? * MON-FRI *)
-          enabled: true
+          enabled: false
 
 resources:
   Resources:
