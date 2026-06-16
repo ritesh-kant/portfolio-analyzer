@@ -389,6 +389,7 @@ async def _process_signal(
             # merged; publisher_count = distinct outlets (what Gate 1 acts on).
             "entry_source_count": int(signal_doc.get("source_count", 1)),
             "entry_publisher_count": publisher_count,
+            "entry_event_type": signal_doc.get("event_type"),
             "entry_position_size_inr": position_size_inr,
             "entry_vix": regime.get("vix"),
             "entry_nifty_change_pct": regime.get("nifty_change_pct"),

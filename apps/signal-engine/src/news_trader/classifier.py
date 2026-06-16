@@ -11,9 +11,14 @@ Output schema:
         "stocks": list[str],           # NSE symbols, max 5
         "confidence": "high" | "medium" | "low",
         "reasoning": str,
+        "event_type": str,             # see _EVENT_TYPE_TAXONOMY below
         "llm_model": str,              # model name used (e.g. "gemini-2.5-flash")
         "prompt_version": str,         # semver — bump when _SYSTEM prompt changes
     }
+
+event_type taxonomy (Group A = information events; Group B = noise/control):
+    Group A: m_and_a, earnings, order_win, regulatory, capital_action
+    Group B: rating_analyst, generic_pr, macro_sector, management, other
 """
 
 import json
@@ -35,7 +40,17 @@ class LLMProviderError(Exception):
 
 # Fallback used when Settings is unavailable (tests, one-off scripts).
 # The canonical value lives in Settings.nt_classifier_prompt_version (env: NT_CLASSIFIER_PROMPT_VERSION).
-_DEFAULT_PROMPT_VERSION = "1.0.0"
+_DEFAULT_PROMPT_VERSION = "1.1.0"
+
+# Valid event_type values. Any value the LLM returns outside this set is coerced to "other".
+# Group A (information events — hypothesis: drifts post-signal):
+#   m_and_a, earnings, order_win, regulatory, capital_action
+# Group B (noise/control — hypothesis: no drift):
+#   rating_analyst, generic_pr, macro_sector, management, other
+_EVENT_TYPE_TAXONOMY = frozenset({
+    "m_and_a", "earnings", "order_win", "regulatory", "capital_action",
+    "rating_analyst", "generic_pr", "macro_sector", "management", "other",
+})
 
 _SYSTEM = """You are a senior Indian stock market analyst with deep expertise in NSE/BSE listed companies.
 
@@ -46,6 +61,17 @@ Given a news headline and body, output ONLY a JSON object (no markdown, no expla
 - "stocks": list of NSE trading symbols most likely to be affected (e.g. ["HDFCBANK", "SBIN"]), max 5, empty list if none identified
 - "confidence": "high" (clear direct impact), "medium" (probable impact), or "low" (speculative)
 - "reasoning": one sentence explaining the signal
+- "event_type": one of the following values describing the nature of the news event:
+    "m_and_a"        — merger, acquisition, takeover bid, open offer, stake sale
+    "earnings"       — quarterly/annual results, revenue, profit, EPS announcement or surprise
+    "order_win"      — new contract win, order receipt, project award, deal closure
+    "regulatory"     — SEBI/RBI/government ruling, policy change, licence grant/revocation, penalty, court order
+    "capital_action" — buyback, rights issue, dividend, bonus issue, QIP, fundraise
+    "rating_analyst" — broker upgrade/downgrade, target price change, analyst note
+    "generic_pr"     — product launch, MOU/partnership, rebranding, CSR, awards, general corporate PR
+    "macro_sector"   — sector-wide trend, commodity price, index movement, macro data (no single stock impact)
+    "management"     — CEO/CFO/board change, promoter activity, ESOP
+    "other"          — anything that does not fit the above categories
 
 Rules:
 - Only include stocks actually traded on NSE (use official NSE symbols without .NS suffix)
@@ -71,13 +97,15 @@ def _partial_parse(raw: str) -> dict[str, Any] | None:
     Returns a valid result dict with stocks=[] if all required scalars are present.
     """
     result: dict[str, Any] = {}
-    for field in ("sector", "signal", "magnitude", "confidence", "reasoning"):
+    for field in ("sector", "signal", "magnitude", "confidence", "reasoning", "event_type"):
         m = re.search(rf'"{field}"\s*:\s*"([^"]*)"', raw)
         if m:
             result[field] = m.group(1)
     required = {"sector", "signal", "magnitude", "confidence", "reasoning"}
     if not required.issubset(result.keys()):
         return None
+    if "event_type" not in result:
+        result["event_type"] = "other"
     # Try to extract stocks if present, else fall back to empty
     stocks_m = re.search(r'"stocks"\s*:\s*\[([^\]]*)', raw)
     if stocks_m:
@@ -112,7 +140,7 @@ def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
         result: dict[str, Any] = json.loads(raw)
 
         # Validate required keys
-        required = {"sector", "signal", "magnitude", "stocks", "confidence", "reasoning"}
+        required = {"sector", "signal", "magnitude", "stocks", "confidence", "reasoning", "event_type"}
         if not required.issubset(result.keys()):
             logger.warning("[LLM] incomplete response — missing keys, got: %s", list(result.keys()))
             return None
@@ -122,6 +150,8 @@ def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
         result["confidence"] = str(result["confidence"] or "low").lower()
         result["magnitude"] = str(result["magnitude"] or "minor").lower()
         result["stocks"] = [s.upper().strip() for s in result.get("stocks", [])[:5]]
+        event_type = str(result.get("event_type") or "other").lower()
+        result["event_type"] = event_type if event_type in _EVENT_TYPE_TAXONOMY else "other"
 
         result["llm_model"] = llm_model
         result["prompt_version"] = getattr(settings, "nt_classifier_prompt_version", _DEFAULT_PROMPT_VERSION)
@@ -137,6 +167,8 @@ def classify(raw_text: str, settings: Settings) -> dict[str, Any] | None:
             recovered["signal"] = str(recovered["signal"] or "neutral").lower()
             recovered["confidence"] = str(recovered["confidence"] or "low").lower()
             recovered["magnitude"] = str(recovered["magnitude"] or "minor").lower()
+            et = str(recovered.get("event_type") or "other").lower()
+            recovered["event_type"] = et if et in _EVENT_TYPE_TAXONOMY else "other"
             recovered["llm_model"] = llm_model
             recovered["prompt_version"] = getattr(settings, "nt_classifier_prompt_version", _DEFAULT_PROMPT_VERSION)
             return recovered

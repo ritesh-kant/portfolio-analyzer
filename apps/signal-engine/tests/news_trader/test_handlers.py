@@ -176,6 +176,7 @@ class TestNewsClassifierHandler:
             "stocks": ["HDFCBANK", "SBIN"],
             "confidence": "high",
             "reasoning": "Rate cut boosts margins.",
+            "event_type": "regulatory",
         })
 
     @patch("handlers.news_classifier.get_db")
@@ -279,6 +280,7 @@ class TestNewsClassifierHandler:
             "stocks": ["HDFCBANK"],
             "confidence": "high",
             "reasoning": "Rate cut.",
+            "event_type": "regulatory",
         }))
 
         mock_db = MagicMock()
@@ -359,6 +361,7 @@ class TestNewsClassifierHandler:
             "stocks": ["HDFCBANK"],
             "confidence": "high",
             "reasoning": "Rate cut boosts margins.",
+            "event_type": "regulatory",
         }))
 
         existing_signal = {
@@ -441,6 +444,7 @@ class TestNewsClassifierHandler:
             "stocks": [],
             "confidence": "low",
             "reasoning": "Nothing specific.",
+            "event_type": "other",
         })
         mock_get_llm.return_value.invoke.return_value = MagicMock(content=low_conf)
 
@@ -584,6 +588,7 @@ class TestFreshnessGate:
         mock_get_llm.return_value.invoke.return_value = MagicMock(content=json.dumps({
             "sector": "Banking", "signal": "bullish", "magnitude": "major",
             "stocks": ["HDFCBANK"], "confidence": "high", "reasoning": "RBI cut.",
+            "event_type": "regulatory",
         }))
         _, mock_sig = self._run_classifier(article, mock_get_llm, mock_boto3, mock_get_db)
         mock_get_llm.assert_called_once()
@@ -600,6 +605,7 @@ class TestFreshnessGate:
         mock_get_llm.return_value.invoke.return_value = MagicMock(content=json.dumps({
             "sector": "IT", "signal": "bullish", "magnitude": "moderate",
             "stocks": ["TCS"], "confidence": "medium", "reasoning": "order win.",
+            "event_type": "order_win",
         }))
         _, mock_sig = self._run_classifier(article, mock_get_llm, mock_boto3, mock_get_db)
         # Gate is fail-open — LLM should still be called

@@ -239,9 +239,9 @@ async def _process_message(
         )
         return False, None
 
-    logger.info("[CLASSIFIER] LLM result news_id=%s signal=%s confidence=%s magnitude=%s stocks=%s sector=%s",
+    logger.info("[CLASSIFIER] LLM result news_id=%s signal=%s confidence=%s magnitude=%s stocks=%s sector=%s event_type=%s",
                 news_id, result["signal"], result["confidence"], result["magnitude"],
-                result["stocks"], result["sector"])
+                result["stocks"], result["sector"], result["event_type"])
 
     # Entity-window merge — the real cross-source dedup. The pre-LLM story_hash
     # check above only catches *identical* headlines (re-syndication); two
@@ -341,6 +341,7 @@ async def _process_message(
         "stocks": result["stocks"],
         "confidence": result["confidence"],
         "reasoning": result["reasoning"],
+        "event_type": result["event_type"],
         "llm_model": result["llm_model"],
         "prompt_version": result["prompt_version"],
         "created_at": now,
