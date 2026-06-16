@@ -1,1 +1,7 @@
-pnpm lint-staged
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Source shell configuration to access NVM
+[ -s "$HOME/.nvm/nvm.sh" ] && \. "$HOME/.nvm/nvm.sh"
+
+exec pnpm lint-staged
