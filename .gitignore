@@ -14,3 +14,6 @@ coverage
 # Data lake — binary parquet/CSV files; managed outside git
 **/data/lake/
 apps/data/
+
+# momentum-trader Upstox candle cache (GBs)
+.cache_upstox/

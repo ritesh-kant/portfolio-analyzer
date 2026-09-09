@@ -44,3 +44,39 @@ nt-monitor:
 # Full end-to-end: ingester → classifier → trade_decision (skips SQS delay)
 nt-pipeline:
 	uv run python scripts/invoke_news_trader.py pipeline
+
+# ── momentum-trader (Upstox paper scanner) ────────────────────────────────────
+
+mt-test:
+	uv run pytest tests/momentum_trader/ -v
+
+# Legacy OAuth only. Paper scanning prefers UPSTOX_ANALYTICS_TOKEN, which does not need daily login.
+mt-login:
+	uv run python -m src.momentum_trader.upstox_auth $(CODE)
+
+# Run the live paper scanner locally (needs UPSTOX_ANALYTICS_TOKEN or legacy OAuth token).
+mt-scan:
+	uv run python -m src.momentum_trader.scanner
+
+# Registered forward-only test: MA9 first pullback, then compare catalyst vs no-catalyst.
+mt-scan-first-pullback:
+	MT_STRATEGY=catalyst_first_pullback MT_LOG_CSV=research/backtests/mt_catalyst_first_pullback_forward_log.csv uv run python -m src.momentum_trader.scanner
+
+# Safe dependency check: authenticates market data but sends no order or paper trade.
+mt-dry-run-first-pullback:
+	MT_STRATEGY=catalyst_first_pullback MT_LOG_CSV=research/backtests/mt_catalyst_first_pullback_forward_log.csv uv run python -m src.momentum_trader.scanner --dry-run
+
+# Two-list forward paper strategy: broad scan -> attention -> 1-minute confirmation.
+mt-scan-attention:
+	MT_STRATEGY=attention_1m MT_LOG_CSV=research/backtests/mt_attention_1m_forward_log.csv uv run python -m src.momentum_trader.scanner
+
+mt-dry-run-attention:
+	MT_STRATEGY=attention_1m MT_LOG_CSV=research/backtests/mt_attention_1m_forward_log.csv uv run python -m src.momentum_trader.scanner --dry-run
+
+# Forward-log gate screen (hypothesis v2 §3); --status while accumulating
+mt-screen:
+	cd ../.. && uv run research/backtests/bt18_momentum_forward_screen.py --status
+
+# Pool backtest smoke test (50 symbols, one year) — full run: see bt17 docstring
+mt-backtest-smoke:
+	cd ../.. && uv run research/backtests/bt17_momentum_pool.py --start 2025-01-01 --end 2025-06-30 --limit 50
