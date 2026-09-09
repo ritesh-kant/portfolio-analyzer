@@ -29,6 +29,7 @@ jobs:
       portfolio-service: ${{ steps.filter.outputs.portfolio-service }}
       analytics-service: ${{ steps.filter.outputs.analytics-service }}
       signal-engine: ${{ steps.filter.outputs.signal-engine }}
+      momentum-scanner: ${{ steps.filter.outputs.momentum-scanner }}
       web: ${{ steps.filter.outputs.web }}
       any-backend: ${{ steps.filter.outputs.any-backend }}
     steps:
@@ -52,6 +53,13 @@ jobs:
               - 'apps/signal-engine/**'
               - 'infrastructure/serverless.yml'
               - 'packages/**'
+            momentum-scanner:
+              - 'apps/signal-engine/Dockerfile.scanner'
+              - 'apps/signal-engine/src/momentum_trader/**'
+              - 'apps/signal-engine/src/config.py'
+              - 'apps/signal-engine/pyproject.toml'
+              - 'apps/signal-engine/uv.lock'
+              - 'infrastructure/ecs-scanner.yml'
             web:
               - 'apps/web/**'
               - 'packages/**'
@@ -205,14 +213,11 @@ jobs:
         run: pnpm exec serverless deploy --stage prod --verbose
 
   deploy-signal-engine:
-    name: Deploy signal-engine (AWS ECR + Lambda)
+    name: Deploy signal-engine Lambda (paused)
     needs: [changes, build, deploy-infra, deploy-portfolio-service]
-    if: >
-      always() &&
-      needs.build.result == 'success' &&
-      (inputs.force_deploy == true || needs.changes.outputs.signal-engine == 'true') &&
-      (needs.deploy-infra.result == 'success' || needs.deploy-infra.result == 'skipped') &&
-      (needs.deploy-portfolio-service.result == 'success' || needs.deploy-portfolio-service.result == 'skipped')
+    # The Lambda is not currently in service. Keep its deployment definition
+    # available, but do not deploy it until this flag is deliberately restored.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -296,6 +301,88 @@ jobs:
           AI_PROVIDER: ${{ vars.AI_PROVIDER }}
           TRADING_MODE: ${{ vars.TRADING_MODE }}
         run: pnpm exec serverless deploy --stage prod --verbose
+
+  deploy-momentum-scanner:
+    name: Deploy momentum paper scanner (ECS)
+    needs: [changes, build]
+    if: >
+      always() &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (inputs.force_deploy == true || needs.changes.outputs.momentum-scanner == 'true')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve scanner ECR repository
+        id: ecr
+        run: |
+          URI=$(aws ecr describe-repositories \
+            --repository-names portfolio-analyzer-mt-scanner \
+            --query 'repositories[0].repositoryUri' --output text)
+          echo "uri=$URI" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push scanner image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/signal-engine
+          file: apps/signal-engine/Dockerfile.scanner
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.ecr.outputs.uri }}:${{ github.sha }}
+          cache-from: type=gha,scope=momentum-scanner
+          cache-to: type=gha,mode=max,scope=momentum-scanner
+          provenance: false
+
+      - name: Resolve existing scanner network settings
+        id: stack
+        run: |
+          PARAMETERS=$(aws cloudformation describe-stacks --stack-name mt-scanner-prod \
+            --query 'Stacks[0].Parameters' --output json)
+          value() { jq -r --arg key "$1" '.[] | select(.ParameterKey == $key) | .ParameterValue' <<<"$PARAMETERS"; }
+          for KEY in SubnetIds SecurityGroupId Cpu Memory; do
+            VALUE=$(value "$KEY")
+            if [[ -z "$VALUE" || "$VALUE" == "null" ]]; then
+              echo "Missing existing mt-scanner-prod parameter: $KEY" >&2
+              exit 1
+            fi
+            echo "${KEY,,}=$VALUE" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Deploy scanner task definition and schedule
+        run: |
+          aws cloudformation deploy \
+            --stack-name mt-scanner-prod \
+            --template-file infrastructure/ecs-scanner.yml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --parameter-overrides \
+              Stage=prod \
+              ImageUri=${{ steps.ecr.outputs.uri }}:${{ github.sha }} \
+              SubnetIds=${{ steps.stack.outputs.subnetids }} \
+              SecurityGroupId=${{ steps.stack.outputs.securitygroupid }} \
+              Cpu=${{ steps.stack.outputs.cpu }} \
+              Memory=${{ steps.stack.outputs.memory }} \
+            --region ${{ env.AWS_REGION }} \
+            --no-fail-on-empty-changeset
 
   deploy-analytics-service:
     name: Deploy analytics-service (AWS)
