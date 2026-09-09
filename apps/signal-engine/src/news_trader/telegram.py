@@ -4,6 +4,7 @@ All functions are fire-and-forget: they log on failure but never raise.
 """
 
 import logging
+import re
 import time
 
 import httpx
@@ -12,6 +13,21 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)
 _API_BASE = "https://api.telegram.org/bot{token}/sendMessage"
+
+
+class _RedactTelegramURL(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # HTTPX logs request URLs at INFO, outside our exception handling.
+        record.msg = re.sub(r"(https://api\.telegram\.org/bot)[^/\s]+",
+                            r"\1[REDACTED]", record.getMessage())
+        record.args = ()
+        return True
+
+
+logging.getLogger("httpx").addFilter(_RedactTelegramURL())
+# Transport DEBUG tracing may include request headers; do not enable it for
+# a client whose authentication is embedded in the request target.
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # Per-process debounce for failure alerts — prevents alert storms when many
 # Lambda invocations fail in the same outage window. Keyed by "category:provider".
@@ -30,9 +46,12 @@ def _send(bot_token: str, chat_id: str, text: str) -> None:
         with httpx.Client(timeout=_TIMEOUT) as client:
             resp = client.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
             if not resp.is_success:
-                logger.warning("telegram_send_failed status=%d body=%s", resp.status_code, resp.text[:200])
+                # Response/request text can contain endpoint or account details.
+                logger.warning("telegram_send_failed status=%d", resp.status_code)
     except Exception as exc:
-        logger.warning("telegram_error err=%s", exc)
+        # Never interpolate HTTP exception text: clients may include the URL,
+        # whose Telegram path embeds the credential.
+        logger.warning("telegram_error type=%s", type(exc).__name__)
 
 
 def alert_trade_entered(

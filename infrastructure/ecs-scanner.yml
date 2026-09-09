@@ -1,0 +1,163 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Momentum-trader paper scanner on ECS Fargate.
+
+Parameters:
+  Stage: { Type: String, Default: prod }
+  ImageUri:
+    Type: String
+    Description: Versioned ECR image built from apps/signal-engine/Dockerfile.scanner
+  SubnetIds: { Type: 'List<AWS::EC2::Subnet::Id>' }
+  SecurityGroupId: { Type: 'AWS::EC2::SecurityGroup::Id' }
+  Cpu: { Type: String, Default: '512' }
+  Memory: { Type: String, Default: '1024' }
+
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties: { ClusterName: !Sub 'portfolio-analyzer-mt-${Stage}' }
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/portfolio-analyzer/mt-scanner-${Stage}'
+      RetentionInDays: 30
+  DataVolumeFs:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      FileSystemTags: [{ Key: Name, Value: !Sub 'mt-scanner-data-${Stage}' }]
+  DataMountTargetA:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref DataVolumeFs
+      SubnetId: !Select [0, !Ref SubnetIds]
+      SecurityGroups: [!Ref SecurityGroupId]
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'mt-scanner-exec-${Stage}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ssm-secrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [ssm:GetParameters, ssm:GetParameter]
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/*'
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'mt-scanner-task-${Stage}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: runtime
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters]
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/*'
+              - Effect: Allow
+                Action: [elasticfilesystem:ClientMount, elasticfilesystem:ClientWrite]
+                Resource: !GetAtt DataVolumeFs.Arn
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub 'mt-scanner-${Stage}'
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      RuntimePlatform: { CpuArchitecture: ARM64, OperatingSystemFamily: LINUX }
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      Volumes:
+        - Name: data
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref DataVolumeFs
+            TransitEncryption: ENABLED
+      ContainerDefinitions:
+        - Name: scanner
+          Image: !Ref ImageUri
+          Essential: true
+          MountPoints: [{ SourceVolume: data, ContainerPath: /data }]
+          Environment:
+            - { Name: STAGE, Value: !Ref Stage }
+            - { Name: AWS_REGION, Value: !Ref 'AWS::Region' }
+            - { Name: AWS_SECRETS_ENABLED, Value: 'true' }
+            - { Name: MOMENTUM_SCANNER_ONLY, Value: 'true' }
+            - { Name: TRADING_MODE, Value: paper }
+            - { Name: MT_STRATEGY, Value: catalyst_first_pullback }
+            - { Name: MT_LOG_CSV, Value: /data/mt_catalyst_first_pullback_forward_log_v3.csv }
+          Secrets:
+            - { Name: MONGODB_URI, ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/MONGODB_URI' }
+            - { Name: TELEGRAM_BOT_TOKEN, ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/TELEGRAM_BOT_TOKEN' }
+            - { Name: TELEGRAM_CHAT_ID, ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/TELEGRAM_CHAT_ID' }
+            - { Name: UPSTOX_ANALYTICS_TOKEN, ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/UPSTOX_ANALYTICS_TOKEN' }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: scanner
+  EventsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'mt-scanner-events-${Stage}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: run-task
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref TaskDefinition
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: [!GetAtt ExecutionRole.Arn, !GetAtt TaskRole.Arn]
+  MorningStart:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub 'mt-scanner-start-${Stage}'
+      Description: Start at 09:05 IST weekdays; application exits on NSE holidays.
+      ScheduleExpression: cron(35 3 ? * MON-FRI *)
+      State: ENABLED
+      Targets:
+        - Id: scanner
+          Arn: !GetAtt Cluster.Arn
+          RoleArn: !GetAtt EventsRole.Arn
+          EcsParameters:
+            TaskDefinitionArn: !Ref TaskDefinition
+            LaunchType: FARGATE
+            TaskCount: 1
+            PlatformVersion: LATEST
+            NetworkConfiguration:
+              AwsVpcConfiguration:
+                AssignPublicIp: ENABLED
+                Subnets: !Ref SubnetIds
+                SecurityGroups: [!Ref SecurityGroupId]
+
+Outputs:
+  ClusterName: { Value: !Ref Cluster }
+  TaskDefinitionArn: { Value: !Ref TaskDefinition }
+  RunNow:
+    Description: Manual start command; add stack network configuration.
+    Value: !Sub 'aws ecs run-task --cluster ${Cluster} --launch-type FARGATE --task-definition ${TaskDefinition}'

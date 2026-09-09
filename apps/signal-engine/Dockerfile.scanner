@@ -1,0 +1,25 @@
+# Momentum-trader scanner — long-lived ECS Fargate task (not a Lambda).
+FROM python:3.12-slim
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+ARG SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.revision=$SOURCE_REVISION
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app
+
+COPY pyproject.toml uv.lock ./
+RUN uv export --frozen --no-dev --extra aws --no-hashes -o /tmp/requirements.txt && \
+    uv pip install --system --no-cache -r /tmp/requirements.txt
+
+COPY src/ src/
+
+# Eligibility data and the forward log are persistent, operator-provisioned EFS data.
+ENV MT_UNIVERSE_CSV=/data/mt_universe.csv \
+    MT_LOG_CSV=/data/mt_forward_log_v3.csv \
+    MT_CACHE_DIR=/data/.cache_upstox \
+    AWS_SECRETS_ENABLED=true
+
+VOLUME ["/data"]
+CMD ["python", "-m", "src.momentum_trader.scanner"]

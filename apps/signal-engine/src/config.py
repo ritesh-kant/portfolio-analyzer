@@ -157,6 +157,27 @@ class Settings(BaseSettings):
     llm_timeout_s: float = 30.0             # asyncio.wait_for budget per LLM call
     llm_daily_spend_limit_usd: float = 5.0  # halt new LLM calls when daily cost exceeds this
 
+    # ── Momentum-trader (mt_*) + Upstox ──────────────────────────────────────
+    # Isolated from nt_*/opt_* by prefix. Spec: research/specs/warrior-patterns-nse.md
+    upstox_api_key: str = ""
+    upstox_api_secret: str = ""
+    upstox_redirect_uri: str = "http://127.0.0.1:8765/callback"
+    # Long-lived, read-only token for market-data and WebSocket paper scanning.
+    # It is preferred over the legacy daily OAuth token when both are present.
+    upstox_analytics_token: str = ""
+    upstox_access_token: str = ""             # legacy daily OAuth token; falls back to SSM if empty
+    mt_universe_csv: str = "research/data/mt_universe.csv"      # repo-relative or absolute
+    mt_extra_universe_files: str = ""         # comma-separated symbol lists (Smallcap/Microcap 250)
+    mt_risk_inr: float = 500.0                # rupees at risk per trade (stop distance × qty)
+    mt_max_notional_inr: float = 50_000.0     # cap on entry × qty
+    mt_max_positions: int = 5                 # concurrent open paper positions
+    mt_total_capital_inr: float = 100_000.0   # open + pending paper notional cap
+    mt_daily_loss_limit_inr: float = 2_500.0  # stop new entries after realised + open loss
+    mt_log_csv: str = "research/backtests/mt_forward_log.csv"  # spec §6 forward log
+    mt_cache_dir: str = ".cache_upstox"       # instrument master + candle cache
+    mt_strategy: str = "baseline"             # baseline | catalyst_first_pullback
+    mt_bypass_market_hours: bool = False      # run the loop outside 09:15–15:35 (tests)
+
     # Observability
     langchain_tracing_v2: bool = False
     langchain_api_key: str = ""
@@ -170,11 +191,22 @@ class Settings(BaseSettings):
         if stage == "dev":
             return self
         insecure: list[str] = []
-        if self.signal_engine_api_key == _DEFAULT_API_KEY:
+        # The ECS scanner makes neither API nor LLM calls, but it still
+        # validates its database credential.
+        scanner_only = os.getenv("MOMENTUM_SCANNER_ONLY", "").lower() == "true"
+        if not scanner_only and self.signal_engine_api_key == _DEFAULT_API_KEY:
             insecure.append("SIGNAL_ENGINE_API_KEY is still the default dev value")
         if _DEFAULT_MONGO_CREDS in self.mongodb_uri:
             insecure.append("MONGODB_URI contains default dev credentials")
-        if not any([self.anthropic_api_key, self.openai_api_key, self.gemini_api_key, self.nvidia_api_key, self.deepseek_api_key]):
+        if not scanner_only and not any(
+            [
+                self.anthropic_api_key,
+                self.openai_api_key,
+                self.gemini_api_key,
+                self.nvidia_api_key,
+                self.deepseek_api_key,
+            ]
+        ):
             insecure.append("No LLM provider API key is set")
         if insecure:
             raise ValueError(
