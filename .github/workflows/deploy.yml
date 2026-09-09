@@ -54,6 +54,7 @@ jobs:
               - 'infrastructure/serverless.yml'
               - 'packages/**'
             momentum-scanner:
+              - '.github/workflows/deploy.yml'
               - 'apps/signal-engine/Dockerfile.scanner'
               - 'apps/signal-engine/src/momentum_trader/**'
               - 'apps/signal-engine/src/config.py'
