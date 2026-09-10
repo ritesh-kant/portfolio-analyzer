@@ -210,6 +210,11 @@ export function MomentumTradeChart({
   priceValues.push(trade.entry_price, trade.stop);
   if (trade.target) priceValues.push(trade.target);
   if (trade.exit_price) priceValues.push(trade.exit_price);
+  // resist_head_pct/support_drop_pct are recorded as % distance from the entry price at trigger time.
+  const resistance = trade.resist_head_pct != null ? trade.entry_price * (1 + trade.resist_head_pct / 100) : null;
+  const support = trade.support_drop_pct != null ? trade.entry_price * (1 - trade.support_drop_pct / 100) : null;
+  if (resistance !== null) priceValues.push(resistance);
+  if (support !== null) priceValues.push(support);
   const rawMin = Math.min(...priceValues);
   const rawMax = Math.max(...priceValues);
   const pricePad = Math.max((rawMax - rawMin) * 0.08, rawMax * 0.001);
@@ -360,6 +365,7 @@ export function MomentumTradeChart({
         })}
         <path d={linePath(data.map((bar) => bar.ema9), x, yPrice)} fill="none" stroke="#fbbf24" strokeWidth="1.5" /><path d={linePath(data.map((bar) => bar.ema20), x, yPrice)} fill="none" stroke="#a78bfa" strokeWidth="1.5" /><path d={linePath(data.map((bar) => bar.vwap), x, yPrice)} fill="none" stroke="#60a5fa" strokeWidth="1.5" strokeDasharray="4 3" />
         {[['Stop', trade.stop, '#fb7185'], ['Target', trade.target, '#34d399']].map(([label, value, color]) => value ? <g key={label as string}><line x1={left} x2={width - right} y1={yPrice(value as number)} y2={yPrice(value as number)} stroke={color as string} strokeOpacity=".75" strokeDasharray="5 4" /><text x={width - right - 2} y={yPrice(value as number) - 4} textAnchor="end" fill={color as string} fontSize="11">{label as string} {fmt(value as number)}</text></g> : null)}
+        {[['Resistance', resistance, '#f472b6'], ['Support', support, '#38bdf8']].map(([label, value, color]) => value ? <g key={label as string}><line x1={left} x2={width - right} y1={yPrice(value as number)} y2={yPrice(value as number)} stroke={color as string} strokeOpacity=".55" /><text x={left + 4} y={yPrice(value as number) - 4} fill={color as string} fontSize="11">{label as string} {fmt(value as number)}</text></g> : null)}
         <g><line x1={left} x2={width - right} y1={entryY} y2={entryY} stroke="#4ade80" strokeOpacity=".8" strokeDasharray="2 3" /><text x={left + 4} y={entryY - 5} fill="#bbf7d0" fontSize="11">BUY {fmt(trade.entry_price)}</text></g>
         {exitY !== null && trade.exit_price !== undefined && <g><line x1={left} x2={width - right} y1={exitY} y2={exitY} stroke="#f87171" strokeOpacity=".8" strokeDasharray="2 3" /><text x={left + 4} y={exitLabelY as number} fill="#fecaca" fontSize="11">SELL {fmt(trade.exit_price)}</text></g>}
         {entryIndex >= 0 && <path d={`M ${x(entryIndex) - 6} ${entryY + 13} L ${x(entryIndex) + 6} ${entryY + 13} L ${x(entryIndex)} ${entryY + 3} Z`} fill="#4ade80" />}
@@ -392,7 +398,7 @@ export function MomentumTradeChart({
           </g>
         )}
       </svg>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 px-2 pb-1 text-xs text-slate-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#2dd4bf]" />{interval} up candle</span><span className="text-[#fbbf24]">EMA 9 / MACD</span><span className="text-[#a78bfa]">EMA 20 / signal</span><span className="text-[#60a5fa]">VWAP</span><span className="text-amber-200">▱ completed pattern</span><span className="text-emerald-300">▲ entry</span><span className="text-rose-300">▼ exit</span><span className="text-slate-400">Hover for price/time · drag to pan · focus chart: +/− zoom, 0 reset, ←/→ pan</span></div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 px-2 pb-1 text-xs text-slate-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#2dd4bf]" />{interval} up candle</span><span className="text-[#fbbf24]">EMA 9 / MACD</span><span className="text-[#a78bfa]">EMA 20 / signal</span><span className="text-[#60a5fa]">VWAP</span><span className="text-amber-200">▱ completed pattern</span>{(resistance !== null || support !== null) && <><span className="text-[#f472b6]">— resistance</span><span className="text-[#38bdf8]">— support</span></>}<span className="text-emerald-300">▲ entry</span><span className="text-rose-300">▼ exit</span><span className="text-slate-400">Hover for price/time · drag to pan · focus chart: +/− zoom, 0 reset, ←/→ pan</span></div>
     </div>
   );
 }

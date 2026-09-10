@@ -77,6 +77,8 @@ export interface MomentumTrade {
   pullback_ord?: number | null;
   atr_pct?: number | null;
   macd_hist?: number | null;
+  resist_head_pct?: number | null;
+  support_drop_pct?: number | null;
   chart?: { interval: '1m'; bars: MomentumBar[] };
 }
 
