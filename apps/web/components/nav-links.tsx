@@ -8,6 +8,7 @@ const LINKS = [
   { href: '/tax', label: 'Tax' },
   { href: '/signals', label: 'Signals' },
   { href: '/trading', label: 'Trading' },
+  { href: '/momentum', label: 'Momentum' },
   { href: '/options', label: 'Options' },
 ] as const;
 

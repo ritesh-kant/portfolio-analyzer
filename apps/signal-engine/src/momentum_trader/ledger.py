@@ -14,6 +14,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 from .engine import AttentionEvent, Candidate, ClosedTrade, Position, Rejection
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,31 @@ CSV_COLUMNS = [
     "next_round_level", "prev_day_gainer", "exit_time", "exit_px", "exit_reason",
     "gross_inr", "costs_inr", "net_inr", "float_filter_applied",
 ]
+
+
+def chart_bars_doc(bars: pd.DataFrame) -> list[dict[str, Any]]:
+    """Make the closed 1-minute bars portable for the trade-review UI.
+
+    The scanner is the only component that has market-data access.  Capturing
+    the raw bars when a paper position closes means the web app can reproduce
+    the chart later without a browser token, a broker API call, or a mutable
+    cache.  Indicators deliberately remain derived values in the UI so their
+    formulas stay visible and can be changed without rewriting stored trades.
+    """
+    required = ("open", "high", "low", "close", "volume")
+    if bars.empty or any(col not in bars.columns for col in required):
+        return []
+    return [
+        {
+            "time": pd.Timestamp(at).isoformat(),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row["volume"]),
+        }
+        for at, row in bars.iterrows()
+    ]
 
 
 def _cand_doc(c: Candidate) -> dict[str, Any]:
@@ -102,7 +129,12 @@ class PaperLedger:
             logger.exception("mt_positions insert failed")
             return None
 
-    def closed(self, t: ClosedTrade, next_round_level: float | None = None) -> None:
+    def closed(
+        self,
+        t: ClosedTrade,
+        next_round_level: float | None = None,
+        chart_bars: pd.DataFrame | None = None,
+    ) -> None:
         if self._db is not None:
             try:
                 self._db["mt_positions"].update_one(
@@ -112,6 +144,13 @@ class PaperLedger:
                         "status": "closed", "exit_time": t.exit_time.to_pydatetime(),
                         "exit_price": t.exit, "exit_reason": t.exit_reason,
                         "gross_inr": t.gross_inr, "costs_inr": t.costs_inr, "net_inr": t.net_inr,
+                        # Raw one-minute session bars are sufficient to render
+                        # candles and derive EMA/VWAP/MACD/volume in the review UI.
+                        "chart": {
+                            "interval": "1m",
+                            "bars": chart_bars_doc(chart_bars)
+                            if chart_bars is not None else [],
+                        },
                     }},
                 )
             except Exception:  # noqa: BLE001

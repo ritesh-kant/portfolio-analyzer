@@ -414,7 +414,16 @@ class Scanner:
         for p in entries:
             self._record_open(p)
         for t in closed:
-            self._ledger.closed(t, round_levels_above(t.entry)[0])
+            # `snapshots` holds the complete session through the bar which
+            # produced the exit. Persist the raw data with the trade so its
+            # eventual review chart is reproducible without calling Upstox.
+            snapshot_key = next((k for k, st in self.states.items() if st.symbol == t.cand.symbol), None)
+            chart_bars = (
+                snapshots.get(snapshot_key, pd.DataFrame())
+                if snapshot_key is not None
+                else pd.DataFrame()
+            )
+            self._ledger.closed(t, round_levels_above(t.entry)[0], chart_bars)
             mark = "✅" if t.net_inr > 0 else "❌"
             self._tg(
                 f"{mark} EXIT <b>{t.cand.symbol}</b> {t.exit_reason} "

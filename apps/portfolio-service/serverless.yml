@@ -159,6 +159,14 @@ functions:
           path: /nt/pipeline/{id}/positions
           method: get
 
+  # ── Momentum paper-trader review API (mt/*) ─────────────────────────────────
+  mtTrades:
+    handler: src/handlers/mt-trades.handler
+    events:
+      - httpApi:
+          path: /mt/trades
+          method: get
+
   # ── Options-trader API (opt/*) ───────────────────────────────────────────────
   optPositions:
     handler: src/handlers/opt-positions.handler
