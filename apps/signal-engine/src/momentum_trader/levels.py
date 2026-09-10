@@ -33,6 +33,11 @@ PIVOT_K = 3            # bars either side that must be lower/higher
 CLUSTER_TOL_PCT = 0.30  # pivots within 0.30% of each other are the same level
 MIN_TOUCHES = 1
 NEAR_PCT = 0.35        # "price is at the level" band, in percent
+# A single intraday pivot is useful context, but is not enough evidence to
+# overrule a live trend.  Anchors are structural by definition; a pivot becomes
+# structural only after the market has made a second, independently confirmed
+# attempt at it.  This is a rule about the source of a level, not its price.
+STRUCTURAL_KINDS = frozenset({"prev_day", "orb", "round"})
 
 
 @dataclass(frozen=True)
@@ -139,6 +144,23 @@ def derive_levels(
 def nearest_resistance(levels: list[Level], price: float,
                        min_strength: float = 0.0) -> Level | None:
     above = [x for x in levels if x.price > price and x.strength >= min_strength]
+    return min(above, key=lambda x: x.price) if above else None
+
+
+def is_structural(level: Level) -> bool:
+    """Whether a level has enough independent evidence to govern a trade.
+
+    Previous-session, opening-range and round-number anchors are known before
+    the decision.  A pivot needs at least two confirmed touches; the final
+    pivot itself is still look-ahead safe because ``derive_levels`` only emits
+    pivots after the required bars on its right have closed.
+    """
+    return level.kind in STRUCTURAL_KINDS or level.touches >= 2
+
+
+def nearest_structural_resistance(levels: list[Level], price: float) -> Level | None:
+    """Nearest resistance that can block entry or establish a rejection exit."""
+    above = [x for x in levels if x.price > price and is_structural(x)]
     return min(above, key=lambda x: x.price) if above else None
 
 

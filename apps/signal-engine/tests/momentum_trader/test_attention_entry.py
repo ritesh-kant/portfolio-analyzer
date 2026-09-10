@@ -53,6 +53,17 @@ def _cfg() -> eng.EngineConfig:
     )
 
 
+def _resistance_cfg() -> eng.EngineConfig:
+    return eng.EngineConfig(
+        fill_mode=eng.FILL_FUTURE_TRIGGER,
+        exit_mode="trend_resistance_state",
+        use_attention_entries=True,
+        attention_day_chg_min=1.5,
+        attention_rvol_min=1.5,
+        require_resistance_breakout=True,
+    )
+
+
 def _promoted_state() -> tuple[eng.DayState, eng.EngineConfig, pd.DataFrame]:
     bars = _attention_prelude()
     st = eng.DayState("TEST", prev_close=100.0, cum_vol_profile=_profile_for(bars))
@@ -219,3 +230,33 @@ def test_chased_future_quote_is_rejected_with_reason() -> None:
     assert eng.fill_pending_quote(st, when, 103.20, cfg, bars) is None
     assert st.pending is None
     assert st.rejections[-1].reason == "chased"
+
+
+def test_resistance_aware_confirmation_waits_for_a_nearby_structural_ceiling() -> None:
+    bars = _attention_prelude()
+    # The current high-volume confirmation is valid in isolation, but a
+    # previous-session ceiling sits less than its initial risk above the trigger.
+    confirmation = pd.DataFrame(
+        [(101.60, 102.10, 101.54, 102.06, 1200.0)],
+        index=pd.DatetimeIndex([bars.index[-1] + pd.Timedelta(minutes=1)]), columns=COLS,
+    )
+    bars = pd.concat([bars, confirmation])
+    setup, reason = eng._resistance_aware_attention_confirmation(
+        bars, 2.5, {"high": 102.50, "low": 99.0, "close": 100.0}
+    )
+    assert setup is None and reason == "attention_wait_resistance_break"
+
+
+def test_resistance_aware_confirmation_uses_the_crossed_ceiling_as_false_break_level() -> None:
+    bars = _attention_prelude()
+    # This volume-backed candle closes through the pre-existing prior-day high.
+    confirmation = pd.DataFrame(
+        [(101.70, 102.30, 101.60, 102.20, 1200.0)],
+        index=pd.DatetimeIndex([bars.index[-1] + pd.Timedelta(minutes=1)]), columns=COLS,
+    )
+    bars = pd.concat([bars, confirmation])
+    setup, reason = eng._resistance_aware_attention_confirmation(
+        bars, 2.5, {"high": 102.0, "low": 99.0, "close": 100.0}
+    )
+    assert setup is not None and reason == "confirmed_resistance_breakout"
+    assert setup.level == pytest.approx(102.0)

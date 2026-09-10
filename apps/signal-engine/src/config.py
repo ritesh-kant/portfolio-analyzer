@@ -173,7 +173,7 @@ class Settings(BaseSettings):
     mt_max_positions: int = 5                 # concurrent open paper positions
     mt_log_csv: str = "research/backtests/mt_forward_log.csv"  # spec §6 forward log
     mt_cache_dir: str = ".cache_upstox"       # instrument master + candle cache
-    mt_strategy: str = "baseline"             # baseline | catalyst_first_pullback | attention_1m
+    mt_strategy: str = "baseline"             # baseline | catalyst_first_pullback | attention_1m | attention_1m_resistance_state
     mt_attention_day_chg_min: float = 1.5      # promotion only; never sufficient to enter
     mt_attention_rvol_min: float = 1.5         # promotion only; never sufficient to enter
     mt_bypass_market_hours: bool = False      # run the loop outside 09:15–15:35 (tests)

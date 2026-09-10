@@ -114,6 +114,15 @@ def test_level_is_near() -> None:
     assert not lv.is_near(203.0, tol_pct=0.35)
 
 
+def test_structural_resistance_requires_an_anchor_or_repeated_pivot() -> None:
+    one_touch = levels.Level(105.0, "pivot_high", 1, 500.0, 1.0)
+    repeated = levels.Level(106.0, "pivot_high", 2, 1000.0, 2.0)
+    prior_high = levels.Level(107.0, "prev_day", 1, 0.0, 1.5)
+    assert not levels.is_structural(one_touch)
+    assert levels.is_structural(repeated) and levels.is_structural(prior_high)
+    assert levels.nearest_structural_resistance([one_touch, repeated, prior_high], 100.0) == repeated
+
+
 # ── exit config ───────────────────────────────────────────────────────────────
 
 def test_modes_enable_the_right_rules() -> None:
@@ -124,6 +133,9 @@ def test_modes_enable_the_right_rules() -> None:
     assert not tmin.use_macd_fade
     tfull = exits.ExitConfig.for_mode(exits.MODE_TREND_FULL)
     assert tfull.use_macd_fade and tfull.use_resistance_reject and tfull.use_volume_climax
+    resistance_state = exits.ExitConfig.for_mode(exits.MODE_TREND_RESISTANCE_STATE)
+    assert resistance_state.structural_resistance_only
+    assert resistance_state.resistance_requires_failed_break
     with pytest.raises(ValueError):
         exits.ExitConfig.for_mode("nope")
 
@@ -266,6 +278,30 @@ def test_resistance_rejection_needs_a_level_and_a_weak_candle() -> None:
     assert exits.check_trend(st, strong, None, cfg) is None      # closed strong at the level
     st.levels = []
     assert exits.check_trend(st, rejected, None, cfg) is None    # no levels → no rule
+
+
+def test_resistance_state_needs_structural_level_and_failed_break() -> None:
+    st = _state(entry=100.0, stop=99.0)
+    st.armed = True
+    cfg = exits.ExitConfig(
+        mode=exits.MODE_TREND_RESISTANCE_STATE,
+        use_ema_fast_break=False, use_ema_slow_break=False, use_swing_trail=False,
+        use_resistance_reject=True, structural_resistance_only=True,
+        resistance_requires_failed_break=True,
+    )
+    # A one-touch pivot must not force an exit, even when price turns red nearby.
+    st.levels = [levels.Level(105.0, "pivot_high", 1, 500.0, 1.0)]
+    failed = _bars(_ramp(10, 100, 0.4) + [(104.9, 105.1, 104.0, 104.2, 900)])
+    assert exits.check_trend(st, failed, None, cfg) is None
+
+    # A structural ceiling exits only after an actual test closes back below it.
+    st.levels = [levels.Level(105.0, "pivot_high", 2, 5000.0, 2.0)]
+    sig = exits.check_trend(st, failed, None, cfg)
+    assert sig is not None and sig.reason == "resistance_reject"
+
+    # A red pullback that remains above an accepted level is not a rejection.
+    held_above = _bars(_ramp(10, 100, 0.4) + [(105.6, 105.8, 105.1, 105.2, 900)])
+    assert exits.check_trend(st, held_above, None, cfg) is None
 
 
 def test_volume_climax_needs_a_heavy_down_bar() -> None:

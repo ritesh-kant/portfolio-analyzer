@@ -30,7 +30,7 @@ from src.news_trader.trailing_sl import calc_costs
 from . import exits, location, quality
 from .candles import candle_tags, completed_pattern_matches
 from .indicators import cumulative_session_volume, day_change_pct, ema, session_vwap, volume_ratio
-from .levels import NEAR_PCT
+from .levels import NEAR_PCT, derive_levels, nearest_structural_resistance
 from .pullback import pullback_ordinal
 from .risk import DEFAULT_RR, TradePlan, plan_trade
 from .setups import CHASE_MAX_EXT_PCT, Setup, false_break, scan_setups
@@ -110,7 +110,7 @@ class EngineConfig:
     allowed_setups: tuple[str, ...] = ()
     allowed_pullback_ordinals: tuple[int, ...] = ()
     fill_mode: str = FILL_NEXT_OPEN    # next_open | trigger | future_trigger
-    exit_mode: str = exits.MODE_FIXED  # fixed_2r | trend_min | trend_full (see exits.py)
+    exit_mode: str = exits.MODE_FIXED  # see exits.py MODES
     # New paper-only path: soft thresholds promote a symbol, 5-minute context
     # defines the setup, and a high-volume 1-minute candle confirms it.
     use_attention_entries: bool = False
@@ -118,6 +118,10 @@ class EngineConfig:
     attention_rvol_min: float = ATTENTION_RVOL_MIN
     attention_confirm_vol_ratio: float = ATTENTION_CONFIRM_VOL_RATIO
     attention_pending_minutes: int = ATTENTION_PENDING_MINUTES
+    # The resistance-state arm never enters with <1R of room to a structural
+    # ceiling.  A later high-volume close through that ceiling creates a fresh
+    # confirmation instead.
+    require_resistance_breakout: bool = False
     exit_cfg: exits.ExitConfig = field(init=False)
 
     def __post_init__(self) -> None:
@@ -494,6 +498,52 @@ def _attention_confirmation(
     )
 
 
+def _resistance_aware_attention_confirmation(
+    bars_1m: pd.DataFrame,
+    min_volume_ratio: float,
+    prev_day: dict[str, float] | None,
+) -> tuple[Setup | None, str]:
+    """Apply the unchanged 1-minute confirmation to structural resistance.
+
+    The level set is built before the current confirmation bar.  If that bar
+    closes through a structural ceiling, the setup's level becomes that ceiling
+    so the existing false-break rule protects the new breakout.  Otherwise an
+    entry with less than one initial-risk unit of room waits rather than buying
+    into supply.
+    """
+    setup, reason = _attention_confirmation(bars_1m, min_volume_ratio)
+    if setup is None:
+        return None, reason
+    prior = bars_1m.iloc[:-1]
+    if prior.empty:
+        return setup, reason
+    levels_before_confirmation = derive_levels(prior, prev_day)
+
+    # If the confirmation has just crossed the closest structural level, it is
+    # the proper breakout confirmation—not an early signal below that level.
+    crossed = nearest_structural_resistance(
+        levels_before_confirmation, float(prior["close"].iloc[-1])
+    )
+    if crossed is not None and float(bars_1m["close"].iloc[-1]) > crossed.price:
+        return Setup(
+            name=setup.name,
+            trigger=setup.trigger,
+            stop=setup.stop,
+            level=crossed.price,
+            meta={**setup.meta, "accepted_resistance": crossed.price},
+        ), "confirmed_resistance_breakout"
+
+    resistance = nearest_structural_resistance(levels_before_confirmation, setup.trigger)
+    if resistance is not None:
+        headroom = resistance.price - setup.trigger
+        initial_risk = setup.trigger - setup.stop
+        if headroom < initial_risk:
+            return None, "attention_wait_resistance_break"
+        return setup, reason
+
+    return setup, reason
+
+
 def _reject_pending(
     state: DayState,
     when: pd.Timestamp,
@@ -719,9 +769,14 @@ def step(
             state.attention_since = None
             state.attention_patterns = []
             return
-        setup, confirmation_reason = _attention_confirmation(
-            bars_1m, cfg.attention_confirm_vol_ratio
-        )
+        if cfg.require_resistance_breakout:
+            setup, confirmation_reason = _resistance_aware_attention_confirmation(
+                bars_1m, cfg.attention_confirm_vol_ratio, state.prev_day
+            )
+        else:
+            setup, confirmation_reason = _attention_confirmation(
+                bars_1m, cfg.attention_confirm_vol_ratio
+            )
         if setup is None:
             state.rejections.append(Rejection(
                 symbol=state.symbol,

@@ -44,7 +44,7 @@ from .engine import (
     fill_pending_quote,
     step,
 )
-from .exits import MODE_FIXED, MODE_TREND_FULL
+from .exits import MODE_FIXED, MODE_TREND_FULL, MODE_TREND_RESISTANCE_STATE
 from .indicators import round_levels_above
 from .ledger import PaperLedger
 from .upstox import Instrument, UpstoxAuthError, UpstoxClient
@@ -58,6 +58,7 @@ PROFILE_DAYS = 20
 STRATEGY_BASELINE = "baseline"
 STRATEGY_CATALYST_FIRST_PULLBACK = "catalyst_first_pullback"
 STRATEGY_ATTENTION_1M = "attention_1m"
+STRATEGY_ATTENTION_1M_RESISTANCE_STATE = "attention_1m_resistance_state"
 
 
 def _strategy_config(settings: Settings) -> EngineConfig:
@@ -83,10 +84,21 @@ def _strategy_config(settings: Settings) -> EngineConfig:
             attention_day_chg_min=settings.mt_attention_day_chg_min,
             attention_rvol_min=settings.mt_attention_rvol_min,
         )
+    if settings.mt_strategy == STRATEGY_ATTENTION_1M_RESISTANCE_STATE:
+        return EngineConfig(
+            risk_inr=settings.mt_risk_inr,
+            max_notional_inr=settings.mt_max_notional_inr,
+            exit_mode=MODE_TREND_RESISTANCE_STATE,
+            fill_mode=FILL_FUTURE_TRIGGER,
+            use_attention_entries=True,
+            attention_day_chg_min=settings.mt_attention_day_chg_min,
+            attention_rvol_min=settings.mt_attention_rvol_min,
+            require_resistance_breakout=True,
+        )
     raise ValueError(
         f"unknown MT_STRATEGY {settings.mt_strategy!r}; expected "
         f"{STRATEGY_BASELINE!r}, {STRATEGY_CATALYST_FIRST_PULLBACK!r}, "
-        f"or {STRATEGY_ATTENTION_1M!r}"
+        f"{STRATEGY_ATTENTION_1M!r}, or {STRATEGY_ATTENTION_1M_RESISTANCE_STATE!r}"
     )
 
 
@@ -263,8 +275,20 @@ class Scanner:
             profile = build_cum_volume_profile(hist_1m, PROFILE_DAYS) if not hist_1m.empty else None
             closes = daily["close"]
             prev_gainer = len(closes) >= 2 and float(closes.iloc[-1] / closes.iloc[-2] - 1) >= 0.04
-            self.states[inst.key] = DayState(symbol=sym, prev_close=prev_close,
-                                             cum_vol_profile=profile, prev_day_gainer=prev_gainer)
+            # The resistance-state arm needs yesterday's anchors to determine
+            # whether a confirmation is breaking a structural ceiling.  Keep
+            # the frozen control's inputs unchanged.
+            prev_day = None
+            if self.cfg.require_resistance_breakout:
+                prev_day = {
+                    "high": float(daily["high"].iloc[-1]),
+                    "low": float(daily["low"].iloc[-1]),
+                    "close": prev_close,
+                }
+            self.states[inst.key] = DayState(
+                symbol=sym, prev_close=prev_close, cum_vol_profile=profile,
+                prev_day_gainer=prev_gainer, prev_day=prev_day,
+            )
             self.inst_by_key[inst.key] = inst
             self.turnover[sym] = turnover_cr
             keys.append(inst.key)

@@ -70,6 +70,9 @@ mt-dry-run-first-pullback:
 mt-scan-attention:
 	MT_STRATEGY=attention_1m MT_LOG_CSV=research/backtests/mt_attention_1m_forward_log.csv uv run python -m src.momentum_trader.scanner
 
+mt-scan-attention-resistance-state:
+	MT_STRATEGY=attention_1m_resistance_state MT_LOG_CSV=research/backtests/mt_attention_1m_resistance_state_forward_log.csv uv run python -m src.momentum_trader.scanner
+
 mt-dry-run-attention:
 	MT_STRATEGY=attention_1m MT_LOG_CSV=research/backtests/mt_attention_1m_forward_log.csv uv run python -m src.momentum_trader.scanner --dry-run
 

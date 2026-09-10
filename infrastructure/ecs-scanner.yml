@@ -129,10 +129,13 @@ Resources:
             - { Name: AWS_SECRETS_ENABLED, Value: 'true' }
             - { Name: MOMENTUM_SCANNER_ONLY, Value: 'true' }
             - { Name: TRADING_MODE, Value: paper }
-            - { Name: MT_STRATEGY, Value: attention_1m }
+            # The original attention_1m arm remains available as the frozen
+            # control. Production paper scans use the separately logged
+            # resistance-state treatment.
+            - { Name: MT_STRATEGY, Value: attention_1m_resistance_state }
             - { Name: MT_ATTENTION_DAY_CHG_MIN, Value: '1.5' }
             - { Name: MT_ATTENTION_RVOL_MIN, Value: '1.5' }
-            - { Name: MT_LOG_CSV, Value: /data/mt_attention_1m_forward_log.csv }
+            - { Name: MT_LOG_CSV, Value: /data/mt_attention_1m_resistance_state_forward_log.csv }
           Secrets:
             - Name: MONGODB_URI
               ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/MONGODB_URI

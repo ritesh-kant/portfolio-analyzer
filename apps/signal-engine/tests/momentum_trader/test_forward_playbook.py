@@ -9,6 +9,7 @@ from src.config import Settings
 from src.momentum_trader import engine as eng
 from src.momentum_trader.scanner import (
     STRATEGY_ATTENTION_1M,
+    STRATEGY_ATTENTION_1M_RESISTANCE_STATE,
     STRATEGY_CATALYST_FIRST_PULLBACK,
     _market_data_token,
     _repo_path,
@@ -48,6 +49,12 @@ def test_scanner_selects_attention_watchlist_strategy() -> None:
     assert cfg.use_attention_entries
     assert cfg.attention_day_chg_min == pytest.approx(1.5)
     assert cfg.attention_rvol_min == pytest.approx(1.5)
+
+
+def test_scanner_selects_separate_resistance_state_arm() -> None:
+    cfg = _strategy_config(Settings(mt_strategy=STRATEGY_ATTENTION_1M_RESISTANCE_STATE))
+    assert cfg.exit_mode == "trend_resistance_state"
+    assert cfg.require_resistance_breakout
 
 
 def test_scanner_rejects_unknown_strategy() -> None:

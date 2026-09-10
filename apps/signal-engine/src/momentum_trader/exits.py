@@ -44,7 +44,8 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from .indicators import ema, macd, volume_ratio
-from .levels import Level, derive_levels, nearest_resistance, swing_pivots
+from .levels import (Level, derive_levels, nearest_resistance,
+                     nearest_structural_resistance, swing_pivots)
 
 # ── frozen parameters ─────────────────────────────────────────────────────────
 ARM_AT_R = 0.5             # arm trend exits once open profit ≥ 0.5 × initial risk
@@ -59,7 +60,10 @@ WARMUP_BARS = 240          # prior-session bars fed to the indicators
 MODE_FIXED = "fixed_2r"
 MODE_TREND_MIN = "trend_min"
 MODE_TREND_FULL = "trend_full"
-MODES = (MODE_FIXED, MODE_TREND_MIN, MODE_TREND_FULL)
+# A separately selectable forward-test mode.  It intentionally leaves the
+# existing trend_full control untouched.
+MODE_TREND_RESISTANCE_STATE = "trend_resistance_state"
+MODES = (MODE_FIXED, MODE_TREND_MIN, MODE_TREND_FULL, MODE_TREND_RESISTANCE_STATE)
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,8 @@ class ExitConfig:
     use_macd_fade: bool = False
     use_resistance_reject: bool = False
     use_volume_climax: bool = False
+    structural_resistance_only: bool = False
+    resistance_requires_failed_break: bool = False
 
     @property
     def has_target(self) -> bool:
@@ -99,6 +105,10 @@ class ExitConfig:
         if mode == MODE_TREND_FULL:
             return cls(mode=mode, use_macd_fade=True, use_resistance_reject=True,
                        use_volume_climax=True)
+        if mode == MODE_TREND_RESISTANCE_STATE:
+            return cls(mode=mode, use_macd_fade=True, use_resistance_reject=True,
+                       use_volume_climax=True, structural_resistance_only=True,
+                       resistance_requires_failed_break=True)
         raise ValueError(f"unknown exit mode {mode!r}; expected one of {MODES}")
 
 
@@ -215,10 +225,18 @@ def check_trend(
             if float(h.iloc[-2]) > 0.0 >= float(h.iloc[-1]):
                 return ExitSignal("macd_fade", close)
     if cfg.use_resistance_reject and st.levels:
-        res = nearest_resistance(st.levels, st.entry)
+        res = (nearest_structural_resistance(st.levels, st.entry)
+               if cfg.structural_resistance_only else nearest_resistance(st.levels, st.entry))
         if res is not None and res.is_near(high, RESIST_NEAR_PCT):
-            body, rng = abs(close - open_), max(high - low, 1e-9)
-            if close < open_ or body <= 0.3 * rng:      # red bar, or indecision
+            if cfg.resistance_requires_failed_break:
+                # A level remains resistance only if price actually tests it
+                # and then closes back underneath.  A red bar above an
+                # accepted level is a pullback, not a reason to sell.
+                rejected = high >= res.price and close < res.price and close < open_
+            else:
+                body, rng = abs(close - open_), max(high - low, 1e-9)
+                rejected = close < open_ or body <= 0.3 * rng
+            if rejected:
                 return ExitSignal("resistance_reject", close)
     if cfg.use_volume_climax and close < open_:
         vr = volume_ratio(bars_tf)

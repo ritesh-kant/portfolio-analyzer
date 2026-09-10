@@ -123,15 +123,35 @@ export function MomentumTradeChart({
   const defaultZoom = interval === '5m' ? DEFAULT_ZOOM_5M : DEFAULT_ZOOM_1M;
   const [zoom, setZoom] = useState(defaultZoom);
   const [requestedStart, setRequestedStart] = useState<number | null>(null);
+  const [priceZoom, setPriceZoom] = useState(1);
+  const [priceCenter, setPriceCenter] = useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<{ pointerId: number; startX: number; startView: number } | null>(null);
+  const dragRef = useRef<{ pointerId: number; startX: number; startView: number; startY: number; startCenter: number } | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
+  // Pinch/ctrl+wheel zoom reads the latest handler through a ref so the native
+  // (non-passive) listener can be attached once per SVG mount, not re-bound every render.
+  const pinchZoomRef = useRef<(deltaY: number, clientX: number, clientY: number, rect: DOMRect) => void>(() => {});
+  const wheelCleanupRef = useRef<(() => void) | null>(null);
+  const setSvgRef = (node: SVGSVGElement | null) => {
+    wheelCleanupRef.current?.();
+    wheelCleanupRef.current = null;
+    if (!node) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return; // trackpad pinch and ctrl+wheel report ctrlKey; plain scroll is left alone
+      event.preventDefault();
+      pinchZoomRef.current(event.deltaY, event.clientX, event.clientY, node.getBoundingClientRect());
+    };
+    node.addEventListener('wheel', onWheel, { passive: false });
+    wheelCleanupRef.current = () => node.removeEventListener('wheel', onWheel);
+  };
 
   useEffect(() => {
     setZoom(defaultZoom);
     setRequestedStart(null);
+    setPriceZoom(1);
+    setPriceCenter(null);
   }, [trade._id, defaultZoom]);
 
   useEffect(() => {
@@ -177,6 +197,14 @@ export function MomentumTradeChart({
   const pan = (direction: -1 | 1) => {
     setRequestedStart(Math.min(maxStart, Math.max(0, viewStart + direction * Math.ceil(visibleCount * 0.7))));
   };
+  const priceZoomIn = () => setPriceZoom((value) => Math.min(8, value * 2));
+  const priceZoomOut = () => setPriceZoom((value) => Math.max(1, value / 2));
+  const resetZoom = () => {
+    setZoom(defaultZoom);
+    setRequestedStart(null);
+    setPriceZoom(1);
+    setPriceCenter(null);
+  };
   const toggleFullscreen = async () => {
     if (!chartRef.current) return;
     if (document.fullscreenElement === chartRef.current) await document.exitFullscreen();
@@ -220,7 +248,45 @@ export function MomentumTradeChart({
   const pricePad = Math.max((rawMax - rawMin) * 0.08, rawMax * 0.001);
   const minPrice = rawMin - pricePad;
   const maxPrice = rawMax + pricePad;
-  const yPrice = (value: number) => priceTop + ((maxPrice - value) / (maxPrice - minPrice || 1)) * priceHeight;
+  // Vertical zoom narrows the visible price band around a center so tightly-packed
+  // lines (stop/target/support/resistance/entry) can be told apart.
+  const priceSpan = (maxPrice - minPrice) / priceZoom;
+  const priceCenterClamped = Math.min(
+    maxPrice - priceSpan / 2,
+    Math.max(minPrice + priceSpan / 2, priceCenter ?? trade.entry_price),
+  );
+  const viewMinPrice = priceCenterClamped - priceSpan / 2;
+  const viewMaxPrice = priceCenterClamped + priceSpan / 2;
+  const panPrice = (direction: -1 | 1) => {
+    setPriceCenter(priceCenterClamped + priceSpan * 0.3 * direction);
+  };
+  const yPrice = (value: number) => priceTop + ((viewMaxPrice - value) / (viewMaxPrice - viewMinPrice || 1)) * priceHeight;
+  // Zooms both axes together around the cursor's bar/price, so the pinched-in area stays under the pointer.
+  const pinchZoom = (deltaY: number, clientX: number, clientY: number, rect: DOMRect) => {
+    const factor = Math.exp(-deltaY * 0.01);
+    const cursorX = ((clientX - rect.left) / rect.width) * width;
+    const cursorY = ((clientY - rect.top) / rect.height) * height;
+
+    const newZoom = Math.round(Math.min(8, Math.max(1, zoom * factor)) * 100) / 100;
+    const fractionX = Math.min(1, Math.max(0, (cursorX - left) / plotWidth));
+    const fullIndexAtCursor = viewStart + fractionX * (visibleCount - 1);
+    const newVisibleCount = Math.min(allData.length, Math.max(15, Math.ceil(allData.length / newZoom)));
+    const newMaxStart = Math.max(0, allData.length - newVisibleCount);
+    const newViewStart = Math.min(newMaxStart, Math.max(0, Math.round(fullIndexAtCursor - fractionX * (newVisibleCount - 1))));
+    setZoom(newZoom);
+    setRequestedStart(newViewStart);
+
+    if (cursorY >= priceTop && cursorY <= priceTop + priceHeight) {
+      const newPriceZoom = Math.round(Math.min(8, Math.max(1, priceZoom * factor)) * 100) / 100;
+      const fractionY = (cursorY - priceTop) / priceHeight;
+      const priceAtCursor = viewMaxPrice - fractionY * (viewMaxPrice - viewMinPrice);
+      const newPriceSpan = (maxPrice - minPrice) / newPriceZoom;
+      const newCenter = priceAtCursor + newPriceSpan * (fractionY - 0.5);
+      setPriceZoom(newPriceZoom);
+      setPriceCenter(Math.min(maxPrice - newPriceSpan / 2, Math.max(minPrice + newPriceSpan / 2, newCenter)));
+    }
+  };
+  pinchZoomRef.current = pinchZoom;
   const macdValues = data.flatMap((bar) => [bar.macd, bar.signal, bar.histogram])
     .filter((value): value is number => value !== null && Number.isFinite(value));
   const macdMin = Math.min(0, ...macdValues);
@@ -264,7 +330,7 @@ export function MomentumTradeChart({
   const cursorReadout = ((y) => {
     if (y === undefined) return null;
     if (y >= priceTop && y <= priceTop + priceHeight)
-      return { y, label: fmt(maxPrice - ((y - priceTop) / priceHeight) * (maxPrice - minPrice)) };
+      return { y, label: fmt(viewMaxPrice - ((y - priceTop) / priceHeight) * (viewMaxPrice - viewMinPrice)) };
     if (y >= macdTop && y <= macdTop + macdHeight)
       return {
         y,
@@ -284,15 +350,24 @@ export function MomentumTradeChart({
     });
     const drag = dragRef.current;
     if (!drag) return;
-    // Offsets are measured from where the drag began, so a round trip lands back on the same candle.
+    // Offsets are measured from where the drag began, so a round trip lands back on the same candle/price.
     const barsPerPixel = Math.max(data.length - 1, 1) / (plotWidth * (rect.width / width));
     const shift = Math.round((event.clientX - drag.startX) * barsPerPixel);
     setRequestedStart(Math.min(maxStart, Math.max(0, drag.startView - shift)));
+    const pricePerPixel = priceSpan / (priceHeight * (rect.height / height));
+    const priceShift = (event.clientY - drag.startY) * pricePerPixel;
+    setPriceCenter(Math.min(maxPrice - priceSpan / 2, Math.max(minPrice + priceSpan / 2, drag.startCenter + priceShift)));
   };
   const startDrag = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (event.button !== 0 && event.pointerType === 'mouse') return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startView: viewStart };
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startView: viewStart,
+      startY: event.clientY,
+      startCenter: priceCenterClamped,
+    };
     setIsDragging(true);
   };
   const endDrag = (event: ReactPointerEvent<SVGSVGElement>) => {
@@ -311,25 +386,34 @@ export function MomentumTradeChart({
       onKeyDown={(event) => {
         if (event.key === '+' || event.key === '=') { event.preventDefault(); zoomIn(); }
         else if (event.key === '-') { event.preventDefault(); zoomOut(); }
-        else if (event.key === '0') { event.preventDefault(); setZoom(defaultZoom); setRequestedStart(null); }
+        else if (event.key === '0') { event.preventDefault(); resetZoom(); }
         else if (event.key === 'ArrowLeft') { event.preventDefault(); pan(-1); }
         else if (event.key === 'ArrowRight') { event.preventDefault(); pan(1); }
+        else if (event.key === 'ArrowUp') { event.preventDefault(); panPrice(1); }
+        else if (event.key === 'ArrowDown') { event.preventDefault(); panPrice(-1); }
       }}
       className="overflow-x-auto rounded-xl border border-black/10 bg-[#101922] p-2 shadow-inner outline-none focus:ring-2 focus:ring-accent fullscreen:flex fullscreen:flex-col fullscreen:justify-center fullscreen:rounded-none fullscreen:p-5"
-      aria-label={`${trade.symbol} ${interval} chart; use plus or minus to zoom, zero to reset, and arrow keys to pan`}
+      aria-label={`${trade.symbol} ${interval} chart; use plus or minus to zoom, zero to reset, arrow left/right to pan, and arrow up/down to pan the price axis when vertically zoomed`}
     >
-      <div className="flex min-w-[720px] items-center justify-between gap-3 px-2 pb-2 text-xs text-slate-300">
-        <span>{zoom === 1 ? 'Full session' : `${zoom}× zoom · ${data.length} ${interval} candles`}</span>
+      <div className="flex min-w-[720px] flex-wrap items-center justify-between gap-3 px-2 pb-2 text-xs text-slate-300">
+        <span>{zoom <= 1 ? 'Full session' : `${zoom % 1 === 0 ? zoom : zoom.toFixed(1)}× zoom · ${data.length} ${interval} candles`}{priceZoom > 1 ? ` · ${priceZoom % 1 === 0 ? priceZoom : priceZoom.toFixed(1)}× price zoom` : ''}</span>
         <div className="flex items-center gap-1">
           <button type="button" onClick={() => pan(-1)} disabled={viewStart === 0} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35" aria-label="Show earlier candles">←</button>
-          <button type="button" onClick={zoomOut} disabled={zoom === 1} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">− Zoom</button>
-          <button type="button" onClick={zoomIn} disabled={zoom === 8 || visibleCount <= 15} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">+ Zoom</button>
-          <button type="button" onClick={() => { setZoom(defaultZoom); setRequestedStart(null); }} disabled={zoom === defaultZoom && requestedStart === null} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">Reset</button>
+          <button type="button" onClick={zoomOut} disabled={zoom <= 1} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">− Zoom</button>
+          <button type="button" onClick={zoomIn} disabled={zoom >= 8 || visibleCount <= 15} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">+ Zoom</button>
           <button type="button" onClick={() => pan(1)} disabled={viewStart === maxStart} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35" aria-label="Show later candles">→</button>
+          <span className="mx-1 h-4 w-px bg-white/15" aria-hidden="true" />
+          <button type="button" onClick={() => panPrice(1)} disabled={priceZoom <= 1} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35" aria-label="Show higher prices">↑</button>
+          <button type="button" onClick={priceZoomOut} disabled={priceZoom <= 1} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">− V-Zoom</button>
+          <button type="button" onClick={priceZoomIn} disabled={priceZoom >= 8} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">+ V-Zoom</button>
+          <button type="button" onClick={() => panPrice(-1)} disabled={priceZoom <= 1} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35" aria-label="Show lower prices">↓</button>
+          <span className="mx-1 h-4 w-px bg-white/15" aria-hidden="true" />
+          <button type="button" onClick={resetZoom} disabled={zoom === defaultZoom && requestedStart === null && priceZoom === 1 && priceCenter === null} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">Reset</button>
           <button type="button" onClick={() => { void toggleFullscreen(); }} className="rounded border border-white/20 px-2 py-1">{isFullscreen ? 'Exit full screen' : 'Full screen'}</button>
         </div>
       </div>
       <svg
+        ref={setSvgRef}
         viewBox={`0 0 ${width} ${height}`}
         className={`min-w-[720px] w-full touch-pan-y select-none ${isDragging ? 'cursor-grabbing' : 'cursor-crosshair'}`}
         role="img"
@@ -343,7 +427,7 @@ export function MomentumTradeChart({
         <rect width={width} height={height} rx="8" fill="#101922" />
         {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
           const yy = priceTop + priceHeight * ratio;
-          const value = maxPrice - (maxPrice - minPrice) * ratio;
+          const value = viewMaxPrice - (viewMaxPrice - viewMinPrice) * ratio;
           return <g key={ratio}><line x1={left} x2={width - right} y1={yy} y2={yy} stroke="#ffffff" strokeOpacity=".10" /><text x={4} y={yy + 4} fill="#a9bac9" fontSize="11">{fmt(value)}</text></g>;
         })}
         {data.map((bar, index) => {
@@ -398,7 +482,7 @@ export function MomentumTradeChart({
           </g>
         )}
       </svg>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 px-2 pb-1 text-xs text-slate-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#2dd4bf]" />{interval} up candle</span><span className="text-[#fbbf24]">EMA 9 / MACD</span><span className="text-[#a78bfa]">EMA 20 / signal</span><span className="text-[#60a5fa]">VWAP</span><span className="text-amber-200">▱ completed pattern</span>{(resistance !== null || support !== null) && <><span className="text-[#f472b6]">— resistance</span><span className="text-[#38bdf8]">— support</span></>}<span className="text-emerald-300">▲ entry</span><span className="text-rose-300">▼ exit</span><span className="text-slate-400">Hover for price/time · drag to pan · focus chart: +/− zoom, 0 reset, ←/→ pan</span></div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 px-2 pb-1 text-xs text-slate-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#2dd4bf]" />{interval} up candle</span><span className="text-[#fbbf24]">EMA 9 / MACD</span><span className="text-[#a78bfa]">EMA 20 / signal</span><span className="text-[#60a5fa]">VWAP</span><span className="text-amber-200">▱ completed pattern</span>{(resistance !== null || support !== null) && <><span className="text-[#f472b6]">— resistance</span><span className="text-[#38bdf8]">— support</span></>}<span className="text-emerald-300">▲ entry</span><span className="text-rose-300">▼ exit</span><span className="text-slate-400">Hover for price/time · drag to pan (vertical too, once V-zoomed) · ctrl+scroll or trackpad pinch to zoom · focus chart: +/− zoom, 0 reset, ←/→ pan, ↑/↓ pan price axis</span></div>
     </div>
   );
 }
