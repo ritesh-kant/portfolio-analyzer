@@ -4,7 +4,8 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, use
 
 import type { MomentumBar, MomentumTrade } from '../lib/momentum-api';
 
-const DEFAULT_ZOOM = 8;
+const DEFAULT_ZOOM_1M = 8;
+const DEFAULT_ZOOM_5M = 2;
 
 type Point = MomentumBar & {
   ema9: number | null;
@@ -119,7 +120,8 @@ export function MomentumTradeChart({
     const raw = trade.chart?.bars ?? [];
     return interval === '5m' ? points(fiveMinuteBars(raw)) : points(raw);
   }, [interval, trade.chart?.bars]);
-  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const defaultZoom = interval === '5m' ? DEFAULT_ZOOM_5M : DEFAULT_ZOOM_1M;
+  const [zoom, setZoom] = useState(defaultZoom);
   const [requestedStart, setRequestedStart] = useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
@@ -128,9 +130,9 @@ export function MomentumTradeChart({
   const chartRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setZoom(DEFAULT_ZOOM);
+    setZoom(defaultZoom);
     setRequestedStart(null);
-  }, [trade._id]);
+  }, [trade._id, defaultZoom]);
 
   useEffect(() => {
     const sync = () => setIsFullscreen(document.fullscreenElement === chartRef.current);
@@ -304,7 +306,7 @@ export function MomentumTradeChart({
       onKeyDown={(event) => {
         if (event.key === '+' || event.key === '=') { event.preventDefault(); zoomIn(); }
         else if (event.key === '-') { event.preventDefault(); zoomOut(); }
-        else if (event.key === '0') { event.preventDefault(); setZoom(DEFAULT_ZOOM); setRequestedStart(null); }
+        else if (event.key === '0') { event.preventDefault(); setZoom(defaultZoom); setRequestedStart(null); }
         else if (event.key === 'ArrowLeft') { event.preventDefault(); pan(-1); }
         else if (event.key === 'ArrowRight') { event.preventDefault(); pan(1); }
       }}
@@ -317,7 +319,7 @@ export function MomentumTradeChart({
           <button type="button" onClick={() => pan(-1)} disabled={viewStart === 0} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35" aria-label="Show earlier candles">←</button>
           <button type="button" onClick={zoomOut} disabled={zoom === 1} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">− Zoom</button>
           <button type="button" onClick={zoomIn} disabled={zoom === 8 || visibleCount <= 15} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">+ Zoom</button>
-          <button type="button" onClick={() => { setZoom(DEFAULT_ZOOM); setRequestedStart(null); }} disabled={zoom === DEFAULT_ZOOM && requestedStart === null} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">Reset</button>
+          <button type="button" onClick={() => { setZoom(defaultZoom); setRequestedStart(null); }} disabled={zoom === defaultZoom && requestedStart === null} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">Reset</button>
           <button type="button" onClick={() => pan(1)} disabled={viewStart === maxStart} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35" aria-label="Show later candles">→</button>
           <button type="button" onClick={() => { void toggleFullscreen(); }} className="rounded border border-white/20 px-2 py-1">{isFullscreen ? 'Exit full screen' : 'Full screen'}</button>
         </div>
