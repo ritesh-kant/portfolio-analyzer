@@ -67,12 +67,16 @@ as breaks.
 doji, dragonfly_doji, gravestone_doji, hammer, inverted_hammer, spinning_top,
 bullish_engulfing, bearish_engulfing, tweezer_bottom, tweezer_top,
 morning_star, evening_star, three_white_soldiers, three_black_crows.
+`morning_doji_star` and `rising_three` are also captured as **strict,
+five-minute observational evidence**. Rising Three is a five-candle
+continuation formation, not a three-candle pattern.
 
 They are **tags, not gates.** Single-bar shapes have no documented stand-alone
 edge, and Warrior himself uses them as confirmation inside a setup, not as the
 setup. The forward log will show whether any tag shifts the outcome; if one
-does, that becomes a *new* hypothesis, not a silent filter. Rising Three /
-Falling Three are omitted: they are the bull/bear flag.
+does, that becomes a *new* hypothesis, not a silent filter. Rising Three is
+kept distinct from a bull flag in the audit log: the two overlap conceptually
+but the bull-flag entry rule has additional volume and retracement gates.
 
 ## 4. Risk (from *Stock Selection*, "Risk Management")
 

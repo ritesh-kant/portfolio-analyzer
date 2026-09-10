@@ -34,6 +34,16 @@ export interface MomentumBar {
   volume: number;
 }
 
+/** A named formation made entirely from completed candles. */
+export interface PatternMatch {
+  name: string;
+  timeframe: '1m' | '5m';
+  start: string;
+  end: string;
+  confirmation: number;
+  invalidation: number;
+}
+
 export interface MomentumTrade {
   _id: string;
   symbol: string;
@@ -62,6 +72,7 @@ export interface MomentumTrade {
   catalyst?: number;
   event_type?: string;
   candle_tags?: string[];
+  pattern_matches?: PatternMatch[];
   quality_reason?: string;
   pullback_ord?: number | null;
   atr_pct?: number | null;

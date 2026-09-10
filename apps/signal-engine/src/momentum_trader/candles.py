@@ -256,6 +256,21 @@ class PatternMatch:
         return asdict(self)
 
 
+def _has_short_downtrend(bars: pd.DataFrame, before: int) -> bool:
+    """Require a modest decline before labelling a formation a reversal.
+
+    Three completed candles immediately before the pattern must make at least
+    two non-rising closes and finish below where they began.  This is permissive
+    enough for NSE's frequent flat prints, but blocks a Morning Star label in an
+    uninterrupted advance where it has no reversal meaning.
+    """
+    if before < 3:
+        return False
+    closes = bars["close"].iloc[before - 3:before].astype(float)
+    non_rising = int((closes.diff().iloc[1:] <= 0.0).sum())
+    return non_rising >= 2 and float(closes.iloc[-1]) < float(closes.iloc[0])
+
+
 def completed_pattern_matches(bars: pd.DataFrame, timeframe: str) -> list[PatternMatch]:
     """Return strict named multi-candle patterns ending on the latest closed bar.
 
@@ -263,24 +278,30 @@ def completed_pattern_matches(bars: pd.DataFrame, timeframe: str) -> list[Patter
     the candles used rather than leaving a trader to guess what a tag meant.
     """
     matches: list[PatternMatch] = []
-    if len(bars) >= 3:
+    if len(bars) >= 6:
         a, b, c = bars.iloc[-3], bars.iloc[-2], bars.iloc[-1]
         base = dict(timeframe=timeframe, start=pd.Timestamp(bars.index[-3]).isoformat(),
                     end=pd.Timestamp(bars.index[-1]).isoformat(),
                     confirmation=float(c["high"]),
                     invalidation=min(float(a["low"]), float(b["low"]), float(c["low"])))
-        if is_morning_star(a, b, c):
-            matches.append(PatternMatch(name="morning_star", **base))
-        if is_morning_doji_star(a, b, c):
+        has_downtrend = _has_short_downtrend(bars, len(bars) - 3)
+        if has_downtrend and is_morning_doji_star(a, b, c):
             matches.append(PatternMatch(name="morning_doji_star", **base))
+        elif has_downtrend and is_morning_star(a, b, c):
+            matches.append(PatternMatch(name="morning_star", **base))
     if len(bars) >= 5:
         a, b, c, d, e = (bars.iloc[-5], bars.iloc[-4], bars.iloc[-3], bars.iloc[-2], bars.iloc[-1])
         if is_rising_three(a, b, c, d, e):
             matches.append(PatternMatch(
-                name="rising_three", timeframe=timeframe,
-                start=pd.Timestamp(bars.index[-5]).isoformat(), end=pd.Timestamp(bars.index[-1]).isoformat(),
+                name="rising_three",
+                timeframe=timeframe,
+                start=pd.Timestamp(bars.index[-5]).isoformat(),
+                end=pd.Timestamp(bars.index[-1]).isoformat(),
                 confirmation=float(e["high"]),
-                invalidation=min(float(a["low"]), float(b["low"]), float(c["low"]), float(d["low"]), float(e["low"])),
+                invalidation=min(
+                    float(a["low"]), float(b["low"]), float(c["low"]),
+                    float(d["low"]), float(e["low"]),
+                ),
             ))
     return matches
 

@@ -114,6 +114,42 @@ def test_candle_tags_on_frame() -> None:
     assert candles.candle_tags(bars.iloc[0:0]) == []
 
 
+def test_morning_star_rejects_small_first_or_last_body() -> None:
+    # A red/indecision/green sequence alone is not enough: both impulse bodies
+    # must occupy at least 55% of their candle ranges.
+    weak_red = pd.Series({"open": 104.0, "high": 106.0, "low": 99.0, "close": 103.0})
+    star = pd.Series({"open": 102.9, "high": 103.4, "low": 102.5, "close": 102.95})
+    green = pd.Series({"open": 102.8, "high": 105.0, "low": 102.7, "close": 104.8})
+    assert not candles.is_morning_star(weak_red, star, green)
+
+
+def test_morning_doji_star_and_rising_three_evidence() -> None:
+    morning = _bars([
+        (108.0, 108.1, 106.9, 107.0, 900),
+        (107.0, 107.1, 105.9, 106.0, 900),
+        (106.0, 106.1, 104.9, 105.0, 900),
+        (104.0, 104.1, 100.0, 100.2, 1000),
+        (100.0, 100.6, 99.5, 100.05, 800),  # doji star
+        (100.3, 103.5, 100.2, 103.4, 1500),
+    ])
+    assert candles.is_morning_doji_star(morning.iloc[-3], morning.iloc[-2], morning.iloc[-1])
+    morning_match = candles.completed_pattern_matches(morning, "5m")
+    assert {m.name for m in morning_match} == {"morning_doji_star"}
+    assert all(m.timeframe == "5m" and m.start < m.end for m in morning_match)
+
+    rising = _bars([
+        (100.0, 105.2, 99.9, 105.0, 5000),  # impulse
+        (104.8, 104.9, 103.9, 104.6, 900),
+        (104.5, 104.6, 103.5, 104.3, 800),
+        (104.2, 104.3, 103.3, 104.0, 700),
+        (103.7, 106.0, 103.6, 105.6, 4500),  # continuation close above first high
+    ])
+    assert candles.is_rising_three(*[rising.iloc[i] for i in range(5)])
+    matches = candles.completed_pattern_matches(rising, "5m")
+    assert len(matches) == 1 and matches[0].name == "rising_three"
+    assert "rising_three" in candles.candle_tags(rising)
+
+
 # ── setups ────────────────────────────────────────────────────────────────────
 
 def _pole_flag_break() -> list[tuple[float, float, float, float, float]]:

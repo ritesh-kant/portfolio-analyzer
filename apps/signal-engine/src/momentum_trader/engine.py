@@ -259,6 +259,7 @@ class DayState:
     candidate_seen: bool = False
     attention: bool = False
     attention_since: pd.Timestamp | None = None
+    attention_patterns: list[dict[str, object]] = field(default_factory=list)
     attention_events: list[AttentionEvent] = field(default_factory=list)
     rejections: list[Rejection] = field(default_factory=list)
 
@@ -416,26 +417,42 @@ def _attention_context(tf5: pd.DataFrame) -> tuple[bool, str]:
     return True, "ok"
 
 
-def _promotion_reason(tf5: pd.DataFrame, bars_1m: pd.DataFrame) -> tuple[str | None, list[str]]:
-    """Return why this symbol deserves closer attention, without authorizing entry."""
+def _promotion_reason(
+    tf5: pd.DataFrame, bars_1m: pd.DataFrame
+) -> tuple[str | None, list[str], list[dict[str, object]]]:
+    """Return auditable attention context without authorizing entry.
+
+    Named formations are evaluated only from completed 5-minute bars.  One-
+    minute tags remain micro-context, but are never presented as 5-minute
+    pattern evidence.  Incomplete five-minute candles are intentionally not
+    examined here: a pattern is not real until its final candle has closed.
+    """
     tags_5m = candle_tags(tf5)
-    # Observe the evolving five-minute candle every minute. It is used only to
-    # promote attention; trend indicators and entries continue to use closed
-    # candles, so this cannot introduce an unfinished-candle entry signal.
-    partial_5m = (bars_1m.resample("5min", label="left", closed="left")
-                  .agg({"open": "first", "high": "max", "low": "min",
-                        "close": "last", "volume": "sum"})
-                  .dropna(subset=["open"]))
-    tags_partial_5m = candle_tags(partial_5m)
     tags_1m = candle_tags(bars_1m)
-    tags = list(dict.fromkeys([*tags_5m, *tags_partial_5m, *tags_1m]))
+    tags = list(dict.fromkeys([*tags_5m, *tags_1m]))
+    matches = [match.document() for match in completed_pattern_matches(tf5, "5m")]
+    if matches:
+        return f"pattern:{matches[0]['name']}", tags, matches
     if PROMOTION_TAGS.intersection(tags):
-        return "candlestick_context", tags
+        return "candlestick_context", tags, matches
     # Detect structures even when the legacy +4% / 3x entry gate has not fired.
     found = scan_setups(tf5, bars_1m, None)
     if found:
-        return f"setup:{found[0].name}", tags
-    return None, tags
+        return f"setup:{found[0].name}", tags, matches
+    return None, tags, matches
+
+
+def _unique_pattern_documents(*groups: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Deduplicate stored formation evidence while preserving formation order."""
+    seen: set[tuple[object, ...]] = set()
+    out: list[dict[str, object]] = []
+    for group in groups:
+        for match in group:
+            key = tuple(match.get(k) for k in ("name", "timeframe", "start", "end"))
+            if key not in seen:
+                seen.add(key)
+                out.append(match)
+    return out
 
 
 def _attention_confirmation(
@@ -676,11 +693,12 @@ def step(
             if chg < cfg.attention_day_chg_min or rv < cfg.attention_rvol_min:
                 return
             context_ok, _ = _attention_context(tf5)
-            reason, tags = _promotion_reason(tf5, bars_1m)
+            reason, tags, matches = _promotion_reason(tf5, bars_1m)
             if not context_ok or reason is None:
                 return
             state.attention = True
             state.attention_since = now
+            state.attention_patterns = matches
             state.attention_events.append(AttentionEvent(
                 symbol=state.symbol, time=now, day_chg_pct=chg, rvol=rv,
                 reason=reason, candle_tags=tuple(tags),
@@ -699,6 +717,7 @@ def step(
             ))
             state.attention = False
             state.attention_since = None
+            state.attention_patterns = []
             return
         setup, confirmation_reason = _attention_confirmation(
             bars_1m, cfg.attention_confirm_vol_ratio
@@ -719,7 +738,10 @@ def step(
         cand = Candidate(
             symbol=state.symbol, time=now, setup=setup, day_chg_pct=chg, rvol=rv,
             catalyst=cat, event_type=ev, candle_tags=tags,
-            pattern_matches=[match.document() for match in completed_pattern_matches(tf5, "5m")],
+            pattern_matches=_unique_pattern_documents(
+                state.attention_patterns,
+                [match.document() for match in completed_pattern_matches(tf5, "5m")],
+            ),
             prev_day_gainer=state.prev_day_gainer,
             pullback_ord=pullback_ordinal(tf5) if len(tf5) else None,
             quality_reason="ok",

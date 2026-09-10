@@ -123,6 +123,8 @@ export function MomentumTradeChart({
   const [requestedStart, setRequestedStart] = useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef<{ pointerId: number; startX: number; startView: number } | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -135,6 +137,23 @@ export function MomentumTradeChart({
     document.addEventListener('fullscreenchange', sync);
     return () => document.removeEventListener('fullscreenchange', sync);
   }, []);
+
+  // Pointer capture normally keeps the drag alive outside the SVG; this releases it even when a
+  // release lands somewhere the chart never hears about, so a drag can never stick.
+  useEffect(() => {
+    if (!isDragging) return;
+    const stop = (event: PointerEvent) => {
+      dragRef.current = null;
+      setIsDragging(false);
+      if (event.target instanceof Node && !chartRef.current?.contains(event.target)) setCursor(null);
+    };
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+    return () => {
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+    };
+  }, [isDragging]);
 
   const fullEntryIndex = nearestBarIndex(allData, trade.entry_time);
   const visibleCount = Math.min(allData.length, Math.max(15, Math.ceil(allData.length / zoom)));
@@ -209,6 +228,19 @@ export function MomentumTradeChart({
   const fullExitIndex = nearestBarIndex(allData, trade.exit_time);
   const exitIndex = fullExitIndex >= viewStart && fullExitIndex < viewStart + data.length
     ? fullExitIndex - viewStart : -1;
+  // A chart only renders patterns made on its own timeframe: a 1m formation
+  // cannot be mistaken for a 5m signal during review.
+  const visiblePatterns = (trade.pattern_matches ?? []).flatMap((match) => {
+    if (match.timeframe !== interval) return [];
+    const start = nearestBarIndex(allData, match.start);
+    const end = nearestBarIndex(allData, match.end);
+    if (end < viewStart || start >= viewStart + data.length) return [];
+    return [{
+      ...match,
+      start: Math.max(0, start - viewStart),
+      end: Math.min(data.length - 1, end - viewStart),
+    }];
+  });
   const entryY = yPrice(trade.entry_price);
   const exitY = trade.exit_price === undefined ? null : yPrice(trade.exit_price);
   // Park the exit label below the entry one when the two price levels almost coincide.
@@ -243,6 +275,25 @@ export function MomentumTradeChart({
       x: ((event.clientX - rect.left) / rect.width) * width,
       y: ((event.clientY - rect.top) / rect.height) * height,
     });
+    const drag = dragRef.current;
+    if (!drag) return;
+    // Offsets are measured from where the drag began, so a round trip lands back on the same candle.
+    const barsPerPixel = Math.max(data.length - 1, 1) / (plotWidth * (rect.width / width));
+    const shift = Math.round((event.clientX - drag.startX) * barsPerPixel);
+    setRequestedStart(Math.min(maxStart, Math.max(0, drag.startView - shift)));
+  };
+  const startDrag = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.button !== 0 && event.pointerType === 'mouse') return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startView: viewStart };
+    setIsDragging(true);
+  };
+  const endDrag = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    dragRef.current = null;
+    setIsDragging(false);
   };
 
   return (
@@ -273,11 +324,14 @@ export function MomentumTradeChart({
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="min-w-[720px] w-full cursor-crosshair"
+        className={`min-w-[720px] w-full touch-pan-y select-none ${isDragging ? 'cursor-grabbing' : 'cursor-crosshair'}`}
         role="img"
         aria-label={`${trade.symbol} ${interval} candle chart`}
         onPointerMove={trackCursor}
-        onPointerLeave={() => setCursor(null)}
+        onPointerDown={startDrag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onPointerLeave={() => { if (!dragRef.current) setCursor(null); }}
       >
         <rect width={width} height={height} rx="8" fill="#101922" />
         {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
@@ -292,6 +346,15 @@ export function MomentumTradeChart({
           const bodyTop = yPrice(Math.max(bar.open, bar.close));
           const bodyBottom = yPrice(Math.min(bar.open, bar.close));
           return <g key={bar.time}><line x1={cx} x2={cx} y1={yPrice(bar.high)} y2={yPrice(bar.low)} stroke={color} strokeWidth="1" /><rect x={cx - candleWidth / 2} y={bodyTop} width={candleWidth} height={Math.max(1, bodyBottom - bodyTop)} fill={color} /></g>;
+        })}
+        {visiblePatterns.map((match) => {
+          const startX = x(match.start) - candleWidth;
+          const endX = x(match.end) + candleWidth;
+          return <g key={`${match.name}-${match.start}-${match.end}`} pointerEvents="none">
+            <rect x={startX} y={priceTop} width={Math.max(2, endX - startX)} height={priceHeight} fill="#fbbf24" fillOpacity=".10" />
+            <path d={`M ${startX} ${priceTop + 16} V ${priceTop + 7} H ${endX} V ${priceTop + 16}`} fill="none" stroke="#fbbf24" strokeWidth="1.2" />
+            <text x={(startX + endX) / 2} y={priceTop + 31} textAnchor="middle" fill="#fde68a" fontSize="10">{match.name.replaceAll('_', ' ')} · {match.timeframe}</text>
+          </g>;
         })}
         <path d={linePath(data.map((bar) => bar.ema9), x, yPrice)} fill="none" stroke="#fbbf24" strokeWidth="1.5" /><path d={linePath(data.map((bar) => bar.ema20), x, yPrice)} fill="none" stroke="#a78bfa" strokeWidth="1.5" /><path d={linePath(data.map((bar) => bar.vwap), x, yPrice)} fill="none" stroke="#60a5fa" strokeWidth="1.5" strokeDasharray="4 3" />
         {[['Stop', trade.stop, '#fb7185'], ['Target', trade.target, '#34d399']].map(([label, value, color]) => value ? <g key={label as string}><line x1={left} x2={width - right} y1={yPrice(value as number)} y2={yPrice(value as number)} stroke={color as string} strokeOpacity=".75" strokeDasharray="5 4" /><text x={width - right - 2} y={yPrice(value as number) - 4} textAnchor="end" fill={color as string} fontSize="11">{label as string} {fmt(value as number)}</text></g> : null)}
@@ -327,7 +390,7 @@ export function MomentumTradeChart({
           </g>
         )}
       </svg>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 px-2 pb-1 text-xs text-slate-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#2dd4bf]" />{interval} up candle</span><span className="text-[#fbbf24]">EMA 9 / MACD</span><span className="text-[#a78bfa]">EMA 20 / signal</span><span className="text-[#60a5fa]">VWAP</span><span className="text-emerald-300">▲ entry</span><span className="text-rose-300">▼ exit</span><span className="text-slate-400">Hover for price/time · focus chart: +/− zoom, 0 reset, ←/→ pan</span></div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 px-2 pb-1 text-xs text-slate-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#2dd4bf]" />{interval} up candle</span><span className="text-[#fbbf24]">EMA 9 / MACD</span><span className="text-[#a78bfa]">EMA 20 / signal</span><span className="text-[#60a5fa]">VWAP</span><span className="text-amber-200">▱ completed pattern</span><span className="text-emerald-300">▲ entry</span><span className="text-rose-300">▼ exit</span><span className="text-slate-400">Hover for price/time · drag to pan · focus chart: +/− zoom, 0 reset, ←/→ pan</span></div>
     </div>
   );
 }
