@@ -1,0 +1,23 @@
+Installed 26 packages in 278ms
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: DUMMYVEDL3.NS"}}}
+$DUMMYVEDL3.NS: possibly delisted; no timezone found
+
+1 Failed download:
+['DUMMYVEDL3.NS']: possibly delisted; no timezone found
+$ADANIPORTS.NS: possibly delisted; no price data found  (1d 2025-06-01 -> 2026-01-08)
+
+1 Failed download:
+['ADANIPORTS.NS']: possibly delisted; no price data found  (1d 2025-06-01 -> 2026-01-08)
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: DUMMYVEDL4.NS"}}}
+$DUMMYVEDL4.NS: possibly delisted; no timezone found
+
+1 Failed download:
+['DUMMYVEDL4.NS']: possibly delisted; no timezone found
+$DUMMYVEDL2.NS: possibly delisted; no timezone found
+
+1 Failed download:
+['DUMMYVEDL2.NS']: possibly delisted; no timezone found
+$DUMMYVEDL1.NS: possibly delisted; no timezone found
+
+1 Failed download:
+['DUMMYVEDL1.NS']: possibly delisted; no timezone found

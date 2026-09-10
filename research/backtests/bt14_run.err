@@ -1,0 +1,21 @@
+Downloading pandas (9.6MiB)
+ Downloading pandas
+Installed 26 packages in 286ms
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: DUMMYVEDL2.NS"}}}
+$DUMMYVEDL2.NS: possibly delisted; no timezone found
+
+1 Failed download:
+['DUMMYVEDL2.NS']: possibly delisted; no timezone found
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: DUMMYVEDL1.NS"}}}
+$DUMMYVEDL1.NS: possibly delisted; no timezone found
+
+1 Failed download:
+['DUMMYVEDL1.NS']: possibly delisted; no timezone found
+$DUMMYVEDL3.NS: possibly delisted; no timezone found
+
+1 Failed download:
+['DUMMYVEDL3.NS']: possibly delisted; no timezone found
+$DUMMYVEDL4.NS: possibly delisted; no timezone found
+
+1 Failed download:
+['DUMMYVEDL4.NS']: possibly delisted; no timezone found

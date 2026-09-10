@@ -1,10 +1,10 @@
 ---
 slug: news-event-type-drift
 strategy: news_trader_event_type
-status: registered
+status: killed
 registered_at: '2026-06-16'
-finalized_at: ''
-decided_at: ''
+finalized_at: '2026-06-26'
+decided_at: '2026-06-26'
 hypothesis_hash: ''
 ---
 
@@ -161,17 +161,26 @@ collection time:
 - `research/backtests/bt12_event_type_drift.py` (+ shared `replay_lib.py`),
   trade CSVs alongside, bars cached in `.cache/`. Mirror BT9's structure.
 
-## 7. Result (filled after experiment — single dev run, no re-runs)
+## 7. Result (single dev run 2026-06-26, no re-runs — `bt12_event_type_drift.py`)
 
-- n(Group A) / n(Group B): <fill>
-- Group-A gross %/trade (intraday): <fill>
-- Group-B gross %/trade (intraday): <fill>
-- Spread (A − B) %/trade: <fill>
-- Anti-strategy (label-permuted) spread: <fill — must be ≈ 0>
-- Per-event_type gross (reported, not gated): m_and_a / earnings / order_win /
-  regulatory / capital_action / rating_analyst / generic_pr / ...
-- Multi-day secondary (if read): Group-A gross after carry costs: <fill>
-- Net %/trade after production costs; cost-stress net: <fill>
+Cohort: 243 actionable signals (bull/bear, high-conf, mod/major, event_type
+present) since field deploy 2026-06-17 → 119 replayed trades (NIFTY500−NIFTY50,
+real Yahoo 5-min bars, deployed exits, market entry). Dev window 06-17..06-24
+(first whole days reaching n(A)≥30); hold-out 06-25 NOT read (KILL is terminal).
+
+- **n(Group A) = 36 / n(Group B) = 83** (dev). n(A) ≥ 30 ✓ — valid read.
+- **Group-A gross = −0.185%/trade** (₹−504; net −33.2/trade). 19/36 wins, exits 26 time_stop / 7 target_hit / 3 sl_hit.
+- **Group-B gross = +0.082%/trade** (₹+630; net −11.7/trade). 43/83 wins.
+- **Spread (A − B) = −0.267%/trade** — WRONG SIGN. Information events drifted *worse* than generic noise.
+- **Anti-strategy: P(permuted spread ≥ real) = 0.941** (2000 perms, seed 42) — the A/B split is statistically indistinguishable from random labels.
+- Per-event_type gross (reported, not gated): **every Group-A type negative** —
+  m_and_a n=14 −0.034% · order_win n=12 −0.281% · capital_action n=5 −0.401% ·
+  earnings n=2 −0.310% · regulatory n=3 −0.065%. Group-B mixed/flat —
+  rating_analyst n=33 +0.133% · macro_sector n=27 +0.012% · generic_pr n=9 +0.183% · other n=13 −0.029% · management n=1 +0.813%.
+- Multi-day secondary: NOT read (primary KILLed; reading it would be mining a fifth variation against the committed stop).
+- Net after production costs: A −33.2/trade, B −11.7/trade; cost-stress (2× slip): A −42.4, B −21.1. Both groups net-negative.
+
+**All three locked KILL conditions tripped:** A gross < +0.15% (−0.185%), spread < +0.15% (−0.267%), and permuted-spread ≥ real (p=0.941).
 
 ## 8. Decision
 
@@ -180,8 +189,11 @@ collection time:
       then confirm on hold-out before any capital/paper-policy change
 - [ ] **NOT VIABLE AT CURRENT COSTS** (+0.15–0.30%) — mechanism real but thin;
       attack costs (limit-entry) and/or tighten taxonomy in a NEW hypothesis
-- [ ] **KILL** (< +0.15% or spread < +0.15% or anti ≥ real) — **the final word.**
-      If even value-changing events show no entry-window drift on real bars, then
-      retail-latency news trading on NSE is not viable. Declare the news-trader a
-      documented negative result and STOP — do not mine a fifth variation on this
-      signal. (This is the committed stop condition agreed 2026-06-16.)
+- [x] **KILL** (< +0.15% or spread < +0.15% or anti ≥ real) — **the final word.**
+      ☑ TRIGGERED 2026-06-26: A gross −0.185%, spread −0.267%, anti p=0.941 (all three).
+      Even value-changing events (M&A/earnings/order-win/regulatory/capital-action)
+      show NO entry-window drift on real bars — they drifted slightly *negative* and
+      *worse* than generic-PR noise. Retail-latency news trading on NSE is hereby a
+      **documented negative result**. The committed stop (agreed 2026-06-16) is
+      reached: STOP — no fifth variation on this signal. event_type was the last
+      signal-side lever; it failed its pre-registered test cleanly.

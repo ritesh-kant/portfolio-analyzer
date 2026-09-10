@@ -1,0 +1,9 @@
+[mcp_servers.mongodb-mcp-server]
+command = "npx"
+args = [
+    "-y",
+    "mongodb-mcp-server",
+]
+
+[mcp_servers.mongodb-mcp-server.env]
+MDB_MCP_CONNECTION_STRING = "mongodb+srv://portfolioadmin:aryan.47@portfolio-analyzer-dev.meejvek.mongodb.net/portfolio_analyzer?appName=portfolio-analyzer-dev"

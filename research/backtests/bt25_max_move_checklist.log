@@ -1,0 +1,25 @@
+============================================================================
+BT25 - strict max-move checklist | 2025 validation
+============================================================================
+
+                     control        strict
+trades                   461              1
+gross / trade         -0.044%        -0.748%
+gross total          Rs   -10068    Rs     -311
+real net total       Rs   -51747    Rs     -397
+real-cost win rate      26.2%           0.0%
+single-plan DSR        0.000           nan
+
+strict is exact control subset: True
+gross lift: -0.704 pp
+anti p(random subset >= strict lift): 0.8762
+
+locked checks:
+  enough trades        FAIL
+  gross return         FAIL
+  real total profit    FAIL
+  lift over control    FAIL
+  anti-test            FAIL
+  DSR                  FAIL
+
+VERDICT: KILL
