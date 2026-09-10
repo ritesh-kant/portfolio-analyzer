@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { MomentumBar, MomentumTrade } from '../lib/momentum-api';
 
@@ -122,6 +122,7 @@ export function MomentumTradeChart({
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [requestedStart, setRequestedStart] = useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -171,6 +172,7 @@ export function MomentumTradeChart({
   }
 
   const width = 1000;
+  const height = 580;
   const left = 64;
   const right = 18;
   const priceTop = 20;
@@ -207,7 +209,41 @@ export function MomentumTradeChart({
   const fullExitIndex = nearestBarIndex(allData, trade.exit_time);
   const exitIndex = fullExitIndex >= viewStart && fullExitIndex < viewStart + data.length
     ? fullExitIndex - viewStart : -1;
+  const entryY = yPrice(trade.entry_price);
+  const exitY = trade.exit_price === undefined ? null : yPrice(trade.exit_price);
+  // Park the exit label below the entry one when the two price levels almost coincide.
+  const exitLabelY = exitY === null ? null : Math.abs(exitY - entryY) >= 13 ? exitY - 5 : entryY + 13;
   const tickCount = Math.min(6, data.length);
+  const cursorIndex = cursor
+    ? Math.min(
+        data.length - 1,
+        Math.max(0, Math.round(((cursor.x - left) / plotWidth) * Math.max(data.length - 1, 1))),
+      )
+    : -1;
+  const cursorBar = cursorIndex >= 0 ? data[cursorIndex] : undefined;
+  // The horizontal readout reports whichever panel the pointer sits in; between panels it is hidden.
+  const cursorReadout = ((y) => {
+    if (y === undefined) return null;
+    if (y >= priceTop && y <= priceTop + priceHeight)
+      return { y, label: fmt(maxPrice - ((y - priceTop) / priceHeight) * (maxPrice - minPrice)) };
+    if (y >= macdTop && y <= macdTop + macdHeight)
+      return {
+        y,
+        label: (macdMax + macdPad - ((y - macdTop) / macdHeight) * (macdMax - macdMin + macdPad * 2)).toFixed(2),
+      };
+    if (y >= volumeTop && y <= volumeTop + volumeHeight)
+      return { y, label: fmtVolume(((volumeTop + volumeHeight - y) / volumeHeight) * volumeMax) };
+    return null;
+  })(cursor?.y);
+  const timeBadgeX = cursorBar ? Math.min(Math.max(x(cursorIndex) - 24, 2), width - 50) : 0;
+  const trackCursor = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    setCursor({
+      x: ((event.clientX - rect.left) / rect.width) * width,
+      y: ((event.clientY - rect.top) / rect.height) * height,
+    });
+  };
 
   return (
     <div
@@ -235,8 +271,15 @@ export function MomentumTradeChart({
           <button type="button" onClick={() => { void toggleFullscreen(); }} className="rounded border border-white/20 px-2 py-1">{isFullscreen ? 'Exit full screen' : 'Full screen'}</button>
         </div>
       </div>
-      <svg viewBox={`0 0 ${width} 580`} className="min-w-[720px] w-full" role="img" aria-label={`${trade.symbol} ${interval} candle chart`}>
-        <rect width={width} height={580} rx="8" fill="#101922" />
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="min-w-[720px] w-full cursor-crosshair"
+        role="img"
+        aria-label={`${trade.symbol} ${interval} candle chart`}
+        onPointerMove={trackCursor}
+        onPointerLeave={() => setCursor(null)}
+      >
+        <rect width={width} height={height} rx="8" fill="#101922" />
         {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
           const yy = priceTop + priceHeight * ratio;
           const value = maxPrice - (maxPrice - minPrice) * ratio;
@@ -252,8 +295,10 @@ export function MomentumTradeChart({
         })}
         <path d={linePath(data.map((bar) => bar.ema9), x, yPrice)} fill="none" stroke="#fbbf24" strokeWidth="1.5" /><path d={linePath(data.map((bar) => bar.ema20), x, yPrice)} fill="none" stroke="#a78bfa" strokeWidth="1.5" /><path d={linePath(data.map((bar) => bar.vwap), x, yPrice)} fill="none" stroke="#60a5fa" strokeWidth="1.5" strokeDasharray="4 3" />
         {[['Stop', trade.stop, '#fb7185'], ['Target', trade.target, '#34d399']].map(([label, value, color]) => value ? <g key={label as string}><line x1={left} x2={width - right} y1={yPrice(value as number)} y2={yPrice(value as number)} stroke={color as string} strokeOpacity=".75" strokeDasharray="5 4" /><text x={width - right - 2} y={yPrice(value as number) - 4} textAnchor="end" fill={color as string} fontSize="11">{label as string} {fmt(value as number)}</text></g> : null)}
-        {entryIndex >= 0 && <g><line x1={x(entryIndex)} x2={x(entryIndex)} y1={priceTop} y2={priceTop + priceHeight} stroke="#4ade80" strokeOpacity=".75" strokeDasharray="4 4" /><path d={`M ${x(entryIndex) - 6} ${priceTop + 12} L ${x(entryIndex) + 6} ${priceTop + 12} L ${x(entryIndex)} ${priceTop + 2} Z`} fill="#4ade80" /><text x={x(entryIndex) + 8} y={priceTop + 12} fill="#bbf7d0" fontSize="11">BUY {fmt(trade.entry_price)}</text></g>}
-        {exitIndex >= 0 && trade.exit_price !== undefined && <g><line x1={x(exitIndex)} x2={x(exitIndex)} y1={priceTop} y2={priceTop + priceHeight} stroke="#f87171" strokeOpacity=".75" strokeDasharray="4 4" /><path d={`M ${x(exitIndex) - 6} ${priceTop + 2} L ${x(exitIndex) + 6} ${priceTop + 2} L ${x(exitIndex)} ${priceTop + 12} Z`} fill="#f87171" /><text x={x(exitIndex) + 8} y={priceTop + 28} fill="#fecaca" fontSize="11">SELL {fmt(trade.exit_price)}</text></g>}
+        <g><line x1={left} x2={width - right} y1={entryY} y2={entryY} stroke="#4ade80" strokeOpacity=".8" strokeDasharray="2 3" /><text x={left + 4} y={entryY - 5} fill="#bbf7d0" fontSize="11">BUY {fmt(trade.entry_price)}</text></g>
+        {exitY !== null && trade.exit_price !== undefined && <g><line x1={left} x2={width - right} y1={exitY} y2={exitY} stroke="#f87171" strokeOpacity=".8" strokeDasharray="2 3" /><text x={left + 4} y={exitLabelY as number} fill="#fecaca" fontSize="11">SELL {fmt(trade.exit_price)}</text></g>}
+        {entryIndex >= 0 && <path d={`M ${x(entryIndex) - 6} ${entryY + 13} L ${x(entryIndex) + 6} ${entryY + 13} L ${x(entryIndex)} ${entryY + 3} Z`} fill="#4ade80" />}
+        {exitIndex >= 0 && exitY !== null && <path d={`M ${x(exitIndex) - 6} ${exitY - 13} L ${x(exitIndex) + 6} ${exitY - 13} L ${x(exitIndex)} ${exitY - 3} Z`} fill="#f87171" />}
         {[0, 0.5, 1].map((ratio) => {
           const yy = macdTop + macdHeight * ratio;
           const value = (macdMax + macdPad) - (macdMax - macdMin + macdPad * 2) * ratio;
@@ -267,8 +312,22 @@ export function MomentumTradeChart({
         {data.map((bar, index) => <rect key={`vol-${bar.time}`} x={x(index) - candleWidth / 2} y={volumeTop + volumeHeight - (bar.volume / volumeMax) * volumeHeight} width={candleWidth} height={(bar.volume / volumeMax) * volumeHeight} fill={bar.close >= bar.open ? '#2dd4bf' : '#fb7185'} opacity=".65" />)}
         <text x={left + 4} y={volumeTop + 10} fill="#a9bac9" fontSize="11">Volume</text>
         {Array.from({ length: tickCount }, (_, tick) => Math.round((tick / Math.max(tickCount - 1, 1)) * (data.length - 1))).map((index) => <text key={index} x={x(index)} y={570} textAnchor="middle" fill="#a9bac9" fontSize="11">{new Date(data[index]!.time).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false })}</text>)}
+        {cursorBar && (
+          <g pointerEvents="none">
+            <line x1={x(cursorIndex)} x2={x(cursorIndex)} y1={priceTop} y2={volumeTop + volumeHeight} stroke="#cbd5e1" strokeOpacity=".55" strokeDasharray="3 3" />
+            {cursorReadout && (
+              <g>
+                <line x1={left} x2={width - right} y1={cursorReadout.y} y2={cursorReadout.y} stroke="#cbd5e1" strokeOpacity=".55" strokeDasharray="3 3" />
+                <rect x={2} y={cursorReadout.y - 9} width={60} height={18} rx="3" fill="#22303f" stroke="#cbd5e1" strokeOpacity=".4" />
+                <text x={32} y={cursorReadout.y + 4} textAnchor="middle" fill="#e2e8f0" fontSize="11">{cursorReadout.label}</text>
+              </g>
+            )}
+            <rect x={timeBadgeX} y={557} width={48} height={18} rx="3" fill="#22303f" stroke="#cbd5e1" strokeOpacity=".4" />
+            <text x={timeBadgeX + 24} y={570} textAnchor="middle" fill="#e2e8f0" fontSize="11">{new Date(cursorBar.time).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false })}</text>
+          </g>
+        )}
       </svg>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 px-2 pb-1 text-xs text-slate-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#2dd4bf]" />{interval} up candle</span><span className="text-[#fbbf24]">EMA 9 / MACD</span><span className="text-[#a78bfa]">EMA 20 / signal</span><span className="text-[#60a5fa]">VWAP</span><span className="text-emerald-300">▲ entry</span><span className="text-rose-300">▼ exit</span><span className="text-slate-400">Focus chart: +/− zoom, 0 reset, ←/→ pan</span></div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 px-2 pb-1 text-xs text-slate-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#2dd4bf]" />{interval} up candle</span><span className="text-[#fbbf24]">EMA 9 / MACD</span><span className="text-[#a78bfa]">EMA 20 / signal</span><span className="text-[#60a5fa]">VWAP</span><span className="text-emerald-300">▲ entry</span><span className="text-rose-300">▼ exit</span><span className="text-slate-400">Hover for price/time · focus chart: +/− zoom, 0 reset, ←/→ pan</span></div>
     </div>
   );
 }

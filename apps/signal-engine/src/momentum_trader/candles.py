@@ -14,6 +14,8 @@ LAST closed bar (and the 1–2 bars before it for multi-bar shapes).
 
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
+
 import pandas as pd
 
 # Geometry thresholds, expressed as fractions of the bar's full range.
@@ -33,6 +35,12 @@ def _parts(bar: pd.Series) -> tuple[float, float, float, float, float]:
 
 def _body(bar: pd.Series) -> float:
     return abs(float(bar["close"]) - float(bar["open"]))
+
+
+def _body_ratio(bar: pd.Series) -> float:
+    """Body as a share of the candle range (safe for zero-range bars)."""
+    _, _, _, _, rng = _parts(bar)
+    return _body(bar) / rng
 
 
 def _is_green(bar: pd.Series) -> bool:
@@ -149,14 +157,27 @@ def is_tweezer_top(prev: pd.Series, cur: pd.Series) -> bool:
 # ── three bar ─────────────────────────────────────────────────────────────────
 
 def is_morning_star(a: pd.Series, b: pd.Series, c: pd.Series) -> bool:
-    """Big red, small-bodied star (gapped or not), big green closing into the red body."""
+    """Strict 3-bar Morning Star geometry.
+
+    A trend is deliberately *not* inferred from three bars alone; callers that
+    present this as a reversal must also show the preceding trend.  The shape
+    itself requires a substantial first/third body so an ordinary 1-minute
+    wobble cannot be labelled a Morning Star.
+    """
     _, _, _, _, rng_b = _parts(b)
     return (
         _is_red(a)
+        and _body_ratio(a) >= 0.55
         and _body(b) <= _SMALL_BODY * rng_b
         and _is_green(c)
+        and _body_ratio(c) >= 0.55
         and float(c["close"]) > (float(a["open"]) + float(a["close"])) / 2.0
     )
+
+
+def is_morning_doji_star(a: pd.Series, b: pd.Series, c: pd.Series) -> bool:
+    """Morning Star whose middle candle is specifically a doji."""
+    return is_doji(b) and is_morning_star(a, b, c)
 
 
 def is_evening_star(a: pd.Series, b: pd.Series, c: pd.Series) -> bool:
@@ -194,14 +215,83 @@ def is_three_black_crows(a: pd.Series, b: pd.Series, c: pd.Series) -> bool:
     return closes_down and opens_inside
 
 
+def is_rising_three(a: pd.Series, b: pd.Series, c: pd.Series, d: pd.Series, e: pd.Series) -> bool:
+    """Strict five-bar Rising Three Methods continuation shape.
+
+    The three pullback bars must be small bearish candles entirely contained in
+    the range of the first impulse.  The final impulse must reclaim and close
+    through the first candle's high.  Trend context is supplied by the caller.
+    """
+    middle = (b, c, d)
+    first_body = _body(a)
+    if not (_is_green(a) and _body_ratio(a) >= 0.55 and first_body > 0.0):
+        return False
+    if not all(_is_red(bar) and _body_ratio(bar) <= _SMALL_BODY for bar in middle):
+        return False
+    if not all(float(a["low"]) <= float(bar["low"]) and float(bar["high"]) <= float(a["high"])
+               for bar in middle):
+        return False
+    pullback_low = min(float(bar["low"]) for bar in middle)
+    retrace = (float(a["close"]) - pullback_low) / first_body
+    return (
+        retrace <= 0.50
+        and _is_green(e)
+        and _body_ratio(e) >= 0.55
+        and float(e["close"]) > float(a["high"])
+    )
+
+
+@dataclass(frozen=True)
+class PatternMatch:
+    """Immutable evidence for a fully closed multi-candle pattern."""
+
+    name: str
+    timeframe: str
+    start: str
+    end: str
+    confirmation: float
+    invalidation: float
+
+    def document(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def completed_pattern_matches(bars: pd.DataFrame, timeframe: str) -> list[PatternMatch]:
+    """Return strict named multi-candle patterns ending on the latest closed bar.
+
+    The timestamps make every UI label reviewable: a chart can shade exactly
+    the candles used rather than leaving a trader to guess what a tag meant.
+    """
+    matches: list[PatternMatch] = []
+    if len(bars) >= 3:
+        a, b, c = bars.iloc[-3], bars.iloc[-2], bars.iloc[-1]
+        base = dict(timeframe=timeframe, start=pd.Timestamp(bars.index[-3]).isoformat(),
+                    end=pd.Timestamp(bars.index[-1]).isoformat(),
+                    confirmation=float(c["high"]),
+                    invalidation=min(float(a["low"]), float(b["low"]), float(c["low"])))
+        if is_morning_star(a, b, c):
+            matches.append(PatternMatch(name="morning_star", **base))
+        if is_morning_doji_star(a, b, c):
+            matches.append(PatternMatch(name="morning_doji_star", **base))
+    if len(bars) >= 5:
+        a, b, c, d, e = (bars.iloc[-5], bars.iloc[-4], bars.iloc[-3], bars.iloc[-2], bars.iloc[-1])
+        if is_rising_three(a, b, c, d, e):
+            matches.append(PatternMatch(
+                name="rising_three", timeframe=timeframe,
+                start=pd.Timestamp(bars.index[-5]).isoformat(), end=pd.Timestamp(bars.index[-1]).isoformat(),
+                confirmation=float(e["high"]),
+                invalidation=min(float(a["low"]), float(b["low"]), float(c["low"]), float(d["low"]), float(e["low"])),
+            ))
+    return matches
+
+
 # ── tag the latest bar ────────────────────────────────────────────────────────
 
 def candle_tags(bars: pd.DataFrame) -> list[str]:
     """Return every candlestick tag that fires on the last closed bar.
 
-    Order is stable so the list can be joined into a CSV field. Rising/Falling
-    Three (5-bar continuation shapes) are deliberately omitted: they are the
-    bull-flag / bear-flag setups already covered in setups.py.
+    Order is stable so the list can be joined into a CSV field.  These are
+    observational labels; entries remain governed by the strategy setup.
     """
     if len(bars) == 0:
         return []
@@ -239,4 +329,10 @@ def candle_tags(bars: pd.DataFrame) -> list[str]:
         for name, fn3 in three:
             if fn3(a, b, cur):
                 tags.append(name)
+        if is_morning_doji_star(a, b, cur):
+            tags.append("morning_doji_star")
+    if len(bars) >= 5:
+        a, b, c, d, e = (bars.iloc[-5], bars.iloc[-4], bars.iloc[-3], bars.iloc[-2], bars.iloc[-1])
+        if is_rising_three(a, b, c, d, e):
+            tags.append("rising_three")
     return tags

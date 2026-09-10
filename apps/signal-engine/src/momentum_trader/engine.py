@@ -28,7 +28,7 @@ import pandas as pd
 from src.news_trader.trailing_sl import calc_costs
 
 from . import exits, location, quality
-from .candles import candle_tags
+from .candles import candle_tags, completed_pattern_matches
 from .indicators import cumulative_session_volume, day_change_pct, ema, session_vwap, volume_ratio
 from .levels import NEAR_PCT
 from .pullback import pullback_ordinal
@@ -145,6 +145,9 @@ class Candidate:
     catalyst: int
     event_type: str
     candle_tags: list[str]
+    # Strict, fully closed multi-candle formations, including their exact
+    # time span and trade levels.  Informational only: it cannot alter entry.
+    pattern_matches: list[dict[str, object]] = field(default_factory=list)
     prev_day_gainer: bool = False
     # Which pullback of the day's move this entry sits on (1 = first after the
     # day's first sharp advance; None = no advance to anchor to). RECORDED ONLY —
@@ -716,6 +719,7 @@ def step(
         cand = Candidate(
             symbol=state.symbol, time=now, setup=setup, day_chg_pct=chg, rvol=rv,
             catalyst=cat, event_type=ev, candle_tags=tags,
+            pattern_matches=[match.document() for match in completed_pattern_matches(tf5, "5m")],
             prev_day_gainer=state.prev_day_gainer,
             pullback_ord=pullback_ordinal(tf5) if len(tf5) else None,
             quality_reason="ok",
@@ -761,6 +765,7 @@ def step(
     cand = Candidate(
         symbol=state.symbol, time=now, setup=setup, day_chg_pct=chg, rvol=rv,
         catalyst=cat, event_type=ev, candle_tags=candle_tags(bars_5m if at_5m_close else bars_1m),
+        pattern_matches=[match.document() for match in completed_pattern_matches(tf5, "5m")],
         prev_day_gainer=state.prev_day_gainer,
         pullback_ord=ordinal,
         quality_reason=q_reason,
