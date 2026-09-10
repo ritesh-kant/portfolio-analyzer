@@ -17,7 +17,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <div className="min-h-screen bg-grain">
           <header className="sticky top-0 z-20 border-b border-black/5 bg-bg/90 backdrop-blur">
-            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8">
               {/* Top row: title + (mobile: sign-out | desktop: nav + sign-out) */}
               <div className="flex items-center justify-between py-3">
                 <div>
@@ -73,7 +73,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               </div>
             </div>
           </header>
-          <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">{children}</main>
+          <main className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8">{children}</main>
         </div>
       </body>
     </html>
