@@ -392,12 +392,12 @@ export function MomentumTradeChart({
         else if (event.key === 'ArrowUp') { event.preventDefault(); panPrice(1); }
         else if (event.key === 'ArrowDown') { event.preventDefault(); panPrice(-1); }
       }}
-      className="overflow-x-auto rounded-xl border border-black/10 bg-[#101922] p-2 shadow-inner outline-none focus:ring-2 focus:ring-accent fullscreen:flex fullscreen:flex-col fullscreen:justify-center fullscreen:rounded-none fullscreen:p-5"
+      className="rounded-xl border border-black/10 bg-[#101922] p-2 shadow-inner outline-none focus:ring-2 focus:ring-accent fullscreen:flex fullscreen:flex-col fullscreen:justify-center fullscreen:rounded-none fullscreen:p-5"
       aria-label={`${trade.symbol} ${interval} chart; use plus or minus to zoom, zero to reset, arrow left/right to pan, and arrow up/down to pan the price axis when vertically zoomed`}
     >
-      <div className="flex min-w-[720px] flex-wrap items-center justify-between gap-3 px-2 pb-2 text-xs text-slate-300">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-2 text-xs text-slate-300">
         <span>{zoom <= 1 ? 'Full session' : `${zoom % 1 === 0 ? zoom : zoom.toFixed(1)}× zoom · ${data.length} ${interval} candles`}{priceZoom > 1 ? ` · ${priceZoom % 1 === 0 ? priceZoom : priceZoom.toFixed(1)}× price zoom` : ''}</span>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <button type="button" onClick={() => pan(-1)} disabled={viewStart === 0} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35" aria-label="Show earlier candles">←</button>
           <button type="button" onClick={zoomOut} disabled={zoom <= 1} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">− Zoom</button>
           <button type="button" onClick={zoomIn} disabled={zoom >= 8 || visibleCount <= 15} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">+ Zoom</button>
@@ -415,7 +415,7 @@ export function MomentumTradeChart({
       <svg
         ref={setSvgRef}
         viewBox={`0 0 ${width} ${height}`}
-        className={`min-w-[720px] w-full touch-pan-y select-none ${isDragging ? 'cursor-grabbing' : 'cursor-crosshair'}`}
+        className={`w-full touch-pan-y select-none ${isDragging ? 'cursor-grabbing' : 'cursor-crosshair'}`}
         role="img"
         aria-label={`${trade.symbol} ${interval} candle chart`}
         onPointerMove={trackCursor}
