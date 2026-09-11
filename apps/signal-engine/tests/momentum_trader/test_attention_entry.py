@@ -64,6 +64,17 @@ def _resistance_cfg() -> eng.EngineConfig:
     )
 
 
+def _reclaim_cfg() -> eng.EngineConfig:
+    return eng.EngineConfig(
+        fill_mode=eng.FILL_FUTURE_TRIGGER,
+        exit_mode="trend_full",
+        use_attention_entries=True,
+        attention_day_chg_min=1.5,
+        attention_rvol_min=1.5,
+        allow_false_break_reentry=True,
+    )
+
+
 def _promoted_state() -> tuple[eng.DayState, eng.EngineConfig, pd.DataFrame]:
     bars = _attention_prelude()
     st = eng.DayState("TEST", prev_close=100.0, cum_vol_profile=_profile_for(bars))
@@ -260,3 +271,56 @@ def test_resistance_aware_confirmation_uses_the_crossed_ceiling_as_false_break_l
     )
     assert setup is not None and reason == "confirmed_resistance_breakout"
     assert setup.level == pytest.approx(102.0)
+
+
+def test_false_break_reclaim_allows_one_new_future_only_entry() -> None:
+    """A retry requires a later high-volume close above the exact failed level."""
+    bars = _attention_prelude()
+    cfg = _reclaim_cfg()
+    state = eng.DayState("TEST", prev_close=100.0, cum_vol_profile=_profile_for(bars))
+    state.attention = True
+    original = eng.Candidate(
+        symbol="TEST", time=bars.index[-1], setup=eng.Setup(
+            eng.ATTENTION_SETUP, trigger=102.0, stop=101.4, level=102.0,
+        ), day_chg_pct=1.6, rvol=1.6, catalyst=0, event_type="", candle_tags=[],
+    )
+    plan = eng.plan_trade(102.0, 101.4, risk_inr=500.0, max_notional_inr=50_000.0)
+    assert plan is not None
+    state.position = eng.Position(
+        cand=original, entry_time=bars.index[-1], plan=plan, highest=102.0,
+        exit_state=eng.exits.initial_state(102.0, 101.4, bars, None),
+    )
+    state.traded_today = True
+    eng._exit(state, bars.index[-1], 101.8, "false_break", cfg)
+    assert state.false_break_reclaim is not None
+
+    # A weak recovery cannot consume the one retry.
+    weak = pd.DataFrame(
+        [(101.8, 102.1, 101.6, 101.95, 100.0)],
+        index=pd.DatetimeIndex([bars.index[-1] + pd.Timedelta(minutes=1)]), columns=COLS,
+    )
+    bars = pd.concat([bars, weak])
+    state.cum_vol_profile = _profile_for(bars)
+    eng.step(state, bars, cfg, lambda _s, _t: (0, ""))
+    assert state.pending is None and state.false_break_reclaim is not None
+
+    # A later green, upper-range, 2.5x-volume close through 102.00 arms one buy-stop.
+    reclaim = pd.DataFrame(
+        [(101.95, 102.40, 101.70, 102.32, 1200.0)],
+        index=pd.DatetimeIndex([bars.index[-1] + pd.Timedelta(minutes=1)]), columns=COLS,
+    )
+    bars = pd.concat([bars, reclaim])
+    state.cum_vol_profile = _profile_for(bars)
+    eng.step(state, bars, cfg, lambda _s, _t: (0, ""))
+    assert state.pending is not None
+    assert state.pending.cand.setup.name == eng.ATTENTION_FALSE_BREAK_RECLAIM_SETUP
+    assert state.pending.cand.setup.level == pytest.approx(102.0)
+    assert state.false_break_reclaim is None and state.false_break_reclaim_attempted
+
+    decision = state.pending.decision_time
+    assert decision is not None
+    assert eng.fill_pending_quote(state, decision + pd.Timedelta(seconds=1), 102.40, cfg, bars)
+
+    # The retry can never create a third attempt after it too false-breaks.
+    eng._exit(state, decision + pd.Timedelta(minutes=1), 101.9, "false_break", cfg)
+    assert state.false_break_reclaim is None

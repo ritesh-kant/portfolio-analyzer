@@ -41,3 +41,26 @@ resistance exits followed by a +1R favourable move within 15 minutes.
 The treatment is not promoted beyond paper trading unless it has positive
 actual-cost net return and does not merely achieve it by eliminating nearly all
 trades.
+
+## Diagnostic trades — excluded from evaluation
+
+- **KEC, 2026-09-10.** The control entered ₹407.10 and closed at ₹407.70 via
+  `resistance_reject` around a one-touch ₹407.65 intraday pivot; costs turned
+  the ₹73.20 gross profit into a ₹29.19 net loss.  The resistance-state replay
+  refused the original 11:36 signal, recognized a later high-volume reclaim of
+  ₹406.71, entered ₹407.30 at 11:40, and exited ₹410.50 on `ema9_break` at
+  11:57: gross ₹390.40, net ₹287.59.  This is an illustrative replay only.
+- **SWANCORP, 2026-09-10.** The control entered ₹299.55 and closed ₹298.70 via
+  `false_break` after losing the actual ₹299.50 breakout level; net ₹−96.76.
+  It later reclaimed the level at 12:15 and reached ₹315.35 (above the displayed
+  ₹314.55 target).  This is a distinct reclaim/re-entry question.  It is not
+  changed by this treatment and must not be added without a separately
+  registered paper arm.
+
+## Operational status
+
+Deployed for future **paper-only** scans in AWS `ap-south-1` on 2026-09-10:
+ECS task definition `mt-scanner-prod:9`, image tag
+`resistance-state-20260910`, strategy `attention_1m_resistance_state`, and log
+path `/data/mt_attention_1m_resistance_state_forward_log.csv`.  The old
+`attention_1m` strategy remains the control and its log remains separate.

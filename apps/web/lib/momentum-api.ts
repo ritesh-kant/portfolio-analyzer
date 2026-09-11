@@ -47,12 +47,14 @@ export interface PatternMatch {
 export interface MomentumTrade {
   _id: string;
   symbol: string;
+  /** Paper strategy that produced this row. Older records predate strategy labels. */
+  strategy?: string;
   status: 'open' | 'closed';
   setup: string;
   trigger_px?: number;
   stop_px?: number;
   level?: number | null;
-  setup_meta?: Record<string, number>;
+  setup_meta?: Record<string, number | string>;
   time: string;
   entry_time: string;
   entry_price: number;

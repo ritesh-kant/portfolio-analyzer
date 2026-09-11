@@ -71,7 +71,8 @@ ATTENTION_RVOL_MIN = 1.5
 ATTENTION_CONFIRM_VOL_RATIO = 2.5
 ATTENTION_PENDING_MINUTES = 3
 ATTENTION_SETUP = "attention_1m_confirmation"
-ONE_MINUTE_SETUPS = ("micro_pullback", ATTENTION_SETUP)
+ATTENTION_FALSE_BREAK_RECLAIM_SETUP = "attention_false_break_reclaim"
+ONE_MINUTE_SETUPS = ("micro_pullback", ATTENTION_SETUP, ATTENTION_FALSE_BREAK_RECLAIM_SETUP)
 ATTENTION_TAGS = frozenset({
     "dragonfly_doji", "hammer", "bullish_engulfing", "tweezer_bottom", "morning_star",
     "three_white_soldiers",
@@ -122,6 +123,11 @@ class EngineConfig:
     # ceiling.  A later high-volume close through that ceiling creates a fresh
     # confirmation instead.
     require_resistance_breakout: bool = False
+    # Paper-only retry: after the initial attention breakout has specifically
+    # failed its broken-level test, allow one new, volume-backed close back
+    # through that same level.  This is deliberately opt-in so existing arms
+    # remain exact controls.
+    allow_false_break_reentry: bool = False
     exit_cfg: exits.ExitConfig = field(init=False)
 
     def __post_init__(self) -> None:
@@ -207,6 +213,18 @@ class Rejection:
     observed_price: float | None = None
 
 
+@dataclass(frozen=True)
+class FalseBreakReclaim:
+    """One eligible retry after an attention breakout loses its level.
+
+    ``level`` is frozen from the original candidate.  It is not recalculated
+    from later candles, so the retry can only reclaim the level that actually
+    failed and cannot quietly become a different setup.
+    """
+    level: float
+    exit_time: pd.Timestamp
+
+
 @dataclass
 class Position:
     cand: Candidate
@@ -266,6 +284,8 @@ class DayState:
     attention_patterns: list[dict[str, object]] = field(default_factory=list)
     attention_events: list[AttentionEvent] = field(default_factory=list)
     rejections: list[Rejection] = field(default_factory=list)
+    false_break_reclaim: FalseBreakReclaim | None = None
+    false_break_reclaim_attempted: bool = False
 
 
 def _bars_5m(bars_1m: pd.DataFrame, full_5m: pd.DataFrame | None) -> pd.DataFrame:
@@ -316,6 +336,20 @@ def _exit(state: DayState, when: pd.Timestamp, px: float, reason: str, cfg: Engi
         cand=pos.cand, entry_time=pos.entry_time, entry=entry, exit_time=when, exit=px,
         exit_reason=reason, qty=qty, gross_inr=gross, costs_inr=costs, net_inr=gross - costs,
     ))
+    # The control never reaches this branch because the option is disabled.
+    # A retry is only possible after a genuine attention false break; a hard
+    # stop, EMA exit, target, or a retry's own failure can never create another
+    # opportunity.  This makes the new arm strictly one extra attempt.
+    if (
+        cfg.allow_false_break_reentry
+        and reason == "false_break"
+        and pos.cand.setup.name == ATTENTION_SETUP
+        and pos.cand.setup.level is not None
+        and not state.false_break_reclaim_attempted
+    ):
+        state.false_break_reclaim = FalseBreakReclaim(
+            level=float(pos.cand.setup.level), exit_time=when
+        )
     state.position = None
 
 
@@ -544,6 +578,94 @@ def _resistance_aware_attention_confirmation(
     return setup, reason
 
 
+def _false_break_reclaim_confirmation(
+    state: DayState,
+    bars_1m: pd.DataFrame,
+    tf5: pd.DataFrame,
+    cfg: EngineConfig,
+    catalyst: CatalystLookup,
+) -> bool:
+    """Arm the one permitted retry only after the original level is reclaimed.
+
+    The candidate must be a normal attention-quality one-minute candle, close
+    above the *original* failed level, and retain the same completed five-minute
+    trend context.  It is still a future-only buy-stop: this function never
+    fills on the reclaim candle itself.
+    """
+    reclaim = state.false_break_reclaim
+    if reclaim is None or bars_1m.empty:
+        return False
+    now = bars_1m.index[-1]
+    # The exit candle has already proved the first break false.  Waiting for a
+    # later completed candle prevents one bar from both exiting and re-entering.
+    if now <= reclaim.exit_time:
+        return False
+    context_ok, context_reason = _attention_context(tf5)
+    if not context_ok:
+        state.rejections.append(Rejection(
+            symbol=state.symbol, time=now, reason=f"reclaim_context_lost:{context_reason}",
+            setup=ATTENTION_FALSE_BREAK_RECLAIM_SETUP, trigger=reclaim.level,
+            observed_price=float(bars_1m["close"].iloc[-1]),
+        ))
+        state.false_break_reclaim = None
+        state.false_break_reclaim_attempted = True
+        return False
+    setup, reason = _attention_confirmation(bars_1m, cfg.attention_confirm_vol_ratio)
+    if setup is None:
+        state.rejections.append(Rejection(
+            symbol=state.symbol, time=now, reason=f"reclaim_{reason}",
+            setup=ATTENTION_FALSE_BREAK_RECLAIM_SETUP, trigger=reclaim.level,
+            observed_price=float(bars_1m["close"].iloc[-1]),
+        ))
+        return False
+    if float(bars_1m["close"].iloc[-1]) <= reclaim.level:
+        state.rejections.append(Rejection(
+            symbol=state.symbol, time=now, reason="reclaim_below_failed_level",
+            setup=ATTENTION_FALSE_BREAK_RECLAIM_SETUP, trigger=reclaim.level,
+            observed_price=float(bars_1m["close"].iloc[-1]),
+        ))
+        return False
+
+    reentry_setup = Setup(
+        name=ATTENTION_FALSE_BREAK_RECLAIM_SETUP,
+        trigger=setup.trigger,
+        stop=setup.stop,
+        level=reclaim.level,
+        meta={
+            **setup.meta,
+            "reclaim_level": reclaim.level,
+            "original_exit_epoch": reclaim.exit_time.timestamp(),
+        },
+    )
+    cat, ev = catalyst(state.symbol, now)
+    dround, rh, res_head, sup_drop = location.measure(tf5, reentry_setup.trigger, state.prev_day)
+    cand = Candidate(
+        symbol=state.symbol, time=now, setup=reentry_setup,
+        day_chg_pct=day_change_pct(bars_1m, state.prev_close),
+        rvol=rvol_now(bars_1m, state.cum_vol_profile) or 0.0,
+        catalyst=cat, event_type=ev, candle_tags=candle_tags(bars_1m),
+        pattern_matches=_unique_pattern_documents(
+            state.attention_patterns,
+            [match.document() for match in completed_pattern_matches(tf5, "5m")],
+        ),
+        prev_day_gainer=state.prev_day_gainer,
+        pullback_ord=pullback_ordinal(tf5) if len(tf5) else None,
+        quality_reason="ok", atr_pct=state.daily_atr_pct,
+        macd_hist=_macd_hist_now(tf5, state.warmup_5m),
+        dist_to_round_pct=dround, round_head_pct=rh,
+        resist_head_pct=res_head, support_drop_pct=sup_drop,
+    )
+    state.candidates.append(cand)
+    decision = now + pd.Timedelta(minutes=1)
+    state.pending = Pending(
+        cand, decision_time=decision,
+        expires_at=decision + pd.Timedelta(minutes=cfg.attention_pending_minutes),
+    )
+    state.false_break_reclaim = None
+    state.false_break_reclaim_attempted = True
+    return True
+
+
 def _reject_pending(
     state: DayState,
     when: pd.Timestamp,
@@ -724,6 +846,13 @@ def step(
 
     # 3. two-stage attention path: soft promotion, then 1-minute confirmation.
     if state.pending is not None or t >= cfg.entry_cutoff or t >= cfg.eod_close:
+        return
+    # A reclaim is evaluated before the one-trade-per-day guard.  It can only
+    # exist after that first trade has exited as a false break, and is consumed
+    # the instant its one allowed future-only buy-stop is armed.
+    if cfg.allow_false_break_reentry and state.false_break_reclaim is not None:
+        tf5 = _bars_5m(bars_1m, full_5m)
+        _false_break_reclaim_confirmation(state, bars_1m, tf5, cfg, catalyst)
         return
     if cfg.one_trade_per_day and state.traded_today:
         return

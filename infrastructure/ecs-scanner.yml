@@ -152,6 +152,60 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: scanner
 
+  # A second task keeps the reclaim hypothesis independent from the existing
+  # resistance-state paper arm. Both use the same read-only market feed and
+  # EFS volume, but write strategy-labelled records and distinct CSV logs.
+  ReclaimTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub mt-scanner-reclaim-${Stage}
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      Volumes:
+        - Name: data
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref DataVolumeFs
+            TransitEncryption: ENABLED
+      ContainerDefinitions:
+        - Name: scanner
+          Image: !Ref ImageUri
+          Essential: true
+          MountPoints:
+            - SourceVolume: data
+              ContainerPath: /data
+          Environment:
+            - { Name: STAGE, Value: !Ref Stage }
+            - { Name: AWS_REGION, Value: !Ref AWS::Region }
+            - { Name: AWS_SECRETS_ENABLED, Value: 'true' }
+            - { Name: MOMENTUM_SCANNER_ONLY, Value: 'true' }
+            - { Name: TRADING_MODE, Value: paper }
+            - { Name: MT_STRATEGY, Value: attention_1m_false_break_reclaim }
+            - { Name: MT_ATTENTION_DAY_CHG_MIN, Value: '1.5' }
+            - { Name: MT_ATTENTION_RVOL_MIN, Value: '1.5' }
+            - { Name: MT_LOG_CSV, Value: /data/mt_attention_1m_false_break_reclaim_forward_log.csv }
+          Secrets:
+            - Name: MONGODB_URI
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/MONGODB_URI
+            - Name: TELEGRAM_BOT_TOKEN
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/TELEGRAM_BOT_TOKEN
+            - Name: TELEGRAM_CHAT_ID
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/TELEGRAM_CHAT_ID
+            - Name: UPSTOX_ANALYTICS_TOKEN
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/UPSTOX_ANALYTICS_TOKEN
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: reclaim
+
   EventsRole:
     Type: AWS::IAM::Role
     Properties:
@@ -169,7 +223,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: ecs:RunTask
-                Resource: !Ref TaskDefinition
+                Resource: [!Ref TaskDefinition, !Ref ReclaimTaskDefinition]
               - Effect: Allow
                 Action: iam:PassRole
                 Resource: [!GetAtt ExecutionRole.Arn, !GetAtt TaskRole.Arn]
@@ -195,12 +249,27 @@ Resources:
                 AssignPublicIp: ENABLED
                 Subnets: !Ref SubnetIds
                 SecurityGroups: [!Ref SecurityGroupId]
+        - Id: reclaim-scanner
+          Arn: !GetAtt Cluster.Arn
+          RoleArn: !GetAtt EventsRole.Arn
+          EcsParameters:
+            TaskDefinitionArn: !Ref ReclaimTaskDefinition
+            LaunchType: FARGATE
+            TaskCount: 1
+            PlatformVersion: LATEST
+            NetworkConfiguration:
+              AwsVpcConfiguration:
+                AssignPublicIp: ENABLED
+                Subnets: !Ref SubnetIds
+                SecurityGroups: [!Ref SecurityGroupId]
 
 Outputs:
   ClusterName:
     Value: !Ref Cluster
   TaskDefinitionArn:
     Value: !Ref TaskDefinition
+  ReclaimTaskDefinitionArn:
+    Value: !Ref ReclaimTaskDefinition
   RunNow:
     Description: Manual start command (add the task networking configuration from this stack)
     Value: !Sub >

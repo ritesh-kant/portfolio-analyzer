@@ -59,6 +59,7 @@ STRATEGY_BASELINE = "baseline"
 STRATEGY_CATALYST_FIRST_PULLBACK = "catalyst_first_pullback"
 STRATEGY_ATTENTION_1M = "attention_1m"
 STRATEGY_ATTENTION_1M_RESISTANCE_STATE = "attention_1m_resistance_state"
+STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM = "attention_1m_false_break_reclaim"
 
 
 def _strategy_config(settings: Settings) -> EngineConfig:
@@ -95,10 +96,22 @@ def _strategy_config(settings: Settings) -> EngineConfig:
             attention_rvol_min=settings.mt_attention_rvol_min,
             require_resistance_breakout=True,
         )
+    if settings.mt_strategy == STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM:
+        return EngineConfig(
+            risk_inr=settings.mt_risk_inr,
+            max_notional_inr=settings.mt_max_notional_inr,
+            exit_mode=MODE_TREND_FULL,
+            fill_mode=FILL_FUTURE_TRIGGER,
+            use_attention_entries=True,
+            attention_day_chg_min=settings.mt_attention_day_chg_min,
+            attention_rvol_min=settings.mt_attention_rvol_min,
+            allow_false_break_reentry=True,
+        )
     raise ValueError(
         f"unknown MT_STRATEGY {settings.mt_strategy!r}; expected "
         f"{STRATEGY_BASELINE!r}, {STRATEGY_CATALYST_FIRST_PULLBACK!r}, "
-        f"{STRATEGY_ATTENTION_1M!r}, or {STRATEGY_ATTENTION_1M_RESISTANCE_STATE!r}"
+        f"{STRATEGY_ATTENTION_1M!r}, {STRATEGY_ATTENTION_1M_RESISTANCE_STATE!r}, "
+        f"or {STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM!r}"
     )
 
 
@@ -245,7 +258,9 @@ class Scanner:
                  for p in self.s.mt_extra_universe_files.split(",") if p.strip()]
         symbols = universe.base_symbols(extra)
         self._connect_db()
-        self._ledger = PaperLedger(self._db, _repo_path(self.s.mt_log_csv), bool(facts))
+        self._ledger = PaperLedger(
+            self._db, _repo_path(self.s.mt_log_csv), bool(facts), self.s.mt_strategy
+        )
 
         keys: list[str] = []
         start_hist = today - timedelta(days=45)
@@ -441,7 +456,9 @@ class Scanner:
             # `snapshots` holds the complete session through the bar which
             # produced the exit. Persist the raw data with the trade so its
             # eventual review chart is reproducible without calling Upstox.
-            snapshot_key = next((k for k, st in self.states.items() if st.symbol == t.cand.symbol), None)
+            snapshot_key = next(
+                (k for k, st in self.states.items() if st.symbol == t.cand.symbol), None
+            )
             chart_bars = (
                 snapshots.get(snapshot_key, pd.DataFrame())
                 if snapshot_key is not None

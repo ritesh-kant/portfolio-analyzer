@@ -66,10 +66,17 @@ def _cand_doc(c: Candidate) -> dict[str, Any]:
 
 
 class PaperLedger:
-    def __init__(self, db: Any | None, csv_path: Path | None, float_filter_applied: bool) -> None:
+    def __init__(
+        self,
+        db: Any | None,
+        csv_path: Path | None,
+        float_filter_applied: bool,
+        strategy: str = "baseline",
+    ) -> None:
         self._db = db
         self._csv = csv_path
         self._ff = int(float_filter_applied)
+        self._strategy = strategy
         if self._csv and not self._csv.exists():
             self._csv.parent.mkdir(parents=True, exist_ok=True)
             with self._csv.open("w", newline="") as f:
@@ -80,7 +87,7 @@ class PaperLedger:
     def candidate(self, c: Candidate) -> None:
         if self._db is not None:
             try:
-                self._db["mt_candidates"].insert_one(_cand_doc(c))
+                self._db["mt_candidates"].insert_one({**_cand_doc(c), "strategy": self._strategy})
             except Exception:  # noqa: BLE001
                 logger.exception("mt_candidates insert failed")
 
@@ -89,6 +96,7 @@ class PaperLedger:
             return
         try:
             self._db["mt_attention"].insert_one({
+                "strategy": self._strategy,
                 "symbol": event.symbol,
                 "time": event.time.to_pydatetime(),
                 "day_chg_pct": event.day_chg_pct,
@@ -104,6 +112,7 @@ class PaperLedger:
             return
         try:
             self._db["mt_rejections"].insert_one({
+                "strategy": self._strategy,
                 "symbol": rejection.symbol,
                 "time": rejection.time.to_pydatetime(),
                 "reason": rejection.reason,
@@ -117,6 +126,7 @@ class PaperLedger:
     def opened(self, p: Position) -> str | None:
         doc = {
             **_cand_doc(p.cand), "status": "open", "entry_time": p.entry_time.to_pydatetime(),
+            "strategy": self._strategy,
             "entry_price": p.plan.entry, "stop": p.plan.stop, "target": p.plan.target,
             "qty": p.plan.qty, "risk_inr": p.plan.risk_inr, "notional_inr": p.plan.notional_inr,
             "paper": True, "float_filter_applied": self._ff,
@@ -139,7 +149,7 @@ class PaperLedger:
             try:
                 self._db["mt_positions"].update_one(
                     {"symbol": t.cand.symbol, "status": "open",
-                     "entry_time": t.entry_time.to_pydatetime()},
+                     "entry_time": t.entry_time.to_pydatetime(), "strategy": self._strategy},
                     {"$set": {
                         "status": "closed", "exit_time": t.exit_time.to_pydatetime(),
                         "exit_price": t.exit, "exit_reason": t.exit_reason,

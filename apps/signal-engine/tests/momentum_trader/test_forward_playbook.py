@@ -9,6 +9,7 @@ from src.config import Settings
 from src.momentum_trader import engine as eng
 from src.momentum_trader.scanner import (
     STRATEGY_ATTENTION_1M,
+    STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM,
     STRATEGY_ATTENTION_1M_RESISTANCE_STATE,
     STRATEGY_CATALYST_FIRST_PULLBACK,
     _market_data_token,
@@ -55,6 +56,13 @@ def test_scanner_selects_separate_resistance_state_arm() -> None:
     cfg = _strategy_config(Settings(mt_strategy=STRATEGY_ATTENTION_1M_RESISTANCE_STATE))
     assert cfg.exit_mode == "trend_resistance_state"
     assert cfg.require_resistance_breakout
+
+
+def test_scanner_selects_separate_false_break_reclaim_arm() -> None:
+    cfg = _strategy_config(Settings(mt_strategy=STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM))
+    assert cfg.fill_mode == eng.FILL_FUTURE_TRIGGER
+    assert cfg.exit_mode == "trend_full"
+    assert cfg.allow_false_break_reentry
 
 
 def test_scanner_rejects_unknown_strategy() -> None:
