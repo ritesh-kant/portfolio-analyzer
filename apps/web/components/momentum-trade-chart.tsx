@@ -425,6 +425,7 @@ export function MomentumTradeChart({
         onPointerLeave={() => { if (!dragRef.current) setCursor(null); }}
       >
         <rect width={width} height={height} rx="8" fill="#101922" />
+        <text x={left + 6} y={priceTop + 16} fill="#e2e8f0" fontSize="13" fontWeight="600" opacity=".85">{trade.symbol}</text>
         {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
           const yy = priceTop + priceHeight * ratio;
           const value = viewMaxPrice - (viewMaxPrice - viewMinPrice) * ratio;

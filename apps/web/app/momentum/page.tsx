@@ -233,12 +233,12 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
       {/* Charts */}
       <div className="space-y-3">
         <div>
-          <h3 className="font-display text-lg">1-minute execution chart</h3>
+          <h3 className="font-display text-lg">{trade.symbol} · 1-minute execution chart</h3>
           <p className="text-xs text-ink/55">Precise candles and fills at the execution timeframe.</p>
         </div>
         <MomentumTradeChart trade={trade} interval="1m" />
         <div>
-          <h3 className="font-display text-lg">5-minute decision chart</h3>
+          <h3 className="font-display text-lg">{trade.symbol} · 5-minute decision chart</h3>
           <p className="text-xs text-ink/55">The scanner's EMA, VWAP, and MACD decision timeframe.</p>
         </div>
         <MomentumTradeChart trade={trade} interval="5m" />
