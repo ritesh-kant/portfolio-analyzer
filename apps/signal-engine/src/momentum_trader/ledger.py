@@ -103,6 +103,7 @@ class PaperLedger:
                 "rvol": event.rvol,
                 "reason": event.reason,
                 "candle_tags": list(event.candle_tags),
+                "evidence": event.evidence,
             })
         except Exception:  # noqa: BLE001
             logger.exception("mt_attention insert failed")

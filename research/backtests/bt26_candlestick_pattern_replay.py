@@ -71,7 +71,7 @@ def _trade_day(bars: pd.DataFrame, match: PatternMatch) -> ReplayTrade | None:
     exit_at, exit_px, reason = trade_bars.index[-1], float(trade_bars["close"].iloc[-1]), "eod_close"
     for at, bar in trade_bars.iterrows():
         if float(bar["low"]) <= plan.stop:
-            exit_at, exit_px, reason = at, max(float(bar["open"]), plan.stop), "stop"
+            exit_at, exit_px, reason = at, min(float(bar["open"]), plan.stop), "stop"
             break
         if float(bar["high"]) >= plan.target:
             exit_at, exit_px, reason = at, plan.target, "target"
@@ -93,7 +93,9 @@ def replay(bars_1m: pd.DataFrame) -> list[ReplayTrade]:
         day = day[day.index.time <= pd.Timestamp("15:14").time()]
         tf5 = resample_5m(day)
         for end in range(3, len(tf5) + 1):
-            matches = completed_pattern_matches(tf5.iloc[:end], "5m")
+            matches = [match for match in completed_pattern_matches(tf5.iloc[:end], "5m")
+                       if match.direction == "bullish" and match.name in
+                       {"morning_star", "morning_doji_star", "rising_three"}]
             if not matches:
                 continue
             trade = _trade_day(day, matches[0])

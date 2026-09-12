@@ -1,0 +1,89 @@
+/* BT29 trade-level pattern report. Dark, self-contained, no CDN. */
+:root {
+  --bg: #0b1017; --panel: #121a25; --line: #1e2b3c; --ink: #e7eef8;
+  --dim: #8fa1bb; --up: #2dd4bf; --dn: #fb7185; --acc: #fbbf24;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+header { padding: 22px 26px 10px; border-bottom: 1px solid var(--line); }
+header h1 { margin: 0 0 6px; font-size: 19px; letter-spacing: .2px; }
+header p { margin: 4px 0; color: var(--dim); max-width: 1180px; }
+header b { color: var(--ink); }
+code { background: #0f1620; padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+.stats { display: flex; flex-wrap: wrap; gap: 7px; padding: 12px 26px; }
+.chip {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 11px; font-size: 11.5px; color: var(--dim);
+}
+.chip b { color: var(--ink); }
+.chip.bull b { color: var(--up); } .chip.bear b { color: var(--dn); }
+.chip.pos b { color: var(--up); } .chip.neg b { color: var(--dn); }
+.wrap { display: flex; gap: 16px; align-items: flex-start; padding: 6px 26px 40px; }
+#charts { flex: 1; min-width: 0; }
+.side { width: 540px; flex: none; position: sticky; top: 12px; }
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 14px;
+}
+.panel h3 { margin: 0 0 8px; font-size: 13px; }
+.hint { color: var(--dim); font-size: 11.5px; margin: 0 0 8px; }
+.scroll { max-height: 46vh; overflow: auto; }
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  margin-bottom: 14px; padding: 10px 12px 4px;
+}
+.card.flash { outline: 2px solid var(--acc); }
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.card-head h2 { margin: 0; font-size: 14px; }
+.meta { color: var(--dim); font-size: 11.5px; margin-top: 2px; }
+.pnl { font-size: 15px; font-weight: 600; text-align: right; white-space: nowrap; }
+.pnl .sub { display: block; font-size: 11px; font-weight: 400; color: var(--dim); }
+.zoom { display: flex; gap: 4px; margin-top: 6px; }
+.zoom button {
+  background: #0f1620; color: var(--dim); border: 1px solid var(--line);
+  border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 11px;
+}
+.zoom button:hover { color: var(--ink); border-color: #2f4460; }
+svg.chart { width: 100%; height: auto; display: block; }
+.pat-box { fill: #fbbf24; fill-opacity: .07; stroke: #fbbf24; stroke-opacity: .35; }
+.pat.bullish .pat-box { fill: var(--up); stroke: var(--up); }
+.pat.bearish .pat-box { fill: var(--dn); stroke: var(--dn); }
+.pat-bracket { fill: none; stroke: #fbbf24; stroke-opacity: .7; stroke-width: 1; }
+.pat.bullish .pat-bracket { stroke: var(--up); }
+.pat.bearish .pat-bracket { stroke: var(--dn); }
+.pat-label { fill: #fbbf24; font-size: 10px; }
+.pat.bullish .pat-label { fill: var(--up); }
+.pat.bearish .pat-label { fill: var(--dn); }
+.pat.sel .pat-box { fill-opacity: .17; stroke-opacity: .9; }
+.pat { cursor: pointer; }
+table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+th, td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+th { position: sticky; top: 0; background: var(--panel); cursor: pointer; color: var(--dim); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: #16202d; }
+tbody tr.active { background: #1c2b3d; }
+.pos { color: var(--up); } .neg { color: var(--dn); }
+.dir-bullish { color: var(--up); } .dir-bearish { color: var(--dn); }
+.dir-neutral, .dir-none { color: var(--dim); }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; font-size: 11.5px; color: var(--dim); }
+select { background: #0f1620; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+.tip {
+  display: none; position: fixed; z-index: 20; max-width: 330px; white-space: pre-line;
+  background: #05080d; border: 1px solid #2f4460; border-radius: 8px; padding: 8px 10px;
+  font-size: 11.5px; color: var(--ink); pointer-events: none;
+}
+footer { padding: 16px 26px 40px; color: var(--dim); font-size: 11.5px; border-top: 1px solid var(--line); }
+.empty { color: var(--dim); padding: 14px; }
+
+/* Narrow windows (and the desktop app's preview pane): stack the two columns
+   instead of letting the sticky side panel push the charts off screen. */
+@media (max-width: 1180px) {
+  .wrap { flex-direction: column; padding: 6px 14px 40px; }
+  .side { width: 100%; position: static; }
+  .scroll { max-height: none; }
+  header, .stats, footer { padding-left: 14px; padding-right: 14px; }
+}

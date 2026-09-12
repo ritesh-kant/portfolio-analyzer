@@ -42,6 +42,40 @@ export interface PatternMatch {
   end: string;
   confirmation: number;
   invalidation: number;
+  direction?: 'bullish' | 'bearish' | 'neutral';
+  kind?: 'reversal' | 'continuation' | 'indecision';
+  prior_trend?: string;
+  formed_at?: string;
+  status?: string;
+  rules_version?: string;
+  evidence?: {
+    candles?: MomentumBar[];
+    trend_closes?: number[];
+    mean_prior_body?: number;
+    mean_prior_range?: number;
+  };
+}
+
+export interface EntryEvidence {
+  pattern_rules_version: string;
+  promotion?: {
+    bar_start: string;
+    observed_at: string;
+    day_chg_pct: number;
+    rvol: number;
+    minimum_day_chg_pct: number;
+    minimum_rvol: number;
+    reason: string;
+    pattern_matches: PatternMatch[];
+  };
+  trend?: { timeframe: string; bar_start: string; close: number; ema9: number; ema20: number; vwap: number };
+  confirmation?: {
+    timeframe: string; bar_start: string; formed_at: string;
+    open: number; high: number; low: number; close: number; volume: number;
+    close_position: number; minimum_close_position: number;
+    volume_ratio: number; minimum_volume_ratio: number;
+  };
+  pending_minutes?: number;
 }
 
 export interface MomentumTrade {
@@ -75,6 +109,8 @@ export interface MomentumTrade {
   event_type?: string;
   candle_tags?: string[];
   pattern_matches?: PatternMatch[];
+  entry_evidence?: EntryEvidence;
+  pattern_rules_version?: string;
   quality_reason?: string;
   pullback_ord?: number | null;
   atr_pct?: number | null;

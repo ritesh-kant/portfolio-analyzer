@@ -3,6 +3,7 @@
 import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { MomentumBar, MomentumTrade } from '../lib/momentum-api';
+import { containingBarIndex, fiveMinuteBars } from '../lib/momentum-bars';
 
 const DEFAULT_ZOOM_1M = 8;
 const DEFAULT_ZOOM_5M = 2;
@@ -24,20 +25,6 @@ function ema(values: number[], span: number) {
   return values.map((close, index) => {
     value = value === null ? close : close * alpha + value * (1 - alpha);
     return index < span - 1 ? null : value;
-  });
-}
-
-function fiveMinuteBars(bars: MomentumBar[]): MomentumBar[] {
-  return Array.from({ length: Math.floor(bars.length / 5) }, (_, bucket) => {
-    const chunk = bars.slice(bucket * 5, bucket * 5 + 5);
-    return {
-      time: chunk[chunk.length - 1]!.time,
-      open: chunk[0]!.open,
-      high: Math.max(...chunk.map((bar) => bar.high)),
-      low: Math.min(...chunk.map((bar) => bar.low)),
-      close: chunk[chunk.length - 1]!.close,
-      volume: chunk.reduce((sum, bar) => sum + bar.volume, 0),
-    };
   });
 }
 
@@ -95,18 +82,6 @@ function linePath(values: Array<number | null>, x: (index: number) => number, y:
     started = true;
     return `${path}${command}${x(index).toFixed(1)},${y(value).toFixed(1)} `;
   }, '');
-}
-
-function nearestBarIndex(bars: MomentumBar[], time: string | undefined) {
-  if (!time || !bars.length) return -1;
-  const needle = new Date(time).getTime();
-  return bars.reduce(
-    (best, bar, index) =>
-      Math.abs(new Date(bar.time).getTime() - needle) < best.diff
-        ? { index, diff: Math.abs(new Date(bar.time).getTime() - needle) }
-        : best,
-    { index: 0, diff: Number.POSITIVE_INFINITY },
-  ).index;
 }
 
 export function MomentumTradeChart({
@@ -177,7 +152,7 @@ export function MomentumTradeChart({
     };
   }, [isDragging]);
 
-  const fullEntryIndex = nearestBarIndex(allData, trade.entry_time);
+  const fullEntryIndex = containingBarIndex(allData, trade.entry_time, interval);
   const visibleCount = Math.min(allData.length, Math.max(15, Math.ceil(allData.length / zoom)));
   const maxStart = Math.max(0, allData.length - visibleCount);
   const focusedStart = Math.min(
@@ -298,15 +273,16 @@ export function MomentumTradeChart({
     value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1_000 ? `${(value / 1_000).toFixed(1)}K` : `${Math.round(value)}`;
   const entryIndex = fullEntryIndex >= viewStart && fullEntryIndex < viewStart + data.length
     ? fullEntryIndex - viewStart : -1;
-  const fullExitIndex = nearestBarIndex(allData, trade.exit_time);
+  const fullExitIndex = containingBarIndex(allData, trade.exit_time, interval);
   const exitIndex = fullExitIndex >= viewStart && fullExitIndex < viewStart + data.length
     ? fullExitIndex - viewStart : -1;
   // A chart only renders patterns made on its own timeframe: a 1m formation
   // cannot be mistaken for a 5m signal during review.
   const visiblePatterns = (trade.pattern_matches ?? []).flatMap((match) => {
     if (match.timeframe !== interval) return [];
-    const start = nearestBarIndex(allData, match.start);
-    const end = nearestBarIndex(allData, match.end);
+    const start = allData.findIndex((bar) => Date.parse(bar.time) === Date.parse(match.start));
+    const end = allData.findIndex((bar) => Date.parse(bar.time) === Date.parse(match.end));
+    if (start < 0 || end < 0) return [];
     if (end < viewStart || start >= viewStart + data.length) return [];
     return [{
       ...match,

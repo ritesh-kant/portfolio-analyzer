@@ -105,7 +105,7 @@ def test_soft_thresholds_promote_but_do_not_enter() -> None:
     assert st.position is None and st.pending is None
 
 
-def test_evolving_five_minute_dragonfly_can_promote_before_bucket_close() -> None:
+def test_closed_one_minute_doji_never_masquerades_as_five_minute_dragonfly() -> None:
     bars = _attention_prelude().iloc[:-4].copy()
     bars.iloc[-1] = [101.60, 101.61, 101.30, 101.60, 100.0]
     st = eng.DayState("TEST", prev_close=100.0, cum_vol_profile=_profile_for(bars))
@@ -114,7 +114,10 @@ def test_evolving_five_minute_dragonfly_can_promote_before_bucket_close() -> Non
 
     assert bars.index[-1].minute % 5 == 0
     assert st.attention
-    assert "dragonfly_doji" in st.attention_events[-1].candle_tags
+    assert "dragonfly_doji" not in st.attention_events[-1].candle_tags
+    assert "doji" in st.attention_events[-1].candle_tags
+    matches = st.attention_events[-1].evidence["pattern_matches"]
+    assert all(match["timeframe"] == "1m" for match in matches)
     assert st.pending is None
 
 
@@ -126,6 +129,18 @@ def test_high_volume_bullish_one_minute_confirmation_arms_order() -> None:
     assert st.candidates[0].setup.name == eng.ATTENTION_SETUP
     assert st.pending is not None
     assert st.pending.cand.setup.trigger == pytest.approx(102.10)
+
+
+def test_promotion_measurements_survive_until_confirmation() -> None:
+    st, cfg, bars = _promoted_state()
+    promotion = dict(st.attention_evidence)
+    bars = _confirm(st, cfg, bars)
+    candidate = st.pending.cand
+    assert candidate.entry_evidence["promotion"] == promotion
+    assert candidate.entry_evidence["promotion"]["rvol"] == pytest.approx(1.6)
+    assert candidate.entry_evidence["confirmation"]["bar_start"] == bars.index[-1].isoformat()
+    assert candidate.entry_evidence["trend"]["timeframe"] == "5m"
+    assert pd.Timestamp(candidate.entry_evidence["trend"]["bar_start"]) < bars.index[-1]
     assert st.position is None
 
 

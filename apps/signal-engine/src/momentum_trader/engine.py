@@ -28,7 +28,7 @@ import pandas as pd
 from src.news_trader.trailing_sl import calc_costs
 
 from . import exits, location, quality
-from .candles import candle_tags, completed_pattern_matches
+from .candles import PATTERN_RULES_VERSION, candle_tags, completed_pattern_matches
 from .indicators import cumulative_session_volume, day_change_pct, ema, session_vwap, volume_ratio
 from .levels import NEAR_PCT, derive_levels, nearest_structural_resistance
 from .pullback import pullback_ordinal
@@ -73,11 +73,6 @@ ATTENTION_PENDING_MINUTES = 3
 ATTENTION_SETUP = "attention_1m_confirmation"
 ATTENTION_FALSE_BREAK_RECLAIM_SETUP = "attention_false_break_reclaim"
 ONE_MINUTE_SETUPS = ("micro_pullback", ATTENTION_SETUP, ATTENTION_FALSE_BREAK_RECLAIM_SETUP)
-ATTENTION_TAGS = frozenset({
-    "dragonfly_doji", "hammer", "bullish_engulfing", "tweezer_bottom", "morning_star",
-    "three_white_soldiers",
-})
-PROMOTION_TAGS = ATTENTION_TAGS | {"doji", "spinning_top", "inverted_hammer"}
 
 CatalystLookup = Callable[[str, pd.Timestamp], tuple[int, str]]
 
@@ -155,9 +150,10 @@ class Candidate:
     catalyst: int
     event_type: str
     candle_tags: list[str]
-    # Strict, fully closed multi-candle formations, including their exact
-    # time span and trade levels.  Informational only: it cannot alter entry.
+    # Context-checked formations, with exact timeframe, candles and rule version.
     pattern_matches: list[dict[str, object]] = field(default_factory=list)
+    entry_evidence: dict[str, object] = field(default_factory=dict)
+    pattern_rules_version: str = PATTERN_RULES_VERSION
     prev_day_gainer: bool = False
     # Which pullback of the day's move this entry sits on (1 = first after the
     # day's first sharp advance; None = no advance to anchor to). RECORDED ONLY —
@@ -201,6 +197,7 @@ class AttentionEvent:
     rvol: float
     reason: str
     candle_tags: tuple[str, ...]
+    evidence: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -282,6 +279,7 @@ class DayState:
     attention: bool = False
     attention_since: pd.Timestamp | None = None
     attention_patterns: list[dict[str, object]] = field(default_factory=list)
+    attention_evidence: dict[str, object] = field(default_factory=dict)
     attention_events: list[AttentionEvent] = field(default_factory=list)
     rejections: list[Rejection] = field(default_factory=list)
     false_break_reclaim: FalseBreakReclaim | None = None
@@ -303,11 +301,15 @@ def resample_5m(bars_1m: pd.DataFrame) -> pd.DataFrame:
     if bars_1m.empty:
         return bars_1m
     agg = {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
-    out = bars_1m.resample("5min", label="left", closed="left").agg(agg).dropna(subset=["open"])
-    last_start = bars_1m.index[-1]
-    if last_start.minute % 5 != 4:       # the current 5-min bucket is still open
-        out = out.iloc[:-1] if len(out) and out.index[-1] <= last_start else out
-    return out
+    grouped = bars_1m.resample("5min", label="left", closed="left")
+    out = grouped.agg(agg).dropna(subset=["open"])
+    # Missing minutes must not fabricate a complete pattern candle. Reject
+    # duplicate/off-minute input too; the chart uses this same clock contract.
+    if (not bars_1m.index.is_unique
+            or (bars_1m.index != bars_1m.index.floor("1min")).any()):
+        return out.iloc[:0]
+    out = out[grouped["close"].count().reindex(out.index) == 5]
+    return out[out.index <= bars_1m.index[-1] - pd.Timedelta(minutes=4)]
 
 
 def rvol_now(bars_1m: pd.DataFrame, profile: pd.Series | None) -> float | None:
@@ -460,24 +462,54 @@ def _promotion_reason(
 ) -> tuple[str | None, list[str], list[dict[str, object]]]:
     """Return auditable attention context without authorizing entry.
 
-    Named formations are evaluated only from completed 5-minute bars.  One-
-    minute tags remain micro-context, but are never presented as 5-minute
-    pattern evidence.  Incomplete five-minute candles are intentionally not
-    examined here: a pattern is not real until its final candle has closed.
+    Both timeframes use the same contextual rules and preserve their own exact
+    timestamps. One-minute evidence is never presented as a five-minute
+    formation. Callers supply closed bars only: an evolving candle cannot
+    establish a completed pattern.
     """
-    tags_5m = candle_tags(tf5)
-    tags_1m = candle_tags(bars_1m)
-    tags = list(dict.fromkeys([*tags_5m, *tags_1m]))
-    matches = [match.document() for match in completed_pattern_matches(tf5, "5m")]
-    if matches:
-        return f"pattern:{matches[0]['name']}", tags, matches
-    if PROMOTION_TAGS.intersection(tags):
-        return "candlestick_context", tags, matches
+    patterns = [*completed_pattern_matches(tf5, "5m"),
+                *completed_pattern_matches(bars_1m, "1m")]
+    tags = list(dict.fromkeys(match.name for match in patterns))
+    matches = [match.document() for match in patterns]
+    # Neutral indecision can draw attention under the existing two-stage
+    # strategy, but is never called a bullish reversal. Bearish patterns cannot
+    # promote a long just because a geometry alias resembles a bullish shape.
+    eligible = [match for match in patterns if match.direction == "bullish"
+                or (match.direction == "neutral" and match.kind == "indecision")]
+    if eligible:
+        chosen = eligible[0]
+        return f"pattern:{chosen.name}:{chosen.timeframe}", tags, matches
     # Detect structures even when the legacy +4% / 3x entry gate has not fired.
     found = scan_setups(tf5, bars_1m, None)
     if found:
         return f"setup:{found[0].name}", tags, matches
     return None, tags, matches
+
+
+def _entry_evidence(state: DayState, bars_1m: pd.DataFrame,
+                    tf5: pd.DataFrame, cfg: EngineConfig) -> dict[str, object]:
+    """Freeze measured values; never substitute signal-time RVOL for promotion."""
+    bar = bars_1m.iloc[-1]
+    fast, slow, vw = ema(tf5["close"], 9), ema(tf5["close"], 20), session_vwap(tf5)
+    return {
+        "pattern_rules_version": PATTERN_RULES_VERSION,
+        "promotion": dict(state.attention_evidence),
+        "trend": {
+            "timeframe": "5m", "bar_start": tf5.index[-1].isoformat(),
+            "close": float(tf5["close"].iloc[-1]), "ema9": float(fast.iloc[-1]),
+            "ema20": float(slow.iloc[-1]), "vwap": float(vw.iloc[-1]),
+        },
+        "confirmation": {
+            "timeframe": "1m", "bar_start": bars_1m.index[-1].isoformat(),
+            "formed_at": (bars_1m.index[-1] + pd.Timedelta(minutes=1)).isoformat(),
+            **{k: float(bar[k]) for k in ("open", "high", "low", "close", "volume")},
+            "close_position": float((bar["close"] - bar["low"]) / (bar["high"] - bar["low"])),
+            "minimum_close_position": 0.60,
+            "volume_ratio": float(volume_ratio(bars_1m).iloc[-1]),
+            "minimum_volume_ratio": cfg.attention_confirm_vol_ratio,
+        },
+        "pending_minutes": cfg.attention_pending_minutes,
+    }
 
 
 def _unique_pattern_documents(*groups: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -647,7 +679,9 @@ def _false_break_reclaim_confirmation(
         pattern_matches=_unique_pattern_documents(
             state.attention_patterns,
             [match.document() for match in completed_pattern_matches(tf5, "5m")],
+            [match.document() for match in completed_pattern_matches(bars_1m, "1m")],
         ),
+        entry_evidence=_entry_evidence(state, bars_1m, tf5, cfg),
         prev_day_gainer=state.prev_day_gainer,
         pullback_ord=pullback_ordinal(tf5) if len(tf5) else None,
         quality_reason="ok", atr_pct=state.daily_atr_pct,
@@ -878,9 +912,18 @@ def step(
             state.attention = True
             state.attention_since = now
             state.attention_patterns = matches
+            state.attention_evidence = {
+                "bar_start": now.isoformat(),
+                "observed_at": (now + pd.Timedelta(minutes=1)).isoformat(),
+                "day_chg_pct": chg, "rvol": rv,
+                "minimum_day_chg_pct": cfg.attention_day_chg_min,
+                "minimum_rvol": cfg.attention_rvol_min, "reason": reason,
+                "pattern_matches": matches, "pattern_rules_version": PATTERN_RULES_VERSION,
+            }
             state.attention_events.append(AttentionEvent(
                 symbol=state.symbol, time=now, day_chg_pct=chg, rvol=rv,
                 reason=reason, candle_tags=tuple(tags),
+                evidence=dict(state.attention_evidence),
             ))
             return  # promotion is observation, never an entry on the same candle
 
@@ -897,6 +940,7 @@ def step(
             state.attention = False
             state.attention_since = None
             state.attention_patterns = []
+            state.attention_evidence = {}
             return
         if cfg.require_resistance_breakout:
             setup, confirmation_reason = _resistance_aware_attention_confirmation(
@@ -925,7 +969,9 @@ def step(
             pattern_matches=_unique_pattern_documents(
                 state.attention_patterns,
                 [match.document() for match in completed_pattern_matches(tf5, "5m")],
+                [match.document() for match in completed_pattern_matches(bars_1m, "1m")],
             ),
+            entry_evidence=_entry_evidence(state, bars_1m, tf5, cfg),
             prev_day_gainer=state.prev_day_gainer,
             pullback_ord=pullback_ordinal(tf5) if len(tf5) else None,
             quality_reason="ok",

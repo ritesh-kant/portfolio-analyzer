@@ -67,6 +67,15 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
   const attention = trade.setup === 'attention_1m_confirmation';
   const reclaim = trade.setup === 'attention_false_break_reclaim';
   const volumeRatio = trade.setup_meta?.volume_ratio;
+  const promotion = trade.entry_evidence?.promotion;
+  const trend = trade.entry_evidence?.trend;
+  const confirmation = trade.entry_evidence?.confirmation;
+  const trendDetail = trend
+    ? `5m candle at ${at(trend.bar_start)}: EMA 9 ${money(trend.ema9)}, EMA 20 ${money(trend.ema20)}, close ${money(trend.close)}, VWAP ${money(trend.vwap)}.`
+    : 'This strategy requires EMA 9 above EMA 20 and the completed 5m close above VWAP. The measured indicator snapshot was not stored for this trade.';
+  const confirmationDetail = confirmation
+    ? `1m candle at ${at(confirmation.bar_start)}: open ${money(confirmation.open)}, close ${money(confirmation.close)}; close position ${(confirmation.close_position * 100).toFixed(1)}% (minimum ${(confirmation.minimum_close_position * 100).toFixed(0)}%); volume ${confirmation.volume_ratio.toFixed(2)}× (minimum ${confirmation.minimum_volume_ratio}×).`
+    : `This strategy requires a green candle closing in its upper 40% with at least 2.5× recent 1m volume. ${typeof volumeRatio === 'number' ? `Stored volume ratio: ${volumeRatio.toFixed(2)}×.` : 'Volume ratio unavailable.'} The full confirmation snapshot was not stored.`;
   const gates = reclaim
     ? [
         {
@@ -75,11 +84,11 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
         },
         {
           label: 'Trend still intact',
-          detail: 'EMA 9 remained above EMA 20 and the completed 5-minute close remained above session VWAP.',
+          detail: trendDetail,
         },
         {
           label: '1-minute reclaim',
-          detail: `A later green candle closed strongly back above the failed level with at least 2.5× recent one-minute volume${typeof volumeRatio === 'number' ? `; recorded volume was ${volumeRatio.toFixed(2)}×.` : '.'}`,
+          detail: confirmationDetail,
         },
         {
           label: 'New buy-stop',
@@ -90,19 +99,21 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
       ? [
           {
             label: 'Attention watchlist',
-            detail: `Day change ${trade.day_chg_pct?.toFixed(2) ?? '—'}% (minimum 1.5%) and RVOL ${trade.rvol?.toFixed(2) ?? '—'}× (minimum 1.5×).`,
+            detail: promotion?.observed_at
+              ? `Promoted at ${at(promotion.observed_at)}: day change ${promotion.day_chg_pct.toFixed(2)}% (minimum ${promotion.minimum_day_chg_pct}%) and RVOL ${promotion.rvol.toFixed(2)}× (minimum ${promotion.minimum_rvol}×). Reason: ${promotion.reason.replaceAll('_', ' ')}.`
+              : `Promotion-time evidence was not stored in this trade. Signal-time day change ${trade.day_chg_pct?.toFixed(2) ?? '—'}% and RVOL ${trade.rvol?.toFixed(2) ?? '—'}× cannot verify the earlier promotion.`,
           },
           {
             label: '5-minute trend context',
-            detail: 'EMA 9 was above EMA 20 and the completed 5-minute close was above session VWAP.',
+            detail: trendDetail,
           },
           {
             label: '1-minute confirmation',
-            detail: `A green candle closed in its upper 40% with at least 2.5× recent one-minute volume${typeof volumeRatio === 'number' ? `; recorded confirmation volume was ${volumeRatio.toFixed(2)}×.` : '.'}`,
+            detail: confirmationDetail,
           },
           {
             label: 'Breakout trigger',
-            detail: `A later quote traded through ${money(trade.trigger_px ?? trade.entry_price)} within the three-minute pending window; paper fill was ${money(trade.entry_price)}.`,
+            detail: `Recorded trigger ${money(trade.trigger_px ?? trade.entry_price)}; paper fill ${money(trade.entry_price)} at ${at(trade.entry_time)}.${trade.level != null ? ` Defended breakout level: ${money(trade.level)}.` : ''}`,
           },
         ]
       : [
@@ -128,11 +139,11 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
         <div>
           <h3 className="font-display text-lg">Why the scanner entered</h3>
           <p className="text-xs text-ink/60">
-            Recorded entry conditions — a checklist of what was required at the time, not an outcome-based explanation.
+            Recorded measurements and strategy requirements. Missing historical evidence is identified explicitly.
           </p>
         </div>
-        <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-800">
-          All required gates passed
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">
+          {promotion?.observed_at && trend && confirmation ? 'Decision evidence recorded' : 'Partial historical evidence'}
         </span>
       </div>
       <ol className="mt-3 space-y-2">
@@ -152,11 +163,35 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
         {trade.target ? `target ${money(trade.target)}, ` : ''}
         {trade.qty} shares.{' '}
         {strictPatterns
-          ? `Strict completed pattern evidence: ${strictPatterns}.`
+          ? `Recorded formations: ${strictPatterns}. Formation alone does not confirm a trade.`
           : trade.candle_tags?.length
             ? `Legacy candle context: ${trade.candle_tags.join(', ')}.`
             : ''}
       </div>
+      {(trade.pattern_matches ?? []).map((match) => (
+        <details key={`${match.name}-${match.timeframe}-${match.start}`} className="mt-3 border-t border-accent/15 pt-2 text-sm">
+          <summary className="cursor-pointer font-medium">
+            {match.name.replaceAll('_', ' ')} · {match.timeframe} · {at(match.start)}–{at(match.end)}
+          </summary>
+          <p className="my-2 text-ink/70">
+            {match.direction ?? 'Direction not stored'} · {match.kind ?? 'Historical formation'}.
+            {' '}Preceding trend: {match.prior_trend ?? 'not stored'}.
+            {match.formed_at ? ` Fully formed at ${at(match.formed_at)}.` : ''}
+            {match.rules_version ? ` Rules: ${match.rules_version}.` : ' Legacy detector; rule version not stored.'}
+          </p>
+          {match.evidence?.candles && <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs tabular-nums">
+              <thead><tr>{['Candle start', 'Open', 'High', 'Low', 'Close', 'Volume'].map((label) => <th key={label} className="p-1">{label}</th>)}</tr></thead>
+              <tbody>{match.evidence.candles.map((bar) => <tr key={bar.time}>
+                <td className="p-1">{at(bar.time)}</td>
+                {[bar.open, bar.high, bar.low, bar.close].map((value, i) => <td key={i} className="p-1">{money(value)}</td>)}
+                <td className="p-1">{bar.volume.toLocaleString('en-IN')}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>}
+          {match.evidence?.trend_closes && <p className="mt-2 text-xs text-ink/60">Pre-pattern closes: {match.evidence.trend_closes.map(money).join(' → ')}</p>}
+        </details>
+      ))}
     </section>
   );
 }
@@ -239,7 +274,7 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
         <MomentumTradeChart trade={trade} interval="1m" />
         <div>
           <h3 className="font-display text-lg">{trade.symbol} · 5-minute decision chart</h3>
-          <p className="text-xs text-ink/55">The scanner's EMA, VWAP, and MACD decision timeframe.</p>
+          <p className="text-xs text-ink/55">The scanner&apos;s EMA, VWAP, and MACD decision timeframe.</p>
         </div>
         <MomentumTradeChart trade={trade} interval="5m" />
       </div>

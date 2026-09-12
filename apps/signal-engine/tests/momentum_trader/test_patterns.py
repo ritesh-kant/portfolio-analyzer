@@ -93,9 +93,9 @@ def test_engulfing() -> None:
 
 
 def test_three_white_soldiers_and_morning_star() -> None:
-    a = pd.Series({"open": 100.0, "high": 101.2, "low": 99.8, "close": 101.0})
-    b = pd.Series({"open": 100.5, "high": 102.2, "low": 100.3, "close": 102.0})
-    c = pd.Series({"open": 101.5, "high": 103.2, "low": 101.3, "close": 103.0})
+    a = pd.Series({"open": 100.0, "high": 101.1, "low": 99.8, "close": 101.0})
+    b = pd.Series({"open": 100.5, "high": 102.1, "low": 100.3, "close": 102.0})
+    c = pd.Series({"open": 101.5, "high": 103.1, "low": 101.3, "close": 103.0})
     assert candles.is_three_white_soldiers(a, b, c)
     big_red = pd.Series({"open": 104.0, "high": 104.1, "low": 100.0, "close": 100.2})
     star = pd.Series({"open": 100.0, "high": 100.6, "low": 99.5, "close": 100.05})
@@ -110,7 +110,8 @@ def test_candle_tags_on_frame() -> None:
         (100.3, 103.5, 100.2, 103.4, 1500),
     ])
     tags = candles.candle_tags(bars)
-    assert "morning_star" in tags
+    # Geometry alone cannot supply the missing prior trend or adaptive scale.
+    assert "morning_star" not in tags
     assert candles.candle_tags(bars.iloc[0:0]) == []
 
 
@@ -124,6 +125,8 @@ def test_morning_star_rejects_small_first_or_last_body() -> None:
 
 
 def test_morning_doji_star_and_rising_three_evidence() -> None:
+    from tests.momentum_trader.test_candlestick_recognition import DOJI_STAR, METHODS, frame
+
     morning = _bars([
         (108.0, 108.1, 106.9, 107.0, 900),
         (107.0, 107.1, 105.9, 106.0, 900),
@@ -133,7 +136,7 @@ def test_morning_doji_star_and_rising_three_evidence() -> None:
         (100.3, 103.5, 100.2, 103.4, 1500),
     ])
     assert candles.is_morning_doji_star(morning.iloc[-3], morning.iloc[-2], morning.iloc[-1])
-    morning_match = candles.completed_pattern_matches(morning, "5m")
+    morning_match = candles.completed_pattern_matches(frame(DOJI_STAR), "5m")
     assert {m.name for m in morning_match} == {"morning_doji_star"}
     assert all(m.timeframe == "5m" and m.start < m.end for m in morning_match)
 
@@ -142,12 +145,12 @@ def test_morning_doji_star_and_rising_three_evidence() -> None:
         (104.8, 104.9, 103.9, 104.6, 900),
         (104.5, 104.6, 103.5, 104.3, 800),
         (104.2, 104.3, 103.3, 104.0, 700),
-        (103.7, 106.0, 103.6, 105.6, 4500),  # continuation close above first high
+        (104.1, 106.0, 103.6, 105.6, 4500),  # open above last pullback close
     ])
     assert candles.is_rising_three(*[rising.iloc[i] for i in range(5)])
-    matches = candles.completed_pattern_matches(rising, "5m")
+    matches = candles.completed_pattern_matches(frame(METHODS, "up"), "5m")
     assert len(matches) == 1 and matches[0].name == "rising_three"
-    assert "rising_three" in candles.candle_tags(rising)
+    assert "rising_three" in candles.candle_tags(frame(METHODS, "up"))
 
 
 # ── setups ────────────────────────────────────────────────────────────────────
