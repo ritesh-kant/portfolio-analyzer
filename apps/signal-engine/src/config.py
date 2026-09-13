@@ -170,7 +170,10 @@ class Settings(BaseSettings):
     mt_extra_universe_files: str = ""         # comma-separated symbol lists (Smallcap/Microcap 250)
     mt_risk_inr: float = 500.0                # rupees at risk per trade (stop distance × qty)
     mt_max_notional_inr: float = 50_000.0     # cap on entry × qty
-    mt_max_positions: int = 5                 # concurrent open paper positions
+    # Concurrent open paper positions. Raised 5 -> 20 by operator decision
+    # (2026-09-13) together with mt_one_trade_per_day=False: re-entry only
+    # produces more trades if there are slots free to hold them.
+    mt_max_positions: int = 20                # concurrent open paper positions
     mt_log_csv: str = "research/backtests/mt_forward_log.csv"  # spec §6 forward log
     mt_cache_dir: str = ".cache_upstox"       # instrument master + candle cache
     mt_strategy: str = "baseline"             # baseline | catalyst_first_pullback | attention_1m | attention_1m_resistance_state | attention_1m_false_break_reclaim | attention_1m_merged (the single deployed forward arm)
@@ -182,6 +185,19 @@ class Settings(BaseSettings):
     # count ~43%, so treat it as a frequency dial. Attention setups are exempt
     # by construction, so this is a no-op for every attention_1m* strategy.
     mt_require_1m_agreement: bool = False
+    # One trade per SYMBOL per day. False = multi-entry: after a position in a
+    # symbol closes, a later qualifying confirmation on the same symbol may open
+    # a new one (never overlapping — DayState holds one position per symbol, so
+    # this is sequential re-entry, not pyramiding).
+    # ⚠ Counter-evidence, recorded because this is an operator override: BT
+    # multi-entry on a FRESH 2022-23 window (2,408 symbol-days) took 2.41x the
+    # trades and lost 2.5x as much (net/symbol-day -475 -> -1,202), anti-test
+    # p = 0.99, and the cost-free secondary trades were negative too, so costs
+    # were not the cause; trade #1 was the best, degrading to #5.
+    # research/hypotheses/2026-09-06-multi-entry-same-stock.md
+    # The engine default stays True so every prior backtest reproduces; this
+    # switch only changes what the LIVE scanner runs.
+    mt_one_trade_per_day: bool = False
     mt_bypass_market_hours: bool = False      # run the loop outside 09:15–15:35 (tests)
 
     # Observability

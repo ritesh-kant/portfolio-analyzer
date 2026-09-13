@@ -123,6 +123,5 @@ def test_env_switch_reaches_every_strategy() -> None:
                      scanner.STRATEGY_ATTENTION_1M_MERGED):
         for flag in (False, True):
             settings = Settings(mt_strategy=strategy, mt_require_1m_agreement=flag)
-            cfg = scanner._strategy_config(settings)
-            cfg.require_1m_agreement = settings.mt_require_1m_agreement
+            cfg = scanner._apply_env_overrides(scanner._strategy_config(settings), settings)
             assert cfg.require_1m_agreement is flag

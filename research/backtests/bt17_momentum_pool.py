@@ -274,6 +274,13 @@ def main() -> int:
                          "research/hypotheses/2026-09-06-volatility-scaled-entry.md")
     ap.add_argument("--day-chg-max", type=float, default=None,
                     help="override the day-change ceiling (default 8.0)")
+    ap.add_argument("--attention", action="store_true",
+                    help="replay the DEPLOYED arm (attention_1m_merged) instead of the "
+                         "legacy 4-8%%/RVOL>=3 setup scan: soft +1.5%%/1.5x promotion, "
+                         "5-min trend context, high-volume 1-min confirmation, resting "
+                         "buy-stop fills, resistance-breakout requirement, one false-break "
+                         "reclaim, resistance-state exits. Sets --fill-mode/--exit-mode "
+                         "unless you pass them explicitly")
     ap.add_argument("--tag", default="", help="suffix for the output CSV names")
     ap.add_argument("--fetch-only", action="store_true", help="just fill the parquet cache")
     ap.add_argument("-v", action="store_true")
@@ -293,16 +300,32 @@ def main() -> int:
     catalyst = no_catalyst
     if a.events:
         catalyst = DatedEventLookup(pd.read_csv(a.events))
-    cfg_kw: dict[str, float] = {}
+    cfg_kw: dict[str, object] = {}
     if a.day_chg_min is not None:
         cfg_kw["day_chg_min"] = a.day_chg_min
     if a.day_chg_max is not None:
         cfg_kw["day_chg_max"] = a.day_chg_max
+    if a.attention:
+        # Mirror scanner._strategy_config(STRATEGY_ATTENTION_1M_MERGED). Only
+        # defaulted, so an explicit --exit-mode/--fill-mode still wins and the
+        # components can be isolated.
+        if "--exit-mode" not in sys.argv:
+            a.exit_mode = "trend_resistance_state"
+        if "--fill-mode" not in sys.argv:
+            a.fill_mode = "future_trigger"
+        cfg_kw.update(use_attention_entries=True, require_resistance_breakout=True,
+                      allow_false_break_reentry=True)
     cfg = EngineConfig(stress_slip=STRESS_SLIP, exit_mode=a.exit_mode,
                        fill_mode=a.fill_mode, one_trade_per_day=not a.multi_entry,
                        require_quality=a.quality, require_max_move=a.max_move,
                        first_candidate_only=a.first_candidate_only,
                        require_1m_agreement=a.require_1m_agreement, **cfg_kw)
+
+    # The pre-filter exists to skip symbols the engine could never trade. Under
+    # attention entries the floor is 1.5%, not 4%, so using day_chg_min here
+    # would silently discard most eligible days.
+    prefilter_chg_min = (cfg.attention_day_chg_min if cfg.use_attention_entries
+                         else cfg.day_chg_min)
 
     all_trades: list[ClosedTrade] = []
     all_cands: list[dict] = []
@@ -321,7 +344,7 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             log.warning("%s: daily fetch failed (%s)", sym, exc)
             continue
-        elig = eligible_span(d, start, end, cfg.day_chg_min)
+        elig = eligible_span(d, start, end, prefilter_chg_min)
         if elig is None:
             skipped_daily += 1
             log.debug("%s: no eligible day on daily pre-filter", sym)

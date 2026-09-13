@@ -78,8 +78,35 @@ def test_fixture_stays_inside_the_day_change_band() -> None:
     assert (chg >= cfg.day_chg_min).any()
 
 
-def test_default_is_still_one_trade_per_day() -> None:
+def test_engine_default_is_still_one_trade_per_day() -> None:
+    """The ENGINE default is unchanged, so every prior backtest reproduces."""
     assert eng.EngineConfig().one_trade_per_day is True
+
+
+def test_live_default_is_multi_entry() -> None:
+    """The LIVE scanner runs multi-entry with 20 slots (operator decision
+    2026-09-13). Asserted on the field defaults, not on an instantiated
+    Settings, so a developer's local .env cannot mask a changed default."""
+    from src.config import Settings
+
+    assert Settings.model_fields["mt_one_trade_per_day"].default is False
+    assert Settings.model_fields["mt_max_positions"].default == 20
+
+
+def test_env_switch_reaches_every_strategy() -> None:
+    """MT_ONE_TRADE_PER_DAY is applied after the per-strategy config is built,
+    so no strategy branch can silently keep the single-entry default."""
+    from src.config import Settings
+    from src.momentum_trader import scanner
+
+    for strategy in (scanner.STRATEGY_BASELINE,
+                     scanner.STRATEGY_CATALYST_FIRST_PULLBACK,
+                     scanner.STRATEGY_ATTENTION_1M,
+                     scanner.STRATEGY_ATTENTION_1M_MERGED):
+        for flag in (False, True):
+            settings = Settings(mt_strategy=strategy, mt_one_trade_per_day=flag)
+            cfg = scanner._apply_env_overrides(scanner._strategy_config(settings), settings)
+            assert cfg.one_trade_per_day is flag
 
 
 def test_single_arm_takes_exactly_one_trade() -> None:

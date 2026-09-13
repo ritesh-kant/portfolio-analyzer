@@ -136,6 +136,12 @@ Resources:
             - { Name: MT_STRATEGY, Value: attention_1m_merged }
             - { Name: MT_ATTENTION_DAY_CHG_MIN, Value: '1.5' }
             - { Name: MT_ATTENTION_RVOL_MIN, Value: '1.5' }
+            # Multi-entry + 20 slots (operator decision 2026-09-13). Re-entry is
+            # sequential per symbol; the slot count is what lets the extra
+            # trades actually be held. Counter-evidence is recorded on
+            # Settings.mt_one_trade_per_day — revert both to 'true'/5 to undo.
+            - { Name: MT_ONE_TRADE_PER_DAY, Value: 'false' }
+            - { Name: MT_MAX_POSITIONS, Value: '20' }
             - { Name: MT_LOG_CSV, Value: /data/mt_attention_1m_merged_forward_log.csv }
           Secrets:
             - Name: MONGODB_URI

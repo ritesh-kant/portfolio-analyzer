@@ -100,6 +100,13 @@ class EngineConfig:
     entry_cutoff: time = ENTRY_CUTOFF
     eod_close: time = EOD_CLOSE
     stress_slip: float = 0.0           # 0 in live paper (costs are real); bt17 passes STRESS_SLIP
+    # True = at most one trade per SYMBOL per day. False = multi-entry: once a
+    # position closes, a later qualifying confirmation on the same symbol can
+    # open a new one. Never overlapping — DayState holds a single `position`, so
+    # re-entry is sequential, not pyramiding.
+    # Default stays True so every prior backtest reproduces; the LIVE scanner
+    # overrides it from MT_ONE_TRADE_PER_DAY (default False since 2026-09-13),
+    # against the BT counter-evidence recorded in Settings.mt_one_trade_per_day.
     one_trade_per_day: bool = True
     # Selectivity filters F1/F2/F3 — trade rarely, only the good ones. Off by
     # default so every prior backtest is reproducible.
@@ -377,6 +384,27 @@ def _exit(state: DayState, when: pd.Timestamp, px: float, reason: str, cfg: Engi
             level=float(pos.cand.setup.level), exit_time=when
         )
     state.position = None
+
+
+def force_close(
+    state: DayState, when: pd.Timestamp, price: float, cfg: EngineConfig,
+    reason: str = "eod_sweep",
+) -> ClosedTrade | None:
+    """Close an open position unconditionally, at `price`.
+
+    `step()` can only exit a position on a bar that ARRIVES, and it reads the
+    clock off the last bar's own timestamp. A live symbol that stops printing
+    before 15:15 therefore never reaches the `eod_close` branch and would carry
+    overnight — which this strategy must never do. The live scanner calls this
+    from a wall-clock sweep; the backtest never needs it, because `run_day`
+    always has the day's final bar in hand.
+
+    Returns the trade it closed, or None when there was no open position.
+    """
+    if state.position is None:
+        return None
+    _exit(state, when, price, reason, cfg)
+    return state.closed[-1]
 
 
 def _quality_gate(state: DayState, tf5: pd.DataFrame, cfg: EngineConfig) -> tuple[bool, str]:
@@ -945,8 +973,13 @@ def step(
     if state.pending is not None or t >= cfg.entry_cutoff or t >= cfg.eod_close:
         return
     # A reclaim is evaluated before the one-trade-per-day guard.  It can only
-    # exist after that first trade has exited as a false break, and is consumed
-    # the instant its one allowed future-only buy-stop is armed.
+    # exist after a trade has exited as a false break, and is consumed the
+    # instant its one allowed future-only buy-stop is armed.
+    # Under multi-entry (one_trade_per_day=False) the two paths do not fight:
+    # the reclaim governs the first re-entry after a false break because it is
+    # the stricter rule (the lost level must be closed back through), and once
+    # it is consumed or refused `false_break_reclaim_attempted` hands every
+    # later re-entry back to the ordinary confirmation path below.
     if cfg.allow_false_break_reentry and state.false_break_reclaim is not None:
         tf5 = _bars_5m(bars_1m, full_5m)
         _false_break_reclaim_confirmation(state, bars_1m, tf5, cfg, catalyst)

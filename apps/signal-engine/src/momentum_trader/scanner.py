@@ -36,12 +36,14 @@ from .bars import IST, BarBuilder
 from .catalyst import hard_catalyst
 from .engine import (
     FILL_FUTURE_TRIGGER,
+    ClosedTrade,
     DayState,
     EngineConfig,
     Position,
     Rejection,
     build_cum_volume_profile,
     fill_pending_quote,
+    force_close,
     step,
 )
 from .exits import MODE_FIXED, MODE_TREND_FULL, MODE_TREND_RESISTANCE_STATE
@@ -54,6 +56,14 @@ logger = logging.getLogger("mt.scanner")
 
 SESSION_START = (9, 15)
 SESSION_END = (15, 35)
+# Wall-clock backstop for the 15:15 close. `step()` only exits on a bar that
+# ARRIVES, and reads the clock off that bar's own timestamp, so a position in a
+# name that stops printing before 15:15 would otherwise be carried overnight —
+# which this strategy must never do. One minute of grace lets the ordinary
+# bar-driven `eod_close` fire first at its real price; whatever is still open at
+# 15:16 is closed here at the last price we saw, tagged `eod_sweep` so the
+# forward log can tell a stale-mark close apart from a real one.
+EOD_SWEEP = (15, 16)
 PROFILE_DAYS = 20
 STRATEGY_BASELINE = "baseline"
 STRATEGY_CATALYST_FIRST_PULLBACK = "catalyst_first_pullback"
@@ -136,6 +146,17 @@ def _strategy_config(settings: Settings) -> EngineConfig:
     )
 
 
+def _apply_env_overrides(cfg: EngineConfig, settings: Settings) -> EngineConfig:
+    """Apply per-deployment switches on top of the strategy's own config.
+
+    Applied here rather than inside each `_strategy_config` branch so every
+    strategy honours the same env switches and no branch can silently miss one.
+    """
+    cfg.require_1m_agreement = settings.mt_require_1m_agreement
+    cfg.one_trade_per_day = settings.mt_one_trade_per_day
+    return cfg
+
+
 def _market_data_token(settings: Settings, ssm_token: str | None = None) -> str:
     """Prefer the year-long read-only token over the daily OAuth credential."""
     return settings.upstox_analytics_token or settings.upstox_access_token or ssm_token or ""
@@ -157,9 +178,7 @@ class Scanner:
     def __init__(self, settings: Settings) -> None:
         self.s = settings
         self.cfg = _strategy_config(settings)
-        # Applied here rather than in each branch so every strategy honours the
-        # same env switch and no branch can silently miss it.
-        self.cfg.require_1m_agreement = settings.mt_require_1m_agreement
+        _apply_env_overrides(self.cfg, settings)
         self.cache = _repo_path(settings.mt_cache_dir)
         self.cache.mkdir(parents=True, exist_ok=True)
         token = _market_data_token(
@@ -447,6 +466,8 @@ class Scanner:
                     entries.append(st.position)
                 closed.extend(st.closed[n_x:])
 
+        closed.extend(self._eod_sweep(now, snapshots))
+
         for c in candidates:
             c.catalyst, c.event_type = self._catalyst(c.symbol, c.time)
         for a in attention_events:
@@ -494,6 +515,45 @@ class Scanner:
                 f"{mark} EXIT <b>{t.cand.symbol}</b> {t.exit_reason} "
                 f"@₹{t.exit:.2f} net ₹{t.net_inr:,.0f}"
             )
+
+    def _eod_sweep(
+        self, now: pd.Timestamp, snapshots: dict[str, pd.DataFrame]
+    ) -> list[ClosedTrade]:
+        """Force-close anything still open at 15:16 (see EOD_SWEEP).
+
+        Normally a no-op: the bar-driven `eod_close` inside `step()` has already
+        closed every position that was still printing at 15:15. This only
+        catches a position whose symbol went quiet before then, which the
+        bar-driven path cannot see at all.
+        """
+        if now.time() < datetime(2000, 1, 1, *EOD_SWEEP).time():
+            return []
+        swept: list[ClosedTrade] = []
+        with self._state_lock:
+            for key, st in self.states.items():
+                if st.position is None:
+                    continue
+                px = self.builder.latest_close(key)
+                if px is None:
+                    bars = snapshots.get(key, pd.DataFrame())
+                    px = float(bars["close"].iloc[-1]) if not bars.empty else None
+                if px is None:
+                    logger.error(
+                        "eod_sweep: %s still open and no price to mark it at — "
+                        "position left open, reconcile by hand", st.symbol
+                    )
+                    continue
+                trade = force_close(st, now, float(px), self.cfg)
+                if trade is not None:
+                    logger.warning(
+                        "eod_sweep: closed %s at last-seen ₹%.2f (last bar %s) — "
+                        "the symbol stopped printing before 15:15",
+                        st.symbol, px,
+                        "none" if snapshots.get(key, pd.DataFrame()).empty
+                        else str(snapshots[key].index[-1]),
+                    )
+                    swept.append(trade)
+        return swept
 
     def _record_open(self, p: Position) -> None:
         assert self._ledger is not None
