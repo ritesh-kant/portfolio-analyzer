@@ -80,7 +80,8 @@ function drawChart(card) {
   vis.forEach(function (p) {
     var s = Math.max(idx[p.start], from), e = Math.min(idx[p.end], to - 1);
     var x1 = X(s) - cw * 0.9, x2 = X(e) + cw * 0.9;
-    var label = (p.kind === "near_miss" ? "? " : "") + nice(p.name) + " " + day.tf;
+    var label = (p.kind === "near_miss" ? "? " : "") + nice(p.name) + " " + day.tf +
+      (p.strength === undefined ? "" : " \u00b7 " + p.strength.toFixed(2) + "\u00d7");
     var wpx = label.length * 4.9;
     var cx = (x1 + x2) / 2;
     var lx1 = Math.min(Math.max(cx - wpx / 2, L), W - R - wpx), lx2 = lx1 + wpx;
@@ -88,8 +89,9 @@ function drawChart(card) {
     while (lanes[lane] !== undefined && lanes[lane] > lx1 - 5) lane++;
     lanes[lane] = lx2;
     var g = el("g", { "data-s": p.start, "data-e": p.end,
+      opacity: p.weak ? 0.42 : 1,
       "class": "pat " + (p.direction || "neutral") +
-        (p.kind === "near_miss" ? " miss" : "") }, svg);
+        (p.kind === "near_miss" ? " miss" : "") + (p.weak ? " weak" : "") }, svg);
     el("rect", { x: x1, y: T, width: Math.max(3, x2 - x1), height: H - T - B,
       "class": "pat-box" }, g);
     var ly = T - 30 + lane * 10;
@@ -141,6 +143,9 @@ function tipText(p, day) {
     "formation " + p.start.slice(11, 16) + " → " + p.end.slice(11, 16) +
     " (" + day.tf + ", closes " + p.formed_at.slice(11, 16) + ")\n" +
     "prior trend: " + p.prior_trend + "\n" +
+    (p.strength === undefined ? "" :
+      "strength: " + p.strength.toFixed(2) + "x the recent average range" +
+      (p.weak ? "  <- correctly named, too small to act on\n" : "\n")) +
     "confirmation ₹" + p.confirmation.toFixed(2) +
     "   invalidation ₹" + p.invalidation.toFixed(2) + "\n" +
     "next-bar open ₹" + (p.entry ? p.entry.toFixed(2) : "?") +

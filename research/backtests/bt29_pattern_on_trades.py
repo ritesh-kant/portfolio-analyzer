@@ -45,9 +45,11 @@ sys.path.insert(0, str(ROOT / "apps" / "signal-engine"))
 
 from src.momentum_trader.candles import (  # noqa: E402
     PATTERN_RULES_VERSION,
+    STRENGTH_WEAK_BELOW,
     completed_pattern_matches,
 )
 from src.momentum_trader.engine import resample_5m  # noqa: E402
+from src.momentum_trader.pullback import pullback_ordinal  # noqa: E402
 
 CACHE = ROOT / "research" / "backtests" / ".cache_upstox" / "1m"
 TRADE_GLOB = str(ROOT / "research" / "backtests" / "bt17_trades*.csv")
@@ -57,20 +59,57 @@ REAL_COST_PCT = 0.21       # measured real MIS round trip, in percent
 STRESS_COST_PCT = 0.80     # the conservative stress this repo uses elsewhere
 WINDOWS = {2022: "2022-23", 2023: "2022-23", 2024: "2024", 2025: "2025", 2026: "2026"}
 
+# The population the operator would actually have traded, and the only one the
+# headline numbers should be read from. Two exclusions, both evidence-based:
+#
+#   * the multi-entry arm (`_me_multi`) was KILLED as a strategy - it takes the
+#     2nd..5th re-entry on the same stock the same day - yet it is the biggest
+#     single trade file, so pooling every variant silently made a dead arm half
+#     the sample;
+#   * runs written before 2026-09-06 carry the breakeven-lock defect that leaked
+#     into `fixed_2r`. Replaying those exact-breakeven scratches shows 40% would
+#     have reached the 2R target, so their gross is understated.
+#
+# Membership is verified at load time rather than trusted: a file qualifies only
+# if it is one trade per symbol-day AND has effectively no breakeven scratches.
+MAX_SCRATCH_SHARE = 0.005
+EXCLUDED_ARMS = ("_me_multi",)
 
-def load_trades() -> pd.DataFrame:
-    frames = []
+
+def is_clean_run(frame: pd.DataFrame, name: str) -> bool:
+    """One trade per symbol-day, no breakeven-lock scratches, not a killed arm."""
+    if any(tag in name for tag in EXCLUDED_ARMS):
+        return False
+    if frame.empty:
+        return False
+    if frame.groupby(["date", "symbol"]).size().max() > 1:
+        return False
+    scratch = ((frame["exit_reason"] == "trail_stop")
+               & (frame["gross_pct"].abs() < 0.005)).mean()
+    return bool(scratch <= MAX_SCRATCH_SHARE)
+
+
+def load_trades() -> tuple[pd.DataFrame, list[str]]:
+    """Every simulated momentum trade, de-duplicated, flagged clean / not."""
+    frames, clean_files = [], []
     for path in sorted(glob.glob(TRADE_GLOB)):
         frame = pd.read_csv(path)
-        frame["src"] = os.path.basename(path)
+        name = os.path.basename(path)
+        frame["src"] = name
+        frame["clean_run"] = is_clean_run(frame, name)
+        if frame["clean_run"].iloc[0] if len(frame) else False:
+            clean_files.append(name)
         frames.append(frame)
     if not frames:
         raise SystemExit("no bt17_trades*.csv found")
     trades = pd.concat(frames, ignore_index=True)
+    # A trade that appears in any clean run keeps that provenance, so the
+    # de-duplication cannot demote it just because a dirty file sorts first.
+    trades = trades.sort_values("clean_run", ascending=False)
     trades = trades.drop_duplicates(subset=KEY).reset_index(drop=True)
     trades["window"] = trades["year"].map(WINDOWS).fillna("other")
     trades["logged_tags"] = trades["tags"].fillna("")
-    return trades
+    return trades, clean_files
 
 
 def scan_symbol_year(task: tuple[str, int, list[dict]]) -> list[dict]:
@@ -102,6 +141,13 @@ def scan_symbol_year(task: tuple[str, int, list[dict]]) -> list[dict]:
             out.append({**row, "scan": "no_5m_bars"})
             continue
         entry_ts = pd.Timestamp(f"{row['date']} {row['entry_time']}", tz=tz)
+        # Which pullback of the day's move this entry sits on. Computed from
+        # bars that had closed before the fill, so it never looks ahead.
+        closed = tf5[tf5.index + pd.Timedelta(minutes=5) <= entry_ts]
+        try:
+            ordinal = pullback_ordinal(closed) if len(closed) else None
+        except Exception:
+            ordinal = None
         found: dict[tuple[str, str, str], dict] = {}
         for k in range(LOOKBACK_BARS):
             through = entry_ts - pd.Timedelta(minutes=5 * k)
@@ -119,6 +165,7 @@ def scan_symbol_year(task: tuple[str, int, list[dict]]) -> list[dict]:
                     "bars_ago": k,
                     "confirmation": match.confirmation,
                     "invalidation": match.invalidation,
+                    "strength": match.strength,
                 }
         hits = sorted(found.values(), key=lambda m: (m["bars_ago"], m["name"]))
         dirs = {m["direction"] for m in hits}
@@ -132,15 +179,20 @@ def scan_symbol_year(task: tuple[str, int, list[dict]]) -> list[dict]:
             "v3_neutral": int("neutral" in dirs),
             "v3_nearest": hits[0]["name"] if hits else "",
             "v3_nearest_bars_ago": hits[0]["bars_ago"] if hits else -1,
+            # Size of the nearest formation, straight from the detector.
+            "v3_strength": hits[0]["strength"] if hits else None,
+            "v3_weak": (int(hits[0]["strength"] < STRENGTH_WEAK_BELOW)
+                        if hits else None),
+            "pullback_ord": ordinal,
             "v3_matches": hits,
         })
     return out
 
 
 def group_tasks(trades: pd.DataFrame) -> list[tuple[str, int, list[dict]]]:
-    cols = [*KEY, "year", "window", "src", "exit_reason", "gross_pct", "net_pct",
-            "gross_inr", "costs_inr", "net_inr", "qty", "stop", "exit", "exit_time",
-            "trigger_time", "day_chg_pct", "rvol", "logged_tags"]
+    cols = [*KEY, "year", "window", "src", "clean_run", "exit_reason", "gross_pct",
+            "net_pct", "gross_inr", "costs_inr", "net_inr", "qty", "stop", "exit",
+            "exit_time", "trigger_time", "day_chg_pct", "rvol", "logged_tags"]
     tasks: dict[tuple[str, int], list[dict]] = {}
     for row in trades[cols].to_dict("records"):
         tasks.setdefault((row["symbol"], int(row["year"])), []).append(row)
@@ -199,11 +251,16 @@ def main() -> int:
                     default=ROOT / "research" / "backtests" / "bt29_summary.csv")
     args = ap.parse_args()
 
-    trades = load_trades()
+    trades, clean_files = load_trades()
     if args.limit:
         trades = trades.head(args.limit)
     print(f"BT29 {PATTERN_RULES_VERSION}: {len(trades):,} unique past trades, "
           f"{trades.symbol.nunique()} symbols, years {sorted(trades.year.unique())}")
+    print(f"clean runs (1 trade/symbol-day, no breakeven-lock scratches, not the "
+          f"killed multi-entry arm): {len(clean_files)}")
+    for name in clean_files:
+        print(f"    {name}")
+    print(f"trades from a clean run: {int(trades.clean_run.sum()):,} of {len(trades):,}")
 
     tasks = group_tasks(trades)
     results: list[dict] = []
@@ -285,6 +342,34 @@ def main() -> int:
     summary = pd.DataFrame(rows)
     summary.to_csv(args.summary_out, index=False)
     print(f"wrote {args.summary_out}")
+
+    # ---- the clean population, which is what the report and the write-up use
+    clean = ok[ok["clean_run"]].copy()
+    clean_rows: list[dict] = []
+    clean_rows.append(contrast(clean, clean["confirmed"], "v3 bullish at entry", "all"))
+    clean_rows.append(contrast(clean, clean["any_v3"], "any v3 pattern at entry", "all"))
+    clean_rows.append(
+        contrast(clean, clean["contradicted"], "v3 bearish only (anti)", "all"))
+    strong = clean[clean["v3_strength"].notna()]
+    clean_rows.append(contrast(strong, strong["v3_strength"] >= 1.0,
+                               "formation >= 1x recent range", "all"))
+    with_ord = clean[clean["pullback_ord"].notna()]
+    clean_rows.append(contrast(with_ord, with_ord["pullback_ord"].isin([1, 2]),
+                               "pullback ordinal 1-2 vs 3+", "all"))
+    for year, grp in clean.groupby("year"):
+        clean_rows.append(
+            contrast(grp, grp["confirmed"], "v3 bullish at entry", f"window {year}"))
+    clean_summary = pd.DataFrame(clean_rows)
+    clean_out = ROOT / "research" / "backtests" / "bt29_clean_pool.csv"
+    clean_summary_out = ROOT / "research" / "backtests" / "bt29_summary_clean.csv"
+    clean.to_csv(clean_out, index=False)
+    clean_summary.to_csv(clean_summary_out, index=False)
+    print(f"\nclean population: {len(clean):,} trades, {clean.symbol.nunique()} symbols, "
+          f"mean gross {clean.gross_pct.mean():+.3f}%, "
+          f"{inr_at(clean, REAL_COST_PCT) / max(len(clean), 1):+.0f} INR/trade at real costs")
+    print(f"wrote {clean_out} and {clean_summary_out}")
+    with pd.option_context("display.width", 220, "display.max_columns", 30):
+        print(clean_summary.round(4).to_string(index=False))
     with pd.option_context("display.width", 220, "display.max_columns", 30):
         print(summary.round(4).to_string(index=False))
 
@@ -298,6 +383,13 @@ def main() -> int:
         print(f"  {label:<16} all {inr_at(ok, cost):>12,.0f}   "
               f"confirmed-only {inr_at(conf, cost):>12,.0f}   "
               f"unconfirmed-only {inr_at(unconf, cost):>12,.0f}")
+    got = ok[ok["v3_strength"].notna()]
+    if len(got):
+        weak = float((got["v3_weak"] == 1).mean())
+        print(f"\nformation size at the fill: median {got.v3_strength.median():.2f}x the "
+              f"ten-candle average range; {100 * weak:.1f}% below the "
+              f"{STRENGTH_WEAK_BELOW:g}x display threshold")
+
     print("\nexit-reason mix:")
     mix = pd.crosstab(ok["confirmed"], ok["exit_reason"], normalize="index")
     print((100 * mix).round(1).to_string())

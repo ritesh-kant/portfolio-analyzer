@@ -75,3 +75,7 @@ footer { padding:6px 22px 40px; color:var(--mut); font-size:11.5px; max-width:11
 g.pat.miss .pat-box { fill:none; stroke-dasharray:4 3; stroke-opacity:.55; }
 g.pat.miss .pat-label { font-style:italic; font-weight:400; opacity:.85; }
 tbody tr.miss td { font-style:italic; opacity:.8; }
+
+/* Correctly named, but the confirming candle is small relative to the recent
+   average range (candles.STRENGTH_WEAK_BELOW). Shown, never hidden. */
+.pat.weak .pat-box { stroke-dasharray: 3 3; }

@@ -48,11 +48,20 @@ export interface PatternMatch {
   formed_at?: string;
   status?: string;
   rules_version?: string;
+  /**
+   * Range of the formation's confirming candle over the mean range of the ten
+   * candles before it. 1 = an ordinary candle for this stock at this time of
+   * day; below ~0.75 the name is still correct but the candle is too small to
+   * act on. Descriptive only — it never suppresses a detection. Absent on
+   * trades stored before 2026-09-13.
+   */
+  strength?: number;
   evidence?: {
     candles?: MomentumBar[];
     trend_closes?: number[];
     mean_prior_body?: number;
     mean_prior_range?: number;
+    signal_candle_range?: number;
   };
 }
 

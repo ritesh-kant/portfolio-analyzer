@@ -30,6 +30,16 @@ a fitted parameter.
     strength             R(last candle) / mean R(10)             own field, added
                          DESCRIPTIVE — gates nothing              13 Sep 2026
 
+Significance vs correctness (added 13 Sep 2026, no rule changed). Every
+published definition of a doji, hammer or spinning top is a *ratio* test on the
+candle's own range, so a candle spanning 0.11% of price satisfies it exactly as
+well as one spanning 1.1%. The names stay correct; what a ratio cannot say is
+whether the candle was big enough to mean anything. ``PatternMatch.strength``
+reports that separately, as the signal candle's range over the ten-candle
+average range, and ``STRENGTH_WEAK_BELOW`` is the suggested display threshold.
+Detection is untouched and ``PATTERN_RULES_VERSION`` is deliberately NOT bumped:
+re-running any earlier census reproduces the identical set of matches.
+
     pattern              shape (on top of the terms above)      position / context
     -------------------  -------------------------------------  -----------------
     hammer               short body, lower >= 2B, upper <= .1R  body <= prior low
@@ -106,16 +116,6 @@ FAR_RANGE_FRACTION = 0.60
 STRENGTH_WEAK_BELOW = 0.75
 STAR_PENETRATION = 0.50
 TREND_MIN_RANGE_MOVE = 0.50
-Significance vs correctness (added 13 Sep 2026, no rule changed). Every
-published definition of a doji, hammer or spinning top is a *ratio* test on the
-candle's own range, so a candle spanning 0.11% of price satisfies it exactly as
-well as one spanning 1.1%. The names stay correct; what the ratio cannot say is
-whether the candle was big enough to mean anything. ``PatternMatch.strength``
-reports that separately, as the signal candle's range over the ten-candle
-average range, and ``STRENGTH_WEAK_BELOW`` is the suggested display threshold.
-Detection is untouched: ``PATTERN_RULES_VERSION`` is deliberately NOT bumped
-because re-running any earlier census reproduces the identical set of matches.
-
 TIMEFRAMES = {"1m": pd.Timedelta(minutes=1), "5m": pd.Timedelta(minutes=5)}
 
 # The two spinning-top names preserve the reference sheet's colour labels.

@@ -248,10 +248,10 @@ before it, so a formation only counts if it had fully closed before the fill.
 
 | what v3 saw | trades | share | gross | win rate | ₹ / trade at real costs |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| bullish formation | 379 | 3.2% | −0.065% | 23.2% | −₹129 |
-| bearish formation | 574 | 4.9% | +0.007% | 28.7% | −₹98 |
-| indecision only (doji / spinning top) | 4,091 | 34.6% | −0.044% | 24.6% | −₹115 |
-| nothing | 6,768 | 57.3% | −0.020% | 27.0% | −₹106 |
+| bullish formation | 379 | 3.2% | −0.073% | 23.7% | −₹131 |
+| bearish formation | 574 | 4.9% | +0.023% | 31.5% | −₹90 |
+| indecision only (doji / spinning top) | 4,091 | 34.6% | −0.040% | 26.3% | −₹113 |
+| nothing | 6,768 | 57.3% | +0.002% | 30.2% | −₹96 |
 
 The first number worth noticing is **3.2%**. v3 almost never calls a bullish
 pattern at a momentum entry, and that is the context gate working exactly as
@@ -264,10 +264,10 @@ same fills — it was labelling shapes without asking where they sat.
 
 | split | n with | gross with | gross without | spread | t |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| v3 bullish at entry | 380 | −0.065% | −0.027% | **−0.038 pp** | −0.91 |
-| any v3 pattern at entry | 5,045 | −0.040% | −0.020% | −0.020 pp | −1.11 |
-| v3 bearish only (anti-test) | 574 | +0.007% | −0.030% | +0.037 pp | +0.84 |
-| pre-v3 logged tags | 7,583 | −0.027% | −0.031% | +0.004 pp | +0.18 |
+| v3 bullish at entry | 380 | −0.074% | −0.012% | **−0.062 pp** | −1.45 |
+| any v3 pattern at entry | 5,045 | −0.035% | +0.002% | −0.037 pp | −1.97 |
+| v3 bearish only (anti-test) | 574 | +0.023% | −0.016% | +0.039 pp | +0.84 |
+| pre-v3 logged tags | 7,583 | −0.012% | −0.018% | +0.006 pp | +0.30 |
 
 Per window, on the canonical `fixed_2r` baseline runs (one exit rule, so the
 outcome is clean):
@@ -287,9 +287,9 @@ below the corrected threshold, and wrong-signed for the hypothesis anyway.
 
 | criterion | required | actual | |
 | --- | --- | --- | --- |
-| gross spread | ≥ +0.30 pp | −0.038 pp | ✗ |
-| t-stat | ≥ 2.0 | −0.91 | ✗ |
-| anti-test | bearish not better | bearish **is** better (+0.037 pp) | ✗ |
+| gross spread | ≥ +0.30 pp | −0.062 pp | ✗ |
+| t-stat | ≥ 2.0 | −1.45 | ✗ |
+| anti-test | bearish not better | bearish **is** better (+0.039 pp) | ✗ |
 | window stability | 3 of 4 positive | 1 of 4 positive | ✗ |
 | cost stress | confirmed subset net-positive at 0.21% | −0.28% / trade | ✗ |
 
@@ -308,11 +308,15 @@ either (+0.004 pp, t = +0.18).
 
 ### Money, since that was the question
 
-At the real MIS round trip of 0.21%, the 11,813 trades are **−₹1,296,692** in
-total, about −₹110 per trade. Taking only the pattern-confirmed trades would
-have made −₹49,036 over 380 trades, about **−₹129 per trade** — worse per trade
+At the real MIS round trip of 0.21%, the 11,813 trades are **−₹1,214,089** in
+total, about −₹103 per trade. Taking only the pattern-confirmed trades would
+have made −₹49,920 over 380 trades, about **−₹131 per trade** — worse per trade
 than the pool, not better. There is no subset of this filter that turns the
 strategy's P&L positive.
+
+(De-duplication prefers a trade's *clean-run* copy where one exists, so these
+pooled figures moved slightly after §3.1 was written. §3.1 is the population of
+record; nothing in either verdict changes.)
 
 ### 3.1 Correction — the first population was too loose
 
@@ -388,10 +392,18 @@ and shooting stars are ≥ 1.0×. The labels are correct — TA-Lib has no size 
 either — but "correct" and "significant" are different questions, and nothing in
 the published definitions asks the second one. Splitting the clean pool at 1×
 gives +0.026 pp (t = +0.50) in favour of the larger formations: real in
-direction, far too small to trade. **Recommended change: emit a `strength` field
-on `PatternMatch` (range ÷ 10-bar average range, already computed as evidence)
-and let the UI grey out anything below ~0.75×.** That improves the annotation.
-It will not produce an edge, and should not be sold as one.
+direction, far too small to trade. **Built 13 Sep 2026: `PatternMatch.strength`**
+(range of the confirming candle ÷ the ten-candle average range) with
+`STRENGTH_WEAK_BELOW = 0.75`. It gates nothing — detection is byte-identical and
+`PATTERN_RULES_VERSION` is unchanged — but the momentum trade chart and both
+audit reports now draw sub-threshold formations faint and print the multiple in
+the label. About 51% of the formations on the BT29 report are flagged. This
+improves the annotation. It is not an edge and is not sold as one. See the
+"Strength" section of `candlestick-recognition-v2.md`.
+
+**Regenerating all of this:** `research/backtests/README-bt29.md` — two
+commands, and the clean-population filter is applied in code (and printed) so it
+cannot drift from what is written here.
 
 **Visual report:** `research/backtests/bt29_trade_report.html` — 238 charted
 trades from the clean population, each card showing the pullback ordinal and the

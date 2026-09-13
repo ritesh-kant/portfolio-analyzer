@@ -113,14 +113,16 @@ function drawChart(card) {
   vis.forEach(function (p) {
     var s = Math.max(idx[p.start], from), e = Math.min(idx[p.end], to - 1);
     var x1 = X(s) - cw * 0.9, x2 = X(e) + cw * 0.9;
-    var label = nice(p.name) + " · " + day.tf;
+    var label = nice(p.name) + " · " + day.tf +
+      (p.strength === undefined ? "" : " · " + p.strength.toFixed(2) + "\u00d7");
     var wpx = label.length * 4.9, cx = (x1 + x2) / 2;
     var lx1 = Math.min(Math.max(cx - wpx / 2, L), W - R - wpx), lx2 = lx1 + wpx;
     var lane = 0;
     while (lanes[lane] !== undefined && lanes[lane] > lx1 - 5) lane++;
     lanes[lane] = lx2;
     var g = el("g", { "data-s": p.start, "data-e": p.end,
-      "class": "pat " + (p.direction || "neutral") }, svg);
+      opacity: p.weak ? 0.42 : 1,
+      "class": "pat " + (p.direction || "neutral") + (p.weak ? " weak" : "") }, svg);
     el("rect", { x: x1, y: T, width: Math.max(3, x2 - x1), height: H - T - B, "class": "pat-box" }, g);
     var ly = T - 32 + lane * 10;
     el("path", { d: "M " + x1 + " " + (ly + 9) + " V " + (ly + 3) + " H " + x2 + " V " + (ly + 9),
@@ -156,6 +158,9 @@ function tipText(p, day) {
     "formation " + hhmm(p.start) + " → " + hhmm(p.end) + " (" + day.tf + ")\n" +
     "closed " + p.bars_ago + " bar(s) before the fill at " + hhmm(day.trade.entry_ts) + "\n" +
     "prior trend: " + p.prior_trend + "\n" +
+    (p.strength === undefined ? "" :
+      "strength: " + p.strength.toFixed(2) + "x the recent average range" +
+      (p.weak ? "  <- too small to act on\n" : "\n")) +
     "confirmation ₹" + p.confirmation.toFixed(2) + "   invalidation ₹" + p.invalidation.toFixed(2);
 }
 
@@ -208,9 +213,9 @@ function buildCards() {
       tr.exit.toFixed(2) + " (" + nice(tr.exit_reason) + ") · qty " + tr.qty +
       " · pullback #" + (tr.pullback_ord === null ? "?" : tr.pullback_ord) +
       " · v3 saw: <b>" + (tr.v3_tags ? nice(tr.v3_tags.split("|").join(", ")) : "nothing") +
-      "</b>" + (tr.pat_rng_vs_base === null ? "" :
-        " (nearest formation spans " + tr.pat_rng_pct.toFixed(2) + "% of price, " +
-        tr.pat_rng_vs_base.toFixed(2) + "× the recent average range)") + "</div>";
+      "</b>" + (tr.strength === null || tr.strength === undefined ? "" :
+        " (nearest formation spans " + tr.strength.toFixed(2) +
+        "× the recent average range)") + "</div>";
     var right = document.createElement("div");
     right.className = "pnl " + cls(tr.net_real_inr);
     right.innerHTML = inr(tr.net_real_inr) +
@@ -295,7 +300,7 @@ function buildRows() {
       t: tr.entry_ts, date: day.date, symbol: day.symbol, setup: tr.setup,
       pat: tr.v3_tags ? tr.v3_tags.split("|").map(nice).join(", ") : "—",
       ord: tr.pullback_ord === null ? -1 : tr.pullback_ord,
-      size: tr.pat_rng_vs_base === null ? null : tr.pat_rng_vs_base,
+      size: tr.strength === undefined ? null : tr.strength,
       bucket: tr.bucket, reason: tr.exit_reason, gross: tr.gross_pct,
       net: tr.net_real_inr, dayIdx: di,
       /* jump to the formation closest to the fill, not just the day's first */

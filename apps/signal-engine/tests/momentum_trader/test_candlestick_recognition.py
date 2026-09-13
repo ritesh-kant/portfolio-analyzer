@@ -305,6 +305,54 @@ def test_spinning_top_needs_both_shadows_longer_than_body_and_no_body_cap():
     assert not names(bars) & {"bullish_spinning_top", "bearish_spinning_top"}
 
 
+def matches(bars: pd.DataFrame, tf: str = "5m") -> dict[str, c.PatternMatch]:
+    return {m.name: m for m in c.completed_pattern_matches(bars, tf)}
+
+
+def test_strength_is_the_signal_candle_against_the_ten_candle_baseline():
+    # frame()'s baseline candles each span 0.8 + 0.4 = 1.2, so a formation
+    # candle spanning 1.2 scores exactly 1.0 and one spanning 0.3 scores 0.25.
+    bars = frame([(100, 100.58, 99.70, 100.28, 1000)], "sideways")
+    got = matches(bars)["bullish_spinning_top"]
+    mean_range = got.evidence["mean_prior_range"]
+    assert got.evidence["signal_candle_range"] == pytest.approx(0.88)
+    assert got.strength == pytest.approx(0.88 / mean_range, rel=1e-3)
+
+
+def test_strength_scales_with_the_candle_and_not_with_the_price_level():
+    # Same shape, same baseline: a candle a quarter the size scores a quarter.
+    big = matches(frame([(100, 100.58, 99.70, 100.28, 1000)], "sideways"))
+    small = matches(frame([(100, 100.145, 99.925, 100.07, 1000)], "sideways"))
+    assert "bullish_spinning_top" in big and "bullish_spinning_top" in small
+    ratio = small["bullish_spinning_top"].strength / big["bullish_spinning_top"].strength
+    assert ratio == pytest.approx(0.25, rel=0.05)
+    # An affine price change must not move it (the audit relies on this).
+    shifted = frame([(500, 500.58, 499.70, 500.28, 1000)], "sideways")
+    assert matches(shifted)["bullish_spinning_top"].strength == pytest.approx(
+        big["bullish_spinning_top"].strength, rel=1e-6
+    )
+
+
+def test_strength_is_descriptive_and_never_suppresses_a_detection():
+    # A formation far below the display threshold is still labelled. Nothing in
+    # the published definitions carries a size floor; inventing one silently
+    # would change what the detector reports. BT29 3.2.
+    small = matches(frame([(100, 100.145, 99.925, 100.07, 1000)], "sideways"))
+    top = small["bullish_spinning_top"]
+    assert top.strength < c.STRENGTH_WEAK_BELOW
+    assert top.status == "formed"
+    assert "bullish_spinning_top" in c.candle_tags(
+        frame([(100, 100.145, 99.925, 100.07, 1000)], "sideways")
+    )
+
+
+def test_strength_travels_in_the_stored_document():
+    got = matches(frame(STAR))["morning_star"]
+    doc = got.document()
+    assert doc["strength"] == got.strength > 0
+    assert json.loads(json.dumps(doc))["strength"] == doc["strength"]
+
+
 def test_zero_range_is_not_a_doji():
     assert not c.is_doji(pd.Series(dict(open=100, high=100, low=100, close=100)))
 

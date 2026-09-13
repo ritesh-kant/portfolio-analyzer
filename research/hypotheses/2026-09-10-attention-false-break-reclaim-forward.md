@@ -44,3 +44,8 @@ Do not change its trigger, stop, retry count, or exits while accumulating.  At
 mix, drawdown, and retry conversion against the separate attention control.
 It remains paper-only unless its incremental actual-cost net return is positive
 without a worse maximum daily drawdown.
+
+## Superseded 2026-09-12
+
+Folded into [attention-1m-merged-forward](2026-09-12-attention-1m-merged-forward.md) at the operator's request for a single forward arm. This arm is retired **before** its review gate was reached, so it has no result and must never be reported as one. Its closed trades are diagnostic only.
+

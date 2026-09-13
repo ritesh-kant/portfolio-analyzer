@@ -60,6 +60,14 @@ STRATEGY_CATALYST_FIRST_PULLBACK = "catalyst_first_pullback"
 STRATEGY_ATTENTION_1M = "attention_1m"
 STRATEGY_ATTENTION_1M_RESISTANCE_STATE = "attention_1m_resistance_state"
 STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM = "attention_1m_false_break_reclaim"
+# The single forward arm (2026-09-12). Everything the separate attention arms
+# were testing in parallel, switched on together: resting buy-stop fills,
+# resistance-state exits, the resistance-breakout entry requirement, and the one
+# allowed false-break reclaim. The arms it replaces had 6 and 0 closed trades
+# respectively, so no comparison was lost by folding them together — but this
+# config deliberately bundles features, so its forward numbers measure the
+# bundle and CANNOT attribute a result to any one of them.
+STRATEGY_ATTENTION_1M_MERGED = "attention_1m_merged"
 
 
 def _strategy_config(settings: Settings) -> EngineConfig:
@@ -107,11 +115,24 @@ def _strategy_config(settings: Settings) -> EngineConfig:
             attention_rvol_min=settings.mt_attention_rvol_min,
             allow_false_break_reentry=True,
         )
+    if settings.mt_strategy == STRATEGY_ATTENTION_1M_MERGED:
+        return EngineConfig(
+            risk_inr=settings.mt_risk_inr,
+            max_notional_inr=settings.mt_max_notional_inr,
+            exit_mode=MODE_TREND_RESISTANCE_STATE,
+            fill_mode=FILL_FUTURE_TRIGGER,
+            use_attention_entries=True,
+            attention_day_chg_min=settings.mt_attention_day_chg_min,
+            attention_rvol_min=settings.mt_attention_rvol_min,
+            require_resistance_breakout=True,
+            allow_false_break_reentry=True,
+        )
     raise ValueError(
         f"unknown MT_STRATEGY {settings.mt_strategy!r}; expected "
         f"{STRATEGY_BASELINE!r}, {STRATEGY_CATALYST_FIRST_PULLBACK!r}, "
         f"{STRATEGY_ATTENTION_1M!r}, {STRATEGY_ATTENTION_1M_RESISTANCE_STATE!r}, "
-        f"or {STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM!r}"
+        f"{STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM!r}, "
+        f"or {STRATEGY_ATTENTION_1M_MERGED!r}"
     )
 
 
@@ -136,6 +157,9 @@ class Scanner:
     def __init__(self, settings: Settings) -> None:
         self.s = settings
         self.cfg = _strategy_config(settings)
+        # Applied here rather than in each branch so every strategy honours the
+        # same env switch and no branch can silently miss it.
+        self.cfg.require_1m_agreement = settings.mt_require_1m_agreement
         self.cache = _repo_path(settings.mt_cache_dir)
         self.cache.mkdir(parents=True, exist_ok=True)
         token = _market_data_token(

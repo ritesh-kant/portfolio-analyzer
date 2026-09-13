@@ -64,3 +64,8 @@ ECS task definition `mt-scanner-prod:9`, image tag
 `resistance-state-20260910`, strategy `attention_1m_resistance_state`, and log
 path `/data/mt_attention_1m_resistance_state_forward_log.csv`.  The old
 `attention_1m` strategy remains the control and its log remains separate.
+
+## Superseded 2026-09-12
+
+Folded into [attention-1m-merged-forward](2026-09-12-attention-1m-merged-forward.md) at the operator's request for a single forward arm. This arm is retired **before** its review gate was reached, so it has no result and must never be reported as one. Its closed trades are diagnostic only.
+

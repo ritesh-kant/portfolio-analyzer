@@ -5,6 +5,9 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, use
 import type { MomentumBar, MomentumTrade } from '../lib/momentum-api';
 import { containingBarIndex, fiveMinuteBars } from '../lib/momentum-bars';
 
+// Mirrors candles.STRENGTH_WEAK_BELOW: a formation whose confirming candle
+// spans less than this multiple of the recent average range is drawn faint.
+const WEAK_STRENGTH = 0.75;
 const DEFAULT_ZOOM_1M = 8;
 const DEFAULT_ZOOM_5M = 2;
 
@@ -418,10 +421,15 @@ export function MomentumTradeChart({
         {visiblePatterns.map((match) => {
           const startX = x(match.start) - candleWidth;
           const endX = x(match.end) + candleWidth;
-          return <g key={`${match.name}-${match.start}-${match.end}`} pointerEvents="none">
-            <rect x={startX} y={priceTop} width={Math.max(2, endX - startX)} height={priceHeight} fill="#fbbf24" fillOpacity=".10" />
-            <path d={`M ${startX} ${priceTop + 16} V ${priceTop + 7} H ${endX} V ${priceTop + 16}`} fill="none" stroke="#fbbf24" strokeWidth="1.2" />
-            <text x={(startX + endX) / 2} y={priceTop + 31} textAnchor="middle" fill="#fde68a" fontSize="10">{match.name.replaceAll('_', ' ')} · {match.timeframe}</text>
+          // A correctly-named formation on a candle much smaller than this
+          // stock's recent average is drawn faint: the label is right, the
+          // candle is not worth acting on. See candles.STRENGTH_WEAK_BELOW.
+          const weak = match.strength !== undefined && match.strength < WEAK_STRENGTH;
+          const size = match.strength === undefined ? '' : ` · ${match.strength.toFixed(2)}×`;
+          return <g key={`${match.name}-${match.start}-${match.end}`} pointerEvents="none" opacity={weak ? 0.45 : 1}>
+            <rect x={startX} y={priceTop} width={Math.max(2, endX - startX)} height={priceHeight} fill="#fbbf24" fillOpacity={weak ? '.04' : '.10'} />
+            <path d={`M ${startX} ${priceTop + 16} V ${priceTop + 7} H ${endX} V ${priceTop + 16}`} fill="none" stroke="#fbbf24" strokeWidth="1.2" strokeDasharray={weak ? '3 3' : undefined} />
+            <text x={(startX + endX) / 2} y={priceTop + 31} textAnchor="middle" fill="#fde68a" fontSize="10">{match.name.replaceAll('_', ' ')} · {match.timeframe}{size}</text>
           </g>;
         })}
         <path d={linePath(data.map((bar) => bar.ema9), x, yPrice)} fill="none" stroke="#fbbf24" strokeWidth="1.5" /><path d={linePath(data.map((bar) => bar.ema20), x, yPrice)} fill="none" stroke="#a78bfa" strokeWidth="1.5" /><path d={linePath(data.map((bar) => bar.vwap), x, yPrice)} fill="none" stroke="#60a5fa" strokeWidth="1.5" strokeDasharray="4 3" />

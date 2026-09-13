@@ -1,4 +1,14 @@
 BT29 candles-v3-20260912: 11,868 unique past trades, 315 symbols, years [np.int64(2022), np.int64(2023), np.int64(2024), np.int64(2025), np.int64(2026)]
+clean runs (1 trade/symbol-day, no breakeven-lock scratches, not the killed multi-entry arm): 8
+    bt17_trades.csv
+    bt17_trades_loc26.csv
+    bt17_trades_mm25_strict.csv
+    bt17_trades_qs_base_fixed.csv
+    bt17_trades_qs_sel_fixed.csv
+    bt17_trades_smoke23.csv
+    bt17_trades_vs_a.csv
+    bt17_trades_vs_b.csv
+trades from a clean run: 7,476 of 11,868
   [50/1067] 428 trades scored
   [100/1067] 1,005 trades scored
   [150/1067] 1,350 trades scored
@@ -8,16 +18,16 @@ BT29 candles-v3-20260912: 11,868 unique past trades, 315 symbols, years [np.int6
   [350/1067] 3,657 trades scored
   [400/1067] 4,296 trades scored
   [450/1067] 4,876 trades scored
-  [500/1067] 5,432 trades scored
-  [550/1067] 5,820 trades scored
+  [500/1067] 5,415 trades scored
+  [550/1067] 5,819 trades scored
   [600/1067] 6,482 trades scored
   [650/1067] 7,038 trades scored
-  [700/1067] 7,642 trades scored
+  [700/1067] 7,641 trades scored
   [750/1067] 8,222 trades scored
   [800/1067] 8,775 trades scored
   [850/1067] 9,354 trades scored
   [900/1067] 9,978 trades scored
-  [950/1067] 10,463 trades scored
+  [950/1067] 10,469 trades scored
   [1000/1067] 10,966 trades scored
   [1050/1067] 11,597 trades scored
   [1067/1067] 11,868 trades scored
@@ -29,57 +39,73 @@ What the v3 detector saw at the moment each trade was filled
 (the four 5m bars closed before the fill; long trades only):
                       n  share_%  gross_%  net_real_%   win_%  net_real_inr  inr_per_trade
 bucket                                                                                    
-bearish           574.0    4.859    0.007      -0.203  28.746    -56067.041        -97.678
-bullish           379.0    3.208   -0.065      -0.275  23.219    -48746.625       -128.619
+bearish           574.0    4.859    0.023      -0.187  31.533    -51883.041        -90.389
+bullish           379.0    3.208   -0.073      -0.283  23.747    -49631.075       -130.953
 conflicting         1.0    0.008   -0.369      -0.579   0.000      -288.963       -288.963
-indecision only  4091.0   34.631   -0.044      -0.254  24.639   -471845.819       -115.338
-none             6768.0   57.293   -0.020      -0.230  27.039   -719743.439       -106.345
+indecision only  4091.0   34.631   -0.040      -0.250  26.302   -462837.119       -113.135
+none             6768.0   57.293    0.002      -0.208  30.171   -649448.989        -95.959
 
 by how long before the fill the formation closed:
                           n  gross_%   win_%
 v3_nearest_bars_ago                         
-0.0                  1246.0   -0.061  25.201
-1.0                  1700.0   -0.030  24.824
-2.0                  1220.0   -0.030  24.672
-3.0                   879.0   -0.044  25.484
+0.0                  1246.0   -0.055  26.806
+1.0                  1700.0   -0.033  26.059
+2.0                  1220.0   -0.013  26.967
+3.0                   879.0   -0.042  27.418
 wrote /Users/ritesh/codebase/ritesh-codebase/portfolio-analyzer/research/backtests/bt29_summary.csv
+
+clean population: 7,447 trades, 311 symbols, mean gross +0.002%, -95 INR/trade at real costs
+wrote /Users/ritesh/codebase/ritesh-codebase/portfolio-analyzer/research/backtests/bt29_clean_pool.csv and /Users/ritesh/codebase/ritesh-codebase/portfolio-analyzer/research/backtests/bt29_summary_clean.csv
+      scope                        split  n_yes  n_no  gross_yes_pct  gross_no_pct  spread_pp  t_stat  win_yes  win_no  net_real_yes_pct  net_real_no_pct
+        all          v3 bullish at entry    165  7282        -0.1103        0.0050    -0.1153 -1.5743   0.2606  0.3227           -0.3203          -0.2050
+        all      any v3 pattern at entry   2700  4747        -0.0166        0.0132    -0.0298 -1.1173   0.3122  0.3265           -0.2266          -0.1968
+        all       v3 bearish only (anti)    347  7100         0.0402        0.0006     0.0397  0.6247   0.3487  0.3200           -0.1698          -0.2094
+        all formation >= 1x recent range    701  1999         0.0014       -0.0229     0.0243  0.4663   0.3295  0.3062           -0.2086          -0.2329
+        all   pullback ordinal 1-2 vs 3+   4443  1830        -0.0018       -0.0035     0.0017  0.0538   0.3210  0.3186           -0.2118          -0.2135
+window 2022          v3 bullish at entry     45  2206        -0.1832       -0.0330    -0.1502 -0.8698   0.2000  0.3087           -0.3932          -0.2430
+window 2023          v3 bullish at entry     59  2590        -0.0626        0.0278    -0.0904 -0.8810   0.2712  0.3317           -0.2726          -0.1822
+window 2024          v3 bullish at entry     23   963        -0.1210       -0.0260    -0.0950 -0.5456   0.3478  0.3178           -0.3310          -0.2360
+window 2025          v3 bullish at entry     18   859        -0.1258        0.0527    -0.1786 -0.9067   0.2778  0.3236           -0.3358          -0.1573
+window 2026          v3 bullish at entry     20   664        -0.0609        0.0250    -0.0859 -0.3542   0.2500  0.3404           -0.2709          -0.1850
                   scope                        split  n_yes  n_no  gross_yes_pct  gross_no_pct  spread_pp  t_stat  win_yes  win_no  net_real_yes_pct  net_real_no_pct
-                    all          v3 bullish at entry    380 11433        -0.0655       -0.0272    -0.0383 -0.9114   0.2316  0.2627           -0.2755          -0.2372
-                    all      any v3 pattern at entry   5045  6768        -0.0401       -0.0197    -0.0204 -1.1057   0.2500  0.2704           -0.2501          -0.2297
-                    all       v3 bearish only (anti)    574 11239         0.0072       -0.0302     0.0374  0.8354   0.2875  0.2603           -0.2028          -0.2402
-                    all      as-logged tags (pre-v3)   7583  4230        -0.0271       -0.0307     0.0035  0.1762   0.2608  0.2631           -0.2371          -0.2407
-         window 2022-23          v3 bullish at entry    293  7961        -0.0696       -0.0631    -0.0066 -0.1370   0.2048  0.2296           -0.2796          -0.2731
+                    all          v3 bullish at entry    380 11433        -0.0739       -0.0120    -0.0619 -1.4485   0.2368  0.2886           -0.2839          -0.2220
+                    all      any v3 pattern at entry   5045  6768        -0.0353        0.0019    -0.0372 -1.9684   0.2670  0.3017           -0.2453          -0.2081
+                    all       v3 bearish only (anti)    574 11239         0.0227       -0.0159     0.0386  0.8443   0.3153  0.2854           -0.1873          -0.2259
+                    all      as-logged tags (pre-v3)   7583  4230        -0.0118       -0.0180     0.0061  0.2973   0.2870  0.2868           -0.2218          -0.2280
+         window 2022-23          v3 bullish at entry    293  7961        -0.0805       -0.0413    -0.0392 -0.8026   0.2116  0.2668           -0.2905          -0.2513
             window 2024          v3 bullish at entry     45  1909        -0.0277        0.0688    -0.0965 -0.8879   0.3556  0.3431           -0.2377          -0.1412
             window 2025          v3 bullish at entry     22   899        -0.0916        0.0483    -0.1399 -0.8600   0.3182  0.3270           -0.3016          -0.1617
             window 2026          v3 bullish at entry     20   664        -0.0609        0.0250    -0.0859 -0.3542   0.2500  0.3404           -0.2709          -0.1850
-        setup bull_flag          v3 bullish at entry     27  1214        -0.2525       -0.0160    -0.2364 -1.7970   0.1481  0.2990           -0.4625          -0.2260
-setup flat_top_breakout          v3 bullish at entry     46  1610        -0.0369       -0.0023    -0.0345 -0.1889   0.2174  0.2205           -0.2469          -0.2123
-     setup ma9_pullback          v3 bullish at entry    152  2682        -0.1134       -0.0238    -0.0896 -1.4532   0.1842  0.2763           -0.3234          -0.2338
-   setup micro_pullback          v3 bullish at entry    124  4633        -0.0202       -0.0514     0.0312  0.5153   0.2823  0.2532           -0.2302          -0.2614
-            setup orb15          v3 bullish at entry      1   370        -0.2658        0.1399        NaN     NaN   0.0000  0.2297           -0.4758          -0.0701
-     setup vwap_reclaim          v3 bullish at entry     30   924         0.1209       -0.0407     0.1616  0.8696   0.3667  0.3095           -0.0891          -0.2507
-            per-pattern    pattern bearish_engulfing    136 11677        -0.0128       -0.0286     0.0158  0.2090   0.2647  0.2616           -0.2228          -0.2386
-            per-pattern pattern bearish_spinning_top   1233 10580        -0.0229       -0.0291     0.0062  0.2191   0.2433  0.2638           -0.2329          -0.2391
-            per-pattern    pattern bullish_engulfing    189 11624        -0.0530       -0.0280    -0.0249 -0.3576   0.2381  0.2620           -0.2630          -0.2380
-            per-pattern pattern bullish_spinning_top   1536 10277        -0.0532       -0.0247    -0.0285 -1.1202   0.2441  0.2643           -0.2632          -0.2347
-            per-pattern                 pattern doji   2602  9211        -0.0381       -0.0257    -0.0124 -0.6079   0.2498  0.2650           -0.2481          -0.2357
-            per-pattern       pattern dragonfly_doji     30 11783         0.0895       -0.0287     0.1183  0.7771   0.3333  0.2615           -0.1205          -0.2387
-            per-pattern      pattern gravestone_doji     75 11738        -0.0475       -0.0283    -0.0192 -0.1603   0.2667  0.2616           -0.2575          -0.2383
-            per-pattern               pattern hammer     48 11765        -0.0750       -0.0282    -0.0468 -0.5867   0.2083  0.2619           -0.2850          -0.2382
-            per-pattern          pattern hanging_man     76 11737         0.1719       -0.0297     0.2016  1.5059   0.3421  0.2611           -0.0381          -0.2397
-            per-pattern      pattern inverted_hammer     68 11745        -0.1766       -0.0276    -0.1490 -2.3609   0.1765  0.2622           -0.3866          -0.2376
-            per-pattern        pattern shooting_star    128 11685        -0.0341       -0.0284    -0.0058 -0.0618   0.3359  0.2608           -0.2441          -0.2384
-            per-pattern       pattern tweezer_bottom     52 11761        -0.0926       -0.0281    -0.0645 -0.7831   0.2308  0.2618           -0.3026          -0.2381
-            per-pattern          pattern tweezer_top    171 11642         0.0093       -0.0290     0.0382  0.4500   0.2632  0.2616           -0.2007          -0.2390
+        setup bull_flag          v3 bullish at entry     27  1214        -0.2216       -0.0000    -0.2216 -1.6118   0.1852  0.3254           -0.4316          -0.2100
+setup flat_top_breakout          v3 bullish at entry     46  1610        -0.0369       -0.0002    -0.0366 -0.2004   0.2174  0.2311           -0.2469          -0.2102
+     setup ma9_pullback          v3 bullish at entry    152  2682        -0.1250       -0.0170    -0.1080 -1.7257   0.1842  0.2890           -0.3350          -0.2270
+   setup micro_pullback          v3 bullish at entry    124  4633        -0.0331       -0.0208    -0.0123 -0.2004   0.2823  0.2974           -0.2431          -0.2308
+            setup orb15          v3 bullish at entry      1   370        -0.2658        0.1467        NaN     NaN   0.0000  0.2324           -0.4758          -0.0633
+     setup vwap_reclaim          v3 bullish at entry     30   924         0.0991       -0.0534     0.1525  0.7768   0.4000  0.3171           -0.1109          -0.2634
+            per-pattern    pattern bearish_engulfing    136 11677         0.0075       -0.0143     0.0218  0.2809   0.2868  0.2869           -0.2025          -0.2243
+            per-pattern pattern bearish_spinning_top   1233 10580        -0.0159       -0.0138    -0.0021 -0.0730   0.2620  0.2898           -0.2259          -0.2238
+            per-pattern    pattern bullish_engulfing    189 11624        -0.0720       -0.0131    -0.0589 -0.8281   0.2434  0.2876           -0.2820          -0.2231
+            per-pattern pattern bullish_spinning_top   1536 10277        -0.0488       -0.0088    -0.0400 -1.5450   0.2591  0.2910           -0.2588          -0.2188
+            per-pattern                 pattern doji   2602  9211        -0.0346       -0.0082    -0.0264 -1.2645   0.2656  0.2929           -0.2446          -0.2182
+            per-pattern       pattern dragonfly_doji     30 11783         0.0752       -0.0142     0.0894  0.5840   0.3333  0.2868           -0.1348          -0.2242
+            per-pattern      pattern gravestone_doji     75 11738        -0.0402       -0.0139    -0.0264 -0.2186   0.2800  0.2869           -0.2502          -0.2239
+            per-pattern               pattern hammer     48 11765        -0.0750       -0.0138    -0.0613 -0.7677   0.2083  0.2872           -0.2850          -0.2238
+            per-pattern          pattern hanging_man     76 11737         0.1876       -0.0153     0.2030  1.4724   0.3553  0.2864           -0.0224          -0.2253
+            per-pattern      pattern inverted_hammer     68 11745        -0.1643       -0.0131    -0.1512 -2.3317   0.1912  0.2874           -0.3743          -0.2231
+            per-pattern        pattern shooting_star    128 11685        -0.0012       -0.0142     0.0130  0.1352   0.3750  0.2859           -0.2112          -0.2242
+            per-pattern       pattern tweezer_bottom     52 11761        -0.0926       -0.0137    -0.0789 -0.9584   0.2308  0.2871           -0.3026          -0.2237
+            per-pattern          pattern tweezer_top    171 11642         0.0103       -0.0144     0.0247  0.2869   0.2982  0.2867           -0.1997          -0.2244
 
 per-pattern cells: 13; Bonferroni(0.05) |t| threshold = 2.89
 
 rupee P&L of the pool, by cost model (same trades, cost swapped):
-  real MIS 0.21%   all   -1,296,692   confirmed-only      -49,036   unconfirmed-only   -1,247,656
-  stress 0.80%     all   -4,432,688   confirmed-only     -153,516   unconfirmed-only   -4,279,172
+  real MIS 0.21%   all   -1,214,089   confirmed-only      -49,920   unconfirmed-only   -1,164,169
+  stress 0.80%     all   -4,350,086   confirmed-only     -154,400   unconfirmed-only   -4,195,685
+
+formation size at the fill: median 0.72x the ten-candle average range; 53.9% below the 0.75x display threshold
 
 exit-reason mix:
 exit_reason  ema20_break  ema9_break  eod_close  false_break  macd_fade  resistance_reject  stop  target  trail_stop  volume_climax
 confirmed                                                                                                                          
-False                0.0         0.0        7.4         23.8        0.0                0.1  36.2    19.7        12.9            0.0
-True                 0.0         0.3        6.3         32.9        0.0                0.0  30.5    16.8        13.2            0.0
+False                0.0         0.0        7.8         24.3        0.0                0.1  38.1    21.8         7.9            0.0
+True                 0.0         0.3        6.6         33.2        0.0                0.0  31.6    17.4        11.1            0.0

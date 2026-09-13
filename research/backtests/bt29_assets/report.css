@@ -58,6 +58,9 @@ svg.chart { width: 100%; height: auto; display: block; }
 .pat.bullish .pat-label { fill: var(--up); }
 .pat.bearish .pat-label { fill: var(--dn); }
 .pat.sel .pat-box { fill-opacity: .17; stroke-opacity: .9; }
+/* Correctly named, but the candle is small relative to the recent average
+   range: shown, never hidden, and visibly de-emphasised. */
+.pat.weak .pat-box { stroke-dasharray: 3 3; }
 .pat { cursor: pointer; }
 table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
 th, td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }

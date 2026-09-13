@@ -35,6 +35,7 @@ sys.path.insert(0, str(ROOT / "apps" / "signal-engine"))
 
 from src.momentum_trader.candles import (  # noqa: E402
     PATTERN_RULES_VERSION,
+    STRENGTH_WEAK_BELOW,
     completed_pattern_matches,
 )
 from src.momentum_trader.engine import resample_5m  # noqa: E402
@@ -58,6 +59,9 @@ def scan_session(tf5: pd.DataFrame) -> list[dict]:
                 "prior_trend": match.prior_trend, "start": match.start, "end": match.end,
                 "confirmation": round(match.confirmation, 2),
                 "invalidation": round(match.invalidation, 2),
+                # Descriptive size, straight from the detector (candles.py).
+                "strength": match.strength,
+                "weak": bool(match.strength < STRENGTH_WEAK_BELOW),
             }
     return list(seen.values())
 
@@ -80,7 +84,14 @@ def bar_fraction(tf5: pd.DataFrame, ts: pd.Timestamp) -> float | None:
 
 
 def pick(scored: pd.DataFrame, limit: int, seed: int) -> pd.DataFrame:
-    """Stratified, deterministic: oversample the trades the test is about."""
+    """Stratified, deterministic: oversample the trades the test is about.
+
+    `sample(random_state=seed)` draws by row POSITION, and a `--jobs N` scan
+    writes `bt29_trades_scored.csv` in worker-completion order, so without the
+    sort below the same seed on the same data picks a different ~18% of the
+    charts every run — which makes two reports impossible to compare.
+    """
+    scored = scored.sort_values(["date", "symbol", "entry_time"]).reset_index(drop=True)
     quota = [("bullish", int(limit * 0.50)), ("bearish", int(limit * 0.22)),
              ("indecision only", int(limit * 0.16)), ("none", int(limit * 0.12))]
     parts = []
@@ -143,10 +154,9 @@ def build_payload(rows: pd.DataFrame) -> list[dict]:
                 "bucket": r["bucket"],
                 "pullback_ord": (int(r["pullback_ord"])
                                  if pd.notna(r.get("pullback_ord")) else None),
-                "pat_rng_pct": (round(float(r["pat_rng_pct"]), 3)
-                                if pd.notna(r.get("pat_rng_pct")) else None),
-                "pat_rng_vs_base": (round(float(r["pat_rng_vs_base"]), 2)
-                                    if pd.notna(r.get("pat_rng_vs_base")) else None),
+                # Size of the nearest formation, as the detector reported it.
+                "strength": (round(float(r["v3_strength"]), 2)
+                             if pd.notna(r.get("v3_strength")) else None),
                 "entry_x": entry_x, "exit_x": exit_x,
             },
         })
@@ -292,8 +302,9 @@ def main() -> int:
         "breakeven-lock defect was fixed on 2026-09-06. The multi-entry arm (2nd, 3rd, 5th "
         "re-entry on the same stock) is excluded — it was killed as a strategy and its "
         "trades are not ones you would take. Each card shows the <b>pullback ordinal</b> and "
-        "how big the nearest formation was relative to the recent average range, so a "
-        "correctly-labelled but insignificant candle is visible as such."
+        "how big the nearest formation was relative to the recent average range. A "
+        f"formation below <b>{STRENGTH_WEAK_BELOW:g}\u00d7</b> that range is drawn faint: "
+        "the name is correct, the candle is too small to act on."
     )
     chips = (
         f'<span class="chip">past trades <b>{len(scored):,}</b></span>'

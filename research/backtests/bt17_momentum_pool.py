@@ -254,6 +254,13 @@ def main() -> int:
     ap.add_argument("--max-move", action="store_true",
                     help="apply the full strict checklist registered in "
                          "2026-09-07-max-move-checklist")
+    ap.add_argument("--require-1m-agreement", action="store_true",
+                    help="refuse a 5-min entry whose own 1-min chart disagrees (1-min "
+                         "EMA9>EMA20, green trigger minute closing in its top 40% on "
+                         ">=2.5x its recent 1-min volume). Off by default, matching the "
+                         "MT_REQUIRE_1M_AGREEMENT env switch: BT30 measured it as a "
+                         "~43% trade-count cut, not a filter (anti p=0.526) "
+                         "(hypothesis 2026-09-12-one-minute-agreement)")
     ap.add_argument("--first-candidate-only", action="store_true",
                     help="do not replace a refused first setup with a later setup that day")
     ap.add_argument("--multi-entry", action="store_true",
@@ -294,7 +301,8 @@ def main() -> int:
     cfg = EngineConfig(stress_slip=STRESS_SLIP, exit_mode=a.exit_mode,
                        fill_mode=a.fill_mode, one_trade_per_day=not a.multi_entry,
                        require_quality=a.quality, require_max_move=a.max_move,
-                       first_candidate_only=a.first_candidate_only, **cfg_kw)
+                       first_candidate_only=a.first_candidate_only,
+                       require_1m_agreement=a.require_1m_agreement, **cfg_kw)
 
     all_trades: list[ClosedTrade] = []
     all_cands: list[dict] = []

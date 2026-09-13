@@ -43,6 +43,7 @@ from src.momentum_trader import candles as C  # noqa: E402
 from src.momentum_trader.candles import (  # noqa: E402
     BODY_LOOKBACK,
     PATTERN_RULES_VERSION,
+    STRENGTH_WEAK_BELOW,
     completed_pattern_matches,
 )
 from src.momentum_trader.engine import resample_5m  # noqa: E402
@@ -150,6 +151,7 @@ def scan_day(
                 continue
             row = asdict(match)
             row.pop("evidence", None)
+            row["weak"] = bool(match.strength < STRENGTH_WEAK_BELOW)
             row.update(forward_returns(tf5, end))
             seen[key] = row
         if want_misses:

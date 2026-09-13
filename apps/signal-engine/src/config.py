@@ -173,9 +173,15 @@ class Settings(BaseSettings):
     mt_max_positions: int = 5                 # concurrent open paper positions
     mt_log_csv: str = "research/backtests/mt_forward_log.csv"  # spec §6 forward log
     mt_cache_dir: str = ".cache_upstox"       # instrument master + candle cache
-    mt_strategy: str = "baseline"             # baseline | catalyst_first_pullback | attention_1m | attention_1m_resistance_state | attention_1m_false_break_reclaim
+    mt_strategy: str = "baseline"             # baseline | catalyst_first_pullback | attention_1m | attention_1m_resistance_state | attention_1m_false_break_reclaim | attention_1m_merged (the single deployed forward arm)
     mt_attention_day_chg_min: float = 1.5      # promotion only; never sufficient to enter
     mt_attention_rvol_min: float = 1.5         # promotion only; never sufficient to enter
+    # Five-minute entries only: refuse one whose own 1-min chart disagrees
+    # (1m EMA9>EMA20, green trigger minute closing in its top 40% on >=2.5x
+    # volume). KILLED as a filter by BT30 (anti p=0.526); it only cuts trade
+    # count ~43%, so treat it as a frequency dial. Attention setups are exempt
+    # by construction, so this is a no-op for every attention_1m* strategy.
+    mt_require_1m_agreement: bool = False
     mt_bypass_market_hours: bool = False      # run the loop outside 09:15–15:35 (tests)
 
     # Observability

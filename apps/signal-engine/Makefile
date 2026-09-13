@@ -66,6 +66,13 @@ mt-scan-first-pullback:
 mt-dry-run-first-pullback:
 	MT_STRATEGY=catalyst_first_pullback MT_LOG_CSV=research/backtests/mt_catalyst_first_pullback_forward_log.csv uv run python -m src.momentum_trader.scanner --dry-run
 
+# The single deployed forward arm (everything on): this is the one to run.
+mt-scan-merged:
+	MT_STRATEGY=attention_1m_merged MT_LOG_CSV=research/backtests/mt_attention_1m_merged_forward_log.csv uv run python -m src.momentum_trader.scanner
+
+mt-dry-run-merged:
+	MT_STRATEGY=attention_1m_merged MT_LOG_CSV=research/backtests/mt_attention_1m_merged_forward_log.csv uv run python -m src.momentum_trader.scanner --dry-run
+
 # Two-list forward paper strategy: broad scan -> attention -> 1-minute confirmation.
 mt-scan-attention:
 	MT_STRATEGY=attention_1m MT_LOG_CSV=research/backtests/mt_attention_1m_forward_log.csv uv run python -m src.momentum_trader.scanner

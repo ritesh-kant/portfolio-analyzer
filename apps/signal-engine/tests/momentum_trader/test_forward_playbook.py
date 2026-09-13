@@ -10,6 +10,7 @@ from src.momentum_trader import engine as eng
 from src.momentum_trader.scanner import (
     STRATEGY_ATTENTION_1M,
     STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM,
+    STRATEGY_ATTENTION_1M_MERGED,
     STRATEGY_ATTENTION_1M_RESISTANCE_STATE,
     STRATEGY_CATALYST_FIRST_PULLBACK,
     _market_data_token,
@@ -63,6 +64,22 @@ def test_scanner_selects_separate_false_break_reclaim_arm() -> None:
     assert cfg.fill_mode == eng.FILL_FUTURE_TRIGGER
     assert cfg.exit_mode == "trend_full"
     assert cfg.allow_false_break_reentry
+
+
+def test_scanner_merged_arm_turns_every_feature_on() -> None:
+    """The single deployed forward arm is the union of the arms it replaced."""
+    cfg = _strategy_config(Settings(
+        mt_strategy=STRATEGY_ATTENTION_1M_MERGED,
+        mt_attention_day_chg_min=1.5,
+        mt_attention_rvol_min=1.5,
+    ))
+    assert cfg.fill_mode == eng.FILL_FUTURE_TRIGGER   # resting buy-stop
+    assert cfg.exit_mode == "trend_resistance_state"
+    assert cfg.use_attention_entries
+    assert cfg.require_resistance_breakout            # from the resistance-state arm
+    assert cfg.allow_false_break_reentry              # from the reclaim arm
+    assert cfg.attention_day_chg_min == pytest.approx(1.5)
+    assert cfg.attention_rvol_min == pytest.approx(1.5)
 
 
 def test_scanner_rejects_unknown_strategy() -> None:

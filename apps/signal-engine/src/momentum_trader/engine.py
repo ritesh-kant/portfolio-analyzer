@@ -74,6 +74,18 @@ ATTENTION_SETUP = "attention_1m_confirmation"
 ATTENTION_FALSE_BREAK_RECLAIM_SETUP = "attention_false_break_reclaim"
 ONE_MINUTE_SETUPS = ("micro_pullback", ATTENTION_SETUP, ATTENTION_FALSE_BREAK_RECLAIM_SETUP)
 
+# ── one-minute agreement gate ────────────────────────────────────────────────
+# "Do not take a five-minute entry the one-minute chart disagrees with."
+# Every threshold here is REUSED from a rule already frozen in this module, so
+# the gate introduces no new tunable number:
+#   * EMA9 > EMA20        — the trend test `_attention_context` applies on 5m;
+#   * close in the top 40% of the bar and volume ≥ ATTENTION_CONFIRM_VOL_RATIO
+#                         — the two tests `_attention_confirmation` applies on 1m.
+# See research/hypotheses/2026-09-12-one-minute-agreement.md.
+ONE_MIN_CLOSE_POSITION_MIN = 0.60
+ONE_MIN_EMA_FAST = 9
+ONE_MIN_EMA_SLOW = 20
+
 CatalystLookup = Callable[[str, pd.Timestamp], tuple[int, str]]
 
 
@@ -101,6 +113,18 @@ class EngineConfig:
     # This makes a filtered arm an exact subset of its control arm, which is
     # necessary for the random-subset anti-test.
     first_candidate_only: bool = False
+    # Refuse a five-minute entry whose own one-minute chart is not in favour.
+    # OFF by default, switchable per deployment via MT_REQUIRE_1M_AGREEMENT.
+    # BT30 (2026-09-13) KILLED it as a FILTER: -0.0003 pp on mean gross,
+    # anti-strategy p = 0.526, and the trades it removes are as good as the ones
+    # it keeps (+0.0520% vs +0.0513%). Its only measured effect is FREQUENCY: it
+    # cuts trade count 43%, which shrinks total loss while per-trade expectancy
+    # is negative (-₹138.6k -> -₹83.1k on 2022-23) but costs slightly more per
+    # trade (-₹81 vs -₹76; a random 43% cut loses less, -₹78.7k). Turn it on
+    # only with that reading, and revisit it the moment expectancy turns
+    # positive — it would then remove 43% of the profit.
+    # research/hypotheses/2026-09-12-one-minute-agreement.md §5, §6
+    require_1m_agreement: bool = False
     # A forward playbook may name its exact setup and pullback ordinal. Empty
     # tuples preserve the full frozen Warrior setup list.
     allowed_setups: tuple[str, ...] = ()
@@ -433,6 +457,45 @@ def _playbook_gate(
     return True, "ok"
 
 
+def _one_minute_gate(
+    bars_1m: pd.DataFrame, setup: Setup, cfg: EngineConfig
+) -> tuple[bool, str]:
+    """(ok, reason) — is the one-minute chart in favour of this entry?
+
+    Judged on the last CLOSED one-minute bar at the moment the five-minute
+    setup is detected, so it can never see past the decision and it reads the
+    same in every fill mode (the fill-latency comparison needs both arms to
+    take identical trades).
+
+    A setup that is itself decided on one-minute evidence passes untouched:
+    its own confirmation already IS this test, and re-applying it would make
+    the attention lane a different strategy rather than a gated one.
+    """
+    if not cfg.require_1m_agreement:
+        return True, "ok"
+    if _is_one_minute_setup(setup.name):
+        return True, "ok"
+    if len(bars_1m) < ONE_MIN_EMA_SLOW + 1:
+        return False, "1m_warmup"
+    fast = ema(bars_1m["close"], ONE_MIN_EMA_FAST)
+    slow = ema(bars_1m["close"], ONE_MIN_EMA_SLOW)
+    if pd.isna(fast.iloc[-1]) or pd.isna(slow.iloc[-1]):
+        return False, "1m_warmup"
+    if float(fast.iloc[-1]) <= float(slow.iloc[-1]):
+        return False, "1m_trend_down"
+    bar = bars_1m.iloc[-1]
+    open_, high, low, close = map(float, (bar["open"], bar["high"], bar["low"], bar["close"]))
+    rng = high - low
+    if rng <= 0.0 or close <= open_:
+        return False, "1m_red_or_flat"
+    if (close - low) / rng < ONE_MIN_CLOSE_POSITION_MIN:
+        return False, "1m_weak_close"
+    vr = volume_ratio(bars_1m).iloc[-1]
+    if pd.isna(vr) or float(vr) < cfg.attention_confirm_vol_ratio:
+        return False, "1m_low_volume"
+    return True, "ok"
+
+
 def _is_one_minute_setup(name: str) -> bool:
     return name in ONE_MINUTE_SETUPS
 
@@ -504,7 +567,7 @@ def _entry_evidence(state: DayState, bars_1m: pd.DataFrame,
             "formed_at": (bars_1m.index[-1] + pd.Timedelta(minutes=1)).isoformat(),
             **{k: float(bar[k]) for k in ("open", "high", "low", "close", "volume")},
             "close_position": float((bar["close"] - bar["low"]) / (bar["high"] - bar["low"])),
-            "minimum_close_position": 0.60,
+            "minimum_close_position": ONE_MIN_CLOSE_POSITION_MIN,
             "volume_ratio": float(volume_ratio(bars_1m).iloc[-1]),
             "minimum_volume_ratio": cfg.attention_confirm_vol_ratio,
         },
@@ -543,7 +606,7 @@ def _attention_confirmation(
     rng = high - low
     if rng <= 0.0 or close <= open_:
         return None, "attention_red_or_flat"
-    if (close - low) / rng < 0.60:
+    if (close - low) / rng < ONE_MIN_CLOSE_POSITION_MIN:
         return None, "attention_weak_close"
     vr = volume_ratio(bars_1m)
     if pd.isna(vr.iloc[-1]) or float(vr.iloc[-1]) < min_volume_ratio:
@@ -1011,6 +1074,7 @@ def step(
     m_ok, m_reason = _max_move_gate(setup, macd_hist, dround, res_head, sup_drop, cfg)
     ordinal = pullback_ordinal(tf5) if len(tf5) else None
     p_ok, p_reason = _playbook_gate(setup, ordinal, cfg)
+    o_ok, o_reason = _one_minute_gate(bars_1m, setup, cfg)
     cat, ev = catalyst(state.symbol, now)
     # Ordinal is read off the 5-min frame for EVERY setup (micro_pullback
     # included) so the number means the same thing on every row.
@@ -1027,9 +1091,11 @@ def step(
         resist_head_pct=res_head, support_drop_pct=sup_drop,
     )
     state.candidates.append(cand)   # refused setups are logged too, then dropped
-    if not q_ok or not m_ok or not p_ok:
+    if not q_ok or not m_ok or not p_ok or not o_ok:
         if q_ok:
-            cand.quality_reason = m_reason if not m_ok else p_reason
+            cand.quality_reason = (
+                m_reason if not m_ok else p_reason if not p_ok else o_reason
+            )
         return
     state.pending = Pending(cand)
 

@@ -349,3 +349,32 @@ hammer 10 -> 5, hanging man 10 -> 3, inverted hammer 12 -> 7, shooting star
 7 -> 2 (position rule); spinning tops +4 (cap removed); everything else equal.
 Near misses 507 -> 529. Tests: 319 -> 323 passing, new cases for every rule
 that changed.
+
+## Strength — a size number alongside the name (13 Sep 2026)
+
+`PatternMatch.strength` = range of the formation's **confirming (last) candle**
+divided by the mean range of the ten candles before the formation. One
+definition works across all 21 patterns because the last candle is the
+confirming candle in every one of them. `candles.STRENGTH_WEAK_BELOW = 0.75`
+is the suggested display threshold; `evidence["signal_candle_range"]` carries
+the numerator so the value is auditable.
+
+**Why it exists.** Every published definition of a doji, hammer or spinning top
+is a ratio test against the candle's *own* range. A candle spanning ₹0.70 on a
+₹615 stock passes "body ≤ 10% of range" exactly as well as one spanning ₹7.00.
+The name is right; the ratio simply cannot say whether the candle was big enough
+to matter. Measured over the 5,045 formations found at real trade entries in
+BT29: 74.7% are below 1.0× and 12.9% span less than one 0.21% round trip.
+
+**What it deliberately does not do.** It gates nothing. No detection is
+suppressed, no name changes, and `PATTERN_RULES_VERSION` stays
+`candles-v3-20260912` — re-running BT28 or BT29 reproduces the identical set of
+matches (verified on 300 trade entries: zero differences). TA-Lib has no size
+floor either; inventing one inside the detector would silently redefine the
+patterns. Consumers decide: the momentum trade chart and both audit reports draw
+sub-threshold formations faint with a dashed box and print the multiple in the
+label.
+
+Splitting BT29's clean pool at 1× gives +0.026 pp in favour of the larger
+formations (t = +0.50). Real in direction, far too small to trade. This field
+improves the annotation; it is not an edge and must not be sold as one.

@@ -1,5 +1,4 @@
 export default {
-  "apps/signal-engine/**/*.py": () => "pnpm --filter signal-engine typecheck",
   "apps/web/**/*.{ts,tsx}": () => "pnpm --filter web typecheck",
   "apps/portfolio-service/**/*.{ts,tsx}": () => "pnpm --filter portfolio-service typecheck",
   "apps/analytics-service/**/*.{ts,tsx}": () => "pnpm --filter analytics-service typecheck",

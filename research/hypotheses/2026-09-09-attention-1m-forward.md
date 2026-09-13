@@ -61,3 +61,8 @@ this sample; any revision gets a new file and a new forward log.
 ## Result
 
 Pending forward accumulation. The TEGA 2026-09-09 trade is excluded.
+
+## Superseded 2026-09-12
+
+Folded into [attention-1m-merged-forward](2026-09-12-attention-1m-merged-forward.md) at the operator's request for a single forward arm. This arm is retired **before** its review gate was reached, so it has no result and must never be reported as one. Its closed trades are diagnostic only.
+
