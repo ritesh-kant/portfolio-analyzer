@@ -1,0 +1,73 @@
+2026-09-13 21:15:37,606 INFO simulating 15 symbols on 8 workers
+2026-09-13 21:15:43,702 INFO [1/15] BERGEPAINT bars=177854 trades=0 (6s)
+2026-09-13 21:15:47,599 INFO [2/15] ANGELONE bars=130919 trades=3 (10s)
+2026-09-13 21:15:57,067 INFO [3/15] COROMANDEL bars=183479 trades=5 (19s)
+2026-09-13 21:15:57,993 INFO [4/15] LALPATHLAB bars=135055 trades=4 (20s)
+2026-09-13 21:16:15,997 INFO [5/15] HINDZINC bars=184591 trades=10 (38s)
+2026-09-13 21:16:17,006 INFO [6/15] CEATLTD bars=123335 trades=11 (39s)
+2026-09-13 21:16:41,508 INFO [7/15] JSWENERGY bars=134294 trades=21 (64s)
+2026-09-13 21:16:44,289 INFO [8/15] SUMICHEM bars=183819 trades=11 (67s)
+2026-09-13 21:16:44,509 INFO [9/15] 360ONE bars=175056 trades=12 (67s)
+2026-09-13 21:16:48,543 INFO [10/15] MOTILALOFS bars=183856 trades=25 (71s)
+2026-09-13 21:16:49,361 INFO [11/15] REDINGTON bars=184215 trades=9 (72s)
+2026-09-13 21:16:53,471 INFO [12/15] GICRE bars=175262 trades=13 (76s)
+2026-09-13 21:17:01,912 INFO [13/15] OLECTRA bars=173629 trades=12 (84s)
+2026-09-13 21:17:18,133 INFO [14/15] ELGIEQUIP bars=184519 trades=19 (101s)
+2026-09-13 21:17:39,570 INFO [15/15] TTML bars=181593 trades=10 (122s)
+2026-09-13 21:17:39,581 INFO daily pre-filter skipped 0 symbols with no eligible day
+
+wrote bt17_trades_par8.csv (165 trades), bt17_candidates_par8.csv (407 candidates)
+
+==============================================================================
+BT17 — momentum POOL (no catalyst split) | 2022-01-01..2023-12-31 | 15 symbols | exit=trend_resistance_state fill=future_trigger
+   context test for hypothesis v2 §5.1 — NOT a gate; float/band filters not applied
+==============================================================================
+
+ALL trades:
+         n  win%  gross%/tr  net%/tr  ...  sharpe  false_break%  stop%  target%
+all 165.00  4.85      -0.05    -1.05  ...  -27.24         44.24   2.42     0.00
+
+[1 rows x 10 columns]
+
+by setup:
+                                   n  win%  ...  stop%  target%
+setup                                       ...                
+attention_1m_confirmation     142.00  5.63  ...   1.41     0.00
+attention_false_break_reclaim  23.00  0.00  ...   8.70     0.00
+
+[2 rows x 10 columns]
+
+by year:
+         n  win%  gross%/tr  net%/tr  ...  sharpe  false_break%  stop%  target%
+year                                  ...                                      
+2022 94.00  5.32      -0.13    -1.14  ...  -27.66         51.06   3.19     0.00
+2023 71.00  4.23       0.07    -0.94  ...  -27.59         35.21   1.41     0.00
+
+[2 rows x 10 columns]
+
+by exit reason (share of trades, mean net%):
+                   count  mean
+exit_reason                   
+ema9_break            30 -0.38
+eod_close              4 -1.01
+false_break           73 -1.44
+macd_fade              6 -0.39
+resistance_reject      4 -0.16
+stop                   4 -1.80
+trail_stop            26 -1.21
+volume_climax         18 -0.65
+
+prev-day gainer vs fresh:
+                     n  win%  gross%/tr  ...  false_break%  stop%  target%
+prev_day_gainer                          ...                              
+0               143.00  4.90      -0.02  ...         41.96   2.10     0.00
+1                22.00  4.55      -0.23  ...         59.09   4.55     0.00
+
+[2 rows x 10 columns]
+
+fill gap vs trigger level (entry/trigger − 1, %) — the latency cost:
+  mean +0.1883  median +0.1247  p90 +0.4616  max +0.9219  at-or-below-trigger 17.0%
+  mean qty 174
+
+>>> POOL stressed net/trade = -1.053%  (negative — this is the fade the catalyst must overcome)
+    wins needed at 2:1 to break even = 33%; observed win rate = 4.8%

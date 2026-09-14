@@ -132,6 +132,16 @@ class EngineConfig:
     # positive — it would then remove 43% of the profit.
     # research/hypotheses/2026-09-12-one-minute-agreement.md §5, §6
     require_1m_agreement: bool = False
+
+    # BT33 variant of the local-resistance rule, OFF by default so the shipped
+    # behaviour is unchanged. Three changes measured together (attribution
+    # forfeited on purpose - the 5m merge was measured inert at 7.3%, so the
+    # live parts are the other two):
+    #   * no 5m level merge;
+    #   * round-number marks excluded from the headroom test - a price grid is
+    #     not supply, and round-number entry rules were already killed here;
+    #   * a refusal ends the day instead of freeing it for a later entry.
+    resistance_veto_v2: bool = False
     # A forward playbook may name its exact setup and pullback ordinal. Empty
     # tuples preserve the full frozen Warrior setup list.
     allowed_setups: tuple[str, ...] = ()
@@ -315,6 +325,9 @@ class DayState:
     rejections: list[Rejection] = field(default_factory=list)
     false_break_reclaim: FalseBreakReclaim | None = None
     false_break_reclaim_attempted: bool = False
+    # Set when the resistance headroom test refuses an entry under
+    # `resistance_veto_v2`: the day is finished, not merely postponed.
+    resistance_refused: bool = False
 
 
 def _bars_5m(bars_1m: pd.DataFrame, full_5m: pd.DataFrame | None) -> pd.DataFrame:
@@ -655,10 +668,20 @@ def _attention_confirmation(
     )
 
 
+# Both branches of the headroom test refuse for the same reason: not enough
+# room to the next ceiling. Kept as one set so a later rename cannot silently
+# drop one of them from the v2 end-of-day rule.
+_RESISTANCE_WAIT_REASONS = frozenset({
+    "attention_wait_resistance_break",
+    "attention_wait_next_resistance_break",
+})
+
+
 def _resistance_aware_attention_confirmation(
     bars_1m: pd.DataFrame,
     min_volume_ratio: float,
     prev_day: dict[str, float] | None,
+    v2: bool = False,
 ) -> tuple[Setup | None, str]:
     """Apply the unchanged 1-minute confirmation to structural resistance.
 
@@ -675,6 +698,23 @@ def _resistance_aware_attention_confirmation(
     if prior.empty:
         return setup, reason
     levels_before_confirmation = derive_levels(prior, prev_day)
+    if not v2:
+        # A one-minute pivot can sit immediately below a still-unbroken
+        # five-minute ceiling.  Entry and charting must use the same
+        # multi-timeframe view, or a local breakout can arm a trade directly
+        # into the resistance shown to the operator.  Measured on 805
+        # confirmations this changes the binding level 7.3% of the time, so v2
+        # drops it and keeps the level set on one timeframe.
+        prior_5m = resample_5m(prior)
+        if not prior_5m.empty:
+            levels_before_confirmation += derive_levels(prior_5m, prev_day)
+
+    # What counts as a ceiling for the headroom test. A round number is a
+    # property of the price grid, not of supply, yet it is the binding level in
+    # 31% of refusals; round-number entry rules were separately measured at
+    # +0.022 pp and killed, so v2 refuses to spend a trade on one.
+    headroom_levels = ([x for x in levels_before_confirmation if x.kind != "round"]
+                       if v2 else levels_before_confirmation)
 
     # If the confirmation has just crossed the closest structural level, it is
     # the proper breakout confirmation—not an early signal below that level.
@@ -682,6 +722,13 @@ def _resistance_aware_attention_confirmation(
         levels_before_confirmation, float(prior["close"].iloc[-1])
     )
     if crossed is not None and float(bars_1m["close"].iloc[-1]) > crossed.price:
+        next_resistance = nearest_structural_resistance(
+            headroom_levels, setup.trigger
+        )
+        initial_risk = setup.trigger - setup.stop
+        if (next_resistance is not None
+                and next_resistance.price - setup.trigger < initial_risk):
+            return None, "attention_wait_next_resistance_break"
         return Setup(
             name=setup.name,
             trigger=setup.trigger,
@@ -690,7 +737,7 @@ def _resistance_aware_attention_confirmation(
             meta={**setup.meta, "accepted_resistance": crossed.price},
         ), "confirmed_resistance_breakout"
 
-    resistance = nearest_structural_resistance(levels_before_confirmation, setup.trigger)
+    resistance = nearest_structural_resistance(headroom_levels, setup.trigger)
     if resistance is not None:
         headroom = resistance.price - setup.trigger
         initial_risk = setup.trigger - setup.stop
@@ -988,6 +1035,8 @@ def step(
         return
     if cfg.first_candidate_only and state.candidate_seen:
         return
+    if state.resistance_refused:
+        return
     chg = day_change_pct(bars_1m, state.prev_close)
     rv = rvol_now(bars_1m, state.cum_vol_profile)
 
@@ -1040,13 +1089,20 @@ def step(
             return
         if cfg.require_resistance_breakout:
             setup, confirmation_reason = _resistance_aware_attention_confirmation(
-                bars_1m, cfg.attention_confirm_vol_ratio, state.prev_day
+                bars_1m, cfg.attention_confirm_vol_ratio, state.prev_day,
+                cfg.resistance_veto_v2,
             )
         else:
             setup, confirmation_reason = _attention_confirmation(
                 bars_1m, cfg.attention_confirm_vol_ratio
             )
         if setup is None:
+            # Under v2 a headroom refusal ends the day. Leaving it open lets a
+            # later, worse confirmation take the slot the refused setup would
+            # have used: those replacement entries were measured at -0.0072%
+            # against +0.0362% for simply standing aside.
+            if cfg.resistance_veto_v2 and confirmation_reason in _RESISTANCE_WAIT_REASONS:
+                state.resistance_refused = True
             state.rejections.append(Rejection(
                 symbol=state.symbol,
                 time=now,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 from src.momentum_trader import engine as eng
+from src.momentum_trader.levels import Level
 
 IST = "Asia/Kolkata"
 COLS = ["open", "high", "low", "close", "volume"]
@@ -286,6 +287,101 @@ def test_resistance_aware_confirmation_uses_the_crossed_ceiling_as_false_break_l
     )
     assert setup is not None and reason == "confirmed_resistance_breakout"
     assert setup.level == pytest.approx(102.0)
+
+
+def test_local_breakout_waits_when_next_timeframe_resistance_has_no_risk_room(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not buy a 1m breakout directly beneath the next 5m ceiling."""
+    bars = _attention_prelude()
+    confirmation = pd.DataFrame(
+        [(101.70, 102.30, 101.60, 102.20, 1200.0)],
+        index=pd.DatetimeIndex([bars.index[-1] + pd.Timedelta(minutes=1)]), columns=COLS,
+    )
+    bars = pd.concat([bars, confirmation])
+    calls = 0
+
+    def levels_for_timeframe(*_args: object, **_kwargs: object) -> list[Level]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return [Level(102.0, "pivot_high", 2, 0.0, 1.0)]
+        return [Level(102.50, "pivot_high", 2, 0.0, 1.0)]
+
+    monkeypatch.setattr(eng, "derive_levels", levels_for_timeframe)
+    monkeypatch.setattr(eng, "resample_5m", lambda _bars: _bars.iloc[:5])
+
+    setup, reason = eng._resistance_aware_attention_confirmation(bars, 2.5, None)
+
+    assert setup is None
+    assert reason == "attention_wait_next_resistance_break"
+
+
+def _confirmation_bars() -> pd.DataFrame:
+    """Prelude plus a confirming minute that closes through 102.0."""
+    bars = _attention_prelude()
+    confirmation = pd.DataFrame(
+        [(101.70, 102.30, 101.60, 102.20, 1200.0)],
+        index=pd.DatetimeIndex([bars.index[-1] + pd.Timedelta(minutes=1)]), columns=COLS,
+    )
+    return pd.concat([bars, confirmation])
+
+
+def test_v2_ignores_a_round_number_as_the_next_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A price grid is not supply: v2 must not spend a refusal on a round mark."""
+    bars = _confirmation_bars()
+
+    def levels(*_args: object, **_kwargs: object) -> list[Level]:
+        return [Level(102.0, "pivot_high", 2, 0.0, 1.0),
+                Level(102.35, "round", 1, 0.0, 0.8)]
+
+    monkeypatch.setattr(eng, "derive_levels", levels)
+    monkeypatch.setattr(eng, "resample_5m", lambda _bars: _bars.iloc[:5])
+
+    blocked, reason = eng._resistance_aware_attention_confirmation(bars, 2.5, None)
+    assert blocked is None and reason == "attention_wait_next_resistance_break"
+
+    setup, _ = eng._resistance_aware_attention_confirmation(bars, 2.5, None, v2=True)
+    assert setup is not None, "v2 should not refuse on the round level alone"
+
+
+def test_v2_does_not_merge_five_minute_levels(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the first (one-minute) level set may be consulted under v2."""
+    bars = _confirmation_bars()
+    calls = 0
+
+    def levels(*_args: object, **_kwargs: object) -> list[Level]:
+        nonlocal calls
+        calls += 1
+        # first call = 1m levels, second = the 5m merge v2 must skip
+        return ([Level(102.0, "pivot_high", 2, 0.0, 1.0)] if calls == 1
+                else [Level(102.50, "pivot_high", 2, 0.0, 1.0)])
+
+    monkeypatch.setattr(eng, "derive_levels", levels)
+    monkeypatch.setattr(eng, "resample_5m", lambda _bars: _bars.iloc[:5])
+
+    setup, _ = eng._resistance_aware_attention_confirmation(bars, 2.5, None, v2=True)
+    assert calls == 1, "v2 called derive_levels twice; the 5m merge is still on"
+    assert setup is not None
+
+
+def test_v2_refusal_ends_the_day_rather_than_freeing_it() -> None:
+    """A refused setup must not hand its slot to a later, worse confirmation."""
+    st = eng.DayState("TEST", prev_close=100.0, cum_vol_profile=None)
+    assert st.resistance_refused is False
+    st.resistance_refused = True
+    cfg = eng.EngineConfig(use_attention_entries=True, require_resistance_breakout=True,
+                           resistance_veto_v2=True)
+    bars = _confirmation_bars()
+    eng.step(st, bars, cfg, lambda _s, _t: (0, ""))
+    assert st.candidates == [], "entries continued after a v2 refusal"
+
+
+def test_resistance_veto_v2_is_off_by_default() -> None:
+    """The shipped arm keeps the operator's rule exactly as written."""
+    assert eng.EngineConfig().resistance_veto_v2 is False
 
 
 def test_false_break_reclaim_allows_one_new_future_only_entry() -> None:

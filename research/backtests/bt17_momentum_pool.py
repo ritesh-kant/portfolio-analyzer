@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import multiprocessing as mp
 import sys
 import time
 from datetime import date, timedelta
@@ -167,27 +168,82 @@ def simulate_symbol(
     return trades, cands
 
 
+def _trade_row(t: ClosedTrade) -> dict:
+    """One CSV row for a closed trade.
+
+    Split out of `trades_frame` so a worker process can return plain dicts
+    instead of pickling engine objects across the process boundary.
+    """
+    c = t.cand
+    return {
+        "date": str(c.time.date()), "year": c.time.year, "symbol": c.symbol, "setup": c.setup.name,
+        "trigger_time": c.time.strftime("%H:%M"), "entry_time": t.entry_time.strftime("%H:%M"),
+        "trigger": c.setup.trigger, "entry": t.entry, "stop": c.setup.stop,
+        "exit_time": t.exit_time.strftime("%H:%M"),
+        "exit": t.exit, "exit_reason": t.exit_reason, "qty": t.qty,
+        "day_chg_pct": c.day_chg_pct, "rvol": c.rvol, "catalyst": c.catalyst,
+        "event_type": c.event_type, "tags": "|".join(c.candle_tags),
+        "prev_day_gainer": int(c.prev_day_gainer), "pullback_ord": c.pullback_ord,
+        "quality_reason": c.quality_reason, "atr_pct": c.atr_pct, "macd_hist": c.macd_hist,
+        "dist_to_round_pct": c.dist_to_round_pct,
+        "round_head_pct": c.round_head_pct, "resist_head_pct": c.resist_head_pct,
+        "support_drop_pct": c.support_drop_pct,
+        "gross_pct": t.gross_pct, "net_pct": t.net_pct,
+        "gross_inr": t.gross_inr, "costs_inr": t.costs_inr, "net_inr": t.net_inr,
+    }
+
+
+# --------------------------------------------------------------------------
+# Parallel execution
+#
+# Symbols are independent: each one reads its own cache file and produces its
+# own trades, so the whole loop fans out with no shared state. Workers are made
+# self-sufficient rather than relying on fork inheritance, because macOS spawns
+# a fresh interpreter per worker.
+# --------------------------------------------------------------------------
+
+_W: dict = {}
+
+
+def _init_worker(token: str, insts: dict, cfg: EngineConfig, catalyst, start: date,
+                 end: date, fetch_start: date, prefilter_chg_min: float,
+                 fetch_only: bool) -> None:
+    """One Upstox client per process; everything else is plain data."""
+    _W.update(client=UpstoxClient(token, cache_dir=CACHE), insts=insts, cfg=cfg,
+              catalyst=catalyst, start=start, end=end, fetch_start=fetch_start,
+              prefilter_chg_min=prefilter_chg_min, fetch_only=fetch_only)
+
+
+def _symbol_job(sym: str) -> dict:
+    """Pre-filter, fetch and simulate one symbol. Never raises into the pool."""
+    out = {"symbol": sym, "status": "ok", "bars": 0, "rows": [], "cands": []}
+    inst = _W["insts"].get(sym)
+    if inst is None:
+        return {**out, "status": "no_instrument"}
+    # Daily pre-filter (1 request): does this name have ANY day in the window
+    # that reached the day-change floor inside the price/turnover bands?
+    try:
+        d = _W["client"].daily(inst.key, _W["fetch_start"], _W["end"])
+    except Exception as exc:  # noqa: BLE001
+        return {**out, "status": f"daily_failed: {exc}"}
+    elig = eligible_span(d, _W["start"], _W["end"], _W["prefilter_chg_min"])
+    if elig is None:
+        return {**out, "status": "skipped_daily"}
+    try:
+        df = _W["client"].cached_1m(inst, elig[0] - timedelta(days=45), elig[1])
+    except Exception as exc:  # noqa: BLE001
+        return {**out, "status": f"fetch_failed: {exc}"}
+    out["bars"] = len(df)
+    if _W["fetch_only"]:
+        return {**out, "status": "cached"}
+    tr, cd = simulate_symbol(inst, df, _W["start"], _W["end"], _W["cfg"], _W["catalyst"])
+    out["rows"] = [_trade_row(t) for t in tr]
+    out["cands"] = cd
+    return out
+
+
 def trades_frame(trades: list[ClosedTrade]) -> pd.DataFrame:
-    rows = []
-    for t in trades:
-        c = t.cand
-        rows.append({
-            "date": str(c.time.date()), "year": c.time.year, "symbol": c.symbol, "setup": c.setup.name,
-            "trigger_time": c.time.strftime("%H:%M"), "entry_time": t.entry_time.strftime("%H:%M"),
-            "trigger": c.setup.trigger, "entry": t.entry, "stop": c.setup.stop,
-            "exit_time": t.exit_time.strftime("%H:%M"),
-            "exit": t.exit, "exit_reason": t.exit_reason, "qty": t.qty,
-            "day_chg_pct": c.day_chg_pct, "rvol": c.rvol, "catalyst": c.catalyst,
-            "event_type": c.event_type, "tags": "|".join(c.candle_tags),
-            "prev_day_gainer": int(c.prev_day_gainer), "pullback_ord": c.pullback_ord,
-            "quality_reason": c.quality_reason, "atr_pct": c.atr_pct, "macd_hist": c.macd_hist,
-            "dist_to_round_pct": c.dist_to_round_pct,
-            "round_head_pct": c.round_head_pct, "resist_head_pct": c.resist_head_pct,
-            "support_drop_pct": c.support_drop_pct,
-            "gross_pct": t.gross_pct, "net_pct": t.net_pct,
-            "gross_inr": t.gross_inr, "costs_inr": t.costs_inr, "net_inr": t.net_inr,
-        })
-    return pd.DataFrame(rows)
+    return pd.DataFrame([_trade_row(t) for t in trades])
 
 
 def _summ(g: pd.DataFrame) -> pd.Series:
@@ -254,6 +310,10 @@ def main() -> int:
     ap.add_argument("--max-move", action="store_true",
                     help="apply the full strict checklist registered in "
                          "2026-09-07-max-move-checklist")
+    ap.add_argument("--resistance-v2", action="store_true",
+                    help="BT33 variant of the local-resistance rule: no 5m level "
+                         "merge, round marks excluded from the headroom test, and a "
+                         "refusal ends the day instead of freeing it.")
     ap.add_argument("--require-1m-agreement", action="store_true",
                     help="refuse a 5-min entry whose own 1-min chart disagrees (1-min "
                          "EMA9>EMA20, green trigger minute closing in its top 40% on "
@@ -283,6 +343,9 @@ def main() -> int:
                          "unless you pass them explicitly")
     ap.add_argument("--tag", default="", help="suffix for the output CSV names")
     ap.add_argument("--fetch-only", action="store_true", help="just fill the parquet cache")
+    ap.add_argument("--jobs", type=int, default=min(8, mp.cpu_count()),
+                    help="worker processes; symbols are independent so this is a "
+                         "straight speed-up. 1 runs in-process for debugging.")
     ap.add_argument("-v", action="store_true")
     a = ap.parse_args()
     logging.basicConfig(level=logging.DEBUG if a.v else logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -319,7 +382,8 @@ def main() -> int:
                        fill_mode=a.fill_mode, one_trade_per_day=not a.multi_entry,
                        require_quality=a.quality, require_max_move=a.max_move,
                        first_candidate_only=a.first_candidate_only,
-                       require_1m_agreement=a.require_1m_agreement, **cfg_kw)
+                       require_1m_agreement=a.require_1m_agreement,
+                       resistance_veto_v2=a.resistance_v2, **cfg_kw)
 
     # The pre-filter exists to skip symbols the engine could never trade. Under
     # attention entries the floor is 1.5%, not 4%, so using day_chg_min here
@@ -327,41 +391,47 @@ def main() -> int:
     prefilter_chg_min = (cfg.attention_day_chg_min if cfg.use_attention_entries
                          else cfg.day_chg_min)
 
-    all_trades: list[ClosedTrade] = []
+    all_rows: list[dict] = []
     all_cands: list[dict] = []
     done = skipped_daily = 0
     t0 = time.time()
-    for sym in symbols:
-        inst = insts.get(sym)
-        if inst is None:
-            log.debug("no instrument for %s", sym)
-            continue
-        # Daily pre-filter (1 request): does this name have ANY day in the window that
-        # (a) reached +4% vs prev close and (b) sat inside the price/turnover bands?
-        # Large caps fail (b) on every day and cost 27 one-minute requests each otherwise.
-        try:
-            d = client.daily(inst.key, fetch_start, end)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("%s: daily fetch failed (%s)", sym, exc)
-            continue
-        elig = eligible_span(d, start, end, prefilter_chg_min)
-        if elig is None:
+    jobs = max(1, a.jobs)
+    initargs = (_token(), insts, cfg, catalyst, start, end, fetch_start,
+                prefilter_chg_min, a.fetch_only)
+    log.info("simulating %d symbols on %d worker%s",
+             len(symbols), jobs, "" if jobs == 1 else "s")
+
+    def absorb(res: dict) -> None:
+        nonlocal done, skipped_daily
+        status = res["status"]
+        if status == "skipped_daily":
             skipped_daily += 1
-            log.debug("%s: no eligible day on daily pre-filter", sym)
-            continue
-        try:
-            df = client.cached_1m(inst, elig[0] - timedelta(days=45), elig[1])
-        except Exception as exc:  # noqa: BLE001
-            log.warning("%s: fetch failed (%s)", sym, exc)
-            continue
+            log.debug("%s: no eligible day on daily pre-filter", res["symbol"])
+            return
+        if status == "no_instrument":
+            log.debug("no instrument for %s", res["symbol"])
+            return
+        if status.startswith(("daily_failed", "fetch_failed")):
+            log.warning("%s: %s", res["symbol"], status)
+            return
         done += 1
         if a.fetch_only:
-            log.info("[%d/%d] %s cached %d bars", done, len(symbols), sym, len(df))
-            continue
-        tr, cd = simulate_symbol(inst, df, start, end, cfg, catalyst)
-        all_trades.extend(tr)
-        all_cands.extend(cd)
-        log.info("[%d/%d] %s bars=%d trades=%d (%.0fs)", done, len(symbols), sym, len(df), len(tr), time.time() - t0)
+            log.info("[%d/%d] %s cached %d bars", done, len(symbols),
+                     res["symbol"], res["bars"])
+            return
+        all_rows.extend(res["rows"])
+        all_cands.extend(res["cands"])
+        log.info("[%d/%d] %s bars=%d trades=%d (%.0fs)", done, len(symbols),
+                 res["symbol"], res["bars"], len(res["rows"]), time.time() - t0)
+
+    if jobs == 1:
+        _init_worker(*initargs)
+        for sym in symbols:
+            absorb(_symbol_job(sym))
+    else:
+        with mp.Pool(jobs, initializer=_init_worker, initargs=initargs) as pool:
+            for res in pool.imap_unordered(_symbol_job, symbols, chunksize=1):
+                absorb(res)
     log.info("daily pre-filter skipped %d symbols with no eligible day", skipped_daily)
     if a.fetch_only:
         return 0
@@ -369,7 +439,12 @@ def main() -> int:
                     else f"{a.exit_mode}_{a.fill_mode}")
     out_tr = OUT_TRADES.with_name(f"bt17_trades_{tag}.csv")
     out_cd = OUT_CANDS.with_name(f"bt17_candidates_{tag}.csv")
-    tr = trades_frame(all_trades)
+    # Workers finish out of order, so sort to a fixed key: the CSV must not
+    # depend on --jobs or on which symbol happened to finish first.
+    tr = pd.DataFrame(all_rows)
+    if not tr.empty:
+        tr = tr.sort_values(["symbol", "date", "trigger_time"]).reset_index(drop=True)
+    all_cands.sort(key=lambda c: (c["symbol"], c["date"], c["time"]))
     tr.to_csv(out_tr, index=False)
     pd.DataFrame(all_cands).to_csv(out_cd, index=False)
     print(f"\nwrote {out_tr.name} ({len(tr)} trades), {out_cd.name} ({len(all_cands)} candidates)")
