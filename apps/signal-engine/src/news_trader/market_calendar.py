@@ -6,6 +6,16 @@ following year. Update this file annually from:
 
 Only equity-segment holidays are included. Weekends are already filtered by
 _is_market_hours() in the handlers and are not listed here.
+
+⚠ **This list is hand-maintained and is known to be incomplete.** NSE observes
+14–16 weekday holidays a year; the 2026 block below carries fewer. A missing
+entry costs a wasted session — on 2026-09-14 (Ganesh Chaturthi, absent until
+2026-09-15) the momentum scanner ran a full Fargate day against a closed market
+and crashed on a half-written cache file. A *wrong* entry is worse: it skips a
+real trading day silently. So only dates confirmed against NSE's own calendar
+belong here, and callers must not treat `is_trading_day() is True` as proof the
+market is open — `momentum_trader.scanner` additionally exits when no symbol has
+printed a bar by its grace time, which catches every holiday this file misses.
 """
 
 from datetime import date
@@ -36,9 +46,16 @@ _NSE_HOLIDAYS: frozenset[date] = frozenset([
     date(2026, 4, 14),   # Dr. Baba Saheb Ambedkar Jayanti
     date(2026, 5,  1),   # Maharashtra Day
     date(2026, 8, 15),   # Independence Day (Saturday — listed for completeness)
-    date(2026, 10,  2),  # Mahatma Gandhi Jayanti
-    date(2026, 11, 14),  # Diwali – Laxmi Puja (tentative; confirm when NSE publishes)
-    date(2026, 12, 25),  # Christmas
+    date(2026, 9, 14),   # Ganesh Chaturthi (Mon) — MISSING until 2026-09-15; cost a session
+    date(2026, 10,  2),  # Mahatma Gandhi Jayanti (Fri)
+    date(2026, 10, 20),  # Dussehra (Tue)
+    date(2026, 11,  8),  # Diwali – Laxmi Pujan (Sun; Muhurat session only, regular closed)
+    date(2026, 11, 10),  # Diwali – Balipratipada (Tue)
+    date(2026, 12, 25),  # Christmas (Fri)
+    # Still unconfirmed for 2026 and therefore NOT listed: Holi's second day,
+    # Id-Ul-Fitr / Bakri Id / Muharram (lunar, announced late), Mahavir Jayanti,
+    # Guru Nanak Jayanti. NSE notifies 14 weekday holidays for 2026 and this
+    # block names fewer, so the scanner's no-data bailout is load-bearing.
 ])
 # fmt: on
 

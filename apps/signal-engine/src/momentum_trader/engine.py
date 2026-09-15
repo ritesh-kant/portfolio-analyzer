@@ -33,7 +33,8 @@ from .indicators import cumulative_session_volume, day_change_pct, ema, session_
 from .levels import NEAR_PCT, derive_levels, nearest_structural_resistance
 from .pullback import pullback_ordinal
 from .risk import DEFAULT_RR, TradePlan, plan_trade
-from .setups import CHASE_MAX_EXT_PCT, Setup, false_break, scan_setups
+from .setups import (CHASE_MAX_EXT_PCT, MICRO_PAUSE_MAX_BARS, Setup, false_break,
+                     micro_pullback, scan_setups)
 
 # ── frozen scan parameters (spec §1) ─────────────────────────────────────────
 DAY_CHG_MIN_PCT = 4.0
@@ -85,6 +86,35 @@ ONE_MINUTE_SETUPS = ("micro_pullback", ATTENTION_SETUP, ATTENTION_FALSE_BREAK_RE
 ONE_MIN_CLOSE_POSITION_MIN = 0.60
 ONE_MIN_EMA_FAST = 9
 ONE_MIN_EMA_SLOW = 20
+
+# ── the transcript's own entry checklist ─────────────────────────────────────
+# Rules the Warrior guide states but which nothing in this engine enforced until
+# 2026-09-15. Each is a separate EngineConfig switch, all default OFF, so the
+# forward arms recorded before that date replay unchanged.
+#
+# PEAK_HOURS_END is the one genuinely NEW number here, and it is a judgement
+# call, so it is stated plainly rather than buried: the guide trades 07:00–10:00
+# EST, a window that ends 30 minutes after the 09:30 US open and is mostly
+# pre-market. NSE has no continuous pre-market — the 09:00–09:08 pre-open is a
+# single auction print — so the guide's window has no literal translation and
+# the whole move it describes must happen after 09:15. 11:00 IST is the first
+# 105 minutes of the session, which is the NSE morning volume peak and the
+# closest honest analogue of "trade while volume, momentum and liquidity are
+# highest; avoid low-volume midday". It is configurable (`MT_PEAK_HOURS_END`)
+# precisely because it was chosen from session-volume shape, not from returns.
+PEAK_HOURS_END = time(11, 0)
+# "Focus strictly on the first and second pullbacks of a trend; third and fourth
+# pullbacks carry significantly higher risk."
+GUIDE_PULLBACK_ORDINALS = (1, 2)
+# Bars of prior-session volume needed before a 1-minute volume ratio is trusted.
+# This is the floor already written into `indicators.volume_ratio`'s own default
+# expression, not a new threshold; see that docstring for why trading the open
+# requires lowering it.
+VOL_BASELINE_MIN_BARS = 3
+# "Keep charts clean using the 9 EMA, 20 EMA, 200 EMA, VWAP, volume bars and a
+# 1-minute MACD." The 200 is a chart reference in the guide, not an entry rule,
+# so it is RECORDED on every entry and drawn on the review chart — never gated.
+TREND_EMA_SPAN = 200
 
 CatalystLookup = Callable[[str, pd.Timestamp], tuple[int, str]]
 
@@ -164,6 +194,37 @@ class EngineConfig:
     # through that same level.  This is deliberately opt-in so existing arms
     # remain exact controls.
     allow_false_break_reentry: bool = False
+
+    # ── the Warrior transcript's stated entry checklist (all default OFF) ────
+    # Each maps to one line of the guide and each REFUSES trades, so turning any
+    # of them on makes the arm a strict subset of the arm without it.
+    # "Wait for the pullback ... buy at the exact moment the first candle makes
+    # a new high above the high of the previous candle." Without this the
+    # attention lane enters on any strong candle, pullback or not.
+    require_micro_pullback: bool = False
+    # "Both Volume Profile (light volume on pullbacks) and MACD ... must give
+    # positive signals before entering" — the first of the two yeses.
+    require_light_pullback_volume: bool = False
+    # ... and the second: "MACD (positive and open)", read on the 1-minute frame
+    # the guide specifies. Flat counts as a no ("DON'T trade ... if the MACD is
+    # negative or flat").
+    require_macd_positive_open: bool = False
+    # "DO trade during peak volatility hours ... DON'T trade during low-volume
+    # midday hours." Caps the entry deadline at `peak_hours_end`.
+    peak_hours_only: bool = False
+    peak_hours_end: time = PEAK_HOURS_END
+    # Prior-session bars warm the 5-minute trend context, so a stock can be
+    # promoted before 10:55. Without this the 20-bar EMA warm-up silently makes
+    # `peak_hours_only` unsatisfiable: the two rules together would take zero
+    # trades. Prior sessions are not look-ahead; this is the same warm-up the
+    # exit rules have used since 2026-09-05.
+    warm_context: bool = False
+    # Bars required before a 1-minute volume ratio is produced. None = the
+    # frozen default (first reading 09:25, i.e. blind to the whole open).
+    vol_baseline_min_bars: int | None = None
+    # Add the 2:1 target to a trend exit mode, so a position closes on whichever
+    # of target / stop / trend-break comes first. The guide keeps both.
+    use_fixed_target: bool = False
     exit_cfg: exits.ExitConfig = field(init=False)
 
     def __post_init__(self) -> None:
@@ -177,7 +238,30 @@ class EngineConfig:
             raise ValueError("attention_confirm_vol_ratio must be positive")
         if self.attention_pending_minutes <= 0:
             raise ValueError("attention_pending_minutes must be positive")
-        self.exit_cfg = exits.ExitConfig.for_mode(self.exit_mode)
+        if self.vol_baseline_min_bars is not None and self.vol_baseline_min_bars < 1:
+            raise ValueError("vol_baseline_min_bars must be positive")
+        if self.require_light_pullback_volume and not self.require_micro_pullback:
+            # The light-volume test is a property OF the pullback, so there is
+            # nothing to measure it on unless a pullback is required. Failing
+            # loudly beats silently ignoring a switch the operator set.
+            raise ValueError(
+                "require_light_pullback_volume needs require_micro_pullback"
+            )
+        self.exit_cfg = exits.ExitConfig.for_mode(
+            self.exit_mode, use_fixed_target=self.use_fixed_target
+        )
+
+    @property
+    def entry_deadline(self) -> time:
+        """Latest bar-start that may still open a position.
+
+        The peak-hours rule TIGHTENS the existing 14:30 cutoff and never relaxes
+        it, so a deployment cannot accidentally extend its trading day by
+        switching the guide's rule on.
+        """
+        if self.peak_hours_only:
+            return min(self.entry_cutoff, self.peak_hours_end)
+        return self.entry_cutoff
 
 
 @dataclass
@@ -454,6 +538,51 @@ def _macd_hist_now(tf5: pd.DataFrame, warmup_5m: pd.DataFrame | None) -> float |
     return float(h.iloc[-1])
 
 
+def _macd_open_state(
+    bars: pd.DataFrame, warmup: pd.DataFrame | None
+) -> tuple[float, float] | None:
+    """(histogram now, histogram on the previous bar), or None before warm-up.
+
+    The guide's "MACD positive and open" is two readings, not one: *positive*
+    means the histogram is above zero, *open* means the gap is still widening
+    rather than converging. One value cannot express the second, which is why
+    this returns a pair. Reuses `exits.indicator_frame`, so the entry reading
+    and the `macd_fade` exit reading are the same number computed the same way.
+    """
+    if len(bars) < 2:
+        return None
+    h = exits.indicator_frame(bars, warmup)["macd_hist"]
+    if len(h) < 2 or pd.isna(h.iloc[-1]) or pd.isna(h.iloc[-2]):
+        return None
+    return float(h.iloc[-1]), float(h.iloc[-2])
+
+
+def _macd_1m_hist(bars_1m: pd.DataFrame, warmup_1m: pd.DataFrame | None) -> float | None:
+    """1-minute MACD histogram for the record, None before warm-up."""
+    state = _macd_open_state(bars_1m, warmup_1m)
+    return None if state is None else state[0]
+
+
+def _trend_ema(
+    tf5: pd.DataFrame, warmup_5m: pd.DataFrame | None, span: int = TREND_EMA_SPAN
+) -> float | None:
+    """The guide's 200 EMA on the position's 5-minute frame. Recorded, not gated.
+
+    200 five-minute bars is roughly 2.7 NSE sessions, so this is None for the
+    whole day unless prior-session bars are supplied.
+    """
+    if tf5.empty:
+        return None
+    joined = tf5
+    if warmup_5m is not None and not warmup_5m.empty:
+        joined = pd.concat([warmup_5m.iloc[-exits.WARMUP_BARS:], tf5])
+        joined = joined[~joined.index.duplicated(keep="last")].sort_index()
+    v = ema(joined["close"], span)
+    if not len(v) or pd.isna(v.iloc[-1]):
+        return None
+    return float(v.iloc[-1])
+
+
 def _max_move_gate(
     setup: Setup,
     macd_hist: float | None,
@@ -494,6 +623,28 @@ def _playbook_gate(
     if cfg.allowed_setups and setup.name not in cfg.allowed_setups:
         return False, "setup_not_allowed"
     if cfg.allowed_pullback_ordinals and pullback_ord not in cfg.allowed_pullback_ordinals:
+        return False, "pullback_not_allowed"
+    return True, "ok"
+
+
+def _pullback_ordinal_gate(
+    pullback_ord: int | None, cfg: EngineConfig
+) -> tuple[bool, str]:
+    """The ordinal half of `_playbook_gate`, for the attention lane.
+
+    The attention setup is not one of the seven named Warrior setups, so the
+    `allowed_setups` half of the playbook gate cannot apply to it; only the
+    "first or second pullback" rule can. A missing ordinal is a REFUSAL rather
+    than a pass: `None` means no sharp advance has been identified today, and a
+    pullback with nothing to pull back from is not the setup the guide
+    describes. This is the reading that makes a refused entry measurable — the
+    live log separates `pullback_no_anchor` from `pullback_not_allowed`.
+    """
+    if not cfg.allowed_pullback_ordinals:
+        return True, "ok"
+    if pullback_ord is None:
+        return False, "pullback_no_anchor"
+    if pullback_ord not in cfg.allowed_pullback_ordinals:
         return False, "pullback_not_allowed"
     return True, "ok"
 
@@ -541,16 +692,33 @@ def _is_one_minute_setup(name: str) -> bool:
     return name in ONE_MINUTE_SETUPS
 
 
-def _attention_context(tf5: pd.DataFrame) -> tuple[bool, str]:
+def _attention_context(
+    tf5: pd.DataFrame, warmup_5m: pd.DataFrame | None = None
+) -> tuple[bool, str]:
     """Five-minute trend context for the attention queue.
 
     Promotion is intentionally not an entry. A neutral doji can draw attention,
     but a trade still needs a separate high-volume one-minute confirmation.
+
+    With no `warmup_5m` the EMAs are computed on today alone and need 20
+    completed 5-minute bars, so the earliest possible promotion is 10:55 IST —
+    measured on the live log, the first attention event on both 2026-09-10 and
+    2026-09-11 was 10:44 and nothing at all happened before it. That is the
+    whole of the guide's peak window, skipped. Passing prior-session bars warms
+    the same EMAs so a promotion can happen from the open. VWAP is deliberately
+    NOT warmed: session VWAP resets daily by definition.
     """
-    if len(tf5) < 20:
+    if tf5.empty:
         return False, "ema_warmup"
-    fast = ema(tf5["close"], 9)
-    slow = ema(tf5["close"], 20)
+    warm = warmup_5m is not None and not warmup_5m.empty
+    if not warm and len(tf5) < 20:
+        return False, "ema_warmup"
+    if warm:
+        ind = exits.indicator_frame(tf5, warmup_5m)
+        fast, slow = ind["ema_fast"], ind["ema_slow"]
+    else:
+        fast = ema(tf5["close"], 9)
+        slow = ema(tf5["close"], 20)
     if pd.isna(fast.iloc[-1]) or pd.isna(slow.iloc[-1]):
         return False, "ema_warmup"
     if float(fast.iloc[-1]) <= float(slow.iloc[-1]):
@@ -602,6 +770,10 @@ def _entry_evidence(state: DayState, bars_1m: pd.DataFrame,
             "timeframe": "5m", "bar_start": tf5.index[-1].isoformat(),
             "close": float(tf5["close"].iloc[-1]), "ema9": float(fast.iloc[-1]),
             "ema20": float(slow.iloc[-1]), "vwap": float(vw.iloc[-1]),
+            # The guide's third moving average. Recorded, never gated — it is
+            # listed as a chart indicator, not as an entry rule. None until
+            # ~2.7 sessions of 5-minute bars exist, so it needs warm-up bars.
+            "ema200": _trend_ema(tf5, state.warmup_5m),
         },
         "confirmation": {
             "timeframe": "1m", "bar_start": bars_1m.index[-1].isoformat(),
@@ -609,10 +781,25 @@ def _entry_evidence(state: DayState, bars_1m: pd.DataFrame,
             **{k: float(bar[k]) for k in ("open", "high", "low", "close", "volume")},
             "close_position": float((bar["close"] - bar["low"]) / (bar["high"] - bar["low"])),
             "minimum_close_position": ONE_MIN_CLOSE_POSITION_MIN,
-            "volume_ratio": float(volume_ratio(bars_1m).iloc[-1]),
+            "volume_ratio": float(
+                volume_ratio(bars_1m, min_periods=cfg.vol_baseline_min_bars).iloc[-1]
+            ),
             "minimum_volume_ratio": cfg.attention_confirm_vol_ratio,
+            # The guide reads MACD on the 1-minute chart. Recorded on every
+            # entry whether or not `require_macd_positive_open` is gating, so
+            # the rule can be measured against the trades it did NOT refuse.
+            "macd_hist": _macd_1m_hist(bars_1m, state.warmup_1m),
         },
         "pending_minutes": cfg.attention_pending_minutes,
+        "checklist": {
+            "micro_pullback": cfg.require_micro_pullback,
+            "light_pullback_volume": cfg.require_light_pullback_volume,
+            "macd_positive_open": cfg.require_macd_positive_open,
+            "peak_hours_only": cfg.peak_hours_only,
+            "entry_deadline": cfg.entry_deadline.isoformat(),
+            "pullback_ordinals": list(cfg.allowed_pullback_ordinals),
+            "fixed_target_rr": cfg.rr if cfg.exit_cfg.has_target else None,
+        },
     }
 
 
@@ -629,8 +816,39 @@ def _unique_pattern_documents(*groups: list[dict[str, object]]) -> list[dict[str
     return out
 
 
+@dataclass(frozen=True)
+class GuideGates:
+    """Everything the transcript's entry checklist needs for one decision.
+
+    Passed as a single object rather than as four arguments because three
+    separate call sites produce an attention confirmation (plain, resistance-
+    aware, false-break reclaim) and all three must apply the identical
+    checklist. A `None` here means "the checklist is off", which is what every
+    arm recorded before 2026-09-15 used.
+    """
+
+    cfg: EngineConfig
+    warmup_1m: pd.DataFrame | None = None
+
+
+def _guide_for(state: DayState, cfg: EngineConfig) -> GuideGates | None:
+    """The checklist for this symbol, or None when no guide switch is set.
+
+    Returning None rather than an all-off `GuideGates` keeps the disabled path
+    byte-identical to the pre-2026-09-15 code: `_attention_confirmation` takes
+    its original branch and even reads `volume_ratio` with its original
+    arguments.
+    """
+    if not (cfg.require_micro_pullback or cfg.require_macd_positive_open
+            or cfg.vol_baseline_min_bars is not None):
+        return None
+    return GuideGates(cfg=cfg, warmup_1m=state.warmup_1m)
+
+
 def _attention_confirmation(
-    bars_1m: pd.DataFrame, min_volume_ratio: float
+    bars_1m: pd.DataFrame,
+    min_volume_ratio: float,
+    guide: GuideGates | None = None,
 ) -> tuple[Setup | None, str]:
     """Confirmed one-minute entry inside an already-promoted five-minute trend.
 
@@ -639,6 +857,20 @@ def _attention_confirmation(
     create the attention context; requiring a second named shape here would
     miss an ordinary strong breakout candle. The order is armed above the
     confirmation bar and is not filled until a future quote trades there.
+
+    With a `guide`, the transcript's own checklist is added on top and the
+    entry becomes the guide's entry rather than a strong-candle entry:
+
+      * the candle must complete a **micro pullback** — 2+ green bars, a 1-2 bar
+        red/doji pause, then the break — and the buy-stop moves DOWN from this
+        candle's high to the pause high, which is where the guide actually buys
+        ("the first candle makes a new high above the high of the previous
+        candle"), with the stop at the pause low ("the low of the pullback");
+      * the pause must have traded on **light volume** relative to the push;
+      * the 1-minute **MACD must be positive and open**.
+
+    Each refusal has its own reason string, so the forward log can say which of
+    the checks is doing the rejecting rather than reporting one opaque count.
     """
     if len(bars_1m) < 3:
         return None, "attention_insufficient_bars"
@@ -649,20 +881,56 @@ def _attention_confirmation(
         return None, "attention_red_or_flat"
     if (close - low) / rng < ONE_MIN_CLOSE_POSITION_MIN:
         return None, "attention_weak_close"
-    vr = volume_ratio(bars_1m)
+    cfg = guide.cfg if guide is not None else None
+    vr = volume_ratio(
+        bars_1m,
+        min_periods=cfg.vol_baseline_min_bars if cfg is not None else None,
+    )
     if pd.isna(vr.iloc[-1]) or float(vr.iloc[-1]) < min_volume_ratio:
         return None, "attention_low_1m_volume"
-    recent = bars_1m.iloc[-3:]
-    stop = float(recent["low"].min())
-    if stop >= high:
+
+    trigger = high
+    stop = float(bars_1m.iloc[-3:]["low"].min())
+    meta: dict[str, float] = {"volume_ratio": float(vr.iloc[-1])}
+
+    if cfg is not None and cfg.require_micro_pullback:
+        # Tested in two steps so "there was no pullback" and "there was one but
+        # sellers were in it" are distinguishable in the rejection log.
+        pull = micro_pullback(bars_1m, max_pause_bars=MICRO_PAUSE_MAX_BARS)
+        if pull is None:
+            return None, "attention_no_micro_pullback"
+        if cfg.require_light_pullback_volume:
+            light = micro_pullback(
+                bars_1m, max_pause_bars=MICRO_PAUSE_MAX_BARS, require_light_volume=True
+            )
+            if light is None:
+                return None, "attention_heavy_pullback_volume"
+            pull = light
+        trigger, stop = pull.trigger, pull.stop
+        meta.update(pull.meta)
+
+    if cfg is not None and cfg.require_macd_positive_open:
+        state = _macd_open_state(bars_1m, guide.warmup_1m if guide else None)
+        if state is None:
+            return None, "attention_macd_warmup"
+        hist, prev_hist = state
+        if hist <= 0.0:
+            return None, "attention_macd_not_positive"
+        if hist <= prev_hist:
+            # "DON'T trade ... if the MACD is negative OR FLAT" — a histogram
+            # that is no longer widening is the flat/converging case.
+            return None, "attention_macd_not_open"
+        meta["macd_hist_1m"] = hist
+
+    if stop >= trigger:
         return None, "attention_invalid_stop"
     return (
         Setup(
             name=ATTENTION_SETUP,
-            trigger=high,
+            trigger=trigger,
             stop=stop,
-            level=high,
-            meta={"volume_ratio": float(vr.iloc[-1])},
+            level=trigger,
+            meta=meta,
         ),
         "confirmed",
     )
@@ -677,11 +945,31 @@ _RESISTANCE_WAIT_REASONS = frozenset({
 })
 
 
+def _headroom_from(bars_1m: pd.DataFrame, setup: Setup) -> float:
+    """The price the "room above" search starts from.
+
+    A level the confirmation candle has already traded through is not supply any
+    more — it is the break being bought. The search must therefore start at the
+    higher of the buy-stop and where price actually is.
+
+    This is invisible until the buy-stop sits BELOW the confirmation bar's
+    close, which is exactly what `require_micro_pullback` does: it moves the
+    trigger down to the pullback high, which is the guide's entry. Measuring
+    headroom from there finds the level the breakout candle just cleared and
+    calls it a ceiling — on a 2024 sample the strict arm took 0 trades against
+    the deployed arm's 58, and every refusal was this. Before that change the
+    trigger was the bar's own high, always at or above the close, so
+    `max()` returns the trigger and every earlier arm is unaffected.
+    """
+    return max(setup.trigger, float(bars_1m["close"].iloc[-1]))
+
+
 def _resistance_aware_attention_confirmation(
     bars_1m: pd.DataFrame,
     min_volume_ratio: float,
     prev_day: dict[str, float] | None,
     v2: bool = False,
+    guide: GuideGates | None = None,
 ) -> tuple[Setup | None, str]:
     """Apply the unchanged 1-minute confirmation to structural resistance.
 
@@ -691,7 +979,7 @@ def _resistance_aware_attention_confirmation(
     entry with less than one initial-risk unit of room waits rather than buying
     into supply.
     """
-    setup, reason = _attention_confirmation(bars_1m, min_volume_ratio)
+    setup, reason = _attention_confirmation(bars_1m, min_volume_ratio, guide)
     if setup is None:
         return None, reason
     prior = bars_1m.iloc[:-1]
@@ -723,7 +1011,7 @@ def _resistance_aware_attention_confirmation(
     )
     if crossed is not None and float(bars_1m["close"].iloc[-1]) > crossed.price:
         next_resistance = nearest_structural_resistance(
-            headroom_levels, setup.trigger
+            headroom_levels, _headroom_from(bars_1m, setup)
         )
         initial_risk = setup.trigger - setup.stop
         if (next_resistance is not None
@@ -737,7 +1025,9 @@ def _resistance_aware_attention_confirmation(
             meta={**setup.meta, "accepted_resistance": crossed.price},
         ), "confirmed_resistance_breakout"
 
-    resistance = nearest_structural_resistance(headroom_levels, setup.trigger)
+    resistance = nearest_structural_resistance(
+        headroom_levels, _headroom_from(bars_1m, setup)
+    )
     if resistance is not None:
         headroom = resistance.price - setup.trigger
         initial_risk = setup.trigger - setup.stop
@@ -770,7 +1060,10 @@ def _false_break_reclaim_confirmation(
     # later completed candle prevents one bar from both exiting and re-entering.
     if now <= reclaim.exit_time:
         return False
-    context_ok, context_reason = _attention_context(tf5)
+    guide = _guide_for(state, cfg)
+    context_ok, context_reason = _attention_context(
+        tf5, state.warmup_5m if cfg.warm_context else None
+    )
     if not context_ok:
         state.rejections.append(Rejection(
             symbol=state.symbol, time=now, reason=f"reclaim_context_lost:{context_reason}",
@@ -780,7 +1073,9 @@ def _false_break_reclaim_confirmation(
         state.false_break_reclaim = None
         state.false_break_reclaim_attempted = True
         return False
-    setup, reason = _attention_confirmation(bars_1m, cfg.attention_confirm_vol_ratio)
+    setup, reason = _attention_confirmation(
+        bars_1m, cfg.attention_confirm_vol_ratio, guide
+    )
     if setup is None:
         state.rejections.append(Rejection(
             symbol=state.symbol, time=now, reason=f"reclaim_{reason}",
@@ -796,6 +1091,15 @@ def _false_break_reclaim_confirmation(
         ))
         return False
 
+    ordinal = pullback_ordinal(tf5) if len(tf5) else None
+    ord_ok, ord_reason = _pullback_ordinal_gate(ordinal, cfg)
+    if not ord_ok:
+        state.rejections.append(Rejection(
+            symbol=state.symbol, time=now, reason=f"reclaim_{ord_reason}",
+            setup=ATTENTION_FALSE_BREAK_RECLAIM_SETUP, trigger=reclaim.level,
+            observed_price=float(bars_1m["close"].iloc[-1]),
+        ))
+        return False
     reentry_setup = Setup(
         name=ATTENTION_FALSE_BREAK_RECLAIM_SETUP,
         trigger=setup.trigger,
@@ -821,7 +1125,7 @@ def _false_break_reclaim_confirmation(
         ),
         entry_evidence=_entry_evidence(state, bars_1m, tf5, cfg),
         prev_day_gainer=state.prev_day_gainer,
-        pullback_ord=pullback_ordinal(tf5) if len(tf5) else None,
+        pullback_ord=ordinal,
         quality_reason="ok", atr_pct=state.daily_atr_pct,
         macd_hist=_macd_hist_now(tf5, state.warmup_5m),
         dist_to_round_pct=dround, round_head_pct=rh,
@@ -1017,7 +1321,9 @@ def step(
         return
 
     # 3. two-stage attention path: soft promotion, then 1-minute confirmation.
-    if state.pending is not None or t >= cfg.entry_cutoff or t >= cfg.eod_close:
+    # `entry_deadline` is the 14:30 cutoff, tightened to the guide's peak-hours
+    # end when that rule is on.
+    if state.pending is not None or t >= cfg.entry_deadline or t >= cfg.eod_close:
         return
     # A reclaim is evaluated before the one-trade-per-day guard.  It can only
     # exist after a trade has exited as a false break, and is consumed the
@@ -1047,10 +1353,12 @@ def step(
     if cfg.use_attention_entries:
         if rv is None:
             return
+        guide = _guide_for(state, cfg)
+        warm5 = state.warmup_5m if cfg.warm_context else None
         if not state.attention:
             if chg < cfg.attention_day_chg_min or rv < cfg.attention_rvol_min:
                 return
-            context_ok, _ = _attention_context(tf5)
+            context_ok, _ = _attention_context(tf5, warm5)
             reason, tags, matches = _promotion_reason(tf5, bars_1m)
             if not context_ok or reason is None:
                 return
@@ -1072,7 +1380,7 @@ def step(
             ))
             return  # promotion is observation, never an entry on the same candle
 
-        context_ok, context_reason = _attention_context(tf5)
+        context_ok, context_reason = _attention_context(tf5, warm5)
         if not context_ok:
             state.rejections.append(Rejection(
                 symbol=state.symbol,
@@ -1090,11 +1398,11 @@ def step(
         if cfg.require_resistance_breakout:
             setup, confirmation_reason = _resistance_aware_attention_confirmation(
                 bars_1m, cfg.attention_confirm_vol_ratio, state.prev_day,
-                cfg.resistance_veto_v2,
+                cfg.resistance_veto_v2, guide,
             )
         else:
             setup, confirmation_reason = _attention_confirmation(
-                bars_1m, cfg.attention_confirm_vol_ratio
+                bars_1m, cfg.attention_confirm_vol_ratio, guide
             )
         if setup is None:
             # Under v2 a headroom refusal ends the day. Leaving it open lets a
@@ -1112,6 +1420,20 @@ def step(
                 observed_price=float(bar["close"]),
             ))
             return
+        ordinal = pullback_ordinal(tf5) if len(tf5) else None
+        ord_ok, ord_reason = _pullback_ordinal_gate(ordinal, cfg)
+        if not ord_ok:
+            # Logged as a rejection rather than a dropped candidate so the
+            # first-and-second-pullback rule's live refusal rate is measurable.
+            state.rejections.append(Rejection(
+                symbol=state.symbol,
+                time=now,
+                reason=ord_reason,
+                setup=setup.name,
+                trigger=setup.trigger,
+                observed_price=float(bar["close"]),
+            ))
+            return
         cat, ev = catalyst(state.symbol, now)
         tags = candle_tags(bars_1m)
         dround, rh, res_head, sup_drop = location.measure(tf5, setup.trigger, state.prev_day)
@@ -1125,7 +1447,7 @@ def step(
             ),
             entry_evidence=_entry_evidence(state, bars_1m, tf5, cfg),
             prev_day_gainer=state.prev_day_gainer,
-            pullback_ord=pullback_ordinal(tf5) if len(tf5) else None,
+            pullback_ord=ordinal,
             quality_reason="ok",
             atr_pct=state.daily_atr_pct,
             macd_hist=_macd_hist_now(tf5, state.warmup_5m),

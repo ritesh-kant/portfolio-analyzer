@@ -153,13 +153,24 @@ def atr(bars: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
 
 
-def volume_ratio(bars: pd.DataFrame, lookback: int = 20) -> pd.Series:
+def volume_ratio(
+    bars: pd.DataFrame, lookback: int = 20, min_periods: int | None = None
+) -> pd.Series:
     """Each bar's volume divided by the average of the `lookback` bars before it.
 
     This is bar-level relative volume, distinct from the day-level RVOL used to
     pick candidates. A value above ~2.5 on a red bar is distribution: sellers
     are hitting the bid in size.
+
+    `min_periods` is how many prior bars must exist before a ratio is produced;
+    it defaults to `max(3, lookback // 2)`, which on the 1-minute frame means
+    the first reading of a session appears at 09:25. That blindness is why the
+    volume test could never pass inside the guide's peak-volatility window, so
+    a caller that trades the open may lower it — to 3, the floor this very
+    expression already contains, not to a new number. It cannot be raised
+    above `lookback`.
     """
     validate_bars(bars)
-    avg = bars["volume"].rolling(lookback, min_periods=max(3, lookback // 2)).mean().shift(1)
+    floor = max(3, lookback // 2) if min_periods is None else min(int(min_periods), lookback)
+    avg = bars["volume"].rolling(lookback, min_periods=max(1, floor)).mean().shift(1)
     return bars["volume"] / avg.replace(0.0, float("nan"))

@@ -66,7 +66,16 @@ mt-scan-first-pullback:
 mt-dry-run-first-pullback:
 	MT_STRATEGY=catalyst_first_pullback MT_LOG_CSV=research/backtests/mt_catalyst_first_pullback_forward_log.csv uv run python -m src.momentum_trader.scanner --dry-run
 
-# The single deployed forward arm (everything on): this is the one to run.
+# The single deployed forward arm (2026-09-15): the merged arm plus the Warrior
+# guide's entire entry checklist, enforced, plus the daily guardrails.
+# research/hypotheses/2026-09-15-warrior-guide-strict.md
+mt-scan-strict:
+	MT_STRATEGY=warrior_strict MT_DISCIPLINE=true MT_LOG_CSV=research/backtests/mt_warrior_strict_forward_log.csv uv run python -m src.momentum_trader.scanner
+
+mt-dry-run-strict:
+	MT_STRATEGY=warrior_strict MT_DISCIPLINE=true MT_LOG_CSV=research/backtests/mt_warrior_strict_forward_log.csv uv run python -m src.momentum_trader.scanner --dry-run
+
+# Retired 2026-09-15 at n=12 closed trades; kept so past forward logs replay.
 mt-scan-merged:
 	MT_STRATEGY=attention_1m_merged MT_LOG_CSV=research/backtests/mt_attention_1m_merged_forward_log.csv uv run python -m src.momentum_trader.scanner
 

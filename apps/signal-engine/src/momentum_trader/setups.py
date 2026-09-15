@@ -42,6 +42,7 @@ MA_TOUCH_TOL = 0.002        # price within 0.2% of the EMA counts as a touch
 ORB_MINUTES = 15            # opening range = first 15 minutes of the session
 SESSION_OPEN = time(9, 15)
 MICRO_GREEN_RUN = 2         # micro pullback: ≥ 2 green bars, then 1 red/doji, then break
+MICRO_PAUSE_MAX_BARS = 2    # the guide's "pull back for 1 to 2 candles" (opt-in; default 1)
 CHASE_MAX_EXT_PCT = 1.0     # trigger bar closes > 1% above the trigger level → chased, skip
 
 
@@ -329,32 +330,61 @@ def red_to_green(bars: pd.DataFrame, prev_close: float) -> Setup | None:
 
 # ── 7. micro pullback (1-min) ─────────────────────────────────────────────────
 
-def micro_pullback(bars: pd.DataFrame) -> Setup | None:
-    """≥2 green bars, one red/doji bar, then a bar that breaks that bar's high.
-    Trigger = the pause bar's high; stop = the pause bar's low."""
+def micro_pullback(
+    bars: pd.DataFrame,
+    max_pause_bars: int = 1,
+    require_light_volume: bool = False,
+) -> Setup | None:
+    """≥2 green bars, a red/doji pause, then a bar that breaks the pause high.
+    Trigger = the pause's high; stop = the pause's low.
+
+    `max_pause_bars` is the guide's "allow the stock to pull back for 1 to 2
+    candles". It defaults to 1, which is the rule this module froze on
+    2026-09-05, so every prior backtest replays unchanged; the shorter pause is
+    always tried first, so raising the cap only ADDS structures that a
+    one-bar pause could not describe.
+
+    `require_light_volume` adds the guide's second confirmation — "light volume
+    on pullbacks" — using the ratio `bull_flag` already froze for the same idea
+    (FLAG_VOL_RATIO), so it introduces no new threshold. Off by default for the
+    same reproducibility reason.
+    """
     validate_bars(bars)
-    if len(bars) < MICRO_GREEN_RUN + 2:
-        return None
-    cur = bars.iloc[-1]
-    pause = bars.iloc[-2]
-    run = bars.iloc[-2 - MICRO_GREEN_RUN : -2]
-    if not bool((run["close"] > run["open"]).all()):
-        return None
-    pause_body = float(pause["close"]) - float(pause["open"])
-    pause_rng = max(float(pause["high"]) - float(pause["low"]), 1e-12)
-    if pause_body > 0.1 * pause_rng:
-        return None  # pause bar must be red or a doji (a green body > 10% of range is not a pause)
-    if float(cur["high"]) <= float(pause["high"]):
-        return None
-    if not _has_stop_room(float(pause["high"]), float(pause["low"])):
-        return None  # zero-range pause bar: high == low, so trigger == stop
-    if _too_extended(bars, float(pause["high"])):
-        return None
-    return Setup(
-        name="micro_pullback",
-        trigger=float(pause["high"]),
-        stop=float(pause["low"]),
-    )
+    for pause_len in range(1, max(1, max_pause_bars) + 1):
+        if len(bars) < MICRO_GREEN_RUN + pause_len + 1:
+            break
+        cur = bars.iloc[-1]
+        pause = bars.iloc[-1 - pause_len : -1]
+        run = bars.iloc[-1 - pause_len - MICRO_GREEN_RUN : -1 - pause_len]
+        if not bool((run["close"] > run["open"]).all()):
+            continue
+        # every pause bar must be red or a doji (a green body > 10% of its range
+        # is a continuation candle, not a pause)
+        bodies = pause["close"] - pause["open"]
+        ranges = (pause["high"] - pause["low"]).clip(lower=1e-12)
+        if bool((bodies > 0.1 * ranges).any()):
+            continue
+        pause_high = float(pause["high"].max())
+        pause_low = float(pause["low"].min())
+        if float(cur["high"]) <= pause_high:
+            continue
+        if require_light_volume:
+            run_vol = float(run["volume"].mean())
+            if run_vol <= 0.0:
+                continue
+            if float(pause["volume"].mean()) > FLAG_VOL_RATIO * run_vol:
+                continue  # sellers came in on the pullback — not a rest, a reversal
+        if not _has_stop_room(pause_high, pause_low):
+            return None  # zero-range pause: high == low, so trigger == stop
+        if _too_extended(bars, pause_high):
+            return None
+        return Setup(
+            name="micro_pullback",
+            trigger=pause_high,
+            stop=pause_low,
+            meta={"pause_bars": float(pause_len)},
+        )
+    return None
 
 
 # ── exits: bull-trap / false-break detection ──────────────────────────────────

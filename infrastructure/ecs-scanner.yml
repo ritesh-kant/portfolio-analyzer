@@ -129,20 +129,32 @@ Resources:
             - { Name: AWS_SECRETS_ENABLED, Value: 'true' }
             - { Name: MOMENTUM_SCANNER_ONLY, Value: 'true' }
             - { Name: TRADING_MODE, Value: paper }
-            # One forward arm, everything on (2026-09-12). The separate
-            # resistance-state and reclaim tasks were folded into this one; the
-            # other MT_STRATEGY values stay in code so past forward logs remain
-            # readable, but nothing else is deployed.
-            - { Name: MT_STRATEGY, Value: attention_1m_merged }
+            # One forward arm, everything on. 2026-09-15: the Warrior guide's
+            # own entry checklist is now enforced rather than merely recorded —
+            # micro pullback on light volume, 1-min MACD positive and open,
+            # first/second pullback only, morning window, 2:1 target alongside
+            # the trend exits, plus the daily guardrails below. This retires
+            # attention_1m_merged at n=12 of its registered 30 trades; that
+            # arm's numbers are descriptive only. The other MT_STRATEGY values
+            # stay in code so past forward logs remain readable.
+            # research/hypotheses/2026-09-15-warrior-guide-strict.md
+            - { Name: MT_STRATEGY, Value: warrior_strict }
             - { Name: MT_ATTENTION_DAY_CHG_MIN, Value: '1.5' }
             - { Name: MT_ATTENTION_RVOL_MIN, Value: '1.5' }
+            # "DO trade during peak volatility hours." The guide's 07:00-10:00
+            # EST is mostly US pre-market, which NSE does not have; this is the
+            # first 105 minutes of the NSE session. Chosen from volume shape,
+            # never from returns — see the hypothesis.
+            - { Name: MT_PEAK_HOURS_END, Value: '11:00' }
+            # 3 strikes / 50% give-back / starter size / size down on a loss.
+            - { Name: MT_DISCIPLINE, Value: 'true' }
             # Multi-entry + 20 slots (operator decision 2026-09-13). Re-entry is
             # sequential per symbol; the slot count is what lets the extra
             # trades actually be held. Counter-evidence is recorded on
             # Settings.mt_one_trade_per_day — revert both to 'true'/5 to undo.
             - { Name: MT_ONE_TRADE_PER_DAY, Value: 'false' }
             - { Name: MT_MAX_POSITIONS, Value: '20' }
-            - { Name: MT_LOG_CSV, Value: /data/mt_attention_1m_merged_forward_log.csv }
+            - { Name: MT_LOG_CSV, Value: /data/mt_warrior_strict_forward_log.csv }
           Secrets:
             - Name: MONGODB_URI
               ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/MONGODB_URI

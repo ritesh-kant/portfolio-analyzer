@@ -20,7 +20,7 @@ import os
 import signal
 import sys
 import threading
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from types import FrameType
 from typing import Any
@@ -34,8 +34,11 @@ from src.news_trader.market_calendar import is_trading_day
 from . import universe
 from .bars import IST, BarBuilder
 from .catalyst import hard_catalyst
+from .discipline import DayDiscipline, DisciplineConfig
 from .engine import (
     FILL_FUTURE_TRIGGER,
+    GUIDE_PULLBACK_ORDINALS,
+    VOL_BASELINE_MIN_BARS,
     ClosedTrade,
     DayState,
     EngineConfig,
@@ -44,12 +47,19 @@ from .engine import (
     build_cum_volume_profile,
     fill_pending_quote,
     force_close,
+    resample_5m,
     step,
 )
 from .exits import MODE_FIXED, MODE_TREND_FULL, MODE_TREND_RESISTANCE_STATE
 from .indicators import round_levels_above
 from .ledger import PaperLedger
-from .upstox import Instrument, UpstoxAuthError, UpstoxClient
+from .upstox import (
+    Instrument,
+    UpstoxAuthError,
+    UpstoxClient,
+    read_parquet_cache,
+    write_parquet_cache,
+)
 from .upstox_auth import read_token_ssm
 
 logger = logging.getLogger("mt.scanner")
@@ -64,7 +74,21 @@ SESSION_END = (15, 35)
 # 15:16 is closed here at the last price we saw, tagged `eod_sweep` so the
 # forward log can tell a stale-mark close apart from a real one.
 EOD_SWEEP = (15, 16)
+# Data-driven "the market is shut" backstop. If not one symbol in the universe
+# has printed a bar by this time, the exchange is closed whatever
+# `market_calendar` says, and the task exits instead of burning a Fargate day.
+# 30 minutes past the open is far beyond any feed-connection delay and far
+# inside the first print of every liquid NSE name.
+NO_DATA_GRACE = (9, 45)
 PROFILE_DAYS = 20
+# Prior sessions of 1-minute bars kept per symbol to warm the indicators. The
+# 5-minute 200 EMA needs 200 bars = 1,000 minutes ≈ 2.7 sessions, so 5 is the
+# smallest round number that produces a value from the opening bell; the exit
+# rules' own warm-up (`exits.WARMUP_BARS`) slices whatever it needs from this.
+# Until 2026-09-15 the scanner passed NO warm-up at all, so every live exit
+# indicator ran cold and the 5-minute trend context could not exist before
+# 10:55 — see `engine._attention_context`.
+WARMUP_SESSIONS = 5
 STRATEGY_BASELINE = "baseline"
 STRATEGY_CATALYST_FIRST_PULLBACK = "catalyst_first_pullback"
 STRATEGY_ATTENTION_1M = "attention_1m"
@@ -78,6 +102,24 @@ STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM = "attention_1m_false_break_reclaim"
 # config deliberately bundles features, so its forward numbers measure the
 # bundle and CANNOT attribute a result to any one of them.
 STRATEGY_ATTENTION_1M_MERGED = "attention_1m_merged"
+# The Warrior transcript's own checklist, all of it, switched on together
+# (2026-09-15, operator request "match all these"). It is the merged arm plus
+# every entry rule the guide states that nothing enforced: a real micro
+# pullback with light volume in it, a positive-and-open 1-minute MACD, first or
+# second pullback only, entries confined to the morning volume peak, a 2:1
+# target alongside the trend exits, and the account-level guardrails in
+# `discipline.py`. Prior-session warm-up is part of the arm, not an extra: the
+# peak-hours rule is unsatisfiable without it.
+#
+# ⚠ Two things this arm is NOT. It is not an attribution experiment — eleven
+# rules move at once, so a result cannot be assigned to any one of them. And
+# three of its components have already been measured and killed on this
+# repo's own data: the pullback ordinal (BT17, anti p=0.469), the
+# quality/selectivity bundle (p=0.979) and the 1-minute agreement gate (BT30,
+# anti p=0.526) all failed to beat random deletion of the same number of
+# trades. It supersedes `attention_1m_merged` at n=12 of its registered 30.
+# research/hypotheses/2026-09-15-warrior-guide-strict.md
+STRATEGY_WARRIOR_STRICT = "warrior_strict"
 
 
 def _strategy_config(settings: Settings) -> EngineConfig:
@@ -137,13 +179,58 @@ def _strategy_config(settings: Settings) -> EngineConfig:
             require_resistance_breakout=True,
             allow_false_break_reentry=True,
         )
+    if settings.mt_strategy == STRATEGY_WARRIOR_STRICT:
+        return EngineConfig(
+            risk_inr=settings.mt_risk_inr,
+            max_notional_inr=settings.mt_max_notional_inr,
+            exit_mode=MODE_TREND_RESISTANCE_STATE,
+            fill_mode=FILL_FUTURE_TRIGGER,
+            use_attention_entries=True,
+            attention_day_chg_min=settings.mt_attention_day_chg_min,
+            attention_rvol_min=settings.mt_attention_rvol_min,
+            require_resistance_breakout=True,
+            allow_false_break_reentry=True,
+            # ── the guide's checklist ────────────────────────────────────────
+            require_micro_pullback=True,
+            require_light_pullback_volume=True,
+            require_macd_positive_open=True,
+            allowed_pullback_ordinals=GUIDE_PULLBACK_ORDINALS,
+            peak_hours_only=True,
+            peak_hours_end=_parse_hhmm(settings.mt_peak_hours_end),
+            warm_context=True,
+            vol_baseline_min_bars=VOL_BASELINE_MIN_BARS,
+            use_fixed_target=True,
+        )
     raise ValueError(
         f"unknown MT_STRATEGY {settings.mt_strategy!r}; expected "
         f"{STRATEGY_BASELINE!r}, {STRATEGY_CATALYST_FIRST_PULLBACK!r}, "
         f"{STRATEGY_ATTENTION_1M!r}, {STRATEGY_ATTENTION_1M_RESISTANCE_STATE!r}, "
         f"{STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM!r}, "
-        f"or {STRATEGY_ATTENTION_1M_MERGED!r}"
+        f"{STRATEGY_ATTENTION_1M_MERGED!r}, or {STRATEGY_WARRIOR_STRICT!r}"
     )
+
+
+def _recent_sessions(hist_1m: pd.DataFrame, sessions: int) -> pd.DataFrame | None:
+    """The last `sessions` calendar days of 1-minute bars, or None if empty.
+
+    Bounded on purpose: `hist_1m` is 35 days for ~145 symbols, and the whole of
+    it would be carried in memory for the entire session to feed indicators that
+    look back at most `exits.WARMUP_BARS` bars.
+    """
+    if hist_1m is None or hist_1m.empty:
+        return None
+    days = sorted(set(hist_1m.index.normalize()))[-sessions:]
+    recent = hist_1m[hist_1m.index.normalize().isin(days)]
+    return None if recent.empty else recent
+
+
+def _parse_hhmm(value: str) -> time:
+    """"10:45" → time(10, 45). Raises rather than silently trading all day."""
+    try:
+        hh, mm = (int(part) for part in str(value).strip().split(":", 1))
+        return time(hh, mm)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"expected HH:MM, got {value!r}") from exc
 
 
 def _apply_env_overrides(cfg: EngineConfig, settings: Settings) -> EngineConfig:
@@ -197,6 +284,61 @@ class Scanner:
         self._state_lock = threading.RLock()
         self._tick_entries: list[Position] = []
         self._tick_rejections: list[Rejection] = []
+        # Account-level guardrails (3 strikes / 50% give-back / size ladder).
+        # They act on the DAY, across every symbol, so they live on the scanner
+        # rather than in the per-symbol engine.
+        self.discipline = DayDiscipline(
+            DisciplineConfig(enabled=settings.mt_discipline)
+        )
+        self._full_risk_inr = settings.mt_risk_inr
+        self._sync_risk()
+
+    # ── daily guardrails ──────────────────────────────────────────────────────
+
+    def _sync_risk(self) -> None:
+        """Push the size ladder's current fraction into the engine config.
+
+        Sizing happens inside `plan_trade`, which reads `cfg.risk_inr`, so the
+        ladder is applied by changing that one number rather than by threading a
+        multiplier through every call. Kept in sync immediately after each close
+        so a fill arriving on the quote thread cannot use a stale size.
+        """
+        self.cfg.risk_inr = self.discipline.risk_inr(self._full_risk_inr)
+
+    def _guard_pending(self, st: DayState, when: pd.Timestamp,
+                       observed: float | None = None) -> bool:
+        """Cancel an armed entry if the day has been halted. True = cancelled.
+
+        Checked at both arming points (bar loop and quote thread) because a
+        buy-stop armed before the third strike must not fill after it.
+        """
+        if st.pending is None:
+            return False
+        allowed, reason = self.discipline.can_trade()
+        if allowed:
+            return False
+        pending = st.pending
+        rejection = Rejection(
+            symbol=st.symbol, time=when, reason=f"halted:{reason}",
+            setup=pending.cand.setup.name, trigger=pending.cand.setup.trigger,
+            observed_price=observed,
+        )
+        st.pending = None
+        st.rejections.append(rejection)
+        return True
+
+    def _record_close(self, trade: ClosedTrade) -> None:
+        """Fold a closed trade into the day's guardrails and re-size."""
+        if not self.discipline.cfg.enabled:
+            return
+        was_halted = self.discipline.halted
+        self.discipline.record(trade.net_inr)
+        self._sync_risk()
+        if self.discipline.halted and not was_halted:
+            logger.warning("discipline: trading halted — %s (%s)",
+                           self.discipline.halted_reason, self.discipline.summary())
+            self._tg(f"🛑 HALTED <b>{self.discipline.halted_reason}</b> — "
+                     f"{self.discipline.summary()}")
 
     # ── notifications ─────────────────────────────────────────────────────────
 
@@ -343,9 +485,16 @@ class Scanner:
                     "low": float(daily["low"].iloc[-1]),
                     "close": prev_close,
                 }
+            warmup_1m = _recent_sessions(hist_1m, WARMUP_SESSIONS)
             self.states[inst.key] = DayState(
                 symbol=sym, prev_close=prev_close, cum_vol_profile=profile,
                 prev_day_gainer=prev_gainer, prev_day=prev_day,
+                # Prior-session bars for the indicators. Held for every strategy
+                # so exits are warm live as they already are in bt17; the
+                # attention CONTEXT only consults them when `warm_context` is on,
+                # so no existing arm changes behaviour by gaining them.
+                warmup_1m=warmup_1m,
+                warmup_5m=resample_5m(warmup_1m) if warmup_1m is not None else None,
             )
             self.inst_by_key[inst.key] = inst
             self.turnover[sym] = turnover_cr
@@ -355,12 +504,21 @@ class Scanner:
         return keys
 
     def _cached_daily(self, inst: Instrument, start: date, end: date) -> pd.DataFrame:
+        """Daily bars, from the EFS cache when it is readable.
+
+        This exact line killed the 2026-09-14 session: `pd.read_parquet` on a
+        zero-byte file raised out of `prepare()` before the feed ever opened.
+        A cache is an optimisation — an unreadable entry must mean "fetch it",
+        never "end the day". Writes are atomic so a concurrent reader can never
+        see a partial file again.
+        """
         f = self.cache / "daily" / f"{inst.symbol.replace('&', '_')}_{end.isoformat()}.parquet"
-        if f.exists():
-            return pd.read_parquet(f)
+        cached = read_parquet_cache(f)
+        if cached is not None and not cached.empty:
+            return cached
         df = self.client.daily(inst.key, start, end)
         f.parent.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(f)
+        write_parquet_cache(f, df)
         return df
 
     # ── main loop ─────────────────────────────────────────────────────────────
@@ -374,6 +532,9 @@ class Scanner:
             if self.cfg.fill_mode != FILL_FUTURE_TRIGGER or st.pending is None:
                 return
             when = pd.Timestamp(ts_ms, unit="ms", tz="UTC").tz_convert(IST)
+            if self._guard_pending(st, when, ltp):
+                self._tick_rejections.append(st.rejections[-1])
+                return
             if self._open_count() >= self.s.mt_max_positions:
                 pending = st.pending
                 rejection = Rejection(
@@ -449,6 +610,7 @@ class Scanner:
                     st.pending.expires_at = now + pd.Timedelta(
                         minutes=self.cfg.attention_pending_minutes
                     )
+                self._guard_pending(st, now, float(bars["close"].iloc[-1]))
                 if st.pending is not None and self._open_count() >= self.s.mt_max_positions:
                     pending = st.pending
                     st.rejections.append(Rejection(
@@ -467,6 +629,13 @@ class Scanner:
                 closed.extend(st.closed[n_x:])
 
         closed.extend(self._eod_sweep(now, snapshots))
+
+        # Fold results into the day's guardrails BEFORE any I/O below, so the
+        # size ladder and the halts are current for the next bar even if a
+        # Mongo or Telegram write is slow. Chronological so "3 consecutive
+        # losses" means what it says when several positions close together.
+        for t in sorted(closed, key=lambda x: x.exit_time):
+            self._record_close(t)
 
         for c in candidates:
             c.catalyst, c.event_type = self._catalyst(c.symbol, c.time)
@@ -514,6 +683,30 @@ class Scanner:
             self._tg(
                 f"{mark} EXIT <b>{t.cand.symbol}</b> {t.exit_reason} "
                 f"@₹{t.exit:.2f} net ₹{t.net_inr:,.0f}"
+            )
+
+    def _market_looks_closed(self, now: pd.Timestamp) -> bool:
+        """True once the grace time has passed with not one bar built anywhere.
+
+        `market_calendar` is a hand-maintained list and is known to be missing
+        entries — 2026-09-14 (Ganesh Chaturthi) was absent, so the scanner ran a
+        full Fargate day against a closed exchange. This is the data-driven
+        backstop: on any real session, 140-odd liquid NSE names have all printed
+        by 09:45, so zero bars across the entire universe means the market is
+        shut, whatever the calendar claims.
+
+        Deliberately "zero across every symbol", never a per-symbol or partial
+        test: one quiet name is normal, and a threshold would eventually be
+        tuned. It cannot fire before the grace time, so a slow feed connection
+        does not trip it.
+        """
+        if self.s.mt_bypass_market_hours or not self.states:
+            return False
+        if now.time() < datetime(2000, 1, 1, *NO_DATA_GRACE).time():
+            return False
+        with self._state_lock:
+            return not any(
+                not self.builder.closed_bars(key, now).empty for key in self.states
             )
 
     def _eod_sweep(
@@ -579,6 +772,8 @@ class Scanner:
             f"{len(closed)} trades, {wins}W/{len(closed) - wins}L, net ₹{net:,.0f}, "
             f"setups={by_setup}, feed={self._feed_status}"
         )
+        if self.discipline.cfg.enabled:
+            self._tg(f"guardrails: {self.discipline.summary()}")
 
     def run(self) -> int:
         today = _now().date()
@@ -625,6 +820,16 @@ class Scanner:
             while not self._stop.is_set():
                 now = _now()
                 if now.time() >= end_t and not self.s.mt_bypass_market_hours:
+                    break
+                if self._market_looks_closed(now):
+                    self._tg(f"🟡 no bars by {now.strftime('%H:%M')} — "
+                             f"market appears closed, exiting")
+                    logger.warning(
+                        "no symbol printed a bar by the %02d:%02d grace time across "
+                        "%d names — treating %s as a non-trading day and exiting. "
+                        "If it WAS a trading day, the feed is broken, not the market.",
+                        *NO_DATA_GRACE, len(self.states), now.date(),
+                    )
                     break
                 # wake ~2s after each minute boundary so the previous bar is closed
                 sleep_s = 62 - now.second if now.second < 2 else 62 - now.second

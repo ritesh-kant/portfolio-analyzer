@@ -65,6 +65,9 @@ function emaSparse(vals, span, minPeriods) {
 function points(bars) {
   var closes = bars.map(function (b) { return b.c; });
   var e9 = ema(closes, 9), e20 = ema(closes, 20);
+  /* The guide's third moving average. Sparse so it stays null until 200
+     bars exist, rather than drawing a meaningless seeded curve. */
+  var e200 = emaSparse(closes, 200, 200);
   var fast = ema(closes, 12), slow = ema(closes, 26);
   var macd = fast.map(function (v, i) {
     return v === null || slow[i] === null ? null : v - slow[i];
@@ -76,7 +79,8 @@ function points(bars) {
     cumVol += b.v;
     return {
       t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v,
-      ema9: e9[i], ema20: e20[i], vwap: cumVol ? cumPv / cumVol : null,
+      ema9: e9[i], ema20: e20[i], ema200: e200[i],
+      vwap: cumVol ? cumPv / cumVol : null,
       macd: macd[i], signal: sig[i],
       hist: macd[i] === null || sig[i] === null ? null : macd[i] - sig[i]
     };
@@ -150,7 +154,7 @@ function drawChart(c) {
   /* price scale — bars, overlays, the trade's own levels, and nearby S/R */
   var pv = [];
   data.forEach(function (b) {
-    [b.l, b.h, b.ema9, b.ema20, b.vwap].forEach(function (v) {
+    [b.l, b.h, b.ema9, b.ema20, b.ema200, b.vwap].forEach(function (v) {
       if (v !== null && isFinite(v)) pv.push(v);
     });
   });
@@ -244,6 +248,7 @@ function drawChart(c) {
   /* overlays — same colours as the /momentum chart */
   line(svg, data.map(function (b) { return b.ema9; }), x, Y, "#fbbf24", 1.5);
   line(svg, data.map(function (b) { return b.ema20; }), x, Y, "#a78bfa", 1.5);
+  line(svg, data.map(function (b) { return b.ema200; }), x, Y, "#94a3b8", 1.5);
   line(svg, data.map(function (b) { return b.vwap; }), x, Y, "#60a5fa", 1.5, "4 3");
 
   /* trade levels */
@@ -381,6 +386,7 @@ function drawCursor(c) {
     + "  vol " + fmtVol(b.v)
     + "  EMA9 " + (b.ema9 == null ? "–" : b.ema9.toFixed(2))
     + "  EMA20 " + (b.ema20 == null ? "–" : b.ema20.toFixed(2))
+    + "  EMA200 " + (b.ema200 == null ? "–" : b.ema200.toFixed(2))
     + "  VWAP " + (b.vwap == null ? "–" : b.vwap.toFixed(2))
     + "  MACD " + (b.macd == null ? "–" : b.macd.toFixed(3))
     + "  hist " + (b.hist == null ? "–" : b.hist.toFixed(3));
@@ -631,7 +637,8 @@ function init() {
   buildCards();
   var leg = document.getElementById("legend");
   [["up candle", "#2dd4bf"], ["down candle", "#fb7185"], ["EMA9 / MACD", "#fbbf24"],
-   ["EMA20 / signal", "#a78bfa"], ["VWAP (dashed)", "#60a5fa"], ["resistance", "#f472b6"],
+   ["EMA20 / signal", "#a78bfa"], ["EMA200", "#94a3b8"],
+   ["VWAP (dashed)", "#60a5fa"], ["resistance", "#f472b6"],
    ["support", "#38bdf8"], ["BUY / entry ▲", "#4ade80"], ["SELL / exit ▼", "#f87171"],
    ["2R target", "#34d399"], ["▱ formation", "#fde68a"]].forEach(function (p) {
     var s = h("span", {}, leg);

@@ -47,7 +47,9 @@ from src.momentum_trader.quality import chart_quality  # noqa: E402
 from src.momentum_trader.catalyst import DatedEventLookup, no_catalyst  # noqa: E402
 from src.momentum_trader.engine import (  # noqa: E402
     FILL_MODES,
+    GUIDE_PULLBACK_ORDINALS,
     STRESS_SLIP,
+    VOL_BASELINE_MIN_BARS,
     ClosedTrade,
     EngineConfig,
     build_cum_volume_profile,
@@ -105,7 +107,8 @@ def eligible_span(daily: pd.DataFrame, start: date, end: date, chg_min: float) -
 
 
 def simulate_symbol(
-    inst: Instrument, df: pd.DataFrame, start: date, end: date, cfg: EngineConfig, catalyst
+    inst: Instrument, df: pd.DataFrame, start: date, end: date, cfg: EngineConfig, catalyst,
+    prefilter_chg_min: float | None = None,
 ) -> tuple[list[ClosedTrade], list[dict]]:
     trades: list[ClosedTrade] = []
     cands: list[dict] = []
@@ -113,14 +116,20 @@ def simulate_symbol(
         return trades, cands
     daily = _daily_from_1m(df)
     days = list(daily.index)
+    # The day-level floor. Under attention entries the engine's own floor is
+    # 1.5%, not 4%: `eligible_span` already used the right one, but this inner
+    # pre-filter did not, so an --attention run silently discarded most of the
+    # days it was meant to replay. Defaults to `cfg.day_chg_min`, so every
+    # legacy-path run is unchanged.
+    floor_pct = cfg.day_chg_min if prefilter_chg_min is None else prefilter_chg_min
     for i, d in enumerate(days):
         if d.date() < start or d.date() > end or i < MIN_PROFILE_DAYS:
             continue
         prev = daily.iloc[i - 1]
         prev_close = float(prev["close"])
         row = daily.iloc[i]
-        # cheap pre-filter: the day must have reached +4% at some point
-        if prev_close <= 0 or float(row["high"]) / prev_close - 1.0 < cfg.day_chg_min / 100.0:
+        # cheap pre-filter: the day must have reached the floor at some point
+        if prev_close <= 0 or float(row["high"]) / prev_close - 1.0 < floor_pct / 100.0:
             continue
         turnover = float(daily["turnover_cr"].iloc[max(0, i - 20):i].mean())
         ok, _ = universe.passes_dynamic(prev_close, turnover)
@@ -143,8 +152,12 @@ def simulate_symbol(
         if len(day_bars) < 30:
             continue
         prev_gainer = i >= 2 and float(prev["close"] / daily.iloc[i - 2]["close"] - 1.0) >= 0.04
-        # prior sessions, for warming up the exit indicators only (entries untouched)
-        warm_days = days[max(0, i - 3):i]
+        # Prior sessions, for warming up the exit indicators (entries untouched)
+        # and, under `warm_context`, the 5-minute trend context too. The 5-min
+        # 200 EMA needs ~2.7 sessions, so that arm takes 5; every other arm keeps
+        # the frozen 3, because a longer warm-up reseeds the 5-minute EMAs and
+        # would shift exits in runs that are meant to reproduce exactly.
+        warm_days = days[max(0, i - (5 if cfg.warm_context else 3)):i]
         warmup = df[df.index.normalize().isin(warm_days)]
         st = run_day(inst.symbol, day_bars, prev_close, profile, cfg, catalyst, prev_gainer,
                      warmup_1m=warmup if not warmup.empty else None,
@@ -207,8 +220,12 @@ _W: dict = {}
 
 def _init_worker(token: str, insts: dict, cfg: EngineConfig, catalyst, start: date,
                  end: date, fetch_start: date, prefilter_chg_min: float,
-                 fetch_only: bool) -> None:
+                 fetch_only: bool, log_level: int) -> None:
     """One Upstox client per process; everything else is plain data."""
+    # A spawned worker does not inherit the parent's logging config, so without
+    # this its HTTP traffic is silently invisible - which is exactly the thing
+    # you look at the log to check.
+    logging.basicConfig(level=log_level, format="%(asctime)s %(levelname)s %(message)s")
     _W.update(client=UpstoxClient(token, cache_dir=CACHE), insts=insts, cfg=cfg,
               catalyst=catalyst, start=start, end=end, fetch_start=fetch_start,
               prefilter_chg_min=prefilter_chg_min, fetch_only=fetch_only)
@@ -236,7 +253,8 @@ def _symbol_job(sym: str) -> dict:
     out["bars"] = len(df)
     if _W["fetch_only"]:
         return {**out, "status": "cached"}
-    tr, cd = simulate_symbol(inst, df, _W["start"], _W["end"], _W["cfg"], _W["catalyst"])
+    tr, cd = simulate_symbol(inst, df, _W["start"], _W["end"], _W["cfg"], _W["catalyst"],
+                             _W["prefilter_chg_min"])
     out["rows"] = [_trade_row(t) for t in tr]
     out["cands"] = cd
     return out
@@ -341,6 +359,16 @@ def main() -> int:
                          "buy-stop fills, resistance-breakout requirement, one false-break "
                          "reclaim, resistance-state exits. Sets --fill-mode/--exit-mode "
                          "unless you pass them explicitly")
+    ap.add_argument("--warrior-strict", action="store_true",
+                    help="replay the warrior_strict arm: --attention plus the guide's "
+                         "own entry checklist — micro pullback on light volume, 1-min "
+                         "MACD positive and open, first/second pullback only, entries "
+                         "confined to the morning peak window, and a 2:1 target kept "
+                         "alongside the trend exits. Implies --attention. The daily "
+                         "guardrails (3 strikes / 50%% give-back / size ladder) are "
+                         "scanner-only and are NOT replayed here: a pool backtest walks "
+                         "one symbol at a time, so it has no coherent day-level P&L to "
+                         "apply them to")
     ap.add_argument("--tag", default="", help="suffix for the output CSV names")
     ap.add_argument("--fetch-only", action="store_true", help="just fill the parquet cache")
     ap.add_argument("--jobs", type=int, default=min(8, mp.cpu_count()),
@@ -368,7 +396,7 @@ def main() -> int:
         cfg_kw["day_chg_min"] = a.day_chg_min
     if a.day_chg_max is not None:
         cfg_kw["day_chg_max"] = a.day_chg_max
-    if a.attention:
+    if a.attention or a.warrior_strict:
         # Mirror scanner._strategy_config(STRATEGY_ATTENTION_1M_MERGED). Only
         # defaulted, so an explicit --exit-mode/--fill-mode still wins and the
         # components can be isolated.
@@ -378,6 +406,14 @@ def main() -> int:
             a.fill_mode = "future_trigger"
         cfg_kw.update(use_attention_entries=True, require_resistance_breakout=True,
                       allow_false_break_reentry=True)
+    if a.warrior_strict:
+        # Mirror scanner._strategy_config(STRATEGY_WARRIOR_STRICT)'s entry side.
+        cfg_kw.update(require_micro_pullback=True, require_light_pullback_volume=True,
+                      require_macd_positive_open=True,
+                      allowed_pullback_ordinals=GUIDE_PULLBACK_ORDINALS,
+                      peak_hours_only=True, warm_context=True,
+                      vol_baseline_min_bars=VOL_BASELINE_MIN_BARS,
+                      use_fixed_target=True)
     cfg = EngineConfig(stress_slip=STRESS_SLIP, exit_mode=a.exit_mode,
                        fill_mode=a.fill_mode, one_trade_per_day=not a.multi_entry,
                        require_quality=a.quality, require_max_move=a.max_move,
@@ -397,7 +433,8 @@ def main() -> int:
     t0 = time.time()
     jobs = max(1, a.jobs)
     initargs = (_token(), insts, cfg, catalyst, start, end, fetch_start,
-                prefilter_chg_min, a.fetch_only)
+                prefilter_chg_min, a.fetch_only,
+                logging.DEBUG if a.v else logging.INFO)
     log.info("simulating %d symbols on %d worker%s",
              len(symbols), jobs, "" if jobs == 1 else "s")
 

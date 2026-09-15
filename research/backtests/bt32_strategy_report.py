@@ -6,7 +6,7 @@ session's 5-minute chart from the cached 1-minute bars, recomputes the exact
 indicator series the engine uses, derives the support/resistance levels AS OF
 THE ENTRY BAR (no look-ahead), and writes ONE self-contained HTML file:
 
-  * three stacked panels per trade — price (candles, EMA9, EMA20, VWAP, every
+  * three stacked panels per trade — price (candles, EMA9, EMA20, EMA200, VWAP, every
     support/resistance level, BUY/STOP/TARGET/EXIT, holding period shaded),
     volume (with its 20-bar average and the RVOL at entry), and MACD(12/26/9)
   * a sortable, filterable trade table

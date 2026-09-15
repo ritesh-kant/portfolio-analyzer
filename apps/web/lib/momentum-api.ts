@@ -1,3 +1,5 @@
+import type { AnalyticsTrade, TradeSource } from './momentum-analytics';
+
 const BASE = process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE ?? 'http://localhost:3001';
 
 let cachedToken: string | null = null;
@@ -131,3 +133,17 @@ export interface MomentumTrade {
 
 export const fetchMomentumTrades = () =>
   get<{ trades: MomentumTrade[]; count: number }>('/mt/trades?limit=500');
+
+// ── analytics dashboard ──────────────────────────────────────────────────────
+
+/**
+ * Trade sets the analytics dashboard can read: the live paper ledger, plus any
+ * backtest run imported with research/backtests/import_trades_to_mongo.py.
+ */
+export const fetchAnalyticsSources = () => get<{ sources: TradeSource[] }>('/mt/analytics/sources');
+
+/** Closed trades from one source, slimmed to the fields the breakdowns use. */
+export const fetchAnalyticsTrades = (source: string) =>
+  get<{ source: string; kind: 'live' | 'backtest'; count: number; trades: AnalyticsTrade[] }>(
+    `/mt/analytics?source=${encodeURIComponent(source)}`,
+  );

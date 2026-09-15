@@ -80,13 +80,20 @@ class ExitConfig:
     use_volume_climax: bool = False
     structural_resistance_only: bool = False
     resistance_requires_failed_break: bool = False
+    # The guide keeps BOTH: "maintain at least a 2:1 reward-to-risk ratio" and
+    # "respect technical exit indicators". `fixed_2r` has the target and no
+    # trend rules; the trend modes have the rules and no target. This flag adds
+    # the 2R target to a trend mode so a position can be closed by whichever
+    # comes first, which is what the transcript actually describes. Off by
+    # default so every prior trend-mode backtest replays unchanged.
+    use_fixed_target: bool = False
 
     @property
     def has_target(self) -> bool:
-        return self.mode == MODE_FIXED
+        return self.mode == MODE_FIXED or self.use_fixed_target
 
     @classmethod
-    def for_mode(cls, mode: str) -> ExitConfig:
+    def for_mode(cls, mode: str, use_fixed_target: bool = False) -> ExitConfig:
         if mode == MODE_FIXED:
             # No arming and no breakeven lock. Spec §4 lists exactly four exits
             # for the fixed mode — false_break, stop, target, 15:15 — and the
@@ -101,14 +108,15 @@ class ExitConfig:
                        use_swing_trail=False, use_ema_fast_break=False,
                        use_ema_slow_break=False)
         if mode == MODE_TREND_MIN:
-            return cls(mode=mode)
+            return cls(mode=mode, use_fixed_target=use_fixed_target)
         if mode == MODE_TREND_FULL:
             return cls(mode=mode, use_macd_fade=True, use_resistance_reject=True,
-                       use_volume_climax=True)
+                       use_volume_climax=True, use_fixed_target=use_fixed_target)
         if mode == MODE_TREND_RESISTANCE_STATE:
             return cls(mode=mode, use_macd_fade=True, use_resistance_reject=True,
                        use_volume_climax=True, structural_resistance_only=True,
-                       resistance_requires_failed_break=True)
+                       resistance_requires_failed_break=True,
+                       use_fixed_target=use_fixed_target)
         raise ValueError(f"unknown exit mode {mode!r}; expected one of {MODES}")
 
 

@@ -176,7 +176,19 @@ class Settings(BaseSettings):
     mt_max_positions: int = 20                # concurrent open paper positions
     mt_log_csv: str = "research/backtests/mt_forward_log.csv"  # spec §6 forward log
     mt_cache_dir: str = ".cache_upstox"       # instrument master + candle cache
-    mt_strategy: str = "baseline"             # baseline | catalyst_first_pullback | attention_1m | attention_1m_resistance_state | attention_1m_false_break_reclaim | attention_1m_merged (the single deployed forward arm)
+    mt_strategy: str = "baseline"             # baseline | catalyst_first_pullback | attention_1m | attention_1m_resistance_state | attention_1m_false_break_reclaim | attention_1m_merged | warrior_strict (the deployed forward arm)
+    # Account-level guardrails from the Warrior transcript: stop for the day
+    # after 3 consecutive losses or after giving back half of peak daily profit,
+    # open at starter size, size up only on a green cushion, size down after
+    # every loss. Scanner-only — a pool backtest replays one symbol at a time
+    # and so has no coherent notion of the day's running P&L.
+    mt_discipline: bool = False
+    # Latest IST bar-start that may open a position when the strategy sets
+    # `peak_hours_only`. The guide's 07:00–10:00 EST window ends 30 minutes
+    # after the US open and is mostly pre-market, which NSE does not have; this
+    # is the first 105 minutes of the NSE session, its morning volume peak.
+    # Chosen from session-volume shape, never from returns — hence configurable.
+    mt_peak_hours_end: str = "11:00"
     mt_attention_day_chg_min: float = 1.5      # promotion only; never sufficient to enter
     mt_attention_rvol_min: float = 1.5         # promotion only; never sufficient to enter
     # Five-minute entries only: refuse one whose own 1-min chart disagrees

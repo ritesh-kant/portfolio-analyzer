@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { MomentumTradeChart } from '../../components/momentum-trade-chart';
@@ -374,6 +375,12 @@ export default function MomentumPage() {
           <p className="mt-1 text-sm text-ink/65">
             Select any trade to review the exact one-minute candles, overlays, and execution points.
           </p>
+          <Link
+            href="/momentum/analytics"
+            className="mt-2 inline-block rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold hover:bg-black/5"
+          >
+            Analytics dashboard →
+          </Link>
         </div>
         <div className="metric-chip text-right">
           <p className="text-xs text-ink/55">Recorded P&amp;L</p>

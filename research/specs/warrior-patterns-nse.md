@@ -6,6 +6,18 @@ under `2026-09-05-momentum-catalyst-upstox-v2.md`, this file and those constants
 change only via a new spec version + a new hypothesis file. Tuning a threshold
 after seeing results is the p-hacking pattern this repo exists to prevent.
 
+> **2026-09-15 — scope note, no constant changed.** This spec covers the five
+> pillars, the seven setups and the risk rules. It never covered the parts of
+> the source transcript that are not chart rules: the two-yeses confirmation,
+> the first/second-pullback limit, the peak-hours window, and the account-level
+> guardrails (3 strikes, 50% give-back, starter size, size down after a loss).
+> Those are now implemented and enforced in the `warrior_strict` arm, registered
+> at [2026-09-15-warrior-guide-strict](../hypotheses/2026-09-15-warrior-guide-strict.md).
+> Every constant in this file is unchanged, and every switch that arm uses is
+> **default-off**, so the setups below still detect exactly what they detected
+> on 2026-09-05. `micro_pullback` gained two optional parameters whose defaults
+> reproduce the frozen rule bit-for-bit.
+
 **Sources baked in** (all Warrior Trading, Ross Cameron):
 1. *My Stock Selection Process & Criteria* — the 5-criterion scanner, the two
    entry rules, the 2:1 risk rule.

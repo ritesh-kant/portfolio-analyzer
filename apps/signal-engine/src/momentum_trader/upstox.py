@@ -16,6 +16,7 @@ from __future__ import annotations
 import gzip
 import json
 import logging
+import os
 import threading
 import time
 from collections import deque
@@ -34,6 +35,58 @@ logger = logging.getLogger(__name__)
 API_BASE = "https://api.upstox.com"
 INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
 _TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
+
+
+# ── cache files that can never crash a session ───────────────────────────────
+# The candle cache lives on a shared EFS volume. On 2026-09-14 two scanner tasks
+# started from the same EventBridge rule and wrote it concurrently: one read the
+# other's half-written file and the whole session died on
+# `ArrowInvalid: Parquet file size is 0 bytes` before a single quote arrived.
+# The duplicate task is gone, but a cache is an optimisation and must never be
+# able to take the process down — a torn, truncated or empty file has to read as
+# "not cached". Writes go to a temp file and are renamed, which is atomic on
+# POSIX, so a concurrent reader sees either the old file or the new one and
+# never a partial one.
+
+def read_parquet_cache(path: Path) -> pd.DataFrame | None:
+    """Cached frame, or None if the file is missing, empty or unreadable."""
+    try:
+        if not path.exists() or path.stat().st_size == 0:
+            return None
+        return pd.read_parquet(path)
+    except Exception as exc:  # noqa: BLE001 — any read failure means "refetch"
+        logger.warning("cache %s unreadable (%s) — refetching", path.name, exc)
+        return None
+
+
+def read_json_cache(path: Path) -> dict | None:
+    """Cached sidecar, or None if missing, empty, truncated or not an object."""
+    try:
+        if not path.exists() or path.stat().st_size == 0:
+            return None
+        value = json.loads(path.read_text())
+        return value if isinstance(value, dict) else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("cache %s unreadable (%s) — refetching", path.name, exc)
+        return None
+
+
+def _atomic_write(path: Path, write: Callable[[Path], None]) -> None:
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        write(tmp)
+        os.replace(tmp, path)          # atomic on POSIX
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def write_parquet_cache(path: Path, df: pd.DataFrame) -> None:
+    _atomic_write(path, lambda p: df.to_parquet(p))
+
+
+def write_json_cache(path: Path, payload: dict) -> None:
+    _atomic_write(path, lambda p: p.write_text(json.dumps(payload)))
 
 
 class UpstoxAuthError(RuntimeError):
@@ -201,12 +254,16 @@ class UpstoxClient:
             have: pd.DataFrame | None = None
             cov0 = cov1 = None
             if f.exists() and meta.exists():
-                rng = json.loads(meta.read_text())
-                cov0, cov1 = date.fromisoformat(rng["start"]), date.fromisoformat(rng["end"])
-                have = pd.read_parquet(f)
-                if cov0 <= want0 and cov1 >= want1 and not have.empty:
-                    frames.append(have.astype(float))
-                    continue
+                rng = read_json_cache(meta)
+                have = read_parquet_cache(f)
+                if rng is not None and have is not None:
+                    cov0 = date.fromisoformat(rng["start"])
+                    cov1 = date.fromisoformat(rng["end"])
+                    if cov0 <= want0 and cov1 >= want1 and not have.empty:
+                        frames.append(have.astype(float))
+                        continue
+                else:
+                    have = None   # unreadable cache → refetch, never crash
             fetched = self.historical_1m(inst.key, want0, want1)
             parts = [x for x in (have, fetched) if x is not None and not x.empty]
             merged = (pd.concat(parts).astype(float) if parts
@@ -220,8 +277,8 @@ class UpstoxClient:
             else:
                 new0, new1 = want0, want1
             f.parent.mkdir(parents=True, exist_ok=True)
-            merged.to_parquet(f)
-            meta.write_text(json.dumps({"start": new0.isoformat(), "end": new1.isoformat()}))
+            write_parquet_cache(f, merged)
+            write_json_cache(meta, {"start": new0.isoformat(), "end": new1.isoformat()})
             frames.append(merged)
         frames = [x for x in frames if not x.empty]
         if not frames:
