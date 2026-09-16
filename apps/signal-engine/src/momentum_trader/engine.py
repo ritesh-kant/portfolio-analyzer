@@ -29,12 +29,25 @@ from src.news_trader.trailing_sl import calc_costs
 
 from . import exits, location, quality
 from .candles import PATTERN_RULES_VERSION, candle_tags, completed_pattern_matches
-from .indicators import cumulative_session_volume, day_change_pct, ema, session_vwap, volume_ratio
+from .indicators import (
+    atr,
+    cumulative_session_volume,
+    day_change_pct,
+    ema,
+    session_vwap,
+    volume_ratio,
+)
 from .levels import NEAR_PCT, derive_levels, nearest_structural_resistance
 from .pullback import pullback_ordinal
 from .risk import DEFAULT_RR, TradePlan, plan_trade
-from .setups import (CHASE_MAX_EXT_PCT, MICRO_PAUSE_MAX_BARS, Setup, false_break,
-                     micro_pullback, scan_setups)
+from .setups import (
+    CHASE_MAX_EXT_PCT,
+    MICRO_PAUSE_MAX_BARS,
+    Setup,
+    false_break,
+    micro_pullback,
+    scan_setups,
+)
 
 # ── frozen scan parameters (spec §1) ─────────────────────────────────────────
 DAY_CHG_MIN_PCT = 4.0
@@ -187,6 +200,17 @@ class EngineConfig:
     #     not supply, and round-number entry rules were already killed here;
     #   * a refusal ends the day instead of freeing it for a later entry.
     resistance_veto_v2: bool = False
+
+    # Add volume-by-price shelves to the level set used by the headroom test.
+    # A pivot needs `k` lower bars on each side, so it cannot see supply built
+    # inside a fast move: one impulse bar blinds the detector for `k` bars
+    # either side, which is where the sellers that stopped the run actually
+    # are. Measured on EIHOTEL 2026-09-16 the gate's nearest structural
+    # resistance above the trigger was a round number ₹300 - 3.3% away - while
+    # 27% of the session's volume had already traded between the trigger and
+    # the 2R target. OFF by default: this changes which trades exist, so every
+    # recorded run keeps the level set it was measured with.
+    volume_shelf_levels: bool = False
     # A forward playbook may name its exact setup and pullback ordinal. Empty
     # tuples preserve the full frozen Warrior setup list.
     allowed_setups: tuple[str, ...] = ()
@@ -1002,6 +1026,7 @@ def _resistance_aware_attention_confirmation(
     prev_day: dict[str, float] | None,
     v2: bool = False,
     guide: GuideGates | None = None,
+    shelves: bool = False,
 ) -> tuple[Setup | None, str]:
     """Apply the unchanged 1-minute confirmation to structural resistance.
 
@@ -1017,7 +1042,9 @@ def _resistance_aware_attention_confirmation(
     prior = bars_1m.iloc[:-1]
     if prior.empty:
         return setup, reason
-    levels_before_confirmation = derive_levels(prior, prev_day)
+    shelf_atr = (float(atr(prior).iloc[-1]) if shelves and len(prior) >= 15 else None)
+    levels_before_confirmation = derive_levels(prior, prev_day,
+                                               add_shelves=shelves, atr=shelf_atr)
     if not v2:
         # A one-minute pivot can sit immediately below a still-unbroken
         # five-minute ceiling.  Entry and charting must use the same
@@ -1027,7 +1054,8 @@ def _resistance_aware_attention_confirmation(
         # drops it and keeps the level set on one timeframe.
         prior_5m = resample_5m(prior)
         if not prior_5m.empty:
-            levels_before_confirmation += derive_levels(prior_5m, prev_day)
+            levels_before_confirmation += derive_levels(
+                prior_5m, prev_day, add_shelves=shelves, atr=None)
 
     # What counts as a ceiling for the headroom test. A round number is a
     # property of the price grid, not of supply, yet it is the binding level in
@@ -1493,7 +1521,7 @@ def step(
         if cfg.require_resistance_breakout:
             setup, confirmation_reason = _resistance_aware_attention_confirmation(
                 bars_1m, cfg.attention_confirm_vol_ratio, state.prev_day,
-                cfg.resistance_veto_v2, guide,
+                cfg.resistance_veto_v2, guide, cfg.volume_shelf_levels,
             )
         else:
             setup, confirmation_reason = _attention_confirmation(

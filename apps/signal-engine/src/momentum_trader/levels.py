@@ -12,6 +12,12 @@ mechanically:
 3. **Anchors.** Prices that matter for reasons other than pivots get added:
    yesterday's high, low and close, today's opening-range high and low, and the
    round-rupee grid. These are where other traders place orders.
+4. **Volume shelves.** A pivot needs `k` lower bars on each side, so it cannot
+   see supply built *inside* a fast move: every bar of a vertical run makes a
+   higher high, and the one impulse bar then blinds the detector for `k` bars
+   either side - which is exactly where the sellers who stopped the run are.
+   A shelf is found from volume-by-price instead: a band where an unusual
+   amount of the session's volume changed hands, regardless of bar shape.
 
 Resistance is the nearest level above the current price, support the nearest
 below. The exit logic uses resistance to answer "is the move about to stall?"
@@ -25,6 +31,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from .indicators import round_levels_above, validate_bars
@@ -37,13 +44,22 @@ NEAR_PCT = 0.35        # "price is at the level" band, in percent
 # overrule a live trend.  Anchors are structural by definition; a pivot becomes
 # structural only after the market has made a second, independently confirmed
 # attempt at it.  This is a rule about the source of a level, not its price.
-STRUCTURAL_KINDS = frozenset({"prev_day", "orb", "round"})
+STRUCTURAL_KINDS = frozenset({"prev_day", "orb", "round", "shelf"})
+
+# Volume-shelf parameters. A shelf is a local peak in the volume-by-price
+# profile, so the bucket width sets what "one level" means. The default scales
+# with the symbol's own 1-minute noise: a shelf narrower than a typical bar is
+# not a price the market argued over, it is one bar's range.
+SHELF_BUCKET_MIN = 0.05          # NSE tick; never bucket finer than this
+SHELF_BUCKET_FALLBACK_PCT = 0.15  # % of price, used when no ATR is supplied
+SHELF_MIN_VOLUME_MULT = 1.5      # peak must hold 1.5x the mean occupied bucket
+SHELF_PEAK_WIDTH = 1             # buckets either side the peak must beat
 
 
 @dataclass(frozen=True)
 class Level:
     price: float
-    kind: str          # pivot_high | pivot_low | prev_day | orb | round
+    kind: str          # pivot_high | pivot_low | prev_day | orb | round | shelf
     touches: int
     volume: float
     strength: float    # touches, plus a small bonus for volume traded there
@@ -111,15 +127,112 @@ def cluster(points: list[tuple[float, float]], kind: str,
     return sorted(out, key=lambda x: x.strength, reverse=True)
 
 
+def _shelf_bucket(bars: pd.DataFrame, atr: float | None) -> float:
+    """Width of one volume-profile bucket, in rupees.
+
+    `atr` is the symbol's average true range on the same timeframe as `bars`.
+    A band narrower than one bar's typical range cannot be a level the market
+    argued over, so the bucket is that range. Callers without an ATR to hand
+    fall back to a fixed percentage of price.
+    """
+    px = float(bars["close"].iloc[-1])
+    width = atr if atr and atr > 0 else px * SHELF_BUCKET_FALLBACK_PCT / 100.0
+    return max(round(width, 2), SHELF_BUCKET_MIN)
+
+
+def volume_by_price(bars: pd.DataFrame, bucket: float) -> pd.Series:
+    """Volume traded in each price bucket, indexed by bucket centre.
+
+    Each bar's volume is spread evenly across its high-low range, which is the
+    honest thing to do with OHLCV: we know the bar traded that range and we do
+    not know where inside it. The alternative - crediting a bar's whole volume
+    to one price - is what makes a single impulse candle look like a level at
+    its wick tip, when almost none of its volume changed hands up there.
+    """
+    validate_bars(bars)
+    if bars.empty or bucket <= 0:
+        return pd.Series(dtype=float)
+    lo = float(bars["low"].min())
+    hi = float(bars["high"].max())
+    start = np.floor(lo / bucket) * bucket
+    # Count the buckets rather than letting arange decide: a zero-range bar has
+    # lo == hi, and `arange(start, hi + bucket, bucket)` then yields a single
+    # edge and no bucket at all.
+    n_buckets = max(int(np.ceil((hi - start) / bucket)), 1)
+    edges = start + np.arange(n_buckets + 1) * bucket
+    profile = np.zeros(n_buckets)
+    lows = bars["low"].to_numpy(dtype=float)
+    highs = bars["high"].to_numpy(dtype=float)
+    vols = bars["volume"].to_numpy(dtype=float)
+    for low_, high_, vol in zip(lows, highs, vols, strict=True):
+        if vol <= 0:
+            continue
+        if high_ <= low_:                      # zero-range bar: one bucket
+            j = min(int(np.searchsorted(edges, low_, "right")) - 1, len(profile) - 1)
+            profile[max(j, 0)] += vol
+            continue
+        overlap = np.clip(np.minimum(edges[1:], high_) - np.maximum(edges[:-1], low_),
+                          0.0, None)
+        total = overlap.sum()
+        if total > 0:
+            profile += vol * overlap / total
+    return pd.Series(profile, index=(edges[:-1] + edges[1:]) / 2.0)
+
+
+def volume_shelf_levels(bars: pd.DataFrame, atr: float | None = None) -> list[Level]:
+    """Prices where an unusual share of the session's volume changed hands.
+
+    A shelf is a local peak in the volume-by-price profile that holds at least
+    `SHELF_MIN_VOLUME_MULT` times the mean occupied bucket. Unlike a pivot it
+    does not care about bar shape, so it still sees the supply a vertical run
+    left behind - the case pivots are blind to by construction.
+
+    Look-ahead safe: the profile is built only from the bars it is given.
+    """
+    if bars.empty:
+        return []
+    bucket = _shelf_bucket(bars, atr)
+    profile = volume_by_price(bars, bucket)
+    if profile.empty:
+        return []
+    values = profile.to_numpy(dtype=float)
+    occupied = values[values > 0]
+    if occupied.size == 0:
+        return []
+    total = float(values.sum())
+    threshold = float(occupied.mean()) * SHELF_MIN_VOLUME_MULT
+    w = SHELF_PEAK_WIDTH
+    out: list[Level] = []
+    for i, value in enumerate(values):
+        if value < threshold:
+            continue
+        window = values[max(0, i - w): i + w + 1]
+        if value < window.max() - 1e-9:
+            continue
+        if i > 0 and abs(values[i - 1] - value) < 1e-9:
+            continue                           # first bucket of a plateau only
+        share = value / total if total > 0 else 0.0
+        out.append(Level(price=float(profile.index[i]), kind="shelf",
+                         touches=2, volume=float(value),
+                         strength=1.0 + min(share * 10.0, 2.0)))
+    return sorted(out, key=lambda x: x.strength, reverse=True)
+
+
 def derive_levels(
     bars: pd.DataFrame,
     prev_day: dict[str, float] | None = None,
     orb: dict[str, float] | None = None,
     add_round: bool = True,
+    add_shelves: bool = False,
+    atr: float | None = None,
 ) -> list[Level]:
     """Every level worth knowing about, strongest first.
 
     `prev_day` takes keys high/low/close; `orb` takes high/low.
+
+    `add_shelves` is off by default so every existing caller and every recorded
+    backtest keeps the level set it was measured with. `atr` only sets the
+    shelf bucket width and is ignored when shelves are off.
     """
     if bars.empty:
         return []
@@ -138,6 +251,8 @@ def derive_levels(
         minor, major = round_levels_above(px)
         levels.append(Level(minor, "round", 1, 0.0, 0.8))
         levels.append(Level(major, "round", 1, 0.0, 1.0))
+    if add_shelves:
+        levels += volume_shelf_levels(bars, atr)
     return [x for x in levels if x.touches >= MIN_TOUCHES]
 
 

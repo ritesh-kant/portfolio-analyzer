@@ -342,12 +342,17 @@ def main() -> int:
                     help="BT33 variant of the local-resistance rule: no 5m level "
                          "merge, round marks excluded from the headroom test, and a "
                          "refusal ends the day instead of freeing it.")
+    ap.add_argument("--volume-shelves", action="store_true",
+                    help="add volume-by-price shelves to the level set used by the "
+                         "headroom test, so supply built inside a fast move is "
+                         "visible (pivots are blind to it by construction). See "
+                         "research/hypotheses/2026-09-16-volume-shelf-levels.md")
     ap.add_argument("--require-1m-agreement", action="store_true",
                     help="refuse a 5-min entry whose own 1-min chart disagrees (1-min "
-                         "EMA9>EMA20, green trigger minute closing in its top 40% on "
+                         "EMA9>EMA20, green trigger minute closing in its top 40%% on "
                          ">=2.5x its recent 1-min volume). Off by default, matching the "
                          "MT_REQUIRE_1M_AGREEMENT env switch: BT30 measured it as a "
-                         "~43% trade-count cut, not a filter (anti p=0.526) "
+                         "~43%% trade-count cut, not a filter (anti p=0.526) "
                          "(hypothesis 2026-09-12-one-minute-agreement)")
     ap.add_argument("--first-candidate-only", action="store_true",
                     help="do not replace a refused first setup with a later setup that day")
@@ -446,7 +451,8 @@ def main() -> int:
                        require_quality=a.quality, require_max_move=a.max_move,
                        first_candidate_only=a.first_candidate_only,
                        require_1m_agreement=a.require_1m_agreement,
-                       resistance_veto_v2=a.resistance_v2, **cfg_kw)
+                       resistance_veto_v2=a.resistance_v2,
+                       volume_shelf_levels=a.volume_shelves, **cfg_kw)
 
     # The pre-filter exists to skip symbols the engine could never trade. Under
     # attention entries the floor is 1.5%, not 4%, so using day_chg_min here
