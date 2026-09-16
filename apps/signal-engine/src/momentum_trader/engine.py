@@ -61,7 +61,22 @@ STRESS_SLIP = 0.0040           # +40 bps/side cost stress (hypothesis Gate 0)
 FILL_NEXT_OPEN = "next_open"
 FILL_TRIGGER = "trigger"
 FILL_FUTURE_TRIGGER = "future_trigger"
-FILL_MODES = (FILL_NEXT_OPEN, FILL_TRIGGER, FILL_FUTURE_TRIGGER)
+# A buy-stop already resting in the book at the trigger. It fills the instant the
+# level is touched, so (a) the fill is the trigger and (b) the chase guard cannot
+# apply — nothing was chased. That second part is what separates it from
+# FILL_TRIGGER, which keeps the guard and so takes exactly the next_open arm's
+# trades. Arming lasts one bar: the order is placed when the setup's break bar is
+# recognised and cancelled at that bar's close, so selection is otherwise
+# unchanged and the two arms stay comparable.
+FILL_RESTING = "resting"
+# Same order, but the stop-sanity band is judged on the price actually paid (the
+# trigger) rather than the baseline arm's next-open. That is what a live resting
+# order must do — it cannot see the next open — but it breaks the trade-for-trade
+# comparability contract in plan_trade's docstring, so the two are separate modes
+# and the difference between them is a measurement, not a detail.
+FILL_RESTING_SIZED = "resting_sized"
+FILL_MODES = (FILL_NEXT_OPEN, FILL_TRIGGER, FILL_FUTURE_TRIGGER,
+              FILL_RESTING, FILL_RESTING_SIZED)
 
 # ── two-stage attention strategy ─────────────────────────────────────────────
 # These values are deliberately softer than the legacy entry gates. They only
@@ -177,6 +192,11 @@ class EngineConfig:
     allowed_setups: tuple[str, ...] = ()
     allowed_pullback_ordinals: tuple[int, ...] = ()
     fill_mode: str = FILL_NEXT_OPEN    # next_open | trigger | future_trigger
+    # Entry slippage applied to RESTING fills only, in percent of the trigger.
+    # A live buy-stop is filled by the first quote at or above the level, not at
+    # the level itself, so a faithful replay prices it slightly worse. 0.0 keeps
+    # every existing run byte-identical; the live-measured figure is ~0.03%.
+    entry_slip_pct: float = 0.0
     exit_mode: str = exits.MODE_FIXED  # see exits.py MODES
     # New paper-only path: soft thresholds promote a symbol, 5-minute context
     # defines the setup, and a high-volume 1-minute candle confirms it.
@@ -230,6 +250,8 @@ class EngineConfig:
     def __post_init__(self) -> None:
         if self.fill_mode not in FILL_MODES:
             raise ValueError(f"unknown fill mode {self.fill_mode!r}; expected one of {FILL_MODES}")
+        if self.entry_slip_pct < 0.0:
+            raise ValueError("entry_slip_pct must be non-negative")
         if self.attention_day_chg_min < 0.0:
             raise ValueError("attention_day_chg_min must be non-negative")
         if self.attention_rvol_min <= 0.0:
@@ -312,6 +334,16 @@ class Pending:
     cand: Candidate
     decision_time: pd.Timestamp | None = None
     expires_at: pd.Timestamp | None = None
+    # True when the market had ALREADY traded through the trigger at the moment
+    # this entry was armed (the legacy setups fire on `bar.high > trigger`), so a
+    # buy-stop resting at the level would have been hit inside that same bar.
+    # False for the attention path, whose trigger sits ABOVE price at decision
+    # time — there the order genuinely waits, and a resting fill may never happen.
+    trigger_reached: bool = False
+    # Highest price the arming bar actually traded. A resting fill can never be
+    # priced above it, so entry slippage cannot invent a price on a bar that only
+    # just touched the level.
+    armed_high: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -1142,6 +1174,23 @@ def _false_break_reclaim_confirmation(
     return True
 
 
+def _open_position(state: DayState, cand: Candidate, when: pd.Timestamp, fill: float,
+                   plan, cfg: EngineConfig, bars_1m: pd.DataFrame,
+                   full_5m: pd.DataFrame | None) -> None:
+    """Turn a filled plan into an open position (shared by every fill mode)."""
+    ec = cfg.exit_cfg
+    is_1m = _is_one_minute_setup(cand.setup.name)
+    tf = bars_1m if is_1m else _bars_5m(bars_1m, full_5m)
+    state.position = Position(
+        cand=cand, entry_time=when, plan=plan, highest=fill,
+        exit_state=exits.initial_state(
+            entry=fill, hard_stop=cand.setup.stop, bars_tf=tf,
+            prev_day=state.prev_day, with_levels=ec.use_resistance_reject,
+        ),
+    )
+    state.traded_today = True
+
+
 def _reject_pending(
     state: DayState,
     when: pd.Timestamp,
@@ -1253,6 +1302,52 @@ def step(
                 return  # OHLC cannot order the entry bar's later high and low honestly.
         if state.pending is not None:
             return
+
+    # 1a. a resting buy-stop. The order sits in the book at the trigger, so it is
+    # filled only when the market actually reaches the level, and a bar that opens
+    # above it fills at that open instead — the mirror of `exits.check_stop`. The
+    # chase cap and the stop-sanity band are both judged on the price actually
+    # paid, exactly as the live quote path (`fill_pending_quote`) does.
+    if state.pending is not None and cfg.fill_mode in (FILL_RESTING, FILL_RESTING_SIZED):
+        pending = state.pending
+        cand = pending.cand
+        trigger = cand.setup.trigger
+        if pending.expires_at is not None and now > pending.expires_at:
+            _reject_pending(state, now, "pending_expired", float(bar["close"]))
+            return
+        # An entry armed while price was already through the level (the legacy
+        # setups fire on `bar.high > trigger`) was hit inside its own signal bar.
+        # One armed BELOW the level — the attention path — has to wait for it, and
+        # filling before the market gets there would invent a price.
+        if not pending.trigger_reached and float(bar["high"]) < trigger:
+            return
+        want = trigger * (1.0 + cfg.entry_slip_pct / 100.0)
+        if pending.trigger_reached:
+            # Hit inside its own signal bar, so THAT bar bounds the price — this
+            # one cannot. Without the cap the slippage alone prices 3.8% of legacy
+            # fills above anything that traded.
+            fill = min(want, pending.armed_high) if pending.armed_high else want
+        else:
+            # A gap open above the level fills at the open, which is worse. But the
+            # fill can never be above what actually traded: these triggers sit on
+            # round numbers the bar often only just touches (high == trigger), so
+            # without this cap the slippage alone invents a price — it priced 33.5%
+            # of attention fills above their own bar's high.
+            fill = min(max(want, float(bar["open"])), float(bar["high"]))
+        if (fill / trigger - 1.0) * 100.0 > CHASE_MAX_EXT_PCT:
+            _reject_pending(state, now, "chased", fill)
+            return
+        plan = plan_trade(
+            fill, cand.setup.stop, risk_inr=cfg.risk_inr,
+            max_notional_inr=cfg.max_notional_inr, rr=cfg.rr,
+            gate_entry=fill if cfg.fill_mode == FILL_RESTING_SIZED else float(bar["open"]),
+        )
+        if plan is None:
+            _reject_pending(state, now, "stop_not_sane", fill)
+            return
+        state.pending = None
+        _open_position(state, cand, now, fill, plan, cfg, bars_1m, full_5m)
+        return
 
     if state.pending is not None:
         cand = state.pending.cand
@@ -1508,7 +1603,11 @@ def step(
                 m_reason if not m_ok else p_reason if not p_ok else o_reason
             )
         return
-    state.pending = Pending(cand)
+    armed_tf = bars_1m if _is_one_minute_setup(setup.name) else tf5
+    state.pending = Pending(
+        cand, trigger_reached=True,
+        armed_high=float(armed_tf["high"].iloc[-1]) if len(armed_tf) else setup.trigger,
+    )
 
 
 def run_day(

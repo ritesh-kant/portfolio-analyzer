@@ -272,6 +272,9 @@ def main() -> int:
     ap.add_argument("--max-charts", type=int, default=120,
                     help="cap the number of charts embedded (0 = all)")
     ap.add_argument("--title", default="BT32 — momentum strategy, trade by trade")
+    ap.add_argument("--note", default="",
+                    help="extra sentence appended to the subtitle, e.g. a caveat that "
+                         "these charts are a SAMPLE and not the population's P&L")
     a = ap.parse_args()
 
     src = Path(a.trades) if Path(a.trades).is_absolute() else ROOT / a.trades
@@ -308,6 +311,8 @@ def main() -> int:
         "exchange, SEBI, stamp, GST). "
         "Descriptive report of an already-measured window — not a new test."
     )
+    if a.note:
+        sub += f" <b>{html.escape(a.note)}</b>"
     out = Path(a.output) if Path(a.output).is_absolute() else ROOT / a.output
     out.write_text(build_html(a.title, sub, data))
     size = out.stat().st_size / 1e6

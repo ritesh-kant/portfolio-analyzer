@@ -93,8 +93,13 @@ def load_trades() -> tuple[pd.DataFrame, list[str]]:
     """Every simulated momentum trade, de-duplicated, flagged clean / not."""
     frames, clean_files = [], []
     for path in sorted(glob.glob(TRADE_GLOB)):
-        frame = pd.read_csv(path)
         name = os.path.basename(path)
+        try:
+            frame = pd.read_csv(path)
+        except pd.errors.EmptyDataError:
+            # a run that produced no trades still writes a header-less file;
+            # skip it rather than aborting the whole scan
+            continue
         frame["src"] = name
         frame["clean_run"] = is_clean_run(frame, name)
         if frame["clean_run"].iloc[0] if len(frame) else False:

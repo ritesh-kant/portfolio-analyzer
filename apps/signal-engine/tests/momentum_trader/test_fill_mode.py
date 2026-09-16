@@ -173,3 +173,143 @@ def test_both_arms_take_the_same_trades_over_a_replayed_session() -> None:
     # that pullback. Asserting `treated <= baseline` would encode a false
     # invariant that merely happens to hold in this fixture.
     assert all(t.entry == pytest.approx(t.cand.setup.trigger) for t in treat)
+
+
+# ── resting buy-stop modes ───────────────────────────────────────────────────
+# research/hypotheses/2026-09-15-resting-buy-stop-execution.md
+#
+# Two shapes of armed entry, and they must fill differently:
+#   trigger_reached=True  — the legacy setups fire on `bar.high > trigger`, so a
+#                           buy-stop at the level was hit inside that signal bar.
+#   trigger_reached=False — the attention path arms BELOW a future trigger, so the
+#                           order genuinely waits and may never fill.
+
+RESTING_MODES = (eng.FILL_RESTING, eng.FILL_RESTING_SIZED)
+
+
+def _rest(fill_mode: str, bar: tuple[str, float, float, float, float, float],
+          *, reached: bool, slip: float = 0.0, trigger: float = 100.0,
+          stop: float = 98.5, expires: pd.Timestamp | None = None) -> eng.DayState:
+    st, _ = _pending_state(trigger, stop)
+    st.pending = eng.Pending(st.pending.cand, trigger_reached=reached, expires_at=expires)
+    cfg = eng.EngineConfig(fill_mode=fill_mode, stress_slip=0.0, entry_slip_pct=slip)
+    eng.step(st, _bars([bar]), cfg, lambda _s, _t: (0, ""))
+    return st
+
+
+def test_resting_modes_are_registered() -> None:
+    for mode in RESTING_MODES:
+        assert mode in eng.FILL_MODES
+
+
+def test_already_through_the_level_fills_at_the_trigger() -> None:
+    for mode in RESTING_MODES:
+        st = _rest(mode, ("10:35", 100.4, 100.6, 100.2, 100.4, 1000), reached=True)
+        assert st.position is not None, mode
+        assert st.position.plan.entry == pytest.approx(100.0), mode
+
+
+def test_a_future_trigger_waits_and_does_not_invent_a_fill() -> None:
+    """The bug this guards: filling at a level the bar never traded at. 30.8% of
+    attention fills were fabricated this way before `trigger_reached` existed."""
+    for mode in RESTING_MODES:
+        st = _rest(mode, ("10:35", 99.0, 99.6, 98.8, 99.2, 1000), reached=False)
+        assert st.position is None, mode
+        assert st.pending is not None, mode          # still resting, not cancelled
+
+
+def test_a_future_trigger_fills_once_the_level_trades() -> None:
+    for mode in RESTING_MODES:
+        st = _rest(mode, ("10:35", 99.5, 100.3, 99.4, 100.2, 1000), reached=False)
+        assert st.position is not None, mode
+        assert st.position.plan.entry == pytest.approx(100.0), mode
+
+
+def test_a_gap_open_above_the_level_fills_at_the_open_which_is_worse() -> None:
+    """Mirror of exits.check_stop's min(stop, open): a buy-stop gapped through
+    pays the open, not the level."""
+    st = _rest(eng.FILL_RESTING_SIZED, ("10:35", 100.6, 100.9, 100.5, 100.8, 1000),
+               reached=False)
+    assert st.position is not None
+    assert st.position.plan.entry == pytest.approx(100.6)
+
+
+def test_resting_keeps_the_chase_cap_exactly_as_the_live_quote_path_does() -> None:
+    runaway = 100.0 * (1.0 + (CHASE_MAX_EXT_PCT + 0.5) / 100.0)
+    st = _rest(eng.FILL_RESTING_SIZED,
+               ("10:35", runaway, runaway + 0.2, runaway - 0.1, runaway, 1000), reached=False)
+    assert st.position is None
+    assert [r.reason for r in st.rejections] == ["chased"]
+
+
+def test_a_resting_order_expires() -> None:
+    st = _rest(eng.FILL_RESTING_SIZED, ("10:35", 99.0, 99.5, 98.9, 99.1, 1000),
+               reached=False, expires=pd.Timestamp("2024-06-03 10:30", tz=IST))
+    assert st.position is None and st.pending is None
+    assert [r.reason for r in st.rejections] == ["pending_expired"]
+
+
+def test_entry_slip_prices_a_resting_fill_worse_than_the_level() -> None:
+    clean = _rest(eng.FILL_RESTING_SIZED, ("10:35", 100.4, 100.6, 100.2, 100.4, 1000),
+                  reached=True, slip=0.0)
+    slipped = _rest(eng.FILL_RESTING_SIZED, ("10:35", 100.4, 100.6, 100.2, 100.4, 1000),
+                    reached=True, slip=0.03)
+    assert clean.position is not None and slipped.position is not None
+    assert slipped.position.plan.entry == pytest.approx(100.0 * 1.0003)
+    assert slipped.position.plan.entry > clean.position.plan.entry
+
+
+def test_entry_slip_does_not_touch_the_legacy_modes() -> None:
+    for mode in LEGACY_FILL_MODES:
+        base = _fill_one_bar(mode, next_open=100.4)
+        assert base is not None, mode
+        st, _ = _pending_state(100.0, 98.5)
+        cfg = eng.EngineConfig(fill_mode=mode, stress_slip=0.0, entry_slip_pct=0.25)
+        eng.step(st, _bars([("10:35", 100.4, 100.6, 100.2, 100.4, 1000)]), cfg,
+                 lambda _s, _t: (0, ""))
+        assert st.position is not None, mode
+        assert st.position.plan.entry == pytest.approx(base.plan.entry), mode
+
+
+def test_resting_sized_gates_on_the_price_paid_not_the_next_open() -> None:
+    """A live buy-stop cannot see the next open, so the stop-sanity band has to be
+    judged on the fill."""
+    trigger = 100.0
+    stop = trigger * (1.0 - MIN_STOP_PCT / 100.0) - 0.01
+    gated = plan_trade(trigger, stop, risk_inr=500.0, max_notional_inr=50_000.0,
+                       gate_entry=103.0)
+    paid = plan_trade(trigger, stop, risk_inr=500.0, max_notional_inr=50_000.0,
+                      gate_entry=trigger)
+    assert (gated is None) != (paid is None), "pick a stop the two gates disagree on"
+
+
+def test_negative_entry_slip_is_rejected() -> None:
+    with pytest.raises(ValueError, match="entry_slip_pct must be non-negative"):
+        eng.EngineConfig(entry_slip_pct=-0.1)
+
+
+def test_entry_slip_defaults_to_zero_so_old_runs_reproduce() -> None:
+    assert eng.EngineConfig().entry_slip_pct == 0.0
+
+
+def test_a_waiting_fill_is_never_priced_above_what_traded() -> None:
+    """The bar only just touches the level (high == trigger). Slippage must not
+    push the fill past the bar's own high — that invents a price, and it priced
+    33.5% of attention fills before this cap."""
+    st = _rest(eng.FILL_RESTING_SIZED, ("10:35", 99.6, 100.0, 99.4, 99.8, 1000),
+               reached=False, slip=0.03, trigger=100.0)
+    assert st.position is not None
+    assert st.position.plan.entry == pytest.approx(100.0)
+    assert st.position.plan.entry <= 100.0
+
+
+def test_an_already_hit_fill_is_capped_by_its_own_arming_bar() -> None:
+    """Slippage must not price a legacy fill above what the signal bar traded."""
+    st, _ = _pending_state(100.0, 98.5)
+    st.pending = eng.Pending(st.pending.cand, trigger_reached=True, armed_high=100.01)
+    cfg = eng.EngineConfig(fill_mode=eng.FILL_RESTING_SIZED, stress_slip=0.0,
+                           entry_slip_pct=0.30)
+    eng.step(st, _bars([("10:35", 100.4, 100.6, 100.2, 100.4, 1000)]), cfg,
+             lambda _s, _t: (0, ""))
+    assert st.position is not None
+    assert st.position.plan.entry == pytest.approx(100.01)

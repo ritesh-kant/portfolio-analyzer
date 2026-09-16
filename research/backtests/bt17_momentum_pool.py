@@ -59,6 +59,11 @@ from src.momentum_trader.exits import MODES  # noqa: E402
 from src.momentum_trader.indicators import atr  # noqa: E402
 from src.momentum_trader.upstox import Instrument, UpstoxClient  # noqa: E402
 
+# Measured on live resting buy-stop fills: the first quote at or above the trigger
+# landed +0.03% over it (n=11, paper). Small n — treat as an estimate, not a
+# constant of nature; raise it if the live sample says otherwise.
+LIVE_ENTRY_SLIP_PCT = 0.03
+
 CACHE = Path(__file__).resolve().parent / ".cache_upstox"
 OUT_TRADES = Path(__file__).resolve().parent / "bt17_trades.csv"
 OUT_CANDS = Path(__file__).resolve().parent / "bt17_candidates.csv"
@@ -284,6 +289,11 @@ def report(tr: pd.DataFrame, n_symbols: int, start: date, end: date, events: boo
     print(f"BT17 — momentum POOL (no catalyst split) | {start}..{end} | {n_symbols} symbols"
           f" | exit={exit_mode} fill={fill_mode}")
     print("   context test for hypothesis v2 §5.1 — NOT a gate; float/band filters not applied")
+    if fill_mode == "next_open":
+        print("   !! fill=next_open is the LEGACY model and is NOT how production fills:")
+        print("      the live scanner rests a buy-stop at the trigger (FILL_FUTURE_TRIGGER).")
+        print("      next_open pays the trigger minute's own run — ~0.22%/trade, about one")
+        print("      whole round trip (BT36). Use --live-fill for the production model.")
     print("=" * 78)
     if tr.empty:
         print("no trades.")
@@ -345,8 +355,20 @@ def main() -> int:
                     help="take EVERY setup a symbol gives all day instead of only the first "
                          "(hypothesis 2026-09-06-multi-entry-same-stock)")
     ap.add_argument("--fill-mode", default="next_open", choices=list(FILL_MODES),
-                    help="next_open = fill at the bar after the trigger (BT17); "
-                         "trigger = resting buy-stop at the trigger level, zero slippage")
+                    help="next_open = fill at the bar after the trigger (BT17 legacy; this is "
+                         "NOT what production does and costs ~0.22%%/trade in decision "
+                         "latency — see BT36); trigger = fill at the level but keep the "
+                         "next-open entry gate (upper bound, uses future information); "
+                         "resting_sized = buy-stop at the level gated on the price actually "
+                         "paid — this is what the live scanner does; future_trigger = the "
+                         "conservative replay of the live quote path")
+    ap.add_argument("--entry-slip-pct", type=float, default=0.0,
+                    help="slippage added to RESTING fills, %% of the trigger. A live buy-stop "
+                         "is filled by the first quote at or above the level, not at the "
+                         "level. 0 reproduces older runs; live measures ~0.03")
+    ap.add_argument("--live-fill", action="store_true",
+                    help="replay entries the way production fills them: --fill-mode "
+                         "resting_sized with the live-measured entry slippage")
     ap.add_argument("--day-chg-min", type=float, default=None,
                     help="override the day-change floor (default 4.0). The 2.0 arm of "
                          "research/hypotheses/2026-09-06-volatility-scaled-entry.md")
@@ -414,8 +436,13 @@ def main() -> int:
                       peak_hours_only=True, warm_context=True,
                       vol_baseline_min_bars=VOL_BASELINE_MIN_BARS,
                       use_fixed_target=True)
+    if a.live_fill:
+        if "--fill-mode" not in sys.argv:
+            a.fill_mode = "resting_sized"
+        if "--entry-slip-pct" not in sys.argv:
+            a.entry_slip_pct = LIVE_ENTRY_SLIP_PCT
     cfg = EngineConfig(stress_slip=STRESS_SLIP, exit_mode=a.exit_mode,
-                       fill_mode=a.fill_mode, one_trade_per_day=not a.multi_entry,
+                       fill_mode=a.fill_mode, entry_slip_pct=a.entry_slip_pct, one_trade_per_day=not a.multi_entry,
                        require_quality=a.quality, require_max_move=a.max_move,
                        first_candidate_only=a.first_candidate_only,
                        require_1m_agreement=a.require_1m_agreement,

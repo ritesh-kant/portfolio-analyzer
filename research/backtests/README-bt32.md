@@ -41,7 +41,9 @@ Useful bt17 flags:
 | *(omit it)* | replay the legacy path instead: the 7 Warrior setups on 4–8% movers with RVOL ≥ 3 |
 | `--multi-entry` | re-enter a symbol after its trade closes (matches the live default since 2026-09-13) |
 | `--exit-mode` | `fixed_2r` \| `trend_min` \| `trend_full` \| `trend_resistance_state` |
-| `--fill-mode` | `next_open` \| `trigger` \| `future_trigger` |
+| `--live-fill` | **replay entries the way production fills them** (`resting_sized` + the live-measured 0.03% entry slip). The default `next_open` is a legacy model that is ~0.22%/trade worse than the deployed system — see `research/hypotheses/2026-09-15-resting-buy-stop-execution.md` |
+| `--entry-slip-pct` | slippage on resting fills, % of the trigger (default 0) |
+| `--fill-mode` | `next_open` \| `trigger` \| `future_trigger` \| `resting` \| `resting_sized` |
 | `--symbols` | comma-separated; omit to run the whole NIFTY 500 (slow, and it will fetch) |
 | `--tag` | suffix for the output CSVs |
 
