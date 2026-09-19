@@ -1,0 +1,28 @@
+{
+  "window": "w1",
+  "start": "2026-08-24",
+  "end": "2026-09-04",
+  "symbols": 61,
+  "off": {
+    "n": 30,
+    "mean_gross": 0.16598373102845063
+  },
+  "on": {
+    "n": 31,
+    "mean_gross": 0.13796222036292727,
+    "refused": 31,
+    "decisions": 160,
+    "refusal_rate": 0.19375
+  },
+  "anti": {
+    "seeds": 3,
+    "mean": 0.17895573421326724,
+    "p5": 0.16598373102845063,
+    "p95": 0.20100813962745548,
+    "p_anti": 1.0
+  },
+  "lift_pp": -0.028021510665523358,
+  "G1_anti_pass": false,
+  "G2_lift_pass": false,
+  "G4_n_pass": true
+}

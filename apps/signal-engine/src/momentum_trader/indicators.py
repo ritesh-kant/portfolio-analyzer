@@ -174,3 +174,37 @@ def volume_ratio(
     floor = max(3, lookback // 2) if min_periods is None else min(int(min_periods), lookback)
     avg = bars["volume"].rolling(lookback, min_periods=max(1, floor)).mean().shift(1)
     return bars["volume"] / avg.replace(0.0, float("nan"))
+
+
+def price_volume_slopes(
+    bars: pd.DataFrame, lookback: int = 4
+) -> tuple[float, float] | None:
+    """Normalized least-squares price and volume slopes over completed bars.
+
+    This is the literal four-bar interpretation of the common price/volume
+    quadrant graphic: positive/positive confirms an advance, while a positive
+    price slope with a negative volume slope is weakening participation.  The
+    result is descriptive, not signed buy/sell volume; OHLCV has no aggressor
+    side.  Both values are expressed per bar relative to the window mean so the
+    signs are comparable across symbols with different prices and liquidity.
+    """
+    validate_bars(bars)
+    if lookback < 2 or bars.empty:
+        return None
+    # A short intraday slope must never bridge the overnight/session boundary.
+    # Callers such as review replays may carry prior-session warm-up bars even
+    # though the live bar builder normally supplies only today's session.
+    session = bars[bars.index.normalize() == bars.index[-1].normalize()]
+    if len(session) < lookback:
+        return None
+    window = session.iloc[-lookback:]
+    price_mean = float(window["close"].mean())
+    volume_mean = float(window["volume"].mean())
+    if price_mean <= 0.0 or volume_mean <= 0.0:
+        return None
+    x = pd.Series(range(lookback), dtype=float)
+    x -= float(x.mean())
+    denom = float((x * x).sum())
+    price = window["close"].astype(float).reset_index(drop=True) / price_mean
+    volume = window["volume"].astype(float).reset_index(drop=True) / volume_mean
+    return float((x * price).sum() / denom), float((x * volume).sum() / denom)

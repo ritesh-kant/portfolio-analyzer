@@ -328,6 +328,9 @@ def main() -> int:
     ap.add_argument("--end", default="2025-12-31")
     ap.add_argument("--limit", type=int, default=0, help="first N symbols only (smoke test)")
     ap.add_argument("--symbols", default="", help="comma-separated override")
+    ap.add_argument("--cached-year", type=int, default=0,
+                    help="replay only symbols with an existing 1-minute cache for this year; "
+                    "cannot be combined with --symbols")
     ap.add_argument("--extra", default="", help="comma-separated extra symbol-list files")
     ap.add_argument("--events", default="", help="CSV symbol,date[,event_type] for a dated catalyst subset")
     ap.add_argument("--exit-mode", default="fixed_2r", choices=list(MODES),
@@ -396,6 +399,21 @@ def main() -> int:
                          "scanner-only and are NOT replayed here: a pool backtest walks "
                          "one symbol at a time, so it has no coherent day-level P&L to "
                          "apply them to")
+    ap.add_argument("--cost-aware-breakeven", action="store_true",
+                    help="after 1R of favorable movement, lift the stop to modeled "
+                    "round-trip cost breakeven plus one NSE tick; experimental overlay")
+    ap.add_argument("--legacy-single-close-false-break", action="store_true",
+                    help="exit on ONE close below the level (pre-2026-09-18) instead of "
+                    "two consecutive closes; comparison control only")
+    ap.add_argument("--legacy-false-break-before-stop", action="store_true",
+                    help="judge the false break BEFORE the stop/target fill "
+                    "(pre-2026-09-18 ordering); comparison control only")
+    ap.add_argument("--legacy-false-break", action="store_true",
+                    help="both pre-2026-09-18 exit behaviours at once; use the two "
+                    "individual flags to attribute which half moved a result")
+    ap.add_argument("--rising-price-volume", action="store_true",
+                    help="require positive 4-bar close AND total-volume slopes at the "
+                    "1-minute confirmation (the 2026-09-18 quadrant gate, default OFF)")
     ap.add_argument("--tag", default="", help="suffix for the output CSV names")
     ap.add_argument("--fetch-only", action="store_true", help="just fill the parquet cache")
     ap.add_argument("--jobs", type=int, default=min(8, mp.cpu_count()),
@@ -409,8 +427,15 @@ def main() -> int:
     fetch_start = start - timedelta(days=45)   # profile + turnover warm-up
     client = UpstoxClient(_token(), cache_dir=CACHE)
     insts = client.nse_equities()
+    if a.symbols and a.cached_year:
+        ap.error("--symbols cannot be combined with --cached-year")
     if a.symbols:
         symbols = [s.strip().upper() for s in a.symbols.split(",") if s.strip()]
+    elif a.cached_year:
+        symbols = sorted(
+            symbol for symbol in insts
+            if (CACHE / "1m" / f"{symbol.replace('&', '_')}_{a.cached_year}.parquet").exists()
+        )
     else:
         symbols = universe.base_symbols([Path(p) for p in a.extra.split(",") if p.strip()])
     if a.limit:
@@ -453,6 +478,12 @@ def main() -> int:
                        require_1m_agreement=a.require_1m_agreement,
                        resistance_veto_v2=a.resistance_v2,
                        volume_shelf_levels=a.volume_shelves, **cfg_kw)
+    cfg.cost_aware_breakeven = a.cost_aware_breakeven
+    cfg.legacy_single_close_false_break = (a.legacy_single_close_false_break
+                                           or a.legacy_false_break)
+    cfg.legacy_false_break_before_stop = (a.legacy_false_break_before_stop
+                                          or a.legacy_false_break)
+    cfg.require_rising_price_volume = a.rising_price_volume
 
     # The pre-filter exists to skip symbols the engine could never trade. Under
     # attention entries the floor is 1.5%, not 4%, so using day_chg_min here

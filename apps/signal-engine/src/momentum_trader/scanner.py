@@ -240,6 +240,7 @@ def _apply_env_overrides(cfg: EngineConfig, settings: Settings) -> EngineConfig:
     strategy honours the same env switches and no branch can silently miss one.
     """
     cfg.require_1m_agreement = settings.mt_require_1m_agreement
+    cfg.require_rising_price_volume = settings.mt_require_rising_price_volume
     cfg.one_trade_per_day = settings.mt_one_trade_per_day
     return cfg
 

@@ -197,6 +197,17 @@ class Settings(BaseSettings):
     # count ~43%, so treat it as a frequency dial. Attention setups are exempt
     # by construction, so this is a no-op for every attention_1m* strategy.
     mt_require_1m_agreement: bool = False
+    # Four-bar price/volume quadrant gate: a long confirmation must show both a
+    # rising close slope and a rising total-volume slope over the last four
+    # completed 1-minute bars of the current session.
+    # ⚠ It was briefly hardcoded ON (2026-09-18) on a post-hoc n=3 same-day
+    # observation. Default is OFF until an ON/OFF replay with an anti-test
+    # clears the criteria locked in
+    # research/hypotheses/2026-09-19-price-volume-gate-ab.md.
+    # OHLCV carries no aggressor side, so only the up-price/up-volume quadrant
+    # of the source graphic is expressible; the two "reversal" quadrants need
+    # signed buy/sell volume this feed does not provide.
+    mt_require_rising_price_volume: bool = False
     # One trade per SYMBOL per day. False = multi-entry: after a position in a
     # symbol closes, a later qualifying confirmation on the same symbol may open
     # a new one (never overlapping — DayState holds one position per symbol, so

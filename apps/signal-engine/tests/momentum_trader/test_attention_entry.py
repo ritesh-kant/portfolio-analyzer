@@ -16,6 +16,46 @@ def _bars(rows: list[tuple[float, float, float, float, float]]) -> pd.DataFrame:
     return pd.DataFrame(rows, index=idx, columns=COLS)
 
 
+def _price_volume_overlay_bars(last_volumes: list[float]) -> pd.DataFrame:
+    rows = [(100.0, 100.1, 99.9, 100.0, 100.0) for _ in range(20)]
+    closes = [100.1, 100.2, 100.3, 100.5]
+    for close, volume in zip(closes, last_volumes, strict=True):
+        rows.append((close - 0.05, close + 0.05, close - 0.1, close, volume))
+    return _bars(rows)
+
+
+def test_price_volume_overlay_accepts_rising_price_and_volume() -> None:
+    bars = _price_volume_overlay_bars([500.0, 1_000.0, 2_000.0, 6_000.0])
+    setup, reason = eng._attention_confirmation(
+        bars, 2.5, require_rising_price_volume=True
+    )
+    assert setup is not None, reason
+    assert setup.meta["price_slope_pct_per_bar"] > 0.0
+    assert setup.meta["volume_slope_per_bar"] > 0.0
+
+
+def test_price_volume_overlay_rejects_rising_price_on_falling_volume() -> None:
+    # The last bar remains >=2.5x its prior-volume baseline, so only the new
+    # four-bar direction check can reject this otherwise-valid confirmation.
+    bars = _price_volume_overlay_bars([10_000.0, 8_000.0, 6_000.0, 5_000.0])
+    setup, reason = eng._attention_confirmation(
+        bars, 2.5, require_rising_price_volume=True
+    )
+    assert setup is None
+    assert reason == "attention_price_volume_not_confirmed"
+
+    unchanged, _ = eng._attention_confirmation(bars, 2.5)
+    assert unchanged is not None, "the experimental overlay must remain default-off"
+
+
+def test_price_volume_overlay_never_uses_prior_session_bars() -> None:
+    prior = _price_volume_overlay_bars([500.0, 1_000.0, 2_000.0, 6_000.0]).iloc[-3:]
+    today = prior.iloc[-1:].copy()
+    today.index = pd.DatetimeIndex([pd.Timestamp("2026-09-11 09:15", tz=IST)])
+    joined = pd.concat([prior, today]).sort_index()
+    assert eng.price_volume_slopes(joined, 4) is None
+
+
 def _attention_prelude() -> pd.DataFrame:
     """Twenty-five rising 5-minute buckets ending in a doji above EMA/VWAP."""
     rows: list[tuple[float, float, float, float, float]] = []

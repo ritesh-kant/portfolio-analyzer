@@ -82,6 +82,10 @@ def _strict_cfg(**overrides) -> EngineConfig:
     return cfg
 
 
+def test_strict_strategy_leaves_price_volume_gate_off_by_default() -> None:
+    assert not _strict_cfg().require_rising_price_volume
+
+
 def _replay(cfg: EngineConfig, day: pd.DataFrame | None = None) -> DayState:
     hist = _prior_sessions()
     prev_close = float(hist["close"].iloc[-1])

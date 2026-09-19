@@ -389,15 +389,29 @@ def micro_pullback(
 
 # ── exits: bull-trap / false-break detection ──────────────────────────────────
 
-def false_break(bars: pd.DataFrame, level: float) -> bool:
-    """A breakout bar followed by a close back below the broken level.
+def false_break(bars: pd.DataFrame, level: float, closes: int = 2) -> bool:
+    """A breakout followed by `closes` consecutive closes back below its level.
 
-    The guide's "flag pattern false break" / "bull trap": treat as an immediate
-    exit signal for a position entered on that level, ahead of the stop."""
-    if len(bars) < 2 or level <= 0:
+    A single close below a one-minute trigger can be ordinary retest noise. The
+    second close confirms that price failed to reclaim the broken level. The
+    guide's "flag pattern false break" / "bull trap" remains an exit signal
+    ahead of the hard stop.
+
+    The breakout is searched over a window rather than read from the single bar
+    at -(closes + 1). With a fixed offset the breakout bar scrolls out of view
+    once price has been under the level for a few bars, so the detector went
+    blind exactly when the breakdown was worst: on a steady decline it fired at
+    bars 3 and 4 and then went quiet at bar 5 with price lower still.
+    `FLAG_MAX_BARS` is the already-frozen pullback window, reused here rather
+    than introducing a new tunable.
+    """
+    if level <= 0 or closes < 1 or len(bars) < closes + 1:
         return False
-    prev, cur = bars.iloc[-2], bars.iloc[-1]
-    return float(prev["high"]) > level and float(cur["close"]) < level
+    confirming = bars.iloc[-closes:]
+    if not bool((confirming["close"].astype(float) < level).all()):
+        return False
+    prior = bars.iloc[-(closes + FLAG_MAX_BARS):-closes]
+    return bool(len(prior)) and bool((prior["high"].astype(float) > level).any())
 
 
 # ── registry ──────────────────────────────────────────────────────────────────

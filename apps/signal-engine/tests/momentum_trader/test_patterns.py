@@ -343,10 +343,45 @@ def test_setups_never_emit_a_stop_at_or_above_the_trigger() -> None:
     assert setups._has_stop_room(100.0, 99.95) is True
 
 
-def test_false_break_detects_close_back_below_level() -> None:
-    bars = _bars([(100.0, 102.5, 99.9, 102.2, 1), (102.2, 102.3, 100.5, 101.0, 1)])
+def test_false_break_requires_two_consecutive_closes_below_level() -> None:
+    bars = _bars([
+        (100.0, 102.5, 99.9, 102.2, 1),
+        (102.2, 102.3, 100.5, 101.0, 1),
+        (101.0, 101.4, 100.4, 100.8, 1),
+    ])
     assert setups.false_break(bars, level=102.0)
     assert not setups.false_break(bars, level=100.0)
+
+
+def test_false_break_stays_armed_while_price_stays_below_the_level() -> None:
+    """The breakout bar must not scroll out of view during a steady breakdown.
+
+    With the breakout pinned at -3 this fired on bars 3 and 4 and then went
+    silent on bar 5, with price lower than when it first fired.
+    """
+    seq = [
+        (101.0, 102.0, 100.5, 101.0, 1),   # breakout bar, high above the level
+        (101.0, 101.2, 98.5, 99.0, 1),     # first close below
+        (99.0, 99.2, 97.5, 98.0, 1),       # second close below → fires
+        (98.0, 98.2, 96.5, 97.0, 1),       # still below, still lower
+        (97.0, 97.2, 95.5, 96.0, 1),       # further below again
+    ]
+    for n in range(3, len(seq) + 1):
+        assert setups.false_break(_bars(seq[:n]), level=100.0), f"went blind at bar {n}"
+
+
+def test_false_break_needs_the_level_exceeded_within_the_lookback() -> None:
+    """A level price never traded above is not a false break."""
+    below = [(97.0, 97.5, 96.0, 97.0, 1)] * 7
+    assert not setups.false_break(_bars(below), level=100.0)
+
+
+def test_false_break_ignores_a_single_close_below_level() -> None:
+    bars = _bars([
+        (100.0, 102.5, 99.9, 102.2, 1),
+        (102.2, 102.3, 100.5, 101.0, 1),
+    ])
+    assert not setups.false_break(bars, level=102.0)
 
 
 def test_scan_setups_returns_all_that_fire() -> None:

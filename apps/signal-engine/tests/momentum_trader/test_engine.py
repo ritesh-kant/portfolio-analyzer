@@ -11,6 +11,7 @@ import pytest
 from src.momentum_trader import catalyst, engine, universe
 from src.momentum_trader.bars import IST, BarBuilder
 from src.momentum_trader.upstox import candles_to_frame
+from src.news_trader.trailing_sl import calc_costs
 
 Row = tuple[float, float, float, float, float]
 COLS = ["open", "high", "low", "close", "volume"]
@@ -94,6 +95,96 @@ def test_stop_exit_fills_at_stop_or_gap() -> None:
         (104.9, 105.0, 104.5, 104.6, 900),     # opens below the stop → fills at the open
     ]))
     assert st2.closed[0].exit_reason == "stop" and st2.closed[0].exit == pytest.approx(104.9)
+
+
+def test_cost_aware_breakeven_stop_covers_modeled_costs_and_buffer() -> None:
+    entry, qty = 100.0, 100
+    stop = engine._cost_aware_breakeven_stop(entry, qty, extra_ticks=1)
+    costs = calc_costs(entry, stop, qty, direction="long")["total"]
+    assert stop > entry
+    assert (stop - entry) * qty > costs
+
+
+def test_cost_aware_stop_binds_only_from_the_bar_after_1r() -> None:
+    """The bar that reaches 1R must not also fill the stop that its own high armed.
+
+    Entry 105.85, stop 105.30 (1R = 106.40), cost-aware breakeven = 106.15.
+    The 10:02 bar reaches 1R and dips to 106.00, below that cost stop; raising
+    the trail on the same bar would invent a fill from a high that came later.
+    """
+    cfg = engine.EngineConfig(cost_aware_breakeven=True)
+    st = _run(_mover_day([
+        (105.85, 105.9, 105.8, 105.85, 700),     # 10:01 fill at 105.85
+        (105.9, 106.45, 106.0, 106.4, 900),      # 10:02 hits 1R; low 106.00 < 106.15
+        (106.4, 106.45, 106.0, 106.1, 900),      # 10:03 the armed stop now binds
+    ]), cfg=cfg)
+    trade = st.closed[0]
+    assert trade.exit_reason == "trail_stop"
+    assert trade.exit == pytest.approx(106.15)
+    assert trade.exit_time.strftime("%H:%M") == "10:03"
+
+
+def test_cost_aware_stop_is_computed_without_the_research_stress_slip() -> None:
+    """bt17's 40 bps/side stress must not move the live breakeven price."""
+    assert engine._cost_aware_breakeven_stop(105.85, 472, 1) == pytest.approx(106.15)
+
+
+def test_false_break_never_counts_a_close_from_before_the_fill() -> None:
+    """Both confirming closes must belong to bars that closed after entry.
+
+    The guard used to check only `index[-1]`, so on the 5-minute path (where
+    `entry_floor` is floored to the bucket) a pattern made entirely of
+    pre-entry closes could exit the trade.
+    """
+    bars = _bars([
+        (101.0, 102.0, 100.5, 101.0, 1),   # breakout bar
+        (101.0, 101.2, 98.5, 99.0, 1),     # first close below
+        (99.0, 99.2, 97.5, 98.0, 1),       # second close below
+    ])
+    cfg = engine.EngineConfig()
+    # filled on the last bar: the earlier close pre-dates the fill → no exit
+    assert not engine._false_break_fired(cfg, bars, 100.0, bars.index[-1])
+    # filled on the middle bar: both confirming closes are at/after the fill
+    assert engine._false_break_fired(cfg, bars, 100.0, bars.index[-2])
+    # the one-close rule only ever uses the last bar, so it is unaffected
+    legacy = engine.EngineConfig(legacy_single_close_false_break=True)
+    assert engine._false_break_fired(legacy, bars, 100.0, bars.index[-1])
+
+
+def test_legacy_false_break_flags_are_independently_selectable() -> None:
+    """Each half of the 2026-09-18 exit change can be replayed on its own."""
+    bars = _bars([
+        (100.0, 102.5, 99.9, 102.2, 1),
+        (102.2, 102.3, 100.5, 101.0, 1),
+    ])
+    floor = bars.index[0]
+    single = engine.EngineConfig(legacy_single_close_false_break=True)
+    assert engine._false_break_fired(single, bars, 102.0, floor)
+    # the default two-close rule needs a third bar, so one close is not enough
+    assert not engine._false_break_fired(engine.EngineConfig(), bars, 102.0, floor)
+    # ordering is a separate switch and does not change the predicate
+    ordering = engine.EngineConfig(legacy_false_break_before_stop=True)
+    assert not engine._false_break_fired(ordering, bars, 102.0, floor)
+
+
+def test_legacy_false_break_matches_single_close_condition() -> None:
+    bars = _bars([
+        (100.0, 102.0, 99.5, 101.5, 1000),
+        (101.5, 101.8, 100.0, 100.5, 1000),
+    ])
+    assert engine._legacy_false_break(bars, level=101.0)
+    assert not engine._legacy_false_break(bars, level=100.0)
+
+
+def test_stop_fill_precedes_confirmed_false_break() -> None:
+    """A bar that confirms a false break cannot replace an intrabar stop fill."""
+    st = _run(_mover_day([
+        (105.85, 105.9, 105.8, 105.85, 700),   # 10:01 fill at 105.85
+        (105.8, 105.85, 105.4, 105.5, 900),    # first close below level 105.6
+        (105.5, 105.55, 105.0, 105.1, 900),    # second close, but low crosses stop 105.3
+    ]))
+    assert st.closed[0].exit_reason == "stop"
+    assert st.closed[0].exit == pytest.approx(105.3)
 
 
 def test_open_position_closes_at_data_end() -> None:

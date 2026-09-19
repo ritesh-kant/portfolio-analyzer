@@ -120,6 +120,7 @@ class PaperLedger:
                 "setup": rejection.setup,
                 "trigger": rejection.trigger,
                 "observed_price": rejection.observed_price,
+                "evidence": rejection.evidence,
             })
         except Exception:  # noqa: BLE001
             logger.exception("mt_rejections insert failed")

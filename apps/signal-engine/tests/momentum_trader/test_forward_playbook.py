@@ -78,6 +78,8 @@ def test_scanner_merged_arm_turns_every_feature_on() -> None:
     assert cfg.use_attention_entries
     assert cfg.require_resistance_breakout            # from the resistance-state arm
     assert cfg.allow_false_break_reentry              # from the reclaim arm
+    # The four-bar price/volume gate is env-gated and OFF until its A/B clears
+    assert not cfg.require_rising_price_volume
     assert cfg.attention_day_chg_min == pytest.approx(1.5)
     assert cfg.attention_rvol_min == pytest.approx(1.5)
 

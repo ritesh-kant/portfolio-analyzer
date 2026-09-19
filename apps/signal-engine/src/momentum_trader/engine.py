@@ -19,6 +19,7 @@ whose start minute ends in 4 or 9 has closed (session opens 09:15, so the
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import time
@@ -34,6 +35,7 @@ from .indicators import (
     cumulative_session_volume,
     day_change_pct,
     ema,
+    price_volume_slopes,
     session_vwap,
     volume_ratio,
 )
@@ -48,6 +50,7 @@ from .setups import (
     micro_pullback,
     scan_setups,
 )
+from .volume_confirmation import volume_confirmation_evidence
 
 # ── frozen scan parameters (spec §1) ─────────────────────────────────────────
 DAY_CHG_MIN_PCT = 4.0
@@ -56,6 +59,7 @@ RVOL_MIN = 3.0
 ENTRY_CUTOFF = time(14, 30)    # no new entries from 14:30 IST (bar start)
 EOD_CLOSE = time(15, 14)       # bar starting 15:14 closes at 15:15 → exit at its close
 STRESS_SLIP = 0.0040           # +40 bps/side cost stress (hypothesis Gate 0)
+COST_STOP_TICK_SIZE = 0.05  # NSE equity tick size
 
 # ── fill modes (entry-fill-latency hypothesis) ───────────────────────────────
 # next_open: what BT17 measured — the level break is detected when the trigger
@@ -99,6 +103,7 @@ ATTENTION_DAY_CHG_MIN_PCT = 1.5
 ATTENTION_RVOL_MIN = 1.5
 ATTENTION_CONFIRM_VOL_RATIO = 2.5
 ATTENTION_PENDING_MINUTES = 3
+PRICE_VOLUME_TREND_BARS = 4
 ATTENTION_SETUP = "attention_1m_confirmation"
 ATTENTION_FALSE_BREAK_RECLAIM_SETUP = "attention_false_break_reclaim"
 ONE_MINUTE_SETUPS = ("micro_pullback", ATTENTION_SETUP, ATTENTION_FALSE_BREAK_RECLAIM_SETUP)
@@ -229,6 +234,12 @@ class EngineConfig:
     attention_rvol_min: float = ATTENTION_RVOL_MIN
     attention_confirm_vol_ratio: float = ATTENTION_CONFIRM_VOL_RATIO
     attention_pending_minutes: int = ATTENTION_PENDING_MINUTES
+    # Experimental overlay for the familiar four-quadrant price/volume chart.
+    # A long entry needs both close and total-volume slopes to be positive over
+    # the last four completed one-minute bars. OFF by default: BT31 found a real
+    # but too-small volume effect, and this switch exists for isolated replay,
+    # not as a claim that OHLCV contains true buy/sell volume.
+    require_rising_price_volume: bool = False
     # The resistance-state arm never enters with <1R of room to a structural
     # ceiling.  A later high-volume close through that ceiling creates a fresh
     # confirmation instead.
@@ -269,6 +280,20 @@ class EngineConfig:
     # Add the 2:1 target to a trend exit mode, so a position closes on whichever
     # of target / stop / trend-break comes first. The guide keeps both.
     use_fixed_target: bool = False
+    # Experimental management overlay: once a trade reaches 1R, lift its stop
+    # to a price that covers round-trip costs and adds a small tick buffer.
+    # Disabled by default so every existing strategy/replay remains unchanged.
+    # The breakeven price is computed from REAL round-trip costs only; the
+    # research stress slip is a P&L accounting overlay, not a cost the trader
+    # pays, and folding it in would place the stop near the 2R target.
+    cost_aware_breakeven: bool = False
+    cost_stop_extra_ticks: int = 1
+    # Backtest controls only, split so each half of the 2026-09-18 exit change
+    # can be attributed on its own. Defaults reproduce the current behavior:
+    # a false break needs two consecutive closes, and it is judged only after
+    # the executable stop/target orders.
+    legacy_single_close_false_break: bool = False
+    legacy_false_break_before_stop: bool = False
     exit_cfg: exits.ExitConfig = field(init=False)
 
     def __post_init__(self) -> None:
@@ -286,6 +311,8 @@ class EngineConfig:
             raise ValueError("attention_pending_minutes must be positive")
         if self.vol_baseline_min_bars is not None and self.vol_baseline_min_bars < 1:
             raise ValueError("vol_baseline_min_bars must be positive")
+        if self.cost_stop_extra_ticks < 0:
+            raise ValueError("cost_stop_extra_ticks must not be negative")
         if self.require_light_pullback_volume and not self.require_micro_pullback:
             # The light-volume test is a property OF the pullback, so there is
             # nothing to measure it on unless a pullback is required. Failing
@@ -389,6 +416,7 @@ class Rejection:
     setup: str
     trigger: float
     observed_price: float | None = None
+    evidence: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -410,6 +438,11 @@ class Position:
     plan: TradePlan
     highest: float
     exit_state: exits.ExitState
+    # Cost-aware breakeven bookkeeping. `armed` is set on the bar that first
+    # reaches 1R; the stop is raised on the NEXT bar, matching the swing
+    # trail's convention that a level decided by a bar cannot also fill on it.
+    cost_stop_armed: bool = False
+    cost_stop_applied: bool = False
 
 
 @dataclass
@@ -537,6 +570,65 @@ def _exit(state: DayState, when: pd.Timestamp, px: float, reason: str, cfg: Engi
             level=float(pos.cand.setup.level), exit_time=when
         )
     state.position = None
+
+
+def _cost_aware_breakeven_stop(entry: float, qty: int, extra_ticks: int) -> float:
+    """Minimum sell stop that covers real round-trip costs, plus a tick buffer.
+
+    Deliberately excludes `stress_slip`: that is a research stress applied to
+    reported P&L, not a brokerage cost the trade actually pays. Including it
+    would push this stop to roughly +1% of entry under bt17's 40 bps/side,
+    which is about the 2R target, so the backtest would be measuring a
+    different rule from the one live would run.
+    """
+    if qty < 1:
+        raise ValueError("cost-aware stop needs at least one share")
+
+    def net(price: float) -> float:
+        costs = calc_costs(entry, price, qty, direction="long")["total"]
+        return (price - entry) * qty - costs
+
+    low, high = entry, entry + COST_STOP_TICK_SIZE
+    while net(high) < 0.0:
+        high += max(entry * 0.01, COST_STOP_TICK_SIZE)
+    for _ in range(60):
+        mid = (low + high) / 2.0
+        if net(mid) < 0.0:
+            low = mid
+        else:
+            high = mid
+    return (math.ceil(high / COST_STOP_TICK_SIZE) + extra_ticks) * COST_STOP_TICK_SIZE
+
+
+def _legacy_false_break(bars: pd.DataFrame, level: float) -> bool:
+    """Pre-2026-09-18 one-close false-break condition, retained for backtests."""
+    if len(bars) < 2 or level <= 0:
+        return False
+    previous, current = bars.iloc[-2], bars.iloc[-1]
+    return float(previous["high"]) > level and float(current["close"]) < level
+
+
+def _false_break_fired(cfg: EngineConfig, tf_bars: pd.DataFrame, level: float | None,
+                       entry_floor: pd.Timestamp) -> bool:
+    """Evaluate the configured false-break rule on the position's own timeframe.
+
+    Every CLOSE used as evidence must come from a bar that closed after the
+    fill. Only `index[-1]` was checked before, which is enough for the
+    one-close rule but not for two: on the five-minute path `entry_floor` is
+    floored to the bucket, so both confirming closes could pre-date the entry
+    entirely and still exit the trade. The breakout bar is context, not
+    evidence, and may legitimately pre-date the fill.
+
+    Which predicate applies is a backtest control; live always uses two closes.
+    """
+    if level is None:
+        return False
+    closes = 1 if cfg.legacy_single_close_false_break else 2
+    if len(tf_bars) < closes + 1 or tf_bars.index[-closes] < entry_floor:
+        return False
+    if cfg.legacy_single_close_false_break:
+        return _legacy_false_break(tf_bars, level)
+    return false_break(tf_bars, level, closes)
 
 
 def force_close(
@@ -905,6 +997,7 @@ def _attention_confirmation(
     bars_1m: pd.DataFrame,
     min_volume_ratio: float,
     guide: GuideGates | None = None,
+    require_rising_price_volume: bool = False,
 ) -> tuple[Setup | None, str]:
     """Confirmed one-minute entry inside an already-promoted five-minute trend.
 
@@ -945,9 +1038,22 @@ def _attention_confirmation(
     if pd.isna(vr.iloc[-1]) or float(vr.iloc[-1]) < min_volume_ratio:
         return None, "attention_low_1m_volume"
 
+    pv_meta: dict[str, float] = {}
+    if require_rising_price_volume:
+        slopes = price_volume_slopes(bars_1m, PRICE_VOLUME_TREND_BARS)
+        if slopes is None:
+            return None, "attention_price_volume_insufficient"
+        price_slope, volume_slope = slopes
+        if price_slope <= 0.0 or volume_slope <= 0.0:
+            return None, "attention_price_volume_not_confirmed"
+        pv_meta = {
+            "price_slope_pct_per_bar": price_slope * 100.0,
+            "volume_slope_per_bar": volume_slope,
+        }
+
     trigger = high
     stop = float(bars_1m.iloc[-3:]["low"].min())
-    meta: dict[str, float] = {"volume_ratio": float(vr.iloc[-1])}
+    meta: dict[str, float] = {"volume_ratio": float(vr.iloc[-1]), **pv_meta}
 
     if cfg is not None and cfg.require_micro_pullback:
         # Tested in two steps so "there was no pullback" and "there was one but
@@ -1027,6 +1133,7 @@ def _resistance_aware_attention_confirmation(
     v2: bool = False,
     guide: GuideGates | None = None,
     shelves: bool = False,
+    require_rising_price_volume: bool = False,
 ) -> tuple[Setup | None, str]:
     """Apply the unchanged 1-minute confirmation to structural resistance.
 
@@ -1036,7 +1143,9 @@ def _resistance_aware_attention_confirmation(
     entry with less than one initial-risk unit of room waits rather than buying
     into supply.
     """
-    setup, reason = _attention_confirmation(bars_1m, min_volume_ratio, guide)
+    setup, reason = _attention_confirmation(
+        bars_1m, min_volume_ratio, guide, require_rising_price_volume
+    )
     if setup is None:
         return None, reason
     prior = bars_1m.iloc[:-1]
@@ -1134,13 +1243,16 @@ def _false_break_reclaim_confirmation(
         state.false_break_reclaim_attempted = True
         return False
     setup, reason = _attention_confirmation(
-        bars_1m, cfg.attention_confirm_vol_ratio, guide
+        bars_1m, cfg.attention_confirm_vol_ratio, guide,
+        cfg.require_rising_price_volume,
     )
     if setup is None:
         state.rejections.append(Rejection(
             symbol=state.symbol, time=now, reason=f"reclaim_{reason}",
             setup=ATTENTION_FALSE_BREAK_RECLAIM_SETUP, trigger=reclaim.level,
             observed_price=float(bars_1m["close"].iloc[-1]),
+            evidence=(volume_confirmation_evidence(bars_1m)
+                      if reason.startswith("attention_price_volume_") else {}),
         ))
         return False
     if float(bars_1m["close"].iloc[-1]) <= reclaim.level:
@@ -1414,24 +1526,48 @@ def step(
             return
         ec = cfg.exit_cfg
         es = pos.exit_state
+        # A cost stop armed by an earlier bar binds from this one, before any
+        # fill is checked. Raising it on the same bar that reached 1R would let
+        # that bar's own high justify a stop its low could already have hit.
+        if cfg.cost_aware_breakeven and pos.cost_stop_armed and not pos.cost_stop_applied:
+            es.trail = max(
+                es.trail,
+                _cost_aware_breakeven_stop(
+                    pos.plan.entry, pos.plan.qty, cfg.cost_stop_extra_ticks,
+                ),
+            )
+            pos.cost_stop_applied = True
         pos.highest = max(pos.highest, float(bar["high"]))
         exits.update_high(es, float(bar["high"]), ec)
+        if (cfg.cost_aware_breakeven and not pos.cost_stop_applied
+                and es.r_multiple(es.highest) >= 1.0):
+            pos.cost_stop_armed = True
         tf_bars = bars_1m if is_1m else _bars_5m(bars_1m, full_5m)
         warmup = state.warmup_1m if is_1m else state.warmup_5m
         entry_floor = pos.entry_time if is_1m else pos.entry_time.floor("5min")
 
-        # pattern failure (both modes): the level that was broken gives way again.
-        # Judged on the setup's own timeframe, never re-judging the trigger bar.
         lvl = pos.cand.setup.level
-        if (lvl is not None and len(tf_bars) >= 2 and tf_bars.index[-1] >= entry_floor
-                and false_break(tf_bars, lvl)):
+        if cfg.legacy_false_break_before_stop and _false_break_fired(cfg, tf_bars, lvl,
+                                                                     entry_floor):
             _exit(state, now, float(bar["close"]), "false_break", cfg)
             return
 
         # stops and the fixed target fill intraday, so they are checked every minute
         sig = exits.check_stop(es, bar) or exits.check_target(bar, pos.plan.target, ec)
+        if sig is not None:
+            _exit(state, now, sig.price, sig.reason, cfg)
+            return
+
+        # Pattern failure is assessed only after executable stop/target orders.
+        # A confirmation bar can cross the hard stop before it closes, so its
+        # close must not replace the stop fill with a worse false-break price.
+        if not cfg.legacy_false_break_before_stop and _false_break_fired(cfg, tf_bars, lvl,
+                                                                         entry_floor):
+            _exit(state, now, float(bar["close"]), "false_break", cfg)
+            return
+
         # trend signals are read off completed bars on the position's timeframe
-        if sig is None and len(tf_bars) and tf_bars.index[-1] != es.last_tf_seen:
+        if len(tf_bars) and tf_bars.index[-1] != es.last_tf_seen:
             es.last_tf_seen = tf_bars.index[-1]
             sig = exits.check_trend(es, tf_bars, warmup, ec)
             # raise the trail AFTER deciding, so it can only bind from the next bar
@@ -1522,10 +1658,12 @@ def step(
             setup, confirmation_reason = _resistance_aware_attention_confirmation(
                 bars_1m, cfg.attention_confirm_vol_ratio, state.prev_day,
                 cfg.resistance_veto_v2, guide, cfg.volume_shelf_levels,
+                cfg.require_rising_price_volume,
             )
         else:
             setup, confirmation_reason = _attention_confirmation(
-                bars_1m, cfg.attention_confirm_vol_ratio, guide
+                bars_1m, cfg.attention_confirm_vol_ratio, guide,
+                cfg.require_rising_price_volume,
             )
         if setup is None:
             # Under v2 a headroom refusal ends the day. Leaving it open lets a
@@ -1541,6 +1679,8 @@ def step(
                 setup=ATTENTION_SETUP,
                 trigger=float(bar["high"]),
                 observed_price=float(bar["close"]),
+                evidence=(volume_confirmation_evidence(bars_1m)
+                          if confirmation_reason.startswith("attention_price_volume_") else {}),
             ))
             return
         ordinal = pullback_ordinal(tf5) if len(tf5) else None
