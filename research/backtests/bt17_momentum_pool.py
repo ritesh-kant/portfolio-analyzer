@@ -208,6 +208,12 @@ def _trade_row(t: ClosedTrade) -> dict:
         "support_drop_pct": c.support_drop_pct,
         "gross_pct": t.gross_pct, "net_pct": t.net_pct,
         "gross_inr": t.gross_inr, "costs_inr": t.costs_inr, "net_inr": t.net_inr,
+        # Add-on tranche (0 unless --pyramid-add-1r). `qty`/`entry` above stay
+        # the FIRST tranche so base-arm rows are unchanged; gross/costs/net are
+        # the whole position, and base_/add_net_inr split it for attribution.
+        "add_qty": t.add_qty, "add_entry": t.add_entry,
+        "add_time": t.add_time.strftime("%H:%M") if t.add_time is not None else "",
+        "base_net_inr": t.base_net_inr, "add_net_inr": t.add_net_inr,
     }
 
 
@@ -399,9 +405,42 @@ def main() -> int:
                          "scanner-only and are NOT replayed here: a pool backtest walks "
                          "one symbol at a time, so it has no coherent day-level P&L to "
                          "apply them to")
+    ap.add_argument("--breakeven-at-r", type=float, default=None,
+                    help="lift the stop to the ENTRY price only after this many R "
+                    "of open profit (1R = the entry-to-stop distance). Default is "
+                    "the frozen 1.0. 1.5 = 'give it more room before protecting "
+                    "it' (hypothesis 2026-09-20-breakeven-at-1p5r). Mutually "
+                    "exclusive with --cost-aware-breakeven")
+    ap.add_argument("--no-trailing-stops", action="store_true",
+                    help="remove every stop that MOVES after entry - the breakeven "
+                    "lift and the swing-low ratchet - leaving only the hard stop "
+                    "decided at entry. The false-break exit and the 15:15 close "
+                    "remain (neither is a stop)")
+    ap.add_argument("--no-trend-exits", action="store_true",
+                    help="remove the five indicator exits (EMA9/EMA20 break, MACD "
+                    "fade, resistance reject, volume climax). With "
+                    "--no-trailing-stops this leaves the initial stop, the "
+                    "false-break exit and the 15:15 close")
+    ap.add_argument("--legacy-same-bar-breakeven", action="store_true",
+                    help="REPRODUCTION ONLY: restore the pre-2026-09-20 breakeven "
+                    "lift, where one minute could both justify the lift (its high) "
+                    "and fill it (its low) - an order nobody could place, firing on "
+                    "4.6%% of 2023-24 trades and understating P&L by ~13 INR/trade. "
+                    "Use it to replay results produced before that date")
     ap.add_argument("--cost-aware-breakeven", action="store_true",
                     help="after 1R of favorable movement, lift the stop to modeled "
                     "round-trip cost breakeven plus one NSE tick; experimental overlay")
+    ap.add_argument("--pyramid-add-1r", action="store_true",
+                    help="buy a SECOND tranche on the bar that lifts the cost-aware "
+                    "stop, risking the same risk_inr against that shared stop. "
+                    "Implies --cost-aware-breakeven. Total exposure can reach 2x "
+                    "max_notional, so judge it on add_net_inr, not on totals "
+                    "(hypothesis 2026-09-19-add-to-winner-at-1r)")
+    ap.add_argument("--initial-risk-fraction", type=float, default=1.0,
+                    help="scale the FIRST tranche's rupee risk; needs "
+                    "--pyramid-add-1r. 0.5 = the 'half now, half once it proves "
+                    "itself' arm, which ends at today's full size instead of "
+                    "twice it, and halves the money at risk in the first minutes")
     ap.add_argument("--legacy-single-close-false-break", action="store_true",
                     help="exit on ONE close below the level (pre-2026-09-18) instead of "
                     "two consecutive closes; comparison control only")
@@ -429,6 +468,13 @@ def main() -> int:
     insts = client.nse_equities()
     if a.symbols and a.cached_year:
         ap.error("--symbols cannot be combined with --cached-year")
+    if a.breakeven_at_r is not None and (a.cost_aware_breakeven or a.pyramid_add_1r):
+        # The cost stop arms off its own literal 1R test inside the bar loop, so
+        # the two flags would disagree about what "reached 1R" means. EngineConfig
+        # guards this, but the cost-stop flags are set after construction and so
+        # never reach that guard.
+        ap.error("--breakeven-at-r cannot be combined with --cost-aware-breakeven "
+                 "or --pyramid-add-1r")
     if a.symbols:
         symbols = [s.strip().upper() for s in a.symbols.split(",") if s.strip()]
     elif a.cached_year:
@@ -477,8 +523,16 @@ def main() -> int:
                        first_candidate_only=a.first_candidate_only,
                        require_1m_agreement=a.require_1m_agreement,
                        resistance_veto_v2=a.resistance_v2,
-                       volume_shelf_levels=a.volume_shelves, **cfg_kw)
-    cfg.cost_aware_breakeven = a.cost_aware_breakeven
+                       volume_shelf_levels=a.volume_shelves,
+                       breakeven_at_r=a.breakeven_at_r,
+                       legacy_same_bar_breakeven=a.legacy_same_bar_breakeven,
+                       no_trailing_stops=a.no_trailing_stops,
+                       no_trend_exits=a.no_trend_exits, **cfg_kw)
+    # Adding size on top of the original hard stop would double the rupee risk,
+    # so the add-on always comes with the protective stop it was designed around.
+    cfg.cost_aware_breakeven = a.cost_aware_breakeven or a.pyramid_add_1r
+    cfg.pyramid_add_at_1r = a.pyramid_add_1r
+    cfg.initial_risk_fraction = a.initial_risk_fraction
     cfg.legacy_single_close_false_break = (a.legacy_single_close_false_break
                                            or a.legacy_false_break)
     cfg.legacy_false_break_before_stop = (a.legacy_false_break_before_stop

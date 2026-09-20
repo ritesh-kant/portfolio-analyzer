@@ -280,6 +280,27 @@ class EngineConfig:
     # Add the 2:1 target to a trend exit mode, so a position closes on whichever
     # of target / stop / trend-break comes first. The guide keeps both.
     use_fixed_target: bool = False
+    # Where the protective stop is lifted to the ENTRY price, in multiples of
+    # the initial risk (1R = the entry-to-stop distance). None = the frozen
+    # BREAKEVEN_AT_R = 1.0. Raising it leaves the original hard stop in place
+    # for longer - the trade can give back more - in exchange for not being
+    # scratched out by ordinary wobble just above 1R, which is what produces
+    # ~22% of all exits today (`trail_stop`, 1.3% gross win rate).
+    # research/hypotheses/2026-09-20-breakeven-at-1p5r.md
+    breakeven_at_r: float | None = None
+    # Backtest-reproduction switch ONLY. True restores the pre-2026-09-20
+    # behaviour in which a single minute could both justify the breakeven lift
+    # (off its high) and fill it (off its low) - an order nobody could place,
+    # firing on 4.6% of 2023-24 trades and understating P&L by 13.34 INR/trade.
+    # The cost-aware stop always deferred; now the plain lock does too.
+    # research/hypotheses/2026-09-20-breakeven-at-1p5r.md
+    legacy_same_bar_breakeven: bool = False
+    # Research-only subtractions. `no_trailing_stops` removes every stop that
+    # MOVES after entry (the breakeven lift and the swing-low ratchet), leaving
+    # only the hard stop decided at entry. `no_trend_exits` removes the five
+    # indicator exits. Neither touches the false-break exit or the 15:15 close.
+    no_trailing_stops: bool = False
+    no_trend_exits: bool = False
     # Experimental management overlay: once a trade reaches 1R, lift its stop
     # to a price that covers round-trip costs and adds a small tick buffer.
     # Disabled by default so every existing strategy/replay remains unchanged.
@@ -288,6 +309,30 @@ class EngineConfig:
     # pays, and folding it in would place the stop near the 2R target.
     cost_aware_breakeven: bool = False
     cost_stop_extra_ticks: int = 1
+    # Buy-side half of the same idea: once the first tranche is protected at the
+    # cost-aware breakeven, the trade has proved itself, so add a SECOND tranche
+    # and let the winner carry more size. Implies `cost_aware_breakeven` — adding
+    # to a position whose stop is still the original hard stop would double the
+    # rupee risk, which is a different (and worse) experiment.
+    #
+    # Zero new tunables. The trigger is the frozen BREAKEVEN_AT_R = 1.0, the
+    # add-on's rupee risk is the same `risk_inr` the first tranche used, its
+    # stop is the cost-aware stop both tranches now share, and it is capped by
+    # the same `max_notional_inr`. Because the cap applies per tranche, total
+    # exposure can reach 2 x max_notional — which is why the pre-registered
+    # primary criterion is the ADD-ON TRANCHE'S OWN net P&L, a number that
+    # cannot be flattered by simply deploying more capital.
+    # research/hypotheses/2026-09-19-add-to-winner-at-1r.md
+    pyramid_add_at_1r: bool = False
+    # Scales the FIRST tranche: both its rupee risk and its share of the
+    # notional cap. Scaling risk alone would be a no-op on every trade where the
+    # notional cap is the binding constraint, and that is a large minority of
+    # them. 1.0 is every arm ever run.
+    # 0.5 with `pyramid_add_at_1r` is the "half now, half once it proves itself"
+    # variant: same maximum exposure as today, but half the money at risk during
+    # the first minutes, which is where the measured loss is concentrated
+    # (BT17: ~39% of trades stop out within five minutes).
+    initial_risk_fraction: float = 1.0
     # Backtest controls only, split so each half of the 2026-09-18 exit change
     # can be attributed on its own. Defaults reproduce the current behavior:
     # a false break needs two consecutive closes, and it is judged only after
@@ -313,6 +358,34 @@ class EngineConfig:
             raise ValueError("vol_baseline_min_bars must be positive")
         if self.cost_stop_extra_ticks < 0:
             raise ValueError("cost_stop_extra_ticks must not be negative")
+        if self.breakeven_at_r is not None and self.breakeven_at_r <= 0.0:
+            raise ValueError("breakeven_at_r must be positive")
+        if self.no_trailing_stops and self.breakeven_at_r is not None:
+            # There is no breakeven lift left to place, so a threshold for it
+            # would be silently inert.
+            raise ValueError("breakeven_at_r is meaningless with no_trailing_stops")
+        if self.no_trailing_stops and self.cost_aware_breakeven:
+            raise ValueError("cost_aware_breakeven is a trailing stop; "
+                             "it cannot be combined with no_trailing_stops")
+        if self.breakeven_at_r is not None and self.cost_aware_breakeven:
+            # The cost stop arms off its own literal 1R test in the bar loop.
+            # Allowing both would leave two different definitions of "reached
+            # 1R" running against the same position, so refuse the combination
+            # rather than silently pick one.
+            raise ValueError("breakeven_at_r cannot be combined with "
+                             "cost_aware_breakeven")
+        if not 0.0 < self.initial_risk_fraction <= 1.0:
+            raise ValueError("initial_risk_fraction must be in (0, 1]")
+        if self.initial_risk_fraction != 1.0 and not self.pyramid_add_at_1r:
+            # Starting small without ever adding is just a smaller strategy; it
+            # would change every rupee figure while testing nothing about
+            # scaling in.
+            raise ValueError("initial_risk_fraction < 1 needs pyramid_add_at_1r")
+        if self.pyramid_add_at_1r and not self.cost_aware_breakeven:
+            # Adding size while the first tranche still sits on its original
+            # hard stop doubles the rupee risk instead of holding it constant.
+            # That is a different experiment, and not the one registered.
+            raise ValueError("pyramid_add_at_1r needs cost_aware_breakeven")
         if self.require_light_pullback_volume and not self.require_micro_pullback:
             # The light-volume test is a property OF the pullback, so there is
             # nothing to measure it on unless a pullback is required. Failing
@@ -321,7 +394,11 @@ class EngineConfig:
                 "require_light_pullback_volume needs require_micro_pullback"
             )
         self.exit_cfg = exits.ExitConfig.for_mode(
-            self.exit_mode, use_fixed_target=self.use_fixed_target
+            self.exit_mode, use_fixed_target=self.use_fixed_target,
+            breakeven_at_r=self.breakeven_at_r,
+            legacy_same_bar_breakeven=self.legacy_same_bar_breakeven,
+            no_trailing_stops=self.no_trailing_stops,
+            no_trend_exits=self.no_trend_exits,
         )
 
     @property
@@ -443,6 +520,12 @@ class Position:
     # trail's convention that a level decided by a bar cannot also fill on it.
     cost_stop_armed: bool = False
     cost_stop_applied: bool = False
+    # Second tranche bought at the 1R add-on, if `pyramid_add_at_1r` is on.
+    # Zero when no add was made, which is every position in every arm that has
+    # the flag off — so the closed-trade maths below reduces to the original.
+    add_qty: int = 0
+    add_entry: float = 0.0
+    add_time: pd.Timestamp | None = None
 
 
 @dataclass
@@ -457,14 +540,35 @@ class ClosedTrade:
     gross_inr: float
     costs_inr: float
     net_inr: float
+    # Add-on tranche attribution. `qty`/`entry` keep describing the FIRST
+    # tranche so existing rows and live records are unchanged, while
+    # `gross_inr`/`costs_inr`/`net_inr` are always the WHOLE position, because
+    # that is the money the account actually made.
+    add_qty: int = 0
+    add_entry: float = 0.0
+    add_time: pd.Timestamp | None = None
+    base_net_inr: float = 0.0    # first tranche only
+    add_net_inr: float = 0.0     # add-on tranche only
+
+    @property
+    def total_qty(self) -> int:
+        return self.qty + self.add_qty
+
+    @property
+    def avg_entry(self) -> float:
+        """Size-weighted entry across tranches; equals `entry` when no add."""
+        if self.add_qty <= 0:
+            return self.entry
+        return ((self.entry * self.qty + self.add_entry * self.add_qty)
+                / self.total_qty)
 
     @property
     def gross_pct(self) -> float:
-        return (self.exit / self.entry - 1.0) * 100.0
+        return (self.exit / self.avg_entry - 1.0) * 100.0
 
     @property
     def net_pct(self) -> float:
-        return self.net_inr / (self.entry * self.qty) * 100.0
+        return self.net_inr / (self.avg_entry * self.total_qty) * 100.0
 
 
 @dataclass
@@ -551,9 +655,22 @@ def _exit(state: DayState, when: pd.Timestamp, px: float, reason: str, cfg: Engi
     gross = (px - entry) * qty
     costs = calc_costs(entry, px, qty, direction="long")["total"]
     costs += (entry + px) * qty * cfg.stress_slip
+    base_net = gross - costs
+    # The add-on tranche is a second round trip: its own entry price, its own
+    # brokerage and taxes. Charging it separately is what makes `add_net_inr`
+    # an honest standalone answer to "did buying more pay for itself?".
+    add_gross = add_costs = 0.0
+    if pos.add_qty > 0:
+        add_gross = (px - pos.add_entry) * pos.add_qty
+        add_costs = calc_costs(pos.add_entry, px, pos.add_qty, direction="long")["total"]
+        add_costs += (pos.add_entry + px) * pos.add_qty * cfg.stress_slip
+        gross += add_gross
+        costs += add_costs
     state.closed.append(ClosedTrade(
         cand=pos.cand, entry_time=pos.entry_time, entry=entry, exit_time=when, exit=px,
         exit_reason=reason, qty=qty, gross_inr=gross, costs_inr=costs, net_inr=gross - costs,
+        add_qty=pos.add_qty, add_entry=pos.add_entry, add_time=pos.add_time,
+        base_net_inr=base_net, add_net_inr=add_gross - add_costs,
     ))
     # The control never reaches this branch because the option is disabled.
     # A retry is only possible after a genuine attention false break; a hard
@@ -570,6 +687,40 @@ def _exit(state: DayState, when: pd.Timestamp, px: float, reason: str, cfg: Engi
             level=float(pos.cand.setup.level), exit_time=when
         )
     state.position = None
+
+
+def _add_to_winner(
+    pos: Position, price: float, when: pd.Timestamp, cfg: EngineConfig,
+) -> None:
+    """Buy a second tranche once the trade has paid for itself.
+
+    Called on the bar that binds the cost-aware stop, i.e. the bar AFTER the
+    one that first reached 1R, and filled at that bar's open. Nothing later in
+    the bar is consulted, so this cannot use information the trader would not
+    have had at the moment of the add.
+
+    Sizing repeats the first tranche's own rule exactly: the two tranches are
+    equal-risk. It risks `risk_inr x initial_risk_fraction` against the stop the
+    position now carries, under the same proportional share of the notional cap.
+    No new number is introduced. So at `initial_risk_fraction` 1.0 the position
+    ends up about twice today's size, and at 0.5 it ends up about today's size
+    having spent the first leg of the move at half of it.
+
+    If the shared stop is already at or above the add price — a gap that opens
+    straight into the stop — there is no room to risk anything and no add is
+    made.
+    """
+    stop = pos.exit_state.stop
+    per_share_risk = price - stop
+    if per_share_risk <= 0.0 or price <= 0.0:
+        return
+    qty = min(int(cfg.risk_inr * cfg.initial_risk_fraction // per_share_risk),
+              int(cfg.max_notional_inr * cfg.initial_risk_fraction // price))
+    if qty < 1:
+        return
+    pos.add_qty = qty
+    pos.add_entry = price
+    pos.add_time = when
 
 
 def _cost_aware_breakeven_stop(entry: float, qty: int, extra_ticks: int) -> float:
@@ -1382,7 +1533,8 @@ def fill_pending_quote(
         return None
     plan = plan_trade(
         price, pending.cand.setup.stop,
-        risk_inr=cfg.risk_inr, max_notional_inr=cfg.max_notional_inr,
+        risk_inr=cfg.risk_inr * cfg.initial_risk_fraction,
+        max_notional_inr=cfg.max_notional_inr * cfg.initial_risk_fraction,
         rr=cfg.rr, gate_entry=price,
     )
     if plan is None:
@@ -1478,8 +1630,8 @@ def step(
             _reject_pending(state, now, "chased", fill)
             return
         plan = plan_trade(
-            fill, cand.setup.stop, risk_inr=cfg.risk_inr,
-            max_notional_inr=cfg.max_notional_inr, rr=cfg.rr,
+            fill, cand.setup.stop, risk_inr=cfg.risk_inr * cfg.initial_risk_fraction,
+            max_notional_inr=cfg.max_notional_inr * cfg.initial_risk_fraction, rr=cfg.rr,
             gate_entry=fill if cfg.fill_mode == FILL_RESTING_SIZED else float(bar["open"]),
         )
         if plan is None:
@@ -1499,8 +1651,8 @@ def step(
         chased = (next_open / cand.setup.trigger - 1.0) * 100.0 > CHASE_MAX_EXT_PCT
         fill = next_open if cfg.fill_mode == FILL_NEXT_OPEN else cand.setup.trigger
         plan = None if chased else plan_trade(
-            fill, cand.setup.stop, risk_inr=cfg.risk_inr,
-            max_notional_inr=cfg.max_notional_inr, rr=cfg.rr, gate_entry=next_open,
+            fill, cand.setup.stop, risk_inr=cfg.risk_inr * cfg.initial_risk_fraction,
+            max_notional_inr=cfg.max_notional_inr * cfg.initial_risk_fraction, rr=cfg.rr, gate_entry=next_open,
         )
         if plan is not None:
             ec = cfg.exit_cfg
@@ -1537,6 +1689,15 @@ def step(
                 ),
             )
             pos.cost_stop_applied = True
+            # Buy side: the first tranche is now protected, so add a second one
+            # on this same bar's open. Same bar as the stop lift by design —
+            # both are decided by the previous bar reaching 1R, and neither may
+            # use anything this bar does after its open.
+            if cfg.pyramid_add_at_1r and pos.add_qty == 0:
+                _add_to_winner(pos, float(bar["open"]), now, cfg)
+        # A breakeven lift armed by an EARLIER bar binds here, before this
+        # bar's low is tested — same ordering the cost stop above uses.
+        exits.apply_pending_breakeven(es, ec)
         pos.highest = max(pos.highest, float(bar["high"]))
         exits.update_high(es, float(bar["high"]), ec)
         if (cfg.cost_aware_breakeven and not pos.cost_stop_applied

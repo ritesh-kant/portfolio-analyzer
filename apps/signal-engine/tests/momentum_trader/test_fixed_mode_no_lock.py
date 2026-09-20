@@ -29,12 +29,19 @@ def test_fixed_mode_never_arms_and_never_locks_breakeven() -> None:
 
 
 def test_trend_mode_still_locks_breakeven_at_1r() -> None:
-    """The lock is a trend-mode feature and must keep working there."""
+    """The lock is a trend-mode feature and must keep working there.
+
+    Since 2026-09-20 it binds on the bar AFTER the one that reached 1R, so that
+    one minute cannot both justify the lift and fill it.
+    """
     cfg = exits.ExitConfig.for_mode(exits.MODE_TREND_MIN)
     st = _state()
     exits.update_high(st, bar_high=101.5, cfg=cfg)
     assert st.armed is True
-    assert st.trail == 100.0
+    assert st.breakeven_pending is True
+    assert st.trail != 100.0                      # not on this bar
+    exits.apply_pending_breakeven(st, cfg)
+    assert st.trail == 100.0                      # on the next one
 
 
 def test_fixed_mode_pullback_to_entry_does_not_exit() -> None:

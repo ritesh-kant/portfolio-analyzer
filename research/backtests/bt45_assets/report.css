@@ -1,0 +1,102 @@
+/* BT32 strategy report. Dark, self-contained, no CDN. */
+:root {
+  --bg: #0b1017; --panel: #121a25; --line: #1e2b3c; --ink: #e7eef8;
+  --dim: #8fa1bb; --up: #2dd4bf; --dn: #fb7185; --acc: #fbbf24;
+  --ema9: #60a5fa; --ema20: #c084fc; --vwap: #fbbf24;
+  --res: #fb7185; --sup: #34d399;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+header { padding: 22px 26px 10px; border-bottom: 1px solid var(--line); }
+header h1 { margin: 0 0 6px; font-size: 19px; letter-spacing: .2px; }
+header p { margin: 4px 0; color: var(--dim); max-width: 1180px; }
+header b { color: var(--ink); }
+code { background: #0f1620; padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+.stats { display: flex; flex-wrap: wrap; gap: 7px; padding: 12px 26px; }
+.chip {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 11px; font-size: 11.5px; color: var(--dim);
+}
+.chip b { color: var(--ink); }
+.chip.pos b { color: var(--up); } .chip.neg b { color: var(--dn); }
+.wrap { display: flex; gap: 16px; align-items: flex-start; padding: 6px 26px 40px; }
+#charts { flex: 1; min-width: 0; }
+.side { width: 430px; flex: none; position: sticky; top: 12px; }
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 14px;
+}
+.panel h3 { margin: 0 0 8px; font-size: 13px; }
+.hint { color: var(--dim); font-size: 11.5px; margin: 6px 0 8px; }
+.scroll { max-height: 52vh; overflow: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11.5px; color: var(--dim); }
+.legend span { display: flex; align-items: center; gap: 5px; }
+.legend i { width: 15px; height: 0; border-top-width: 2px; border-top-style: solid; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.filters label { font-size: 11.5px; color: var(--dim); display: flex; gap: 5px; align-items: center; }
+.filters select {
+  background: #0f1620; color: var(--ink); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 6px; font-size: 11.5px;
+}
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  margin-bottom: 14px; padding: 10px 12px 6px;
+}
+.card.flash { outline: 2px solid var(--acc); }
+/* Native fullscreen: the card IS the screen, so centre the chart in it. */
+.card:fullscreen {
+  margin: 0; border-radius: 0; padding: 16px 22px;
+  display: flex; flex-direction: column; justify-content: center;
+  background: var(--bg); overflow: auto;
+}
+.card:fullscreen .card-head { flex: none; margin-bottom: 10px; }
+.card:fullscreen svg { max-height: 82vh; }
+/* Fallback for webviews that refuse the Fullscreen API. */
+body.has-zoom { overflow: hidden; }
+.card.zoomed {
+  position: fixed; inset: 0; z-index: 50; margin: 0; border-radius: 0;
+  padding: 16px 22px; background: var(--bg); overflow: auto;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.card.zoomed svg { max-height: 82vh; }
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.card-head h2 { margin: 0; font-size: 14px; }
+.card-head .meta { color: var(--dim); font-size: 11.5px; margin-top: 2px; }
+.card-head .meta b { color: var(--ink); }
+.kpi { text-align: right; font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+.kpi b { font-size: 14px; display: block; }
+.pos { color: var(--up); } .neg { color: var(--dn); }
+svg { display: block; width: 100%; height: auto; touch-action: pan-y; cursor: crosshair; }
+svg.dragging { cursor: grabbing; }
+.card:focus { outline: 2px solid var(--acc); outline-offset: 1px; }
+.toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 6px; padding: 6px 2px 8px; font-size: 11.5px; color: var(--dim);
+}
+.toolbar .btns { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.toolbar button {
+  background: #0f1620; color: var(--dim); border: 1px solid var(--line);
+  border-radius: 5px; padding: 2px 7px; font-size: 11.5px; cursor: pointer;
+}
+.toolbar button:hover:not(:disabled) { color: var(--ink); border-color: var(--dim); }
+.toolbar button:disabled { opacity: .35; cursor: not-allowed; }
+.toolbar .sep { width: 1px; height: 14px; background: var(--line); margin: 0 3px; }
+.readout {
+  min-height: 17px; padding: 2px 4px 4px; font-size: 11px; color: var(--dim);
+  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+svg text { font: 10px -apple-system, BlinkMacSystemFont, sans-serif; fill: var(--dim); }
+table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+th { color: var(--dim); cursor: pointer; position: sticky; top: 0; background: var(--panel); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: #16202e; }
+.tip {
+  position: fixed; display: none; pointer-events: none; z-index: 9;
+  background: #0f1620; border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 8px; font-size: 11px; color: var(--ink); white-space: pre;
+}

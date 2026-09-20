@@ -160,10 +160,14 @@ def test_breakeven_lock_at_1r() -> None:
     cfg = exits.ExitConfig.for_mode(exits.MODE_TREND_MIN)
     st = _state(entry=100.0, stop=99.0)
     exits.update_high(st, 100.5, cfg)
+    exits.apply_pending_breakeven(st, cfg)
     assert st.trail == pytest.approx(99.0)      # 0.5R: armed but stop not yet moved
     exits.update_high(st, 101.0, cfg)
-    assert st.trail == pytest.approx(100.0)     # 1R: stop lifted to entry
+    assert st.trail == pytest.approx(99.0)      # 1R reached — but it binds NEXT bar
+    exits.apply_pending_breakeven(st, cfg)
+    assert st.trail == pytest.approx(100.0)     # next bar: stop lifted to entry
     exits.update_high(st, 100.2, cfg)
+    exits.apply_pending_breakeven(st, cfg)
     assert st.trail == pytest.approx(100.0)     # never falls back
 
 

@@ -39,7 +39,7 @@ entries remain directly comparable with BT17.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pandas as pd
 
@@ -73,6 +73,11 @@ class ExitConfig:
     breakeven_at_r: float = BREAKEVEN_AT_R
     swing_buffer_pct: float = SWING_BUFFER_PCT
     use_swing_trail: bool = True
+    # Backtest-reproduction switch ONLY. True restores the pre-2026-09-20
+    # behaviour in which the breakeven lift binds on the same bar that earned
+    # it - see `apply_pending_breakeven` for why that is wrong. Default False =
+    # correct.
+    legacy_same_bar_breakeven: bool = False
     use_ema_fast_break: bool = True
     use_ema_slow_break: bool = True
     use_macd_fade: bool = False
@@ -93,8 +98,18 @@ class ExitConfig:
         return self.mode == MODE_FIXED or self.use_fixed_target
 
     @classmethod
-    def for_mode(cls, mode: str, use_fixed_target: bool = False) -> ExitConfig:
+    def for_mode(cls, mode: str, use_fixed_target: bool = False,
+                 breakeven_at_r: float | None = None,
+                 legacy_same_bar_breakeven: bool = False,
+                 no_trailing_stops: bool = False,
+                 no_trend_exits: bool = False) -> ExitConfig:
         if mode == MODE_FIXED:
+            if breakeven_at_r is not None:
+                # fixed_2r deliberately has NO breakeven lock (see below).
+                # Honouring an override here would re-open the 2026-09-06 leak
+                # through the front door, so refuse instead of ignoring a
+                # switch the operator set.
+                raise ValueError("breakeven_at_r does not apply to fixed_2r")
             # No arming and no breakeven lock. Spec §4 lists exactly four exits
             # for the fixed mode — false_break, stop, target, 15:15 — and the
             # original BT17 run (2026-09-05, before this module existed) had zero
@@ -104,19 +119,30 @@ class ExitConfig:
             # decomposing losses. Every A/B since 09-05 carried the leak in BOTH
             # arms, so no verdict flips, but absolute fixed_2r numbers before
             # this fix are not the spec'd strategy.
-            return cls(mode=mode, arm_at_r=float("inf"), breakeven_at_r=float("inf"),
-                       use_swing_trail=False, use_ema_fast_break=False,
-                       use_ema_slow_break=False)
+            cfg = cls(mode=mode, arm_at_r=float("inf"), breakeven_at_r=float("inf"),
+                      use_swing_trail=False, use_ema_fast_break=False,
+                      use_ema_slow_break=False)
+            return _strip(cfg, no_trailing_stops, no_trend_exits)
+        be = BREAKEVEN_AT_R if breakeven_at_r is None else breakeven_at_r
         if mode == MODE_TREND_MIN:
-            return cls(mode=mode, use_fixed_target=use_fixed_target)
+            cfg = cls(mode=mode, breakeven_at_r=be,
+                      legacy_same_bar_breakeven=legacy_same_bar_breakeven,
+                      use_fixed_target=use_fixed_target)
+            return _strip(cfg, no_trailing_stops, no_trend_exits)
         if mode == MODE_TREND_FULL:
-            return cls(mode=mode, use_macd_fade=True, use_resistance_reject=True,
-                       use_volume_climax=True, use_fixed_target=use_fixed_target)
+            cfg = cls(mode=mode, breakeven_at_r=be,
+                      legacy_same_bar_breakeven=legacy_same_bar_breakeven,
+                      use_macd_fade=True, use_resistance_reject=True,
+                      use_volume_climax=True, use_fixed_target=use_fixed_target)
+            return _strip(cfg, no_trailing_stops, no_trend_exits)
         if mode == MODE_TREND_RESISTANCE_STATE:
-            return cls(mode=mode, use_macd_fade=True, use_resistance_reject=True,
-                       use_volume_climax=True, structural_resistance_only=True,
-                       resistance_requires_failed_break=True,
-                       use_fixed_target=use_fixed_target)
+            cfg = cls(mode=mode, breakeven_at_r=be,
+                      legacy_same_bar_breakeven=legacy_same_bar_breakeven,
+                      use_macd_fade=True, use_resistance_reject=True,
+                      use_volume_climax=True, structural_resistance_only=True,
+                      resistance_requires_failed_break=True,
+                      use_fixed_target=use_fixed_target)
+            return _strip(cfg, no_trailing_stops, no_trend_exits)
         raise ValueError(f"unknown exit mode {mode!r}; expected one of {MODES}")
 
 
@@ -128,6 +154,10 @@ class ExitState:
     trail: float
     highest: float
     armed: bool = False
+    # Set when a bar reaches `breakeven_at_r`, cleared when the lift actually
+    # binds on the FOLLOWING bar. Only used when `defer_breakeven_one_bar`.
+    breakeven_pending: bool = False
+    breakeven_applied: bool = False
     levels: list[Level] = field(default_factory=list)
     last_tf_seen: pd.Timestamp | None = None
 
@@ -138,6 +168,24 @@ class ExitState:
     def r_multiple(self, price: float) -> float:
         risk = self.entry - self.hard_stop
         return (price - self.entry) / risk if risk > 0 else 0.0
+
+
+def _strip(cfg: ExitConfig, no_trailing_stops: bool, no_trend_exits: bool) -> ExitConfig:
+    """Research-only subtractions from a built exit config.
+
+    `no_trailing_stops` removes every stop that MOVES after entry - the
+    breakeven lift and the swing-low ratchet - leaving the hard stop written
+    down at entry. `no_trend_exits` removes the five indicator exits. Neither
+    touches the false-break exit (an entry-pattern failure, not a stop, and it
+    feeds the reclaim re-entry path) or the 15:15 close.
+    """
+    if no_trailing_stops:
+        cfg = replace(cfg, use_swing_trail=False, breakeven_at_r=float("inf"))
+    if no_trend_exits:
+        cfg = replace(cfg, use_ema_fast_break=False, use_ema_slow_break=False,
+                      use_macd_fade=False, use_resistance_reject=False,
+                      use_volume_climax=False)
+    return cfg
 
 
 @dataclass(frozen=True)
@@ -170,7 +218,32 @@ def update_high(st: ExitState, bar_high: float, cfg: ExitConfig) -> None:
     if not st.armed and r >= cfg.arm_at_r:
         st.armed = True
     if r >= cfg.breakeven_at_r:
-        st.trail = max(st.trail, st.entry)
+        if cfg.legacy_same_bar_breakeven:
+            st.trail = max(st.trail, st.entry)
+        elif not st.breakeven_applied:
+            st.breakeven_pending = True
+
+
+def apply_pending_breakeven(st: ExitState, cfg: ExitConfig) -> None:
+    """Bind a breakeven lift that an EARLIER bar armed, before this bar's low
+    is tested.
+
+    Under `legacy_same_bar_breakeven`, `update_high` raises the stop off a
+    bar's HIGH and `check_stop` then fills it off that SAME bar's LOW - so a
+    minute that ran up to 1R and back through the entry books an exit at the
+    entry price, from an order nobody could have placed inside the candle.
+    Measured on 2023+2024 that mis-fires on 145 of 380 breakeven scratches
+    (4.6% of all trades) and understated P&L by +13.34 INR/trade.
+
+    The cost-aware stop always armed on one bar and bound on the next for
+    exactly this reason; this makes the plain breakeven lock agree with it.
+    research/hypotheses/2026-09-20-breakeven-at-1p5r.md
+    """
+    if cfg.legacy_same_bar_breakeven or not st.breakeven_pending:
+        return
+    st.trail = max(st.trail, st.entry)
+    st.breakeven_pending = False
+    st.breakeven_applied = True
 
 
 def check_stop(st: ExitState, bar: pd.Series) -> ExitSignal | None:

@@ -8,7 +8,7 @@ from datetime import time
 
 import pandas as pd
 import pytest
-from src.momentum_trader import catalyst, engine, universe
+from src.momentum_trader import catalyst, engine, exits, universe
 from src.momentum_trader.bars import IST, BarBuilder
 from src.momentum_trader.upstox import candles_to_frame
 from src.news_trader.trailing_sl import calc_costs
@@ -127,6 +127,83 @@ def test_cost_aware_stop_binds_only_from_the_bar_after_1r() -> None:
 def test_cost_aware_stop_is_computed_without_the_research_stress_slip() -> None:
     """bt17's 40 bps/side stress must not move the live breakeven price."""
     assert engine._cost_aware_breakeven_stop(105.85, 472, 1) == pytest.approx(106.15)
+
+
+def test_pyramid_requires_the_protective_stop() -> None:
+    """Adding size on the original hard stop would double the rupee risk."""
+    with pytest.raises(ValueError, match="cost_aware_breakeven"):
+        engine.EngineConfig(pyramid_add_at_1r=True)
+    with pytest.raises(ValueError, match="pyramid_add_at_1r"):
+        engine.EngineConfig(initial_risk_fraction=0.5)
+
+
+def test_pyramid_adds_a_second_tranche_on_the_bar_that_lifts_the_stop() -> None:
+    """Same bar as the cost stop, filled at that bar's OPEN, equal rupee risk.
+
+    Entry 105.85, hard stop 105.30 (1R = 106.40), cost stop 106.15. The 10:02
+    bar reaches 1R; the add is made at 10:03's open, risking risk_inr against
+    the 106.15 stop the whole position now shares.
+    """
+    cfg = engine.EngineConfig(cost_aware_breakeven=True, pyramid_add_at_1r=True)
+    st = _run(_mover_day([
+        (105.85, 105.9, 105.8, 105.85, 700),     # 10:01 fill at 105.85
+        (105.9, 106.45, 106.3, 106.4, 900),      # 10:02 reaches 1R
+        (106.5, 106.6, 106.4, 106.5, 900),       # 10:03 stop binds, add at 106.50
+        (106.5, 106.6, 106.0, 106.1, 900),       # 10:04 both tranches stop out
+    ]), cfg=cfg)
+    t = st.closed[0]
+    assert t.add_time is not None and t.add_time.strftime("%H:%M") == "10:03"
+    assert t.add_entry == pytest.approx(106.50)
+    # equal-risk sizing, under the same notional cap the first tranche used
+    assert t.add_qty == min(int(cfg.risk_inr // (106.50 - 106.15)),
+                            int(cfg.max_notional_inr // 106.50))
+    assert t.exit == pytest.approx(106.15)
+    # the add-on lost its own risk; the first tranche kept a small gain
+    assert t.add_net_inr < 0.0
+    assert t.net_inr == pytest.approx(t.base_net_inr + t.add_net_inr)
+    assert t.total_qty == t.qty + t.add_qty
+
+
+def test_no_add_when_the_bar_opens_at_or_below_the_shared_stop() -> None:
+    """A gap that opens into the stop leaves no room to risk anything."""
+    cfg = engine.EngineConfig(cost_aware_breakeven=True, pyramid_add_at_1r=True)
+    st = _run(_mover_day([
+        (105.85, 105.9, 105.8, 105.85, 700),
+        (105.9, 106.45, 106.3, 106.4, 900),      # reaches 1R
+        (106.0, 106.1, 105.5, 105.6, 900),       # opens 106.00 < cost stop 106.15
+    ]), cfg=cfg)
+    t = st.closed[0]
+    assert t.add_qty == 0 and t.add_net_inr == 0.0
+    assert t.gross_pct == pytest.approx((t.exit / t.entry - 1.0) * 100.0)
+
+
+def test_half_size_start_ends_at_about_one_full_position() -> None:
+    """Two half tranches ~ one of today's positions, not two."""
+    full = engine.EngineConfig(cost_aware_breakeven=True)
+    half = engine.EngineConfig(cost_aware_breakeven=True, pyramid_add_at_1r=True,
+                               initial_risk_fraction=0.5)
+    day = _mover_day([
+        (105.85, 105.9, 105.8, 105.85, 700),
+        (105.9, 106.45, 106.3, 106.4, 900),
+        (106.5, 106.6, 106.4, 106.5, 900),
+        (106.5, 106.6, 106.0, 106.1, 900),
+    ])
+    a, b = _run(day, cfg=full).closed[0], _run(day, cfg=half).closed[0]
+    assert b.qty == pytest.approx(a.qty // 2, abs=1)
+    assert b.total_qty == pytest.approx(a.qty, abs=2)
+
+
+def test_pyramid_off_leaves_every_closed_trade_field_untouched() -> None:
+    cfg = engine.EngineConfig(cost_aware_breakeven=True)
+    st = _run(_mover_day([
+        (105.85, 105.9, 105.8, 105.85, 700),
+        (105.9, 106.45, 106.3, 106.4, 900),
+        (106.5, 106.6, 106.0, 106.1, 900),
+    ]), cfg=cfg)
+    t = st.closed[0]
+    assert (t.add_qty, t.add_entry, t.add_time, t.add_net_inr) == (0, 0.0, None, 0.0)
+    assert t.avg_entry == t.entry and t.total_qty == t.qty
+    assert t.net_pct == pytest.approx(t.net_inr / (t.entry * t.qty) * 100.0)
 
 
 def test_false_break_never_counts_a_close_from_before_the_fill() -> None:
@@ -353,3 +430,130 @@ def test_dated_event_lookup_counts_d_and_d_plus_1() -> None:
     assert lk("ABC", pd.Timestamp("2026-09-07 10:00", tz=IST)) == (1, "earnings")
     assert lk("ABC", pd.Timestamp("2026-09-08 10:00", tz=IST)) == (1, "earnings")
     assert lk("ABC", pd.Timestamp("2026-09-09 10:00", tz=IST)) == (0, "")
+
+
+# ── breakeven_at_r override (hypothesis 2026-09-20-breakeven-at-1p5r) ─────────
+
+def test_breakeven_at_r_defaults_to_the_frozen_one_r() -> None:
+    """Every arm ever run must replay unchanged when the flag is untouched."""
+    for mode in ("trend_min", "trend_full", "trend_resistance_state"):
+        cfg = engine.EngineConfig(exit_mode=mode)
+        assert cfg.exit_cfg.breakeven_at_r == exits.BREAKEVEN_AT_R == 1.0
+        assert cfg.exit_cfg.arm_at_r == exits.ARM_AT_R == 0.5
+
+
+def test_breakeven_at_r_reaches_the_exit_config() -> None:
+    """`exit_cfg` is built in __post_init__, so a value that never reaches the
+    constructor is a silent no-op. This is the test for that trap."""
+    cfg = engine.EngineConfig(exit_mode="trend_resistance_state", breakeven_at_r=1.5)
+    assert cfg.exit_cfg.breakeven_at_r == 1.5
+    # the arming threshold is a SEPARATE frozen number and must not move with it
+    assert cfg.exit_cfg.arm_at_r == 0.5
+
+
+def test_breakeven_at_r_is_rejected_where_it_has_no_meaning() -> None:
+    with pytest.raises(ValueError, match="fixed_2r"):
+        engine.EngineConfig(exit_mode="fixed_2r", breakeven_at_r=1.5)
+    with pytest.raises(ValueError, match="breakeven_at_r must be positive"):
+        engine.EngineConfig(exit_mode="trend_full", breakeven_at_r=0.0)
+    with pytest.raises(ValueError, match="cost_aware_breakeven"):
+        engine.EngineConfig(exit_mode="trend_full", breakeven_at_r=1.5,
+                            cost_aware_breakeven=True)
+    # fixed_2r keeps its deliberate "no breakeven lock at all"
+    assert engine.EngineConfig(exit_mode="fixed_2r").exit_cfg.breakeven_at_r == float("inf")
+
+
+def test_stop_lifts_to_entry_only_after_the_configured_r() -> None:
+    """Entry 100, hard stop 98 → 1R = 102, 1.5R = 103.
+
+    At a 102.50 high the default arm is already protected at entry and the
+    1.5R arm is still on its original stop. That difference IS the experiment.
+    """
+    for r, protected_at_102_5 in ((None, True), (1.5, False)):
+        cfg = engine.EngineConfig(exit_mode="trend_full", breakeven_at_r=r)
+        st = exits.initial_state(entry=100.0, hard_stop=98.0)
+        exits.update_high(st, 102.5, cfg.exit_cfg)
+        exits.apply_pending_breakeven(st, cfg.exit_cfg)   # i.e. the following bar
+        assert st.armed is True                      # arming is unchanged at 0.5R
+        assert (st.stop == 100.0) is protected_at_102_5
+        assert st.stop == (100.0 if protected_at_102_5 else 98.0)
+        # push through 1.5R and the 1.5R arm protects too — later, not never
+        exits.update_high(st, 103.0, cfg.exit_cfg)
+        exits.apply_pending_breakeven(st, cfg.exit_cfg)
+        assert st.stop == 100.0
+
+
+def test_deferred_breakeven_cannot_fill_on_the_bar_that_armed_it() -> None:
+    """Entry 100, hard stop 98 → 1R = 102. One bar runs 101 → 102.5 → 99.5.
+
+    Same-bar (the legacy default): the high arms the lift to 100 and the low
+    fills it, booking an exit at the entry price from an order that could not
+    have existed inside the candle. Deferred: that bar cannot stop out at all;
+    protection binds on the NEXT bar.
+    """
+    bar = pd.Series({"open": 101.0, "high": 102.5, "low": 99.5, "close": 100.2})
+
+    legacy = engine.EngineConfig(exit_mode="trend_full",
+                                 legacy_same_bar_breakeven=True).exit_cfg
+    st = exits.initial_state(entry=100.0, hard_stop=98.0)
+    exits.apply_pending_breakeven(st, legacy)          # no-op when not deferring
+    exits.update_high(st, float(bar["high"]), legacy)
+    assert st.stop == 100.0
+    assert exits.check_stop(st, bar) is not None       # the artifact
+
+    fixed = engine.EngineConfig(exit_mode="trend_full").exit_cfg  # the DEFAULT
+    st = exits.initial_state(entry=100.0, hard_stop=98.0)
+    exits.apply_pending_breakeven(st, fixed)
+    exits.update_high(st, float(bar["high"]), fixed)
+    assert st.breakeven_pending is True
+    assert st.stop == 98.0                             # still the hard stop
+    assert exits.check_stop(st, bar) is None           # 99.5 > 98 → survives
+    # next bar: the lift binds before that bar's low is tested
+    exits.apply_pending_breakeven(st, fixed)
+    assert st.stop == 100.0 and st.breakeven_pending is False
+    assert exits.check_stop(st, pd.Series(
+        {"open": 100.4, "high": 100.6, "low": 99.8, "close": 99.9})) is not None
+
+
+def test_the_breakeven_lift_is_deferred_by_default_everywhere() -> None:
+    """The fix ships ON. Live builds EngineConfig directly (scanner._strategy_config),
+    so no deployment branch can silently miss it."""
+    for mode in ("trend_min", "trend_full", "trend_resistance_state"):
+        assert engine.EngineConfig(exit_mode=mode).exit_cfg.legacy_same_bar_breakeven is False
+    from src.momentum_trader.scanner import _strategy_config, Settings  # noqa: PLC0415
+    for name in ("attention_1m_merged", "attention_1m", "baseline"):
+        cfg = _strategy_config(Settings(mt_strategy=name))
+        assert cfg.exit_cfg.legacy_same_bar_breakeven is False, name
+
+
+def test_no_trailing_stops_leaves_only_the_entry_stop() -> None:
+    """Entry 100, hard stop 98. However far price runs, the stop stays at 98."""
+    cfg = engine.EngineConfig(exit_mode="trend_resistance_state",
+                              no_trailing_stops=True).exit_cfg
+    assert cfg.use_swing_trail is False
+    assert cfg.breakeven_at_r == float("inf")
+    assert cfg.use_macd_fade is True          # trend exits untouched
+    st = exits.initial_state(entry=100.0, hard_stop=98.0)
+    for high in (101.0, 102.0, 105.0, 110.0):
+        exits.update_high(st, high, cfg)
+        exits.apply_pending_breakeven(st, cfg)
+    assert st.stop == 98.0 and st.trail == 98.0
+    # Arming at 0.5R is a SEPARATE frozen rule and must still fire — the trend
+    # exits depend on it, and this option removes moving stops, not arming.
+    assert st.armed is True
+    assert st.highest == 110.0
+
+
+def test_no_trend_exits_removes_all_five_indicator_exits() -> None:
+    cfg = engine.EngineConfig(exit_mode="trend_resistance_state",
+                              no_trailing_stops=True, no_trend_exits=True).exit_cfg
+    for f in ("use_ema_fast_break", "use_ema_slow_break", "use_macd_fade",
+              "use_resistance_reject", "use_volume_climax"):
+        assert getattr(cfg, f) is False, f
+
+
+def test_no_trailing_stops_refuses_meaningless_combinations() -> None:
+    with pytest.raises(ValueError, match="breakeven_at_r is meaningless"):
+        engine.EngineConfig(no_trailing_stops=True, breakeven_at_r=1.5)
+    with pytest.raises(ValueError, match="cost_aware_breakeven is a trailing stop"):
+        engine.EngineConfig(no_trailing_stops=True, cost_aware_breakeven=True)
