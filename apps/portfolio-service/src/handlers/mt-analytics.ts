@@ -58,52 +58,86 @@ const ANALYSIS_FIELDS = {
 } as const;
 
 /** Every trade set the dashboard can be pointed at, live one first. */
-export const sources = requireAuth(async () => {
-  await connect();
+export const sources = requireAuth(async (event) => {
+  const origin = event.headers?.['origin'] ?? event.headers?.['Origin'];
+  try {
+    await connect();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[mt-analytics.sources] db connect failed', err);
+    return json(500, { error: 'Analytics store unavailable' }, origin);
+  }
   const db = mongoose.connection.db!;
+  let live: { trades?: number; from?: unknown; to?: unknown }[];
+  let runs: Record<string, unknown>[];
+  try {
+    live = (await db
+      .collection(LIVE_COLLECTION)
+      .aggregate([
+        { $match: { status: 'closed' } },
+        {
+          $group: {
+            _id: null,
+            trades: { $sum: 1 },
+            from: { $min: '$entry_time' },
+            to: { $max: '$entry_time' },
+          },
+        },
+      ])
+      .toArray()) as typeof live;
 
-  const live = await db
-    .collection(LIVE_COLLECTION)
-    .aggregate([
-      { $match: { status: 'closed' } },
-      { $group: { _id: null, trades: { $sum: 1 }, from: { $min: '$entry_time' }, to: { $max: '$entry_time' } } },
-    ])
-    .toArray();
+    runs = (await db.collection(RUNS_COLLECTION).find().sort({ from: -1 }).toArray()) as Record<
+      string,
+      unknown
+    >[];
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[mt-analytics.sources] query failed', err);
+    return json(500, { error: 'Analytics store unavailable' }, origin);
+  }
 
-  const runs = await db.collection(RUNS_COLLECTION).find().sort({ from: -1 }).toArray();
-
-  return json(200, {
-    sources: [
-      {
-        id: LIVE,
-        kind: 'live' as const,
-        label: 'Live paper trades',
-        trades: live[0]?.trades ?? 0,
-        from: live[0]?.from ?? null,
-        to: live[0]?.to ?? null,
-        // Live paper costs are the real MIS schedule with no stress added, so
-        // there is nothing for the cost-model switch to back out.
-        stressSlip: 0,
-      },
-      ...runs.map((run) => ({
-        id: String(run._id),
-        kind: 'backtest' as const,
-        label: String(run.label ?? run._id),
-        trades: Number(run.trades ?? 0),
-        from: run.from ?? null,
-        to: run.to ?? null,
-        sourceFile: run.source_file ?? null,
-        importedAt: run.imported_at ?? null,
-        stressSlip: Number(run.stress_slip ?? 0),
-      })),
-    ],
-  });
+  return json(
+    200,
+    {
+      sources: [
+        {
+          id: LIVE,
+          kind: 'live' as const,
+          label: 'Live paper trades',
+          trades: live[0]?.trades ?? 0,
+          from: live[0]?.from ?? null,
+          to: live[0]?.to ?? null,
+          // Live paper costs are the real MIS schedule with no stress added, so
+          // there is nothing for the cost-model switch to back out.
+          stressSlip: 0,
+        },
+        ...runs.map((run) => ({
+          id: String(run._id),
+          kind: 'backtest' as const,
+          label: String(run.label ?? run._id),
+          trades: Number(run.trades ?? 0),
+          from: run.from ?? null,
+          to: run.to ?? null,
+          sourceFile: run.source_file ?? null,
+          importedAt: run.imported_at ?? null,
+          stressSlip: Number(run.stress_slip ?? 0),
+        })),
+      ],
+    },
+    origin,
+  );
 });
 
 /** Closed trades from one source, slimmed to the analysis fields. */
 export const handler = requireAuth(async (event) => {
-  await connect();
-  const db = mongoose.connection.db!;
+  const origin = event.headers?.['origin'] ?? event.headers?.['Origin'];
+  try {
+    await connect();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[mt-analytics.handler] db connect failed', err);
+    return json(500, { error: 'Analytics store unavailable' }, origin);
+  }
   const source = event.queryStringParameters?.source ?? LIVE;
 
   const [collection, filter] =
@@ -111,17 +145,29 @@ export const handler = requireAuth(async (event) => {
       ? [LIVE_COLLECTION, { status: 'closed' }]
       : [BACKTEST_COLLECTION, { run_tag: source, status: 'closed' }];
 
-  const docs = await db
-    .collection(collection)
-    .find(filter, { projection: ANALYSIS_FIELDS })
-    .sort({ entry_time: 1 })
-    .limit(20000)
-    .toArray();
+  let docs: Record<string, unknown>[];
+  try {
+    const db = mongoose.connection.db!;
+    docs = await db
+      .collection(collection)
+      .find(filter, { projection: ANALYSIS_FIELDS })
+      .sort({ entry_time: 1 })
+      .limit(20000)
+      .toArray();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[mt-analytics.handler] query failed', err);
+    return json(500, { error: 'Analytics store unavailable' }, origin);
+  }
 
-  return json(200, {
-    source,
-    kind: source === LIVE ? 'live' : 'backtest',
-    count: docs.length,
-    trades: docs.map((doc) => ({ ...doc, _id: String(doc._id) })),
-  });
+  return json(
+    200,
+    {
+      source,
+      kind: source === LIVE ? 'live' : 'backtest',
+      count: docs.length,
+      trades: docs.map((doc) => ({ ...doc, _id: String(doc._id) })),
+    },
+    origin,
+  );
 });

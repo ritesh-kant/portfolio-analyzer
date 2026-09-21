@@ -15,15 +15,35 @@ async function getToken(): Promise<string> {
 
 async function get<T>(path: string): Promise<T> {
   const token = await getToken();
-  const res = await fetch(`${BASE}${path}`, {
-    cache: 'no-store',
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      cache: 'no-store',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch (err) {
+    // A network-level failure on a cross-origin fetch (DNS, blocked route,
+    // or missing CORS headers on a gateway 4xx/5xx) surfaces here as a
+    // generic TypeError — translate it into something actionable.
+    throw new Error(
+      `Network error reaching ${BASE}${path} — the API did not return CORS headers. ` +
+        `Check the API base URL / stage and the service logs. (${err instanceof Error ? err.message : String(err)})`,
+    );
+  }
   if (res.status === 401) {
     cachedToken = null;
     throw new Error('Session expired — please refresh');
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${path}`);
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) detail = `: ${body.error}`;
+    } catch {
+      /* non-JSON error body — keep status only */
+    }
+    throw new Error(`HTTP ${res.status}${detail}: ${path}`);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -79,12 +99,27 @@ export interface EntryEvidence {
     reason: string;
     pattern_matches: PatternMatch[];
   };
-  trend?: { timeframe: string; bar_start: string; close: number; ema9: number; ema20: number; vwap: number };
+  trend?: {
+    timeframe: string;
+    bar_start: string;
+    close: number;
+    ema9: number;
+    ema20: number;
+    vwap: number;
+  };
   confirmation?: {
-    timeframe: string; bar_start: string; formed_at: string;
-    open: number; high: number; low: number; close: number; volume: number;
-    close_position: number; minimum_close_position: number;
-    volume_ratio: number; minimum_volume_ratio: number;
+    timeframe: string;
+    bar_start: string;
+    formed_at: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+    close_position: number;
+    minimum_close_position: number;
+    volume_ratio: number;
+    minimum_volume_ratio: number;
   };
   pending_minutes?: number;
 }
