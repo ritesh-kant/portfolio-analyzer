@@ -399,22 +399,19 @@ export default function MomentumPage() {
 
   const trade = trades.find((item) => item._id === selected) ?? null;
 
+  const totalGross = trades.reduce((sum, item) => sum + (item.gross_inr ?? 0), 0);
   const totalNet = trades.reduce((sum, item) => sum + (item.net_inr ?? 0), 0);
 
-  const strategyTotals = useMemo(() => {
-    const totals = new Map<string, { count: number; net: number }>();
-    for (const item of trades) {
-      const key = item.strategy ?? 'earlier_paper_run';
-      const current = totals.get(key) ?? { count: 0, net: 0 };
-      totals.set(key, { count: current.count + 1, net: current.net + (item.net_inr ?? 0) });
-    }
-    // Show a newly deployed arm before its first trade, so the review page
-    // makes its paper-only status visible from the first session onward.
-    if (!totals.has('attention_1m_false_break_reclaim')) {
-      totals.set('attention_1m_false_break_reclaim', { count: 0, net: 0 });
-    }
-    return [...totals.entries()];
-  }, [trades]);
+  const dayTotals = useMemo(
+    () =>
+      groups.map(([date, items]) => ({
+        date,
+        count: items.length,
+        gross: items.reduce((sum, item) => sum + (item.gross_inr ?? 0), 0),
+        net: items.reduce((sum, item) => sum + (item.net_inr ?? 0), 0),
+      })),
+    [groups],
+  );
 
   function handleSelectTrade(id: string) {
     setSelected(id);
@@ -438,32 +435,59 @@ export default function MomentumPage() {
             Analytics dashboard →
           </Link>
         </div>
-        <div className="metric-chip text-right">
-          <p className="text-xs text-ink/55">Recorded P&amp;L</p>
-          <p className={`font-display text-xl ${pnlClass(totalNet)}`}>
-            {totalNet >= 0 ? '+' : ''}
-            {money(totalNet)}
-          </p>
+        <div className="flex gap-3">
+          <div className="metric-chip text-right">
+            <p className="text-xs text-ink/55">Gross P&amp;L</p>
+            <p className={`font-display text-xl ${pnlClass(totalGross)}`}>
+              {totalGross >= 0 ? '+' : ''}
+              {money(totalGross)}
+            </p>
+          </div>
+          <div className="metric-chip text-right">
+            <p className="text-xs text-ink/55">Net P&amp;L</p>
+            <p className={`font-display text-xl ${pnlClass(totalNet)}`}>
+              {totalNet >= 0 ? '+' : ''}
+              {money(totalNet)}
+            </p>
+          </div>
         </div>
       </section>
 
-      {/* Strategy summary chips */}
-      {!loading && !error && strategyTotals.length > 0 && (
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {strategyTotals.map(([strategy, summary]) => (
-            <div key={strategy} className="metric-chip">
-              <p className="text-xs text-ink/55">{strategyLabel(strategy)}</p>
-              <p className={`mt-1 font-display text-xl ${pnlClass(summary.net)}`}>
-                {summary.net >= 0 ? '+' : ''}
-                {money(summary.net)}
-              </p>
-              <p className="mt-1 text-xs text-ink/50">
-                {summary.count
-                  ? `${summary.count} paper trade${summary.count === 1 ? '' : 's'} · kept separate`
-                  : 'Forward paper arm · starts next session'}
-              </p>
-            </div>
-          ))}
+      {/* Day-wise P&L, all arms combined */}
+      {!loading && !error && dayTotals.length > 0 && (
+        <section className="overflow-hidden rounded-xl border border-black/10 bg-panel shadow-card">
+          <div className="border-b border-black/10 px-4 py-3">
+            <h2 className="font-display text-lg">Day-wise P&amp;L</h2>
+            <p className="text-xs text-ink/55">Gross and net across every paper trade, all arms combined.</p>
+          </div>
+          <div className="max-h-80 overflow-y-auto overflow-x-auto">
+            <table className="w-full text-left text-sm tabular-nums">
+              <thead className="sticky top-0 z-10 bg-panel">
+                <tr className="text-xs font-bold uppercase tracking-wide text-ink/50">
+                  <th className="px-4 py-2">Date</th>
+                  <th className="px-4 py-2">Trades</th>
+                  <th className="px-4 py-2">Gross</th>
+                  <th className="px-4 py-2">Net</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dayTotals.map(({ date, count, gross, net }) => (
+                  <tr key={date} className="border-t border-black/5">
+                    <td className="px-4 py-2 font-medium">{dateLabel(date)}</td>
+                    <td className="px-4 py-2 text-ink/60">{count}</td>
+                    <td className={`px-4 py-2 font-semibold ${pnlClass(gross)}`}>
+                      {gross >= 0 ? '+' : ''}
+                      {money(gross)}
+                    </td>
+                    <td className={`px-4 py-2 font-semibold ${pnlClass(net)}`}>
+                      {net >= 0 ? '+' : ''}
+                      {money(net)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
