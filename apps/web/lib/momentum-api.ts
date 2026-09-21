@@ -1,6 +1,5 @@
 import type { AnalyticsTrade, TradeSource } from './momentum-analytics';
-
-const BASE = process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE ?? 'http://localhost:3001';
+import { PORTFOLIO_API_BASE as BASE } from './api-base';
 
 let cachedToken: string | null = null;
 

@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE ?? 'http://localhost:3001';
+import { PORTFOLIO_API_BASE as BASE } from './api-base';
 
 let cachedToken: string | null = null;
 
@@ -70,12 +70,12 @@ export interface NtPosition {
   paper?: boolean;
   sl_pct_used?: number;
   // Entry-timing capture (populated on positions opened after 2026-06-03)
-  signal_price?: number;        // LTP at classification time (15 min before entry)
-  entry_chase_pct?: number;     // (entry_price - signal_price) / signal_price × 100
-  magnitude?: string;           // LLM expected-move label: major | moderate | minor
+  signal_price?: number; // LTP at classification time (15 min before entry)
+  entry_chase_pct?: number; // (entry_price - signal_price) / signal_price × 100
+  magnitude?: string; // LLM expected-move label: major | moderate | minor
   // Volume confirmation (populated on positions opened after 2026-06-04)
-  volume_current_day?: number;  // accumulated volume for entry day (yfinance ~15 min delayed)
-  volume_avg_daily?: number;    // 3-month average daily volume
+  volume_current_day?: number; // accumulated volume for entry day (yfinance ~15 min delayed)
+  volume_avg_daily?: number; // 3-month average daily volume
   volume_ratio_at_entry?: number; // volume_current_day / volume_avg_daily; >1 = above-avg activity
 }
 
@@ -165,7 +165,13 @@ export const fetchStats = (days?: number) =>
 export type StageStatus = 'pending' | 'running' | 'waiting' | 'done' | 'skipped' | 'failed';
 
 export interface PipelineStatus {
-  run: { _id: string; triggered_at: string; source: string; status: string; error: string | null } | null;
+  run: {
+    _id: string;
+    triggered_at: string;
+    source: string;
+    status: string;
+    error: string | null;
+  } | null;
   stages: {
     ingester: { status: StageStatus; count: number };
     classifier: { status: StageStatus; count: number };

@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE ?? 'http://localhost:3001';
+import { PORTFOLIO_API_BASE as BASE } from './api-base';
 
 let cachedToken: string | null = null;
 
@@ -118,9 +118,7 @@ export interface ChainSnapshot {
 // ─── API calls ────────────────────────────────────────────────────────────────
 
 export function fetchOptPositions(status: 'open' | 'closed' | 'all' = 'all') {
-  return get<{ positions: OptPosition[]; count: number }>(
-    `/opt/positions?status=${status}`,
-  );
+  return get<{ positions: OptPosition[]; count: number }>(`/opt/positions?status=${status}`);
 }
 
 export function fetchOptStats(days?: number) {
@@ -128,7 +126,11 @@ export function fetchOptStats(days?: number) {
   return get<OptStats>(`/opt/stats${q}`);
 }
 
-export function fetchChainSnapshots(opts?: { symbol?: string; signal_id?: string; hours?: number }) {
+export function fetchChainSnapshots(opts?: {
+  symbol?: string;
+  signal_id?: string;
+  hours?: number;
+}) {
   const params = new URLSearchParams();
   if (opts?.symbol) params.set('symbol', opts.symbol);
   if (opts?.signal_id) params.set('signal_id', opts.signal_id);

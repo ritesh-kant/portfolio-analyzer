@@ -5,9 +5,9 @@ import type {
   TaxDashboardSummary,
 } from '@portfolio-analyzer/shared-types';
 
-export const PORTFOLIO_API_BASE =
-  process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE ?? 'http://localhost:3001';
-const ANALYTICS_API_BASE = process.env.NEXT_PUBLIC_ANALYTICS_API_BASE ?? 'http://localhost:4001';
+import { ANALYTICS_API_BASE, PORTFOLIO_API_BASE } from './api-base';
+
+export { PORTFOLIO_API_BASE };
 
 export interface PortfolioSummaryResponse {
   investedAmount: number;
