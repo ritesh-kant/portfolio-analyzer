@@ -47,6 +47,14 @@ function TradeRow({ trade, active, onClick }: { trade: MomentumTrade; active: bo
             <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink/60">
               {trade.setup.replaceAll('_', ' ')}
             </span>
+            {trade.news_context && trade.news_context.length > 0 && (
+              <span
+                title={`${trade.news_context.length} news item(s) near entry`}
+                className="shrink-0 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-700"
+              >
+                📰 {trade.news_context.length}
+              </span>
+            )}
           </div>
           <p className="mt-1 text-xs text-ink/55">
             {strategyLabel(trade.strategy)} · Buy {money(trade.entry_price)} at {at(trade.entry_time)}
@@ -197,6 +205,50 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
   );
 }
 
+const newsAt = (value: string) =>
+  new Date(value).toLocaleString('en-IN', {
+    timeZone: IST,
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+
+/**
+ * Headlines mentioning the symbol in the 24h before entry — descriptive
+ * context only, gathered independently of and never used by the strategy's
+ * entry/exit logic. Absent on trades opened before this was wired up.
+ */
+function NewsContext({ trade }: { trade: MomentumTrade }) {
+  if (!trade.news_context || trade.news_context.length === 0) return null;
+  return (
+    <section className="rounded-xl border border-black/10 bg-panel p-4 shadow-card">
+      <h3 className="font-display text-lg">News around entry</h3>
+      <p className="text-xs text-ink/55">
+        Headlines mentioning {trade.symbol} in the 24h before entry — for context only, not a signal input.
+      </p>
+      <ul className="mt-3 space-y-2">
+        {trade.news_context.map((item, i) => (
+          <li key={`${item.published_at}-${i}`} className="rounded-lg bg-black/[0.03] p-2.5 text-sm">
+            {item.url ? (
+              <a href={item.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+                {item.headline}
+              </a>
+            ) : (
+              <p className="font-medium">{item.headline}</p>
+            )}
+            <p className="mt-0.5 text-xs text-ink/55">
+              {newsAt(item.published_at)} · {item.publisher ?? item.source}
+              {item.tier ? ` · ${item.tier}` : ''}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => void }) {
   return (
     <section className="space-y-4">
@@ -248,6 +300,9 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
           </span>
           <span className="rounded-full bg-black/5 px-2.5 py-1">RVOL {trade.rvol?.toFixed(2) ?? '—'}×</span>
           <span className="rounded-full bg-black/5 px-2.5 py-1">Catalyst {trade.catalyst ? 'yes' : 'no'}</span>
+          <span className="rounded-full bg-black/5 px-2.5 py-1">
+            News {trade.news_context && trade.news_context.length > 0 ? trade.news_context.length : 'none'}
+          </span>
           {trade.candle_tags?.map((tag) => (
             <span key={tag} className="rounded-full bg-black/5 px-2.5 py-1 text-ink/65">
               legacy: {tag}
@@ -265,6 +320,7 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
       </div>
 
       <EntryReason trade={trade} />
+      <NewsContext trade={trade} />
 
       {/* Charts */}
       <div className="space-y-3">

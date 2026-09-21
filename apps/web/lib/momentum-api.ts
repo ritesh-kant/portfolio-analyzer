@@ -89,6 +89,21 @@ export interface EntryEvidence {
   pending_minutes?: number;
 }
 
+/**
+ * Descriptive only — attached in the background when the trade opens by
+ * scanning RSS/NSE/BSE for headlines mentioning the symbol. Never used by the
+ * engine's entry/exit logic; unrelated to `catalyst`/`event_type` below,
+ * which come from the separate (unresolved) catalyst-gate hypothesis.
+ */
+export interface NewsContextItem {
+  headline: string;
+  source: string;
+  publisher?: string;
+  tier?: string;
+  url?: string | null;
+  published_at: string;
+}
+
 export interface MomentumTrade {
   _id: string;
   symbol: string;
@@ -119,6 +134,7 @@ export interface MomentumTrade {
   catalyst?: number;
   event_type?: string;
   candle_tags?: string[];
+  news_context?: NewsContextItem[];
   pattern_matches?: PatternMatch[];
   entry_evidence?: EntryEvidence;
   pattern_rules_version?: string;

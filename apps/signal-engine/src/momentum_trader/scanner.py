@@ -53,6 +53,7 @@ from .engine import (
 from .exits import MODE_FIXED, MODE_TREND_FULL, MODE_TREND_RESISTANCE_STATE
 from .indicators import round_levels_above
 from .ledger import PaperLedger
+from .news_context import recent_news
 from .upstox import (
     Instrument,
     UpstoxAuthError,
@@ -751,12 +752,34 @@ class Scanner:
 
     def _record_open(self, p: Position) -> None:
         assert self._ledger is not None
-        self._ledger.opened(p)
+        doc_id = self._ledger.opened(p)
+        if doc_id is not None:
+            threading.Thread(
+                target=self._attach_news_context,
+                args=(doc_id, p.cand.symbol, p.entry_time),
+                daemon=True,
+                name=f"news-context-{p.cand.symbol}",
+            ).start()
         exit_note = (f"target ₹{p.plan.target:.2f}"
                      if self.cfg.exit_mode == MODE_FIXED else "negative-signal exit")
         self._tg(f"📝 ENTER <b>{p.cand.symbol}</b> {p.cand.setup.name} "
                  f"@₹{p.plan.entry:.2f} ×{p.plan.qty} stop ₹{p.plan.stop:.2f} "
                  f"{exit_note} cat={p.cand.catalyst}")
+
+    def _attach_news_context(self, doc_id: str, symbol: str, at: pd.Timestamp) -> None:
+        """Best-effort background annotation for review — never on the live
+        decision path, never allowed to raise into the scan loop."""
+        if self._db is None:
+            return
+        try:
+            from bson import ObjectId
+
+            items = recent_news(symbol, at.to_pydatetime())
+            self._db["mt_positions"].update_one(
+                {"_id": ObjectId(doc_id)}, {"$set": {"news_context": items}}
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("news_context attach failed for %s", symbol)
 
     def _eod_summary(self) -> None:
         closed = [t for st in self.states.values() for t in st.closed]
