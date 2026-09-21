@@ -4,6 +4,12 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { MomentumTradeChart } from '../../components/momentum-trade-chart';
+import { ConfidenceMeter } from '../../components/signals/ConfidenceMeter';
+import {
+  calculateTradeConfidence,
+  type ConfidenceBand,
+  type TradeConfidence,
+} from '../../lib/momentum-confidence';
 import { fetchMomentumTrades, type MomentumTrade } from '../../lib/momentum-api';
 
 const IST = 'Asia/Kolkata';
@@ -11,9 +17,15 @@ const money = (value: number | undefined) =>
   value === undefined ? '—' : `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const at = (value: string | undefined) =>
   value
-    ? new Date(value).toLocaleTimeString('en-IN', { timeZone: IST, hour: '2-digit', minute: '2-digit', hour12: false })
+    ? new Date(value).toLocaleTimeString('en-IN', {
+        timeZone: IST,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      })
     : '—';
-const dateKey = (value: string) => new Intl.DateTimeFormat('en-CA', { timeZone: IST }).format(new Date(value));
+const dateKey = (value: string) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: IST }).format(new Date(value));
 const dateLabel = (value: string) =>
   new Date(`${value}T12:00:00+05:30`).toLocaleDateString('en-IN', {
     weekday: 'short',
@@ -27,14 +39,47 @@ const strategyLabel = (value: string | undefined) =>
     attention_1m: 'Attention control',
     attention_1m_resistance_state: 'Resistance-state',
     attention_1m_false_break_reclaim: 'False-break reclaim',
-  }[value ?? ''] ?? 'Earlier paper run');
+  })[value ?? ''] ?? 'Earlier paper run';
 
 function pnlClass(value: number | undefined) {
   return value === undefined ? 'text-ink/55' : value >= 0 ? 'text-emerald-700' : 'text-rose-600';
 }
 
-function TradeRow({ trade, active, onClick }: { trade: MomentumTrade; active: boolean; onClick: () => void }) {
+function confidenceClass(band: ConfidenceBand) {
+  return {
+    strong: 'bg-emerald-100 text-emerald-800',
+    moderate: 'bg-amber-100 text-amber-800',
+    developing: 'bg-rose-100 text-rose-800',
+    unavailable: 'bg-slate-100 text-slate-700',
+  }[band];
+}
+
+function ConfidenceBadge({ confidence }: { confidence: TradeConfidence }) {
+  const label =
+    confidence.score === null ? 'Confidence unavailable' : `Confidence ${confidence.score}`;
+  const coverage = `${confidence.evidenceCoverage}% evidence`;
+  return (
+    <span
+      title={`${label}; ${coverage}`}
+      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${confidenceClass(confidence.band)}`}
+    >
+      {confidence.score === null ? 'Confidence —' : `Confidence ${confidence.score}`}
+      {confidence.evidenceCoverage < 100 ? ` · ${confidence.evidenceCoverage}%` : ''}
+    </span>
+  );
+}
+
+function TradeRow({
+  trade,
+  active,
+  onClick,
+}: {
+  trade: MomentumTrade;
+  active: boolean;
+  onClick: () => void;
+}) {
   const net = trade.net_inr;
+  const confidence = calculateTradeConfidence(trade);
   return (
     <button
       onClick={onClick}
@@ -47,6 +92,7 @@ function TradeRow({ trade, active, onClick }: { trade: MomentumTrade; active: bo
             <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink/60">
               {trade.setup.replaceAll('_', ' ')}
             </span>
+            <ConfidenceBadge confidence={confidence} />
             {trade.news_context && trade.news_context.length > 0 && (
               <span
                 title={`${trade.news_context.length} news item(s) near entry`}
@@ -57,8 +103,11 @@ function TradeRow({ trade, active, onClick }: { trade: MomentumTrade; active: bo
             )}
           </div>
           <p className="mt-1 text-xs text-ink/55">
-            {strategyLabel(trade.strategy)} · Buy {money(trade.entry_price)} at {at(trade.entry_time)}
-            {trade.exit_price !== undefined ? ` → Sell ${money(trade.exit_price)} at ${at(trade.exit_time)}` : ' · Open'}
+            {strategyLabel(trade.strategy)} · Buy {money(trade.entry_price)} at{' '}
+            {at(trade.entry_time)}
+            {trade.exit_price !== undefined
+              ? ` → Sell ${money(trade.exit_price)} at ${at(trade.exit_time)}`
+              : ' · Open'}
           </p>
         </div>
         <div className={`shrink-0 text-right text-sm font-bold ${pnlClass(net)}`}>
@@ -69,6 +118,76 @@ function TradeRow({ trade, active, onClick }: { trade: MomentumTrade; active: bo
         </div>
       </div>
     </button>
+  );
+}
+
+function TradeConfidenceCard({ trade }: { trade: MomentumTrade }) {
+  const confidence = calculateTradeConfidence(trade);
+  const label = {
+    strong: 'Strong entry evidence',
+    moderate: 'Moderate entry evidence',
+    developing: 'Developing entry evidence',
+    unavailable: 'Evidence unavailable',
+  }[confidence.band];
+
+  return (
+    <section className="rounded-xl border border-black/10 bg-panel p-4 shadow-card">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="font-display text-lg">Entry confidence</h3>
+          <p className="text-xs text-ink/60">
+            A display-only score of recorded technical and execution evidence at entry. It is not a
+            profit prediction.
+          </p>
+        </div>
+        <span
+          className={`rounded-full px-2.5 py-1 text-xs font-bold ${confidenceClass(confidence.band)}`}
+        >
+          {label}
+        </span>
+      </div>
+
+      {confidence.score === null ? (
+        <p className="mt-4 rounded-lg bg-black/[0.03] p-3 text-sm text-ink/65">
+          No score can be calculated because this historical trade has no recorded scoring evidence.
+        </p>
+      ) : (
+        <div className="mt-4 max-w-md">
+          <ConfidenceMeter confidence={confidence.score} />
+        </div>
+      )}
+
+      <p className="mt-3 text-xs text-ink/60">
+        Evidence coverage: <strong className="text-ink">{confidence.evidenceCoverage}%</strong>.
+        Missing historical fields are labeled below and do not receive invented values.
+      </p>
+
+      <ul className="mt-4 divide-y divide-black/5 rounded-lg border border-black/5">
+        {confidence.factors.map((item) => (
+          <li
+            key={item.id}
+            className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 px-3 py-2.5 text-sm"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">{item.label}</p>
+              <p className="text-xs text-ink/60">{item.detail}</p>
+            </div>
+            <span
+              className={`shrink-0 text-xs font-bold ${
+                item.status === 'earned'
+                  ? 'text-emerald-700'
+                  : item.status === 'not_met'
+                    ? 'text-rose-600'
+                    : 'text-ink/45'
+              }`}
+            >
+              {item.status === 'not_recorded' ? 'Not recorded' : `${item.earned}/${item.maximum}`}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 text-xs text-ink/45">Rubric: {confidence.rubricVersion}</p>
+    </section>
   );
 }
 
@@ -148,11 +267,14 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
         <div>
           <h3 className="font-display text-lg">Why the scanner entered</h3>
           <p className="text-xs text-ink/60">
-            Recorded measurements and strategy requirements. Missing historical evidence is identified explicitly.
+            Recorded measurements and strategy requirements. Missing historical evidence is
+            identified explicitly.
           </p>
         </div>
         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">
-          {promotion?.observed_at && trend && confirmation ? 'Decision evidence recorded' : 'Partial historical evidence'}
+          {promotion?.observed_at && trend && confirmation
+            ? 'Decision evidence recorded'
+            : 'Partial historical evidence'}
         </span>
       </div>
       <ol className="mt-3 space-y-2">
@@ -168,8 +290,8 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
         ))}
       </ol>
       <div className="mt-3 border-t border-accent/15 pt-3 text-sm">
-        <strong>Risk plan:</strong> entry {money(trade.entry_price)}, invalidation stop {money(trade.stop)},{' '}
-        {trade.target ? `target ${money(trade.target)}, ` : ''}
+        <strong>Risk plan:</strong> entry {money(trade.entry_price)}, invalidation stop{' '}
+        {money(trade.stop)}, {trade.target ? `target ${money(trade.target)}, ` : ''}
         {trade.qty} shares.{' '}
         {strictPatterns
           ? `Recorded formations: ${strictPatterns}. Formation alone does not confirm a trade.`
@@ -178,27 +300,55 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
             : ''}
       </div>
       {(trade.pattern_matches ?? []).map((match) => (
-        <details key={`${match.name}-${match.timeframe}-${match.start}`} className="mt-3 border-t border-accent/15 pt-2 text-sm">
+        <details
+          key={`${match.name}-${match.timeframe}-${match.start}`}
+          className="mt-3 border-t border-accent/15 pt-2 text-sm"
+        >
           <summary className="cursor-pointer font-medium">
-            {match.name.replaceAll('_', ' ')} · {match.timeframe} · {at(match.start)}–{at(match.end)}
+            {match.name.replaceAll('_', ' ')} · {match.timeframe} · {at(match.start)}–
+            {at(match.end)}
           </summary>
           <p className="my-2 text-ink/70">
-            {match.direction ?? 'Direction not stored'} · {match.kind ?? 'Historical formation'}.
-            {' '}Preceding trend: {match.prior_trend ?? 'not stored'}.
+            {match.direction ?? 'Direction not stored'} · {match.kind ?? 'Historical formation'}.{' '}
+            Preceding trend: {match.prior_trend ?? 'not stored'}.
             {match.formed_at ? ` Fully formed at ${at(match.formed_at)}.` : ''}
-            {match.rules_version ? ` Rules: ${match.rules_version}.` : ' Legacy detector; rule version not stored.'}
+            {match.rules_version
+              ? ` Rules: ${match.rules_version}.`
+              : ' Legacy detector; rule version not stored.'}
           </p>
-          {match.evidence?.candles && <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs tabular-nums">
-              <thead><tr>{['Candle start', 'Open', 'High', 'Low', 'Close', 'Volume'].map((label) => <th key={label} className="p-1">{label}</th>)}</tr></thead>
-              <tbody>{match.evidence.candles.map((bar) => <tr key={bar.time}>
-                <td className="p-1">{at(bar.time)}</td>
-                {[bar.open, bar.high, bar.low, bar.close].map((value, i) => <td key={i} className="p-1">{money(value)}</td>)}
-                <td className="p-1">{bar.volume.toLocaleString('en-IN')}</td>
-              </tr>)}</tbody>
-            </table>
-          </div>}
-          {match.evidence?.trend_closes && <p className="mt-2 text-xs text-ink/60">Pre-pattern closes: {match.evidence.trend_closes.map(money).join(' → ')}</p>}
+          {match.evidence?.candles && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs tabular-nums">
+                <thead>
+                  <tr>
+                    {['Candle start', 'Open', 'High', 'Low', 'Close', 'Volume'].map((label) => (
+                      <th key={label} className="p-1">
+                        {label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {match.evidence.candles.map((bar) => (
+                    <tr key={bar.time}>
+                      <td className="p-1">{at(bar.time)}</td>
+                      {[bar.open, bar.high, bar.low, bar.close].map((value, i) => (
+                        <td key={i} className="p-1">
+                          {money(value)}
+                        </td>
+                      ))}
+                      <td className="p-1">{bar.volume.toLocaleString('en-IN')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {match.evidence?.trend_closes && (
+            <p className="mt-2 text-xs text-ink/60">
+              Pre-pattern closes: {match.evidence.trend_closes.map(money).join(' → ')}
+            </p>
+          )}
         </details>
       ))}
     </section>
@@ -226,13 +376,22 @@ function NewsContext({ trade }: { trade: MomentumTrade }) {
     <section className="rounded-xl border border-black/10 bg-panel p-4 shadow-card">
       <h3 className="font-display text-lg">News around entry</h3>
       <p className="text-xs text-ink/55">
-        Headlines mentioning {trade.symbol} in the 24h before entry — for context only, not a signal input.
+        Headlines mentioning {trade.symbol} in the 24h before entry — for context only, not a signal
+        input.
       </p>
       <ul className="mt-3 space-y-2">
         {trade.news_context.map((item, i) => (
-          <li key={`${item.published_at}-${i}`} className="rounded-lg bg-black/[0.03] p-2.5 text-sm">
+          <li
+            key={`${item.published_at}-${i}`}
+            className="rounded-lg bg-black/[0.03] p-2.5 text-sm"
+          >
             {item.url ? (
-              <a href={item.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+              <a
+                href={item.url}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-accent hover:underline"
+              >
                 {item.headline}
               </a>
             ) : (
@@ -282,26 +441,37 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
           <div className="min-w-0">
             <h2 className="font-display text-2xl">
               {trade.symbol}{' '}
-              <span className="text-base font-medium text-ink/55">· {trade.setup.replaceAll('_', ' ')}</span>
+              <span className="text-base font-medium text-ink/55">
+                · {trade.setup.replaceAll('_', ' ')}
+              </span>
             </h2>
             <p className="mt-1 text-sm text-ink/60">
-              {strategyLabel(trade.strategy)} · Entry {money(trade.entry_price)} at {at(trade.entry_time)} · Stop{' '}
-              {money(trade.stop)}
+              {strategyLabel(trade.strategy)} · Entry {money(trade.entry_price)} at{' '}
+              {at(trade.entry_time)} · Stop {money(trade.stop)}
               {trade.target ? ` · Target ${money(trade.target)}` : ''}
             </p>
           </div>
           <p className={`shrink-0 font-display text-xl ${pnlClass(trade.net_inr)}`}>
-            {trade.net_inr === undefined ? 'Open' : `${trade.net_inr >= 0 ? '+' : ''}${money(trade.net_inr)}`}
+            {trade.net_inr === undefined
+              ? 'Open'
+              : `${trade.net_inr >= 0 ? '+' : ''}${money(trade.net_inr)}`}
           </p>
         </div>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           <span className="rounded-full bg-accent/10 px-2.5 py-1 text-accent">
             Day change {trade.day_chg_pct?.toFixed(2) ?? '—'}%
           </span>
-          <span className="rounded-full bg-black/5 px-2.5 py-1">RVOL {trade.rvol?.toFixed(2) ?? '—'}×</span>
-          <span className="rounded-full bg-black/5 px-2.5 py-1">Catalyst {trade.catalyst ? 'yes' : 'no'}</span>
           <span className="rounded-full bg-black/5 px-2.5 py-1">
-            News {trade.news_context && trade.news_context.length > 0 ? trade.news_context.length : 'none'}
+            RVOL {trade.rvol?.toFixed(2) ?? '—'}×
+          </span>
+          <span className="rounded-full bg-black/5 px-2.5 py-1">
+            Catalyst {trade.catalyst ? 'yes' : 'no'}
+          </span>
+          <span className="rounded-full bg-black/5 px-2.5 py-1">
+            News{' '}
+            {trade.news_context && trade.news_context.length > 0
+              ? trade.news_context.length
+              : 'none'}
           </span>
           {trade.candle_tags?.map((tag) => (
             <span key={tag} className="rounded-full bg-black/5 px-2.5 py-1 text-ink/65">
@@ -319,6 +489,7 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
         </div>
       </div>
 
+      <TradeConfidenceCard trade={trade} />
       <EntryReason trade={trade} />
       <NewsContext trade={trade} />
 
@@ -326,12 +497,16 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
       <div className="space-y-3">
         <div>
           <h3 className="font-display text-lg">{trade.symbol} · 1-minute execution chart</h3>
-          <p className="text-xs text-ink/55">Precise candles and fills at the execution timeframe.</p>
+          <p className="text-xs text-ink/55">
+            Precise candles and fills at the execution timeframe.
+          </p>
         </div>
         <MomentumTradeChart trade={trade} interval="1m" />
         <div>
           <h3 className="font-display text-lg">{trade.symbol} · 5-minute decision chart</h3>
-          <p className="text-xs text-ink/55">The scanner&apos;s EMA, VWAP, and MACD decision timeframe.</p>
+          <p className="text-xs text-ink/55">
+            The scanner&apos;s EMA, VWAP, and MACD decision timeframe.
+          </p>
         </div>
         <MomentumTradeChart trade={trade} interval="5m" />
       </div>
@@ -362,7 +537,8 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
         Focus either chart, then use <kbd className="rounded bg-black/5 px-1">+</kbd> /{' '}
         <kbd className="rounded bg-black/5 px-1">−</kbd> to zoom,{' '}
         <kbd className="rounded bg-black/5 px-1">0</kbd> to reset, and{' '}
-        <kbd className="rounded bg-black/5 px-1">←</kbd> / <kbd className="rounded bg-black/5 px-1">→</kbd> to pan.
+        <kbd className="rounded bg-black/5 px-1">←</kbd> /{' '}
+        <kbd className="rounded bg-black/5 px-1">→</kbd> to pan.
       </p>
     </section>
   );
@@ -384,7 +560,9 @@ export default function MomentumPage() {
         setSelected(next[0]?._id ?? null);
         setOpenDates(next[0] ? new Set([dateKey(next[0].entry_time)]) : new Set());
       })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load momentum trades'))
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : 'Could not load momentum trades'),
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -423,7 +601,9 @@ export default function MomentumPage() {
       {/* Page header */}
       <section className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-accent">Paper-trade review</p>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-accent">
+            Paper-trade review
+          </p>
           <h1 className="font-display text-3xl tracking-tight">Momentum trades</h1>
           <p className="mt-1 text-sm text-ink/65">
             Select any trade to review the exact one-minute candles, overlays, and execution points.
@@ -458,7 +638,9 @@ export default function MomentumPage() {
         <section className="overflow-hidden rounded-xl border border-black/10 bg-panel shadow-card">
           <div className="border-b border-black/10 px-4 py-3">
             <h2 className="font-display text-lg">Day-wise P&amp;L</h2>
-            <p className="text-xs text-ink/55">Gross and net across every paper trade, all arms combined.</p>
+            <p className="text-xs text-ink/55">
+              Gross and net across every paper trade, all arms combined.
+            </p>
           </div>
           <div className="max-h-80 overflow-y-auto overflow-x-auto">
             <table className="w-full text-left text-sm tabular-nums">
@@ -493,7 +675,9 @@ export default function MomentumPage() {
 
       {/* States */}
       {loading && (
-        <div className="metric-chip py-12 text-center text-sm text-ink/55">Loading momentum trade history…</div>
+        <div className="metric-chip py-12 text-center text-sm text-ink/55">
+          Loading momentum trade history…
+        </div>
       )}
       {error && <div className="metric-chip border-rose-200 py-6 text-rose-700">{error}</div>}
       {!loading && !error && trades.length === 0 && (

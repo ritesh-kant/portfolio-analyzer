@@ -116,6 +116,12 @@ Signals are scored across 9 weighted signals (max 100 pts):
 
 Signals with `confidence >= MIN_SIGNAL_CONFIDENCE` (default 60) are passed to order_agent.
 
+## Momentum Trade-Review Confidence
+
+The Momentum trades page separately shows a versioned `momentum-entry-v1` confidence score for paper-trade review. It is a display-only, normalized 0-100 summary of technical and execution evidence recorded at entry: mover strength, trend confluence, one-minute confirmation, setup/risk structure, and structural price location.
+
+This review score is not the signal confidence described above. It excludes news, catalyst, realized P&L, and every post-entry outcome; it does not affect scanner entries, position sizing, stops, exits, or any order behavior. Older ledger rows can have incomplete entry evidence, so the UI always displays evidence coverage and marks absent factors as “Not recorded”.
+
 ## Kill-Switch Guards
 
 Any of these blocks a signal (no order placed):

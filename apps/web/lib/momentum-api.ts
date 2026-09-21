@@ -105,6 +105,7 @@ export interface EntryEvidence {
     ema9: number;
     ema20: number;
     vwap: number;
+    ema200?: number | null;
   };
   confirmation?: {
     timeframe: string;
@@ -119,6 +120,7 @@ export interface EntryEvidence {
     minimum_close_position: number;
     volume_ratio: number;
     minimum_volume_ratio: number;
+    macd_hist?: number | null;
   };
   pending_minutes?: number;
 }
