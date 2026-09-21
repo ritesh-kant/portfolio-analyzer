@@ -86,7 +86,10 @@ def write_parquet_cache(path: Path, df: pd.DataFrame) -> None:
 
 
 def write_json_cache(path: Path, payload: dict) -> None:
-    _atomic_write(path, lambda p: p.write_text(json.dumps(payload)))
+    def _write(p: Path) -> None:
+        p.write_text(json.dumps(payload))
+
+    _atomic_write(path, _write)
 
 
 class UpstoxAuthError(RuntimeError):

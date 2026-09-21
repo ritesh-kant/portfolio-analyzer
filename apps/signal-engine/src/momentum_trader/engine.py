@@ -1466,7 +1466,7 @@ def _false_break_reclaim_confirmation(
 
 
 def _open_position(state: DayState, cand: Candidate, when: pd.Timestamp, fill: float,
-                   plan, cfg: EngineConfig, bars_1m: pd.DataFrame,
+                   plan: TradePlan, cfg: EngineConfig, bars_1m: pd.DataFrame,
                    full_5m: pd.DataFrame | None) -> None:
     """Turn a filled plan into an open position (shared by every fill mode)."""
     ec = cfg.exit_cfg
