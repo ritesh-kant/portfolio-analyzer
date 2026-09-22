@@ -31,7 +31,7 @@ export function fiveMinuteBars(bars: MomentumBar[]): MomentumBar[] {
 }
 
 /** A fill belongs to the candle containing its timestamp, never a future bar. */
-export function containingBarIndex(bars: MomentumBar[], time: string | undefined, interval: '1m' | '5m'): number {
+export function containingBarIndex(bars: MomentumBar[], time: string | null | undefined, interval: '1m' | '5m'): number {
   if (!time) return -1;
   const needle = Date.parse(time);
   const duration = (interval === '5m' ? 5 : 1) * 60_000;

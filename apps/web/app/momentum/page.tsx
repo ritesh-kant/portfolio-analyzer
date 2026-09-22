@@ -13,9 +13,9 @@ import {
 import { fetchMomentumTrades, type MomentumTrade } from '../../lib/momentum-api';
 
 const IST = 'Asia/Kolkata';
-const money = (value: number | undefined) =>
-  value === undefined ? '—' : `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
-const at = (value: string | undefined) =>
+const money = (value: number | null | undefined) =>
+  value == null ? '—' : `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+const at = (value: string | null | undefined) =>
   value
     ? new Date(value).toLocaleTimeString('en-IN', {
         timeZone: IST,
@@ -41,8 +41,8 @@ const strategyLabel = (value: string | undefined) =>
     attention_1m_false_break_reclaim: 'False-break reclaim',
   })[value ?? ''] ?? 'Earlier paper run';
 
-function pnlClass(value: number | undefined) {
-  return value === undefined ? 'text-ink/55' : value >= 0 ? 'text-emerald-700' : 'text-rose-600';
+function pnlClass(value: number | null | undefined) {
+  return value == null ? 'text-ink/55' : value >= 0 ? 'text-emerald-700' : 'text-rose-600';
 }
 
 function confidenceClass(band: ConfidenceBand) {
@@ -105,13 +105,13 @@ function TradeRow({
           <p className="mt-1 text-xs text-ink/55">
             {strategyLabel(trade.strategy)} · Buy {money(trade.entry_price)} at{' '}
             {at(trade.entry_time)}
-            {trade.exit_price !== undefined
+            {trade.exit_price != null
               ? ` → Sell ${money(trade.exit_price)} at ${at(trade.exit_time)}`
               : ' · Open'}
           </p>
         </div>
         <div className={`shrink-0 text-right text-sm font-bold ${pnlClass(net)}`}>
-          {net === undefined ? 'Open' : `${net >= 0 ? '+' : ''}${money(net)}`}
+          {net == null ? 'Open' : `${net >= 0 ? '+' : ''}${money(net)}`}
           <p className="mt-1 whitespace-nowrap text-[11px] font-medium text-ink/45">
             {trade.exit_reason?.replaceAll('_', ' ') ?? 'in progress'}
           </p>
@@ -452,7 +452,7 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
             </p>
           </div>
           <p className={`shrink-0 font-display text-xl ${pnlClass(trade.net_inr)}`}>
-            {trade.net_inr === undefined
+            {trade.net_inr == null
               ? 'Open'
               : `${trade.net_inr >= 0 ? '+' : ''}${money(trade.net_inr)}`}
           </p>
@@ -516,7 +516,7 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
         <div className="metric-chip">
           <p className="text-xs text-ink/55">Exit</p>
           <p className="mt-1 font-semibold">
-            {trade.exit_price === undefined
+            {trade.exit_price == null
               ? 'Still open'
               : `${money(trade.exit_price)} · ${trade.exit_reason?.replaceAll('_', ' ')}`}
           </p>

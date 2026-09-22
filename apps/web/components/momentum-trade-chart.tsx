@@ -294,7 +294,7 @@ export function MomentumTradeChart({
     }];
   });
   const entryY = yPrice(trade.entry_price);
-  const exitY = trade.exit_price === undefined ? null : yPrice(trade.exit_price);
+  const exitY = trade.exit_price == null ? null : yPrice(trade.exit_price);
   // Park the exit label below the entry one when the two price levels almost coincide.
   const exitLabelY = exitY === null ? null : Math.abs(exitY - entryY) >= 13 ? exitY - 5 : entryY + 13;
   const tickCount = Math.min(6, data.length);
@@ -436,7 +436,7 @@ export function MomentumTradeChart({
         {[['Stop', trade.stop, '#fb7185'], ['Target', trade.target, '#34d399']].map(([label, value, color]) => value ? <g key={label as string}><line x1={left} x2={width - right} y1={yPrice(value as number)} y2={yPrice(value as number)} stroke={color as string} strokeOpacity=".75" strokeDasharray="5 4" /><text x={width - right - 2} y={yPrice(value as number) - 4} textAnchor="end" fill={color as string} fontSize="11">{label as string} {fmt(value as number)}</text></g> : null)}
         {[['Resistance', resistance, '#f472b6'], ['Support', support, '#38bdf8']].map(([label, value, color]) => value ? <g key={label as string}><line x1={left} x2={width - right} y1={yPrice(value as number)} y2={yPrice(value as number)} stroke={color as string} strokeOpacity=".55" /><text x={left + 4} y={yPrice(value as number) - 4} fill={color as string} fontSize="11">{label as string} {fmt(value as number)}</text></g> : null)}
         <g><line x1={left} x2={width - right} y1={entryY} y2={entryY} stroke="#4ade80" strokeOpacity=".8" strokeDasharray="2 3" /><text x={left + 4} y={entryY - 5} fill="#bbf7d0" fontSize="11">BUY {fmt(trade.entry_price)}</text></g>
-        {exitY !== null && trade.exit_price !== undefined && <g><line x1={left} x2={width - right} y1={exitY} y2={exitY} stroke="#f87171" strokeOpacity=".8" strokeDasharray="2 3" /><text x={left + 4} y={exitLabelY as number} fill="#fecaca" fontSize="11">SELL {fmt(trade.exit_price)}</text></g>}
+        {exitY !== null && trade.exit_price != null && <g><line x1={left} x2={width - right} y1={exitY} y2={exitY} stroke="#f87171" strokeOpacity=".8" strokeDasharray="2 3" /><text x={left + 4} y={exitLabelY as number} fill="#fecaca" fontSize="11">SELL {fmt(trade.exit_price)}</text></g>}
         {entryIndex >= 0 && <path d={`M ${x(entryIndex) - 6} ${entryY + 13} L ${x(entryIndex) + 6} ${entryY + 13} L ${x(entryIndex)} ${entryY + 3} Z`} fill="#4ade80" />}
         {exitIndex >= 0 && exitY !== null && <path d={`M ${x(exitIndex) - 6} ${exitY - 13} L ${x(exitIndex) + 6} ${exitY - 13} L ${x(exitIndex)} ${exitY - 3} Z`} fill="#f87171" />}
         {[0, 0.5, 1].map((ratio) => {
