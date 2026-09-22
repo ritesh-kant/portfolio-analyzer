@@ -176,7 +176,9 @@ class Settings(BaseSettings):
     mt_max_positions: int = 20                # concurrent open paper positions
     mt_log_csv: str = "research/backtests/mt_forward_log.csv"  # spec §6 forward log
     mt_cache_dir: str = ".cache_upstox"       # instrument master + candle cache
-    mt_strategy: str = "baseline"             # baseline | catalyst_first_pullback | attention_1m | attention_1m_resistance_state | attention_1m_false_break_reclaim | attention_1m_merged | warrior_strict (the deployed forward arm)
+    # baseline | catalyst_first_pullback | attention_1m |
+    # attention_1m_resistance_state | attention_1m_merged | warrior_strict
+    mt_strategy: str = "warrior_strict"       # deployed forward strategy
     # Account-level guardrails from the Warrior transcript: stop for the day
     # after 3 consecutive losses or after giving back half of peak daily profit,
     # open at starter size, size up only on a green cushion, size down after

@@ -94,14 +94,9 @@ STRATEGY_BASELINE = "baseline"
 STRATEGY_CATALYST_FIRST_PULLBACK = "catalyst_first_pullback"
 STRATEGY_ATTENTION_1M = "attention_1m"
 STRATEGY_ATTENTION_1M_RESISTANCE_STATE = "attention_1m_resistance_state"
-STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM = "attention_1m_false_break_reclaim"
-# The single forward arm (2026-09-12). Everything the separate attention arms
-# were testing in parallel, switched on together: resting buy-stop fills,
-# resistance-state exits, the resistance-breakout entry requirement, and the one
-# allowed false-break reclaim. The arms it replaces had 6 and 0 closed trades
-# respectively, so no comparison was lost by folding them together — but this
-# config deliberately bundles features, so its forward numbers measure the
-# bundle and CANNOT attribute a result to any one of them.
+# The single forward arm (2026-09-12). It combines resting buy-stop fills,
+# resistance-state exits, the resistance-breakout entry requirement, and the
+# structural support/resistance position-management rules.
 STRATEGY_ATTENTION_1M_MERGED = "attention_1m_merged"
 # The Warrior transcript's own checklist, all of it, switched on together
 # (2026-09-15, operator request "match all these"). It is the merged arm plus
@@ -157,17 +152,6 @@ def _strategy_config(settings: Settings) -> EngineConfig:
             attention_rvol_min=settings.mt_attention_rvol_min,
             require_resistance_breakout=True,
         )
-    if settings.mt_strategy == STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM:
-        return EngineConfig(
-            risk_inr=settings.mt_risk_inr,
-            max_notional_inr=settings.mt_max_notional_inr,
-            exit_mode=MODE_TREND_FULL,
-            fill_mode=FILL_FUTURE_TRIGGER,
-            use_attention_entries=True,
-            attention_day_chg_min=settings.mt_attention_day_chg_min,
-            attention_rvol_min=settings.mt_attention_rvol_min,
-            allow_false_break_reentry=True,
-        )
     if settings.mt_strategy == STRATEGY_ATTENTION_1M_MERGED:
         return EngineConfig(
             risk_inr=settings.mt_risk_inr,
@@ -178,7 +162,6 @@ def _strategy_config(settings: Settings) -> EngineConfig:
             attention_day_chg_min=settings.mt_attention_day_chg_min,
             attention_rvol_min=settings.mt_attention_rvol_min,
             require_resistance_breakout=True,
-            allow_false_break_reentry=True,
         )
     if settings.mt_strategy == STRATEGY_WARRIOR_STRICT:
         return EngineConfig(
@@ -190,7 +173,6 @@ def _strategy_config(settings: Settings) -> EngineConfig:
             attention_day_chg_min=settings.mt_attention_day_chg_min,
             attention_rvol_min=settings.mt_attention_rvol_min,
             require_resistance_breakout=True,
-            allow_false_break_reentry=True,
             # ── the guide's checklist ────────────────────────────────────────
             require_micro_pullback=True,
             require_light_pullback_volume=True,
@@ -206,7 +188,6 @@ def _strategy_config(settings: Settings) -> EngineConfig:
         f"unknown MT_STRATEGY {settings.mt_strategy!r}; expected "
         f"{STRATEGY_BASELINE!r}, {STRATEGY_CATALYST_FIRST_PULLBACK!r}, "
         f"{STRATEGY_ATTENTION_1M!r}, {STRATEGY_ATTENTION_1M_RESISTANCE_STATE!r}, "
-        f"{STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM!r}, "
         f"{STRATEGY_ATTENTION_1M_MERGED!r}, or {STRATEGY_WARRIOR_STRICT!r}"
     )
 

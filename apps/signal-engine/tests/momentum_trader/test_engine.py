@@ -224,7 +224,10 @@ def test_false_break_never_counts_a_close_from_before_the_fill() -> None:
     # filled on the middle bar: both confirming closes are at/after the fill
     assert engine._false_break_fired(cfg, bars, 100.0, bars.index[-2])
     # the one-close rule only ever uses the last bar, so it is unaffected
-    legacy = engine.EngineConfig(legacy_single_close_false_break=True)
+    legacy = engine.EngineConfig(
+        use_structural_exit_levels=False,
+        legacy_single_close_false_break=True,
+    )
     assert engine._false_break_fired(legacy, bars, 100.0, bars.index[-1])
 
 
@@ -235,12 +238,18 @@ def test_legacy_false_break_flags_are_independently_selectable() -> None:
         (102.2, 102.3, 100.5, 101.0, 1),
     ])
     floor = bars.index[0]
-    single = engine.EngineConfig(legacy_single_close_false_break=True)
+    single = engine.EngineConfig(
+        use_structural_exit_levels=False,
+        legacy_single_close_false_break=True,
+    )
     assert engine._false_break_fired(single, bars, 102.0, floor)
     # the default two-close rule needs a third bar, so one close is not enough
     assert not engine._false_break_fired(engine.EngineConfig(), bars, 102.0, floor)
     # ordering is a separate switch and does not change the predicate
-    ordering = engine.EngineConfig(legacy_false_break_before_stop=True)
+    ordering = engine.EngineConfig(
+        use_structural_exit_levels=False,
+        legacy_false_break_before_stop=True,
+    )
     assert not engine._false_break_fired(ordering, bars, 102.0, floor)
 
 
@@ -262,6 +271,83 @@ def test_stop_fill_precedes_confirmed_false_break() -> None:
     ]))
     assert st.closed[0].exit_reason == "stop"
     assert st.closed[0].exit == pytest.approx(105.3)
+
+
+def _structural_position(
+    support: float = 100.5, hard_stop: float = 99.0,
+) -> tuple[engine.DayState, engine.EngineConfig]:
+    cfg = engine.EngineConfig(use_structural_exit_levels=True)
+    state = engine.DayState("TEST", prev_close=100.0, cum_vol_profile=None)
+    setup = engine.Setup("micro_pullback", trigger=101.0, stop=hard_stop)
+    cand = engine.Candidate(
+        symbol="TEST", time=pd.Timestamp("2026-09-07 10:00", tz=IST), setup=setup,
+        day_chg_pct=5.0, rvol=3.0, catalyst=0, event_type="", candle_tags=[],
+    )
+    plan = engine.plan_trade(101.0, hard_stop, risk_inr=500.0, max_notional_inr=50_000.0)
+    assert plan is not None
+    exit_state = exits.initial_state(entry=101.0, hard_stop=hard_stop)
+    exit_state.structural_support = exits.Level(
+        support, "prev_day", touches=1, volume=0.0, strength=1.5
+    )
+    state.position = engine.Position(
+        cand=cand, entry_time=cand.time, plan=plan, highest=101.0, exit_state=exit_state,
+    )
+    return state, cfg
+
+
+def test_structural_support_break_exits_on_completed_one_minute_close() -> None:
+    state, cfg = _structural_position()
+    bars = _bars([(100.8, 100.9, 100.4, 100.45, 1_000)], start="2026-09-07 10:01")
+    engine.step(state, bars, cfg, _no_cat)
+    assert state.closed[0].exit_reason == "support_break"
+    assert state.closed[0].exit == pytest.approx(100.45)
+
+
+def test_hard_stop_precedes_structural_support_break() -> None:
+    state, cfg = _structural_position()
+    bars = _bars([(100.8, 100.9, 98.8, 100.4, 1_000)], start="2026-09-07 10:01")
+    engine.step(state, bars, cfg, _no_cat)
+    assert state.closed[0].exit_reason == "stop"
+    assert state.closed[0].exit == pytest.approx(99.0)
+
+
+def test_support_at_or_below_hard_stop_does_not_create_another_exit() -> None:
+    state, cfg = _structural_position(support=99.0)
+    bars = _bars([(100.8, 100.9, 99.2, 99.5, 1_000)], start="2026-09-07 10:01")
+    engine.step(state, bars, cfg, _no_cat)
+    assert state.position is not None
+    assert state.closed == []
+
+
+def test_structural_exit_caps_fixed_target_at_entry_known_resistance() -> None:
+    cfg = engine.EngineConfig(use_structural_exit_levels=True)
+    state = engine.DayState(
+        "TEST",
+        prev_close=100.0,
+        cum_vol_profile=None,
+        prev_day={"high": 102.0, "low": 99.5, "close": 100.5},
+    )
+    setup = engine.Setup("micro_pullback", trigger=101.0, stop=99.0)
+    cand = engine.Candidate(
+        symbol="TEST", time=pd.Timestamp("2026-09-07 10:00", tz=IST), setup=setup,
+        day_chg_pct=5.0, rvol=3.0, catalyst=0, event_type="", candle_tags=[],
+    )
+    plan = engine.plan_trade(101.0, 99.0, risk_inr=500.0, max_notional_inr=50_000.0)
+    assert plan is not None and plan.target == pytest.approx(105.0)
+    bars = _bars([(100.0, 101.1, 99.8, 100.8, 1_000)] * 8, start="2026-09-07 09:53",
+                 freq="1min")
+    engine._open_position(state, cand, bars.index[-1], 101.0, plan, cfg, bars, None)
+    assert state.position is not None
+    assert state.position.plan.target == pytest.approx(102.0)
+    assert state.position.plan.reward_inr == pytest.approx(
+        (102.0 - 101.0) * state.position.plan.qty
+    )
+    assert state.position.target_source == "structural_resistance:prev_day"
+
+
+def test_structural_exit_rejects_false_break_reclaim_combination() -> None:
+    with pytest.raises(ValueError, match="cannot be combined"):
+        engine.EngineConfig(use_structural_exit_levels=True, allow_false_break_reentry=True)
 
 
 def test_open_position_closes_at_data_end() -> None:

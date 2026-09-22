@@ -44,8 +44,14 @@ from dataclasses import dataclass, field, replace
 import pandas as pd
 
 from .indicators import ema, macd, volume_ratio
-from .levels import (Level, derive_levels, nearest_resistance,
-                     nearest_structural_resistance, swing_pivots)
+from .levels import (
+    Level,
+    derive_levels,
+    nearest_resistance,
+    nearest_structural_resistance,
+    nearest_structural_support,
+    swing_pivots,
+)
 
 # ── frozen parameters ─────────────────────────────────────────────────────────
 ARM_AT_R = 0.5             # arm trend exits once open profit ≥ 0.5 × initial risk
@@ -159,6 +165,8 @@ class ExitState:
     breakeven_pending: bool = False
     breakeven_applied: bool = False
     levels: list[Level] = field(default_factory=list)
+    structural_support: Level | None = None
+    structural_resistance: Level | None = None
     last_tf_seen: pd.Timestamp | None = None
 
     @property
@@ -201,12 +209,16 @@ def initial_state(
     prev_day: dict[str, float] | None = None,
     orb: dict[str, float] | None = None,
     with_levels: bool = False,
+    add_shelves: bool = False,
+    atr: float | None = None,
 ) -> ExitState:
     levels: list[Level] = []
     if with_levels and bars_tf is not None and not bars_tf.empty:
-        levels = derive_levels(bars_tf, prev_day, orb)
+        levels = derive_levels(bars_tf, prev_day, orb, add_shelves=add_shelves, atr=atr)
     return ExitState(entry=entry, hard_stop=hard_stop, trail=hard_stop, highest=entry,
-                     levels=levels)
+                     levels=levels,
+                     structural_support=nearest_structural_support(levels, entry),
+                     structural_resistance=nearest_structural_resistance(levels, entry))
 
 
 # ── per one-minute bar ────────────────────────────────────────────────────────

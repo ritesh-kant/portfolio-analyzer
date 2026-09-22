@@ -231,3 +231,40 @@ Keep both fixes — they cost nothing and close two holes that would bite the
 moment a five-minute setup is re-enabled or a fire is suppressed — but record
 plainly that **neither is a P&L improvement**. The BT42 verdict is unchanged:
 P&L null, +2.3 pp accuracy from requiring two closes.
+
+---
+
+## Rising Three / contained-pullback audit (BT45, run 2026-09-21)
+
+The concern is mechanically valid in isolation: a Rising Three has three red
+pullback candles, while the false-break rule fires after two closes below the
+trade's defended breakout level. A completed Rising Three cannot veto that
+decision in real time, because the formation exists only after its later final
+green candle has closed. The regression
+`test_rising_three_pullback_can_fire_false_break_before_formation_confirms`
+captures that causal sequence and separately proves that a pullback which
+remains above the defended level does not fire.
+
+BT45 (`research/backtests/bt45_two_close_continuation_audit.py`) scanned the
+actual 299 `false_break` exits in the current, post-fix 2024 BT42 output. It
+then inspected the preserved one-minute cache retrospectively for a five-minute
+Rising Three that:
+
+1. began after the trade opened;
+2. contained the false-break decision in its three-red pullback; and
+3. completed after that decision with its final green candle.
+
+| Population | Count |
+|---|---:|
+| Current-rule `false_break` exits | 299 |
+| Cache-readable exits | 297 |
+| Missing cache (unclassified, not counted as negative) | 2 |
+| Retrospective Rising Three overlaps | **0** |
+
+Result: this exact Rising Three failure mode did not occur in the preserved
+2024 false-break sample. The result is **not** evidence that no small pullback
+can be exited early, and it does not justify a pattern exception: such an
+exception would require future information at the decision point. The
+two-close rule remains unchanged. The per-exit audit artifact is
+`research/backtests/bt45_two_close_continuation.csv`; its output is
+diagnostic-only and must not be used to tune this already-spent window.

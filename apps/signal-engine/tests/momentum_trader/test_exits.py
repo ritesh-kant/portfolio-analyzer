@@ -118,9 +118,29 @@ def test_structural_resistance_requires_an_anchor_or_repeated_pivot() -> None:
     one_touch = levels.Level(105.0, "pivot_high", 1, 500.0, 1.0)
     repeated = levels.Level(106.0, "pivot_high", 2, 1000.0, 2.0)
     prior_high = levels.Level(107.0, "prev_day", 1, 0.0, 1.5)
+    prior_low = levels.Level(98.0, "prev_day", 1, 0.0, 1.5)
     assert not levels.is_structural(one_touch)
     assert levels.is_structural(repeated) and levels.is_structural(prior_high)
-    assert levels.nearest_structural_resistance([one_touch, repeated, prior_high], 100.0) == repeated
+    assert (
+        levels.nearest_structural_resistance([one_touch, repeated, prior_high], 100.0)
+        == repeated
+    )
+    assert levels.nearest_structural_support([one_touch, prior_low], 100.0) == prior_low
+
+
+def test_initial_state_freezes_structural_levels_known_at_entry() -> None:
+    bars = _bars(_ramp(12, 100.0, 0.1))
+    state = exits.initial_state(
+        entry=100.0,
+        hard_stop=98.0,
+        bars_tf=bars,
+        prev_day={"high": 101.5, "low": 99.0, "close": 100.5},
+        with_levels=True,
+    )
+    assert state.structural_support is not None
+    assert state.structural_support.price == pytest.approx(99.0)
+    assert state.structural_resistance is not None
+    assert state.structural_resistance.price == pytest.approx(100.5)
 
 
 # ── exit config ───────────────────────────────────────────────────────────────

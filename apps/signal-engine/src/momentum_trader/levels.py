@@ -279,6 +279,12 @@ def nearest_structural_resistance(levels: list[Level], price: float) -> Level | 
     return min(above, key=lambda x: x.price) if above else None
 
 
+def nearest_structural_support(levels: list[Level], price: float) -> Level | None:
+    """Nearest support with enough evidence to govern an exit."""
+    below = [x for x in levels if x.price < price and is_structural(x)]
+    return max(below, key=lambda x: x.price) if below else None
+
+
 def nearest_support(levels: list[Level], price: float,
                     min_strength: float = 0.0) -> Level | None:
     below = [x for x in levels if x.price < price and x.strength >= min_strength]

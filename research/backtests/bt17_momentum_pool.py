@@ -197,6 +197,11 @@ def _trade_row(t: ClosedTrade) -> dict:
         "date": str(c.time.date()), "year": c.time.year, "symbol": c.symbol, "setup": c.setup.name,
         "trigger_time": c.time.strftime("%H:%M"), "entry_time": t.entry_time.strftime("%H:%M"),
         "trigger": c.setup.trigger, "entry": t.entry, "stop": c.setup.stop,
+        "target": t.target, "target_source": t.target_source,
+        "structural_support": t.structural_support,
+        "structural_support_kind": t.structural_support_kind,
+        "structural_resistance": t.structural_resistance,
+        "structural_resistance_kind": t.structural_resistance_kind,
         "exit_time": t.exit_time.strftime("%H:%M"),
         "exit": t.exit, "exit_reason": t.exit_reason, "qty": t.qty,
         "day_chg_pct": c.day_chg_pct, "rvol": c.rvol, "catalyst": c.catalyst,
@@ -392,9 +397,9 @@ def main() -> int:
                     help="replay the DEPLOYED arm (attention_1m_merged) instead of the "
                          "legacy 4-8%%/RVOL>=3 setup scan: soft +1.5%%/1.5x promotion, "
                          "5-min trend context, high-volume 1-min confirmation, resting "
-                         "buy-stop fills, resistance-breakout requirement, one false-break "
-                         "reclaim, resistance-state exits. Sets --fill-mode/--exit-mode "
-                         "unless you pass them explicitly")
+                         "buy-stop fills, resistance-breakout requirement, structural "
+                         "support/resistance position management, resistance-state exits. "
+                         "Sets --fill-mode/--exit-mode unless you pass them explicitly")
     ap.add_argument("--warrior-strict", action="store_true",
                     help="replay the warrior_strict arm: --attention plus the guide's "
                          "own entry checklist — micro pullback on light volume, 1-min "
@@ -414,13 +419,13 @@ def main() -> int:
     ap.add_argument("--no-trailing-stops", action="store_true",
                     help="remove every stop that MOVES after entry - the breakeven "
                     "lift and the swing-low ratchet - leaving only the hard stop "
-                    "decided at entry. The false-break exit and the 15:15 close "
+                    "decided at entry. The support-break exit and the 15:15 close "
                     "remain (neither is a stop)")
     ap.add_argument("--no-trend-exits", action="store_true",
                     help="remove the five indicator exits (EMA9/EMA20 break, MACD "
                     "fade, resistance reject, volume climax). With "
                     "--no-trailing-stops this leaves the initial stop, the "
-                    "false-break exit and the 15:15 close")
+                    "support-break exit and the 15:15 close")
     ap.add_argument("--legacy-same-bar-breakeven", action="store_true",
                     help="REPRODUCTION ONLY: restore the pre-2026-09-20 breakeven "
                     "lift, where one minute could both justify the lift (its high) "
@@ -503,7 +508,7 @@ def main() -> int:
         if "--fill-mode" not in sys.argv:
             a.fill_mode = "future_trigger"
         cfg_kw.update(use_attention_entries=True, require_resistance_breakout=True,
-                      allow_false_break_reentry=True)
+                      allow_false_break_reentry=False)
     if a.warrior_strict:
         # Mirror scanner._strategy_config(STRATEGY_WARRIOR_STRICT)'s entry side.
         cfg_kw.update(require_micro_pullback=True, require_light_pullback_volume=True,

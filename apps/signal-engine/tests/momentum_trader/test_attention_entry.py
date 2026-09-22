@@ -112,6 +112,7 @@ def _reclaim_cfg() -> eng.EngineConfig:
         use_attention_entries=True,
         attention_day_chg_min=1.5,
         attention_rvol_min=1.5,
+        use_structural_exit_levels=False,
         allow_false_break_reentry=True,
     )
 

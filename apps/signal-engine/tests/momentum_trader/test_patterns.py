@@ -384,6 +384,27 @@ def test_false_break_ignores_a_single_close_below_level() -> None:
     assert not setups.false_break(bars, level=102.0)
 
 
+def test_rising_three_pullback_can_fire_false_break_before_formation_confirms() -> None:
+    """A Rising Three confirms only on its final green candle.
+
+    The middle three red candles are a valid pullback, but they can still
+    close twice below an earlier defended breakout level. The exit must retain
+    its causal behavior: it cannot use the final green candle before that
+    candle has closed.
+    """
+    from tests.momentum_trader.test_candlestick_recognition import METHODS, frame, names
+
+    bars = frame(METHODS, "up")
+    during_pullback = bars.iloc[:-1]
+
+    assert "rising_three" not in names(during_pullback)
+    assert setups.false_break(during_pullback, level=104.0)
+    assert not setups.false_break(during_pullback, level=103.0)
+
+    assert "rising_three" in names(bars)
+    assert not setups.false_break(bars, level=104.0)
+
+
 def test_scan_setups_returns_all_that_fire() -> None:
     bars = _bars(_pole_flag_break())
     found = setups.scan_setups(bars)

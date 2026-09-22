@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import time
 
 import pandas as pd
@@ -244,11 +244,14 @@ class EngineConfig:
     # ceiling.  A later high-volume close through that ceiling creates a fresh
     # confirmation instead.
     require_resistance_breakout: bool = False
-    # Paper-only retry: after the initial attention breakout has specifically
-    # failed its broken-level test, allow one new, volume-backed close back
-    # through that same level.  This is deliberately opt-in so existing arms
-    # remain exact controls.
+    # Historical-replay-only retry. Production strategy selection never enables
+    # it because structural support now replaces false-break exits.
     allow_false_break_reentry: bool = False
+    # At fill, freeze the nearest
+    # structural support and resistance known from completed bars. A close below
+    # the support replaces the two-close false-break exit; a nearer resistance
+    # caps a live fixed target. This is the production default.
+    use_structural_exit_levels: bool = True
 
     # ── the Warrior transcript's stated entry checklist (all default OFF) ────
     # Each maps to one line of the guide and each REFUSES trades, so turning any
@@ -393,6 +396,17 @@ class EngineConfig:
             raise ValueError(
                 "require_light_pullback_volume needs require_micro_pullback"
             )
+        if self.use_structural_exit_levels and self.allow_false_break_reentry:
+            raise ValueError(
+                "use_structural_exit_levels replaces false-break exits and cannot "
+                "be combined with allow_false_break_reentry"
+            )
+        if self.use_structural_exit_levels and (
+            self.legacy_single_close_false_break or self.legacy_false_break_before_stop
+        ):
+            raise ValueError(
+                "legacy false-break controls are incompatible with use_structural_exit_levels"
+            )
         self.exit_cfg = exits.ExitConfig.for_mode(
             self.exit_mode, use_fixed_target=self.use_fixed_target,
             breakeven_at_r=self.breakeven_at_r,
@@ -515,6 +529,7 @@ class Position:
     plan: TradePlan
     highest: float
     exit_state: exits.ExitState
+    target_source: str = "fixed_2r"
     # Cost-aware breakeven bookkeeping. `armed` is set on the bar that first
     # reaches 1R; the stop is raised on the NEXT bar, matching the swing
     # trail's convention that a level decided by a bar cannot also fill on it.
@@ -540,6 +555,12 @@ class ClosedTrade:
     gross_inr: float
     costs_inr: float
     net_inr: float
+    target: float = 0.0
+    target_source: str = "fixed_2r"
+    structural_support: float | None = None
+    structural_support_kind: str = ""
+    structural_resistance: float | None = None
+    structural_resistance_kind: str = ""
     # Add-on tranche attribution. `qty`/`entry` keep describing the FIRST
     # tranche so existing rows and live records are unchanged, while
     # `gross_inr`/`costs_inr`/`net_inr` are always the WHOLE position, because
@@ -669,6 +690,15 @@ def _exit(state: DayState, when: pd.Timestamp, px: float, reason: str, cfg: Engi
     state.closed.append(ClosedTrade(
         cand=pos.cand, entry_time=pos.entry_time, entry=entry, exit_time=when, exit=px,
         exit_reason=reason, qty=qty, gross_inr=gross, costs_inr=costs, net_inr=gross - costs,
+        target=pos.plan.target, target_source=pos.target_source,
+        structural_support=(pos.exit_state.structural_support.price
+                            if pos.exit_state.structural_support is not None else None),
+        structural_support_kind=(pos.exit_state.structural_support.kind
+                                 if pos.exit_state.structural_support is not None else ""),
+        structural_resistance=(pos.exit_state.structural_resistance.price
+                               if pos.exit_state.structural_resistance is not None else None),
+        structural_resistance_kind=(pos.exit_state.structural_resistance.kind
+                                    if pos.exit_state.structural_resistance is not None else ""),
         add_qty=pos.add_qty, add_entry=pos.add_entry, add_time=pos.add_time,
         base_net_inr=base_net, add_net_inr=add_gross - add_costs,
     ))
@@ -1472,12 +1502,28 @@ def _open_position(state: DayState, cand: Candidate, when: pd.Timestamp, fill: f
     ec = cfg.exit_cfg
     is_1m = _is_one_minute_setup(cand.setup.name)
     tf = bars_1m if is_1m else _bars_5m(bars_1m, full_5m)
+    exit_state = exits.initial_state(
+        entry=fill, hard_stop=cand.setup.stop, bars_tf=tf, prev_day=state.prev_day,
+        with_levels=ec.use_resistance_reject or cfg.use_structural_exit_levels,
+        add_shelves=cfg.volume_shelf_levels,
+    )
+    target_source = "fixed_2r" if ec.has_target else "disabled"
+    resistance = exit_state.structural_resistance
+    if (
+        cfg.use_structural_exit_levels
+        and ec.has_target
+        and resistance is not None
+        and fill < resistance.price < plan.target
+    ):
+        plan = replace(
+            plan,
+            target=resistance.price,
+            reward_inr=(resistance.price - fill) * plan.qty,
+        )
+        target_source = f"structural_resistance:{resistance.kind}"
     state.position = Position(
-        cand=cand, entry_time=when, plan=plan, highest=fill,
-        exit_state=exits.initial_state(
-            entry=fill, hard_stop=cand.setup.stop, bars_tf=tf,
-            prev_day=state.prev_day, with_levels=ec.use_resistance_reject,
-        ),
+        cand=cand, entry_time=when, plan=plan, highest=fill, exit_state=exit_state,
+        target_source=target_source,
     )
     state.traded_today = True
 
@@ -1542,16 +1588,7 @@ def fill_pending_quote(
         return None
     cand = pending.cand
     state.pending = None
-    is_1m = _is_one_minute_setup(cand.setup.name)
-    tf = bars_1m if is_1m else _bars_5m(bars_1m, full_5m)
-    state.position = Position(
-        cand=cand, entry_time=when, plan=plan, highest=price,
-        exit_state=exits.initial_state(
-            entry=price, hard_stop=cand.setup.stop, bars_tf=tf,
-            prev_day=state.prev_day, with_levels=cfg.exit_cfg.use_resistance_reject,
-        ),
-    )
-    state.traded_today = True
+    _open_position(state, cand, when, price, plan, cfg, bars_1m, full_5m)
     return state.position
 
 
@@ -1655,17 +1692,7 @@ def step(
             max_notional_inr=cfg.max_notional_inr * cfg.initial_risk_fraction, rr=cfg.rr, gate_entry=next_open,
         )
         if plan is not None:
-            ec = cfg.exit_cfg
-            is_1m = _is_one_minute_setup(cand.setup.name)
-            tf = bars_1m if is_1m else _bars_5m(bars_1m, full_5m)
-            state.position = Position(
-                cand=cand, entry_time=now, plan=plan, highest=fill,
-                exit_state=exits.initial_state(
-                    entry=fill, hard_stop=cand.setup.stop, bars_tf=tf,
-                    prev_day=state.prev_day, with_levels=ec.use_resistance_reject,
-                ),
-            )
-            state.traded_today = True
+            _open_position(state, cand, now, fill, plan, cfg, bars_1m, full_5m)
 
     # 2. manage an open position on this bar
     pos = state.position
@@ -1722,8 +1749,18 @@ def step(
         # Pattern failure is assessed only after executable stop/target orders.
         # A confirmation bar can cross the hard stop before it closes, so its
         # close must not replace the stop fill with a worse false-break price.
-        if not cfg.legacy_false_break_before_stop and _false_break_fired(cfg, tf_bars, lvl,
-                                                                         entry_floor):
+        if cfg.use_structural_exit_levels:
+            support = es.structural_support
+            if (
+                support is not None
+                and support.price > es.hard_stop
+                and float(bar["close"]) < support.price
+            ):
+                _exit(state, now, float(bar["close"]), "support_break", cfg)
+                return
+        elif not cfg.legacy_false_break_before_stop and _false_break_fired(
+            cfg, tf_bars, lvl, entry_floor
+        ):
             _exit(state, now, float(bar["close"]), "false_break", cfg)
             return
 

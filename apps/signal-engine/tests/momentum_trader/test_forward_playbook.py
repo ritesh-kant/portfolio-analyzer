@@ -9,7 +9,6 @@ from src.config import Settings
 from src.momentum_trader import engine as eng
 from src.momentum_trader.scanner import (
     STRATEGY_ATTENTION_1M,
-    STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM,
     STRATEGY_ATTENTION_1M_MERGED,
     STRATEGY_ATTENTION_1M_RESISTANCE_STATE,
     STRATEGY_CATALYST_FIRST_PULLBACK,
@@ -39,6 +38,10 @@ def test_scanner_selects_registered_forward_playbook() -> None:
     assert cfg.allowed_pullback_ordinals == (1,)
 
 
+def test_structural_position_management_is_on_by_default() -> None:
+    assert eng.EngineConfig().use_structural_exit_levels
+
+
 def test_scanner_selects_attention_watchlist_strategy() -> None:
     settings = Settings(
         mt_strategy=STRATEGY_ATTENTION_1M,
@@ -59,13 +62,6 @@ def test_scanner_selects_separate_resistance_state_arm() -> None:
     assert cfg.require_resistance_breakout
 
 
-def test_scanner_selects_separate_false_break_reclaim_arm() -> None:
-    cfg = _strategy_config(Settings(mt_strategy=STRATEGY_ATTENTION_1M_FALSE_BREAK_RECLAIM))
-    assert cfg.fill_mode == eng.FILL_FUTURE_TRIGGER
-    assert cfg.exit_mode == "trend_full"
-    assert cfg.allow_false_break_reentry
-
-
 def test_scanner_merged_arm_turns_every_feature_on() -> None:
     """The single deployed forward arm is the union of the arms it replaced."""
     cfg = _strategy_config(Settings(
@@ -77,7 +73,8 @@ def test_scanner_merged_arm_turns_every_feature_on() -> None:
     assert cfg.exit_mode == "trend_resistance_state"
     assert cfg.use_attention_entries
     assert cfg.require_resistance_breakout            # from the resistance-state arm
-    assert cfg.allow_false_break_reentry              # from the reclaim arm
+    assert cfg.use_structural_exit_levels
+    assert not cfg.allow_false_break_reentry
     # The four-bar price/volume gate is env-gated and OFF until its A/B clears
     assert not cfg.require_rising_price_volume
     assert cfg.attention_day_chg_min == pytest.approx(1.5)
