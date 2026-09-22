@@ -2,8 +2,9 @@
 
 import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { MomentumBar, MomentumTrade } from '../lib/momentum-api';
+import type { MomentumTrade } from '../lib/momentum-api';
 import { containingBarIndex, fiveMinuteBars } from '../lib/momentum-bars';
+import { points, sessionBars, tradeLevels } from '../lib/momentum-session';
 
 // Mirrors candles.STRENGTH_WEAK_BELOW: a formation whose confirming candle
 // spans less than this multiple of the recent average range is drawn faint.
@@ -11,68 +12,7 @@ const WEAK_STRENGTH = 0.75;
 const DEFAULT_ZOOM_1M = 8;
 const DEFAULT_ZOOM_5M = 2;
 
-type Point = MomentumBar & {
-  ema9: number | null;
-  ema20: number | null;
-  vwap: number | null;
-  macd: number | null;
-  signal: number | null;
-  histogram: number | null;
-};
-
 const fmt = (value: number) => `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
-
-function ema(values: number[], span: number) {
-  const alpha = 2 / (span + 1);
-  let value: number | null = null;
-  return values.map((close, index) => {
-    value = value === null ? close : close * alpha + value * (1 - alpha);
-    return index < span - 1 ? null : value;
-  });
-}
-
-function points(bars: MomentumBar[]): Point[] {
-  const closes = bars.map((bar) => bar.close);
-  const ema9 = ema(closes, 9);
-  const ema20 = ema(closes, 20);
-  const fast = ema(closes, 12);
-  const slow = ema(closes, 26);
-  const macd = fast.map((value, i) => {
-    const slowValue = slow[i] ?? null;
-    return value === null || slowValue === null ? null : value - slowValue;
-  });
-  const signal = ema(macd.map((value) => value ?? 0), 9).map((value, i) =>
-    (macd[i] ?? null) === null ? null : value,
-  );
-  let cumPv = 0;
-  let cumVol = 0;
-  const indicators = bars.map((bar, i) => {
-    cumPv += ((bar.high + bar.low + bar.close) / 3) * bar.volume;
-    cumVol += bar.volume;
-    return {
-      ema9: ema9[i] ?? null,
-      ema20: ema20[i] ?? null,
-      vwap: cumVol ? cumPv / cumVol : null,
-      macd: macd[i] ?? null,
-      signal: signal[i] ?? null,
-      histogram: (macd[i] ?? null) === null || (signal[i] ?? null) === null
-        ? null
-        : macd[i]! - signal[i]!,
-    };
-  });
-  return bars.map((bar, i) => {
-    const indicator = indicators[i] ?? null;
-    return {
-      ...bar,
-      ema9: indicator?.ema9 ?? null,
-      ema20: indicator?.ema20 ?? null,
-      vwap: indicator?.vwap ?? null,
-      macd: indicator?.macd ?? null,
-      signal: indicator?.signal ?? null,
-      histogram: indicator?.histogram ?? null,
-    };
-  });
-}
 
 function linePath(values: Array<number | null>, x: (index: number) => number, y: (value: number) => number) {
   let started = false;
@@ -95,9 +35,10 @@ export function MomentumTradeChart({
   interval: '1m' | '5m';
 }) {
   const allData = useMemo(() => {
-    const raw = trade.chart?.bars ?? [];
+    // The stored series can begin before the opening bell — see `sessionBars`.
+    const raw = sessionBars(trade.chart?.bars ?? [], trade.entry_time);
     return interval === '5m' ? points(fiveMinuteBars(raw)) : points(raw);
-  }, [interval, trade.chart?.bars]);
+  }, [interval, trade.chart?.bars, trade.entry_time]);
   const defaultZoom = interval === '5m' ? DEFAULT_ZOOM_5M : DEFAULT_ZOOM_1M;
   const [zoom, setZoom] = useState(defaultZoom);
   const [requestedStart, setRequestedStart] = useState<number | null>(null);
@@ -216,11 +157,8 @@ export function MomentumTradeChart({
   priceValues.push(trade.entry_price, trade.stop);
   if (trade.target) priceValues.push(trade.target);
   if (trade.exit_price) priceValues.push(trade.exit_price);
-  // resist_head_pct/support_drop_pct are recorded as % distance from the entry price at trigger time.
-  const resistance = trade.resist_head_pct != null ? trade.entry_price * (1 + trade.resist_head_pct / 100) : null;
-  const support = trade.support_drop_pct != null ? trade.entry_price * (1 - trade.support_drop_pct / 100) : null;
-  if (resistance !== null) priceValues.push(resistance);
-  if (support !== null) priceValues.push(support);
+  const levels = tradeLevels(trade);
+  for (const level of levels) priceValues.push(level.price);
   const rawMin = Math.min(...priceValues);
   const rawMax = Math.max(...priceValues);
   const pricePad = Math.max((rawMax - rawMin) * 0.08, rawMax * 0.001);
@@ -434,7 +372,15 @@ export function MomentumTradeChart({
         })}
         <path d={linePath(data.map((bar) => bar.ema9), x, yPrice)} fill="none" stroke="#fbbf24" strokeWidth="1.5" /><path d={linePath(data.map((bar) => bar.ema20), x, yPrice)} fill="none" stroke="#a78bfa" strokeWidth="1.5" /><path d={linePath(data.map((bar) => bar.vwap), x, yPrice)} fill="none" stroke="#60a5fa" strokeWidth="1.5" strokeDasharray="4 3" />
         {[['Stop', trade.stop, '#fb7185'], ['Target', trade.target, '#34d399']].map(([label, value, color]) => value ? <g key={label as string}><line x1={left} x2={width - right} y1={yPrice(value as number)} y2={yPrice(value as number)} stroke={color as string} strokeOpacity=".75" strokeDasharray="5 4" /><text x={width - right - 2} y={yPrice(value as number) - 4} textAnchor="end" fill={color as string} fontSize="11">{label as string} {fmt(value as number)}</text></g> : null)}
-        {[['Resistance', resistance, '#f472b6'], ['Support', support, '#38bdf8']].map(([label, value, color]) => value ? <g key={label as string}><line x1={left} x2={width - right} y1={yPrice(value as number)} y2={yPrice(value as number)} stroke={color as string} strokeOpacity=".55" /><text x={left + 4} y={yPrice(value as number) - 4} fill={color as string} fontSize="11">{label as string} {fmt(value as number)}</text></g> : null)}
+        {levels.map((level) => {
+          const color = level.side === 'resistance' ? '#f472b6' : '#38bdf8';
+          return (
+            <g key={level.label}>
+              <line x1={left} x2={width - right} y1={yPrice(level.price)} y2={yPrice(level.price)} stroke={color} strokeOpacity={level.faint ? '.3' : '.55'} strokeDasharray={level.faint ? '5 4' : undefined} />
+              <text x={left + 4} y={yPrice(level.price) - 4} fill={color} fontSize="11" fillOpacity={level.faint ? '.7' : '1'}>{level.label} {fmt(level.price)}{level.kind ? ` · ${level.kind.replaceAll('_', ' ')}` : ''}</text>
+            </g>
+          );
+        })}
         <g><line x1={left} x2={width - right} y1={entryY} y2={entryY} stroke="#4ade80" strokeOpacity=".8" strokeDasharray="2 3" /><text x={left + 4} y={entryY - 5} fill="#bbf7d0" fontSize="11">BUY {fmt(trade.entry_price)}</text></g>
         {exitY !== null && trade.exit_price != null && <g><line x1={left} x2={width - right} y1={exitY} y2={exitY} stroke="#f87171" strokeOpacity=".8" strokeDasharray="2 3" /><text x={left + 4} y={exitLabelY as number} fill="#fecaca" fontSize="11">SELL {fmt(trade.exit_price)}</text></g>}
         {entryIndex >= 0 && <path d={`M ${x(entryIndex) - 6} ${entryY + 13} L ${x(entryIndex) + 6} ${entryY + 13} L ${x(entryIndex)} ${entryY + 3} Z`} fill="#4ade80" />}
@@ -467,7 +413,7 @@ export function MomentumTradeChart({
           </g>
         )}
       </svg>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 px-2 pb-1 text-xs text-slate-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#2dd4bf]" />{interval} up candle</span><span className="text-[#fbbf24]">EMA 9 / MACD</span><span className="text-[#a78bfa]">EMA 20 / signal</span><span className="text-[#60a5fa]">VWAP</span><span className="text-amber-200">▱ completed pattern</span>{(resistance !== null || support !== null) && <><span className="text-[#f472b6]">— resistance</span><span className="text-[#38bdf8]">— support</span></>}<span className="text-emerald-300">▲ entry</span><span className="text-rose-300">▼ exit</span><span className="text-slate-400">Hover for price/time · drag to pan (vertical too, once V-zoomed) · ctrl+scroll or trackpad pinch to zoom · focus chart: +/− zoom, 0 reset, ←/→ pan, ↑/↓ pan price axis</span></div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 px-2 pb-1 text-xs text-slate-300"><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-[#2dd4bf]" />{interval} up candle</span><span className="text-[#fbbf24]">EMA 9 / MACD</span><span className="text-[#a78bfa]">EMA 20 / signal</span><span className="text-[#60a5fa]">VWAP</span><span className="text-amber-200">▱ completed pattern</span>{levels.length > 0 && <><span className="text-[#f472b6]">— resistance</span><span className="text-[#38bdf8]">— support</span><span className="text-slate-400">faint = recorded only, gates nothing</span></>}<span className="text-emerald-300">▲ entry</span><span className="text-rose-300">▼ exit</span><span className="text-slate-400">Hover for price/time · drag to pan (vertical too, once V-zoomed) · ctrl+scroll or trackpad pinch to zoom · focus chart: +/− zoom, 0 reset, ←/→ pan, ↑/↓ pan price axis</span></div>
     </div>
   );
 }

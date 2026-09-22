@@ -180,6 +180,20 @@ export interface MomentumTrade {
   macd_hist?: number | null;
   resist_head_pct?: number | null;
   support_drop_pct?: number | null;
+  /** The levels above in rupees, and the price they were measured from (the
+   * setup's trigger, not the fill). Recorded from 2026-09-22; older rows carry
+   * only the percentages and are rebuilt from `trigger_px`. */
+  level_anchor_px?: number | null;
+  resist_px?: number | null;
+  support_px?: number | null;
+  resist_kind?: string;
+  support_kind?: string;
+  /** What the exit rules actually hold for the life of the trade, fixed at
+   * entry by `exits.initial_state`. Recorded from 2026-09-22. */
+  structural_resistance?: number | null;
+  structural_resistance_kind?: string;
+  structural_support?: number | null;
+  structural_support_kind?: string;
   chart?: { interval: '1m'; bars: MomentumBar[] };
 }
 

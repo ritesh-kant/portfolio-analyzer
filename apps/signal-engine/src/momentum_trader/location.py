@@ -21,6 +21,7 @@ of a level is introduced here.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 import pandas as pd
 
@@ -86,19 +87,53 @@ def head_and_drop(
     return head, drop
 
 
+@dataclass(frozen=True)
+class Location:
+    """What the location metrics measured, at one price on one timeframe.
+
+    The percentages are the historical record — every backtest and every stored
+    row carries them. `resist_px` / `support_px` are the same two levels in
+    rupees, kept because a percentage means nothing without the price it was
+    measured FROM, and that anchor is the setup's TRIGGER, not the fill. The
+    review chart reconstructed the levels off the fill instead and drew both
+    ₹1.30 out on RHIM 2026-09-22 (trigger 391.30, fill 392.60); recording the
+    prices removes the reconstruction rather than fixing it twice.
+    """
+
+    dist_to_round_pct: float | None = None
+    round_head_pct: float | None = None
+    resist_head_pct: float | None = None
+    support_drop_pct: float | None = None
+    anchor_px: float | None = None
+    resist_px: float | None = None
+    support_px: float | None = None
+    resist_kind: str = ""
+    support_kind: str = ""
+
+
 def measure(
     bars_tf: pd.DataFrame,
     price: float,
     prev_day: dict[str, float] | None = None,
-) -> tuple[float | None, float | None, float | None, float | None]:
-    """(dist_to_round_pct, round_head_pct, resist_head_pct, support_drop_pct).
+) -> Location:
+    """Every location metric at `price`, plus the levels they were measured to.
 
     Reads only `bars_tf`, which the caller has already sliced to closed bars up
     to and including the trigger bar, so this cannot see the future.
     """
     dr, rh = dist_to_round_pct(price), round_head_pct(price)
+    anchor = price if price > 0 else None
     if bars_tf.empty:
-        return dr, rh, None, None
+        return Location(dist_to_round_pct=dr, round_head_pct=rh, anchor_px=anchor)
     levels = derive_levels(bars_tf, prev_day)
     head, drop = head_and_drop(levels, price)
-    return dr, rh, head, drop
+    res = nearest_resistance(levels, price)
+    sup = nearest_support(levels, price)
+    return Location(
+        dist_to_round_pct=dr, round_head_pct=rh,
+        resist_head_pct=head, support_drop_pct=drop, anchor_px=anchor,
+        resist_px=res.price if res is not None else None,
+        support_px=sup.price if sup is not None else None,
+        resist_kind=res.kind if res is not None else "",
+        support_kind=sup.kind if sup is not None else "",
+    )

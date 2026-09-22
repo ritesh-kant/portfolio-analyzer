@@ -96,8 +96,32 @@ def test_missing_levels_are_none_not_silently_far() -> None:
 
 def test_measure_returns_all_four_and_tolerates_an_empty_frame() -> None:
     empty = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
-    dr, rh, head, drop = loc.measure(empty, 100.0)
-    assert dr is not None and rh is not None and head is None and drop is None
+    m = loc.measure(empty, 100.0)
+    assert m.dist_to_round_pct is not None and m.round_head_pct is not None
+    assert m.resist_head_pct is None and m.support_drop_pct is None
+    assert m.resist_px is None and m.support_px is None
+    assert m.anchor_px == 100.0, "the price the percentages are measured from"
+
+
+def test_measure_reports_levels_in_rupees_and_percent_together() -> None:
+    """The percentages and the prices must describe the same two levels."""
+    bars = pd.DataFrame(
+        {"open": [100.0, 101.0, 102.0, 101.0, 100.0, 99.0, 100.0, 101.0, 102.0],
+         "high": [101.0, 103.0, 103.0, 102.0, 101.0, 100.0, 101.0, 102.0, 103.0],
+         "low": [99.0, 100.0, 101.0, 100.0, 99.0, 97.0, 99.0, 100.0, 101.0],
+         "close": [100.5, 102.0, 102.5, 101.0, 100.0, 98.0, 100.5, 101.5, 102.5],
+         "volume": [1000.0] * 9},
+        index=pd.date_range("2026-09-22 09:15", periods=9, freq="min", tz="Asia/Kolkata"),
+    )
+    m = loc.measure(bars, 100.0)
+    anchor = m.anchor_px
+    assert anchor == 100.0
+    if m.resist_px is not None:
+        assert m.resist_head_pct == pytest.approx((m.resist_px - anchor) / anchor * 100.0)
+        assert m.resist_kind != ""
+    if m.support_px is not None:
+        assert m.support_drop_pct == pytest.approx((anchor - m.support_px) / anchor * 100.0)
+        assert m.support_kind != ""
 
 
 def test_near_bands_reuse_the_frozen_constant() -> None:
@@ -116,6 +140,31 @@ def test_location_metrics_are_recorded_on_every_candidate() -> None:
     # at least one candidate should have found a level on one side or the other
     assert any(c.resist_head_pct is not None or c.support_drop_pct is not None
                for c in st.candidates)
+
+
+def test_every_candidate_carries_its_levels_in_rupees_anchored_to_the_trigger() -> None:
+    """The percentages are measured from the TRIGGER, so the prices must agree
+    with the trigger — not with the fill, which is where the review chart used
+    to rebuild them from (RHIM 2026-09-22: trigger 391.30, fill 392.60, both
+    lines drawn ₹1.30 high)."""
+    bars, prev_close, profile = _session()
+    cfg = eng.EngineConfig(stress_slip=0.0)
+    st = eng.run_day("T", bars, prev_close, profile, cfg, lambda _s, _t: (0, ""))
+    assert st.candidates, "fixture must produce candidates"
+    for c in st.candidates:
+        assert c.level_anchor_px == pytest.approx(c.setup.trigger)
+        if c.resist_head_pct is not None:
+            assert c.resist_px is not None
+            assert c.resist_px == pytest.approx(
+                c.setup.trigger * (1 + c.resist_head_pct / 100.0))
+        else:
+            assert c.resist_px is None
+        if c.support_drop_pct is not None:
+            assert c.support_px is not None
+            assert c.support_px == pytest.approx(
+                c.setup.trigger * (1 - c.support_drop_pct / 100.0))
+        else:
+            assert c.support_px is None
 
 
 def test_adding_the_metrics_did_not_change_the_trade_set() -> None:

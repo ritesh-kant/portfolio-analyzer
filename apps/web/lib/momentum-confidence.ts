@@ -221,9 +221,9 @@ export function calculateTradeConfidence(trade: MomentumTrade): TradeConfidence 
       !hasOwn(trade, 'resist_head_pct')
         ? 'Resistance-headroom evidence was not recorded'
         : trade.resist_head_pct === null
-          ? 'No structural resistance was derived above entry'
+          ? 'No resistance was derived above the trigger'
           : finiteNumber(trade.resist_head_pct)
-            ? `${trade.resist_head_pct.toFixed(2)}% to the nearest structural resistance`
+            ? `${trade.resist_head_pct.toFixed(2)}% to the nearest 5-minute resistance above the trigger`
             : 'Resistance-headroom evidence was not recorded',
     ),
     factor(
@@ -244,9 +244,9 @@ export function calculateTradeConfidence(trade: MomentumTrade): TradeConfidence 
       !hasOwn(trade, 'support_drop_pct')
         ? 'Support-location evidence was not recorded'
         : trade.support_drop_pct === null
-          ? 'No structural support was derived below entry'
+          ? 'No support was derived below the trigger'
           : finiteNumber(trade.support_drop_pct)
-            ? `${trade.support_drop_pct.toFixed(2)}% to the nearest structural support`
+            ? `${trade.support_drop_pct.toFixed(2)}% to the nearest 5-minute support below the trigger`
             : 'Support-location evidence was not recorded',
     ),
   ];

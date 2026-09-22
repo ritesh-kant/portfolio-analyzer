@@ -469,6 +469,14 @@ class Candidate:
     round_head_pct: float | None = None      # % up to the next mark (exploratory)
     resist_head_pct: float | None = None     # % up to nearest derived resistance
     support_drop_pct: float | None = None    # % down to nearest derived support
+    # The same two levels in rupees, and the price they were measured from.
+    # The percentages are anchored to the TRIGGER; a reader that rebuilds them
+    # from the fill is wrong by the whole entry slip. See location.Location.
+    level_anchor_px: float | None = None
+    resist_px: float | None = None
+    support_px: float | None = None
+    resist_kind: str = ""
+    support_kind: str = ""
 
 
 @dataclass
@@ -1465,7 +1473,9 @@ def _false_break_reclaim_confirmation(
         },
     )
     cat, ev = catalyst(state.symbol, now)
-    dround, rh, res_head, sup_drop = location.measure(tf5, reentry_setup.trigger, state.prev_day)
+    loc = location.measure(tf5, reentry_setup.trigger, state.prev_day)
+    dround, rh = loc.dist_to_round_pct, loc.round_head_pct
+    res_head, sup_drop = loc.resist_head_pct, loc.support_drop_pct
     cand = Candidate(
         symbol=state.symbol, time=now, setup=reentry_setup,
         day_chg_pct=day_change_pct(bars_1m, state.prev_close),
@@ -1483,6 +1493,9 @@ def _false_break_reclaim_confirmation(
         macd_hist=_macd_hist_now(tf5, state.warmup_5m),
         dist_to_round_pct=dround, round_head_pct=rh,
         resist_head_pct=res_head, support_drop_pct=sup_drop,
+        level_anchor_px=loc.anchor_px,
+        resist_px=loc.resist_px, support_px=loc.support_px,
+        resist_kind=loc.resist_kind, support_kind=loc.support_kind,
     )
     state.candidates.append(cand)
     decision = now + pd.Timedelta(minutes=1)
@@ -1897,7 +1910,9 @@ def step(
             return
         cat, ev = catalyst(state.symbol, now)
         tags = candle_tags(bars_1m)
-        dround, rh, res_head, sup_drop = location.measure(tf5, setup.trigger, state.prev_day)
+        loc = location.measure(tf5, setup.trigger, state.prev_day)
+        dround, rh = loc.dist_to_round_pct, loc.round_head_pct
+        res_head, sup_drop = loc.resist_head_pct, loc.support_drop_pct
         cand = Candidate(
             symbol=state.symbol, time=now, setup=setup, day_chg_pct=chg, rvol=rv,
             catalyst=cat, event_type=ev, candle_tags=tags,
@@ -1914,6 +1929,9 @@ def step(
             macd_hist=_macd_hist_now(tf5, state.warmup_5m),
             dist_to_round_pct=dround, round_head_pct=rh,
             resist_head_pct=res_head, support_drop_pct=sup_drop,
+            level_anchor_px=loc.anchor_px,
+            resist_px=loc.resist_px, support_px=loc.support_px,
+            resist_kind=loc.resist_kind, support_kind=loc.support_kind,
         )
         state.candidates.append(cand)
         state.candidate_seen = True
@@ -1941,7 +1959,9 @@ def step(
     # Where the trigger sits relative to round numbers and derived S/R.
     # Measured on the 5-min frame for every setup so the numbers are comparable
     # across rows, and read at the trigger price the setup itself declared.
-    dround, rh, res_head, sup_drop = location.measure(tf5, setup.trigger, state.prev_day)
+    loc = location.measure(tf5, setup.trigger, state.prev_day)
+    dround, rh = loc.dist_to_round_pct, loc.round_head_pct
+    res_head, sup_drop = loc.resist_head_pct, loc.support_drop_pct
     macd_hist = _macd_hist_now(tf5, state.warmup_5m)
     m_ok, m_reason = _max_move_gate(setup, macd_hist, dround, res_head, sup_drop, cfg)
     ordinal = pullback_ordinal(tf5) if len(tf5) else None
@@ -1961,6 +1981,9 @@ def step(
         macd_hist=macd_hist,
         dist_to_round_pct=dround, round_head_pct=rh,
         resist_head_pct=res_head, support_drop_pct=sup_drop,
+        level_anchor_px=loc.anchor_px,
+        resist_px=loc.resist_px, support_px=loc.support_px,
+        resist_kind=loc.resist_kind, support_kind=loc.support_kind,
     )
     state.candidates.append(cand)   # refused setups are logged too, then dropped
     if not q_ok or not m_ok or not p_ok or not o_ok:

@@ -17,6 +17,7 @@ from typing import Any
 import pandas as pd
 
 from .engine import AttentionEvent, Candidate, ClosedTrade, Position, Rejection
+from .levels import Level
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,20 @@ def chart_bars_doc(bars: pd.DataFrame) -> list[dict[str, Any]]:
         }
         for at, row in bars.iterrows()
     ]
+
+
+def _structural_doc(resistance: Level | None, support: Level | None) -> dict[str, Any]:
+    """The entry-time structural levels, flattened for Mongo.
+
+    `ClosedTrade` carries the same four values already flattened, so both
+    writers store one shape and a review can read either row.
+    """
+    return {
+        "structural_resistance": resistance.price if resistance else None,
+        "structural_resistance_kind": resistance.kind if resistance else "",
+        "structural_support": support.price if support else None,
+        "structural_support_kind": support.kind if support else "",
+    }
 
 
 def _cand_doc(c: Candidate) -> dict[str, Any]:
@@ -132,6 +147,13 @@ class PaperLedger:
             "entry_price": p.plan.entry, "stop": p.plan.stop, "target": p.plan.target,
             "qty": p.plan.qty, "risk_inr": p.plan.risk_inr, "notional_inr": p.plan.notional_inr,
             "paper": True, "float_filter_applied": self._ff,
+            # The two levels the exit rules hold for the life of the trade, in
+            # rupees, as `exits.initial_state` fixed them at entry. The engine
+            # has always computed these and thrown them away at the ledger; a
+            # reviewer could only see the recorded-only location metrics and had
+            # no way to tell which level any rule was actually watching.
+            **_structural_doc(p.exit_state.structural_resistance,
+                              p.exit_state.structural_support),
         }
         if self._db is None:
             return None
@@ -156,6 +178,13 @@ class PaperLedger:
                         "status": "closed", "exit_time": t.exit_time.to_pydatetime(),
                         "exit_price": t.exit, "exit_reason": t.exit_reason,
                         "gross_inr": t.gross_inr, "costs_inr": t.costs_inr, "net_inr": t.net_inr,
+                        # Same entry-time levels as `opened` wrote; repeated
+                        # here because a scanner restart can close a position it
+                        # did not open.
+                        "structural_resistance": t.structural_resistance,
+                        "structural_resistance_kind": t.structural_resistance_kind,
+                        "structural_support": t.structural_support,
+                        "structural_support_kind": t.structural_support_kind,
                         # Raw one-minute session bars are sufficient to render
                         # candles and derive EMA/VWAP/MACD/volume in the review UI.
                         "chart": {
