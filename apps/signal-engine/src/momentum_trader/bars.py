@@ -14,6 +14,21 @@ import pandas as pd
 
 IST = "Asia/Kolkata"
 COLS = ["open", "high", "low", "close", "volume"]
+# NSE continuous trading opens at 09:15. Two things arrive on the feed before
+# it and are NOT bars of today's session:
+#   * the previous session's last trade, delivered in the first FULL-mode
+#     snapshot with its own `ltt` (2026-09-22 RHIM: 09-21 15:56 at 367.00 on a
+#     day that opened at 389.30), and
+#   * the 09:00-09:08 pre-open auction print.
+# Every stored trade up to 2026-09-22 carries both, and the engine stepped over
+# them: `indicators.volume_ratio` averaged the stale bar into the session's
+# first 20 volume baselines, `atr` read the overnight gap as one bar's range,
+# and the review chart drew its price axis down to yesterday's last trade.
+# Session-scoped helpers (`session_vwap`, `cumulative_session_volume`,
+# `price_volume_slopes`) group by day and were immune, which is why this hid
+# for so long. `closed_bars` is the one door every consumer comes through, so
+# the cut belongs here rather than in each of them.
+SESSION_OPEN = (9, 15)
 
 
 @dataclass
@@ -79,9 +94,17 @@ class BarBuilder:
         self._last_vtt[key] = max(self._last_vtt.get(key, 0.0), vtt)
 
     def closed_bars(self, key: str, now: pd.Timestamp) -> pd.DataFrame:
-        """All bars whose minute has fully elapsed at `now` (IST)."""
+        """Bars of `now`'s own session whose minute has fully elapsed at `now`.
+
+        Bounded at both ends on purpose: the upper bound keeps the unfinished
+        minute out, the lower bound keeps everything before the opening bell
+        out (see `SESSION_OPEN`).
+        """
         cutoff = now.tz_convert(IST).floor("min")
-        rows = [b for b in self._bars.get(key, []) if b.start < cutoff]
+        opened = cutoff.normalize() + pd.Timedelta(
+            hours=SESSION_OPEN[0], minutes=SESSION_OPEN[1]
+        )
+        rows = [b for b in self._bars.get(key, []) if opened <= b.start < cutoff]
         if not rows:
             return pd.DataFrame(columns=COLS)
         df = pd.DataFrame(

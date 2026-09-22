@@ -32,7 +32,7 @@ from src.news_trader import telegram
 from src.news_trader.market_calendar import is_trading_day
 
 from . import universe
-from .bars import IST, BarBuilder
+from .bars import IST, SESSION_OPEN, BarBuilder
 from .catalyst import hard_catalyst
 from .discipline import DayDiscipline, DisciplineConfig
 from .engine import (
@@ -65,7 +65,7 @@ from .upstox_auth import read_token_ssm
 
 logger = logging.getLogger("mt.scanner")
 
-SESSION_START = (9, 15)
+SESSION_START = SESSION_OPEN
 SESSION_END = (15, 35)
 # Wall-clock backstop for the 15:15 close. `step()` only exits on a bar that
 # ARRIVES, and reads the clock off that bar's own timestamp, so a position in a
