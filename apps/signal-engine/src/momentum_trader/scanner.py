@@ -792,8 +792,8 @@ class Scanner:
         now = _now()
         official = total = 0
         for key in self.states:
-            o, t = self.builder.candle_coverage(key, now)
-            official, total = official + o, total + t
+            from_exchange, minutes = self.builder.candle_coverage(key, now)
+            official, total = official + from_exchange, total + minutes
         if total:
             self._tg(f"bar source: {official}/{total} minutes "
                      f"({100.0 * official / total:.1f}%) from exchange 1m candles")
