@@ -11,8 +11,46 @@ import { points, sessionBars, tradeLevels } from '../lib/momentum-session';
 const WEAK_STRENGTH = 0.75;
 const DEFAULT_ZOOM_1M = 8;
 const DEFAULT_ZOOM_5M = 2;
+const DEFAULT_PRICE_ZOOM = 4;
 
 const fmt = (value: number) => `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+
+// Vertical de-collision for the horizontal price-line labels. Levels, BUY and
+// SELL are all left-anchored at the same x, so when two lines sit within a few
+// pixels (structural vs 5m-nearest, entry vs resistance) the texts print on top
+// of each other. Sort by desired y, enforce a minimum gap, then shift the
+// rigid block into the price panel. Lines stay where they are — only labels
+// move, with a short leader joining a displaced label back to its line.
+function stackLabelYs(desired: number[], gap = 13, minY = -Infinity, maxY = Infinity): number[] {
+  if (desired.length === 0) return [];
+  const order = desired.map((y, i) => i).sort((a, b) => desired[a]! - desired[b]!);
+  const placed = new Array<number>(desired.length);
+  // Pass 1: top-down, enforce the minimum gap.
+  let prev = -Infinity;
+  for (const i of order) {
+    const next = Math.max(desired[i]!, prev + gap);
+    placed[i] = next;
+    prev = next;
+  }
+  // Pass 2: shift the whole block into the panel WITHOUT touching the gaps —
+  // clamping each label independently would crush a stack sitting above the
+  // top edge back onto a single y (SELL ₹456.1 on top of Resistance ₹456.1).
+  const lo = Math.min(...placed);
+  const hi = Math.max(...placed);
+  let shift = 0;
+  if (hi > maxY) shift = maxY - hi;
+  if (lo + shift < minY) shift = minY - lo;
+  for (let i = 0; i < placed.length; i++) placed[i]! += shift;
+  // Pass 3: if the stack is taller than the panel, the shift above still
+  // leaves one end hanging out — walk top-down from the top edge so labels
+  // stay separated (a label may spill past the bottom instead of overprinting).
+  let cursor = minY;
+  for (const i of order) {
+    if (placed[i]! < cursor) placed[i] = cursor;
+    cursor = placed[i]! + gap;
+  }
+  return placed;
+}
 
 function linePath(values: Array<number | null>, x: (index: number) => number, y: (value: number) => number) {
   let started = false;
@@ -42,7 +80,7 @@ export function MomentumTradeChart({
   const defaultZoom = interval === '5m' ? DEFAULT_ZOOM_5M : DEFAULT_ZOOM_1M;
   const [zoom, setZoom] = useState(defaultZoom);
   const [requestedStart, setRequestedStart] = useState<number | null>(null);
-  const [priceZoom, setPriceZoom] = useState(1);
+  const [priceZoom, setPriceZoom] = useState(DEFAULT_PRICE_ZOOM);
   const [priceCenter, setPriceCenter] = useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
@@ -69,7 +107,7 @@ export function MomentumTradeChart({
   useEffect(() => {
     setZoom(defaultZoom);
     setRequestedStart(null);
-    setPriceZoom(1);
+    setPriceZoom(DEFAULT_PRICE_ZOOM);
     setPriceCenter(null);
   }, [trade._id, defaultZoom]);
 
@@ -121,7 +159,7 @@ export function MomentumTradeChart({
   const resetZoom = () => {
     setZoom(defaultZoom);
     setRequestedStart(null);
-    setPriceZoom(1);
+    setPriceZoom(DEFAULT_PRICE_ZOOM);
     setPriceCenter(null);
   };
   const toggleFullscreen = async () => {
@@ -233,8 +271,6 @@ export function MomentumTradeChart({
   });
   const entryY = yPrice(trade.entry_price);
   const exitY = trade.exit_price == null ? null : yPrice(trade.exit_price);
-  // Park the exit label below the entry one when the two price levels almost coincide.
-  const exitLabelY = exitY === null ? null : Math.abs(exitY - entryY) >= 13 ? exitY - 5 : entryY + 13;
   const tickCount = Math.min(6, data.length);
   const cursorIndex = cursor
     ? Math.min(
@@ -325,7 +361,7 @@ export function MomentumTradeChart({
           <button type="button" onClick={priceZoomIn} disabled={priceZoom >= 8} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">+ V-Zoom</button>
           <button type="button" onClick={() => panPrice(-1)} disabled={priceZoom <= 1} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35" aria-label="Show lower prices">↓</button>
           <span className="mx-1 h-4 w-px bg-white/15" aria-hidden="true" />
-          <button type="button" onClick={resetZoom} disabled={zoom === defaultZoom && requestedStart === null && priceZoom === 1 && priceCenter === null} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">Reset</button>
+          <button type="button" onClick={resetZoom} disabled={zoom === defaultZoom && requestedStart === null && priceZoom === DEFAULT_PRICE_ZOOM && priceCenter === null} className="rounded border border-white/20 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-35">Reset</button>
           <button type="button" onClick={() => { void toggleFullscreen(); }} className="rounded border border-white/20 px-2 py-1">{isFullscreen ? 'Exit full screen' : 'Full screen'}</button>
         </div>
       </div>
@@ -364,25 +400,67 @@ export function MomentumTradeChart({
           // candle is not worth acting on. See candles.STRENGTH_WEAK_BELOW.
           const weak = match.strength !== undefined && match.strength < WEAK_STRENGTH;
           const size = match.strength === undefined ? '' : ` · ${match.strength.toFixed(2)}×`;
+          const midX = Math.min(Math.max((startX + endX) / 2, left + 70), width - right - 70);
           return <g key={`${match.name}-${match.start}-${match.end}`} pointerEvents="none" opacity={weak ? 0.45 : 1}>
             <rect x={startX} y={priceTop} width={Math.max(2, endX - startX)} height={priceHeight} fill="#fbbf24" fillOpacity={weak ? '.04' : '.10'} />
             <path d={`M ${startX} ${priceTop + 16} V ${priceTop + 7} H ${endX} V ${priceTop + 16}`} fill="none" stroke="#fbbf24" strokeWidth="1.2" strokeDasharray={weak ? '3 3' : undefined} />
-            <text x={(startX + endX) / 2} y={priceTop + 31} textAnchor="middle" fill="#fde68a" fontSize="10">{match.name.replaceAll('_', ' ')} · {match.timeframe}{size}</text>
+            <text x={midX} y={priceTop + 31} textAnchor="middle" fill="#fde68a" fontSize="10" stroke="#101922" strokeWidth="3" paintOrder="stroke">{match.name.replaceAll('_', ' ')} · {match.timeframe}{size}</text>
           </g>;
         })}
         <path d={linePath(data.map((bar) => bar.ema9), x, yPrice)} fill="none" stroke="#fbbf24" strokeWidth="1.5" /><path d={linePath(data.map((bar) => bar.ema20), x, yPrice)} fill="none" stroke="#a78bfa" strokeWidth="1.5" /><path d={linePath(data.map((bar) => bar.vwap), x, yPrice)} fill="none" stroke="#60a5fa" strokeWidth="1.5" strokeDasharray="4 3" />
         {[['Stop', trade.stop, '#fb7185'], ['Target', trade.target, '#34d399']].map(([label, value, color]) => value ? <g key={label as string}><line x1={left} x2={width - right} y1={yPrice(value as number)} y2={yPrice(value as number)} stroke={color as string} strokeOpacity=".75" strokeDasharray="5 4" /><text x={width - right - 2} y={yPrice(value as number) - 4} textAnchor="end" fill={color as string} fontSize="11">{label as string} {fmt(value as number)}</text></g> : null)}
-        {levels.map((level) => {
-          const color = level.side === 'resistance' ? '#f472b6' : '#38bdf8';
-          return (
-            <g key={level.label}>
-              <line x1={left} x2={width - right} y1={yPrice(level.price)} y2={yPrice(level.price)} stroke={color} strokeOpacity={level.faint ? '.3' : '.55'} strokeDasharray={level.faint ? '5 4' : undefined} />
-              <text x={left + 4} y={yPrice(level.price) - 4} fill={color} fontSize="11" fillOpacity={level.faint ? '.7' : '1'}>{level.label} {fmt(level.price)}{level.kind ? ` · ${level.kind.replaceAll('_', ' ')}` : ''}</text>
-            </g>
+        {(() => {
+          // All of these labels share the same left-anchored x, so stack them
+          // vertically instead of letting close lines overwrite each other.
+          // The line itself never moves; a displaced label gets a leader tick.
+          type LeftLabel = { key: string; lineY: number; text: string; color: string; opacity?: number };
+          // Levels within 0.3% of the fill are noise against the BUY/SELL lines —
+          // merge them into the trade lines instead of stacking near-duplicate
+          // labels (SELL ₹456.1 vs Resistance ₹456.1 · pivot high).
+          const merged = levels.filter(
+            (level) =>
+              Math.abs(level.price - trade.entry_price) / trade.entry_price > 0.003 &&
+              (trade.exit_price == null ||
+                Math.abs(level.price - trade.exit_price) / trade.exit_price > 0.003),
           );
-        })}
-        <g><line x1={left} x2={width - right} y1={entryY} y2={entryY} stroke="#4ade80" strokeOpacity=".8" strokeDasharray="2 3" /><text x={left + 4} y={entryY - 5} fill="#bbf7d0" fontSize="11">BUY {fmt(trade.entry_price)}</text></g>
-        {exitY !== null && trade.exit_price != null && <g><line x1={left} x2={width - right} y1={exitY} y2={exitY} stroke="#f87171" strokeOpacity=".8" strokeDasharray="2 3" /><text x={left + 4} y={exitLabelY as number} fill="#fecaca" fontSize="11">SELL {fmt(trade.exit_price)}</text></g>}
+          const items: LeftLabel[] = [
+            ...merged.map((level) => {
+              const color = level.side === 'resistance' ? '#f472b6' : '#38bdf8';
+              return {
+                key: level.label,
+                lineY: yPrice(level.price),
+                text: `${level.label} ${fmt(level.price)}${level.kind ? ` · ${level.kind.replaceAll('_', ' ')}` : ''}`,
+                color,
+                opacity: level.faint ? 0.7 : 1,
+              };
+            }),
+            { key: 'BUY', lineY: entryY, text: `BUY ${fmt(trade.entry_price)}`, color: '#bbf7d0' },
+            ...(exitY !== null && trade.exit_price != null
+              ? [{ key: 'SELL', lineY: exitY, text: `SELL ${fmt(trade.exit_price)}`, color: '#fecaca' }]
+              : []),
+            // A label whose line is panned/zoomed out of the price panel has
+            // nothing to point at — clamping it to the panel edge is what
+            // stacked SELL ₹456.1 on top of Resistance ₹456.1. Hide it with
+            // its (already clipped) line instead.
+          ].filter((item) => item.lineY >= priceTop && item.lineY <= priceTop + priceHeight);
+          const labelYs = stackLabelYs(
+            items.map((item) => item.lineY - 4),
+            13,
+            priceTop + 38,
+            priceTop + priceHeight - 4,
+          );
+          return items.map((item, i) => {
+            const labelY = labelYs[i]!;
+            const displaced = Math.abs(labelY - (item.lineY - 4)) > 0.5;
+            return (
+              <g key={item.key}>
+                <line x1={left} x2={width - right} y1={item.lineY} y2={item.lineY} stroke={item.color} strokeOpacity=".55" strokeDasharray={item.key === 'BUY' || item.key === 'SELL' ? '2 3' : undefined} />
+                {displaced && <line x1={left + 4} x2={left + 4} y1={item.lineY} y2={labelY} stroke={item.color} strokeOpacity=".55" strokeWidth="1" />}
+                <text x={left + 6} y={labelY} fill={item.color} fontSize="11" fillOpacity={item.opacity ?? 1} stroke="#101922" strokeWidth="3" paintOrder="stroke">{item.text}</text>
+              </g>
+            );
+          });
+        })()}
         {entryIndex >= 0 && <path d={`M ${x(entryIndex) - 6} ${entryY + 13} L ${x(entryIndex) + 6} ${entryY + 13} L ${x(entryIndex)} ${entryY + 3} Z`} fill="#4ade80" />}
         {exitIndex >= 0 && exitY !== null && <path d={`M ${x(exitIndex) - 6} ${exitY - 13} L ${x(exitIndex) + 6} ${exitY - 13} L ${x(exitIndex)} ${exitY - 3} Z`} fill="#f87171" />}
         {[0, 0.5, 1].map((ratio) => {
