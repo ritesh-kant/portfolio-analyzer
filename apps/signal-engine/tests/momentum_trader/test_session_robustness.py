@@ -184,3 +184,11 @@ def test_market_hours_bypass_disables_the_bailout():
     s = _scanner_with({"NSE_EQ|A": object()}, bars=None)
     s.s = Settings(mt_strategy=STRATEGY_WARRIOR_STRICT, mt_bypass_market_hours=True)
     assert not s._market_looks_closed(_at(11, 0))
+
+
+def test_warrior_strict_carries_the_macd_open_tolerance():
+    """Kept at the frozen rule (0) after BT48; still env-overridable."""
+    live = _strategy_config(Settings(mt_strategy=STRATEGY_WARRIOR_STRICT))
+    assert live.macd_open_tolerance == 0.0
+    tried = Settings(mt_strategy=STRATEGY_WARRIOR_STRICT, mt_macd_open_tolerance=0.05)
+    assert _strategy_config(tried).macd_open_tolerance == 0.05

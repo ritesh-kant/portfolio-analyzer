@@ -209,3 +209,81 @@ they are recorded because they change what earlier numbers meant.
 
 The guardrails are scanner-only: a pool backtest walks one symbol at a time and
 has no coherent day-level P&L to apply "3 consecutive losses" to.
+
+## Amendment 2026-09-23 — MACD "open" tolerance (operator decision)
+
+**What changed.** The checklist's "MACD open" test was `histogram > previous
+histogram`: any shrink refused. It is now `histogram ≥ previous × (1 − 0.10)`.
+The histogram must still be positive. `EngineConfig.macd_open_tolerance`,
+env `MT_MACD_OPEN_TOLERANCE` (default 0.10; 0 restores the frozen rule
+exactly), `bt17 --macd-open-tolerance` (default 0.10; pass 0 to reproduce the
+2026-09-15 descriptive replay above).
+
+**Why.** IKS, 2026-09-23 09:30, replayed on official exchange candles: a
+textbook micro pullback (break of the 09:29 pause high 1917.9 by 0.1) was
+refused because the histogram went 1.985 → 1.849, a 6.8% shrink. A pause
+candle, which the micro pullback *requires*, almost always shrinks the
+histogram, so the strict rule asked the breakout candle to win all of that
+back within one minute.
+
+**This breaks the review-gate rule above, knowingly.** It was changed at n=3 of
+30 because of one observed refusal, which is the result-driven tuning this file
+was written to prevent. Recorded as such, not as evidence:
+
+* In the live log, `attention_macd_not_open` had fired **0 times** in every
+  `warrior_strict` session to date (680 red/flat, 340 low volume, 121 weak
+  close, 48 no micro pullback). The IKS refusal exists only in the
+  official-candle replay, which the live arm could not see until the same
+  day's exchange-candle fix (`project_live_bar_sampling`).
+* The whole checklist already tested indistinguishable from random deletion
+  (anti p = 0.394). One component's tolerance is expected to move gross by
+  hundredths of a percentage point either way.
+* Same-day replay, IKS official candles, 10%: signal 09:30, trigger 1917.9,
+  stop 1912.7; bar-replay fill 1923.0, exit 09:37 `volume_climax` at 1932.0,
+  net **+₹131**. One trade, chosen because it was the refusal. It means nothing.
+
+**Consequence for the gate.** The 30-trade sample now mixes two MACD rules
+(and two bar sources, see the exchange-candle fix). The gate report must split
+trades before/after 2026-09-24 and state the mix; the kill condition is
+unchanged. Each entry's `entry_evidence.checklist.macd_open_tolerance` and
+`confirmation`/`setup_meta.macd_prev_hist_1m` record which rule and what dip
+admitted it, so the trades the tolerance let in can be counted at the gate.
+
+**Post-change replay, 2026-09-23 (run after enabling, so descriptive only).**
+`bt17 --warrior-strict --live-fill --multi-entry`, tolerance 0 vs 0.10, same
+cached symbols, 2025-09-23 → 2026-09-22 (2025 leg re-reads the Sep–Dec slice
+BT47 already used; 2026 is spent). Real costs 0.21%:
+
+| | strict (0) | 10% |
+|---|---|---|
+| trades | 219 | 231 |
+| gross %/trade | −0.041 | −0.055 |
+| net %/trade | −0.251 | −0.265 |
+| net ₹ | −26,200 | −29,167 |
+
+All 219 strict trades are unchanged; the tolerance only **adds 12**, gross
+**−0.313%/trade**, net −₹2,966 (mean −₹247, median −₹347, 3W/9L, 8 stopped
+out; 95% CI on mean net −₹425 to −₹38). Anti-strategy: random 12-trade subsets
+of the strict pool beat the added trades 93.7% of the time. The trades the
+tolerance admits are worse than the arm's average, not better.
+
+**Tolerance sweep (same replay, operator request).** Admitted trades are
+nested — each larger tolerance keeps the smaller one's additions and adds more:
+
+| tolerance | trades added | W/L | added gross %/trade | added net ₹ | anti p |
+|---|---|---|---|---|---|
+| 5% | 10 | 3/7 | −0.243 | −2,134 | 0.846 |
+| 7% | 11 | 3/8 | −0.317 | −2,727 | 0.932 |
+| 8% | 11 | 3/8 | −0.317 | −2,727 | 0.929 |
+| 10% | 12 | 3/9 | −0.313 | −2,966 | 0.938 |
+
+Every tolerance tested is net-negative against the strict rule; none removed or
+changed a strict trade. Picking one of these by its replay number would be
+fitting the rule to this year's 12 trades.
+
+**Reverted the same day — never deployed.** After the replay, sweep and the
+BT48 per-trade charts (`bt48_macd_buffer_report.py`), the operator kept the
+frozen rule: `MT_MACD_OPEN_TOLERANCE=0` (config default and ECS). The code
+path stays, byte-identical to the frozen rule at 0. No live trade ever ran
+under a buffer, so the 30-trade sample does **not** need a pre/post split for
+this change.

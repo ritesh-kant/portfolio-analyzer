@@ -267,6 +267,15 @@ class EngineConfig:
     # the guide specifies. Flat counts as a no ("DON'T trade ... if the MACD is
     # negative or flat").
     require_macd_positive_open: bool = False
+    # How far the 1-minute histogram may SHRINK against the previous bar and
+    # still count as "open", as a fraction of the previous value. 0.0 = the
+    # frozen 2026-09-15 rule (any decrease refuses). The histogram must still
+    # be positive either way. Operator decision 2026-09-23 after IKS 09:30 on
+    # official candles was refused for a 6.8% dip (1.985 → 1.849): a pause
+    # candle, which the micro pullback REQUIRES, almost always shrinks the
+    # histogram, so the strict rule demanded the breakout win that back in one
+    # minute. See the warrior_strict hypothesis file's amendment.
+    macd_open_tolerance: float = 0.0
     # "DO trade during peak volatility hours ... DON'T trade during low-volume
     # midday hours." Caps the entry deadline at `peak_hours_end`.
     peak_hours_only: bool = False
@@ -357,6 +366,8 @@ class EngineConfig:
             raise ValueError("attention_confirm_vol_ratio must be positive")
         if self.attention_pending_minutes <= 0:
             raise ValueError("attention_pending_minutes must be positive")
+        if not 0.0 <= self.macd_open_tolerance < 1.0:
+            raise ValueError("macd_open_tolerance must be in [0, 1)")
         if self.vol_baseline_min_bars is not None and self.vol_baseline_min_bars < 1:
             raise ValueError("vol_baseline_min_bars must be positive")
         if self.cost_stop_extra_ticks < 0:
@@ -894,6 +905,20 @@ def _macd_open_state(
     return float(h.iloc[-1]), float(h.iloc[-2])
 
 
+def _macd_closing(hist: float, prev_hist: float, tolerance: float) -> bool:
+    """True when the histogram counts as flat/converging — "not open".
+
+    "DON'T trade ... if the MACD is negative OR FLAT". With `tolerance` 0 this
+    is the frozen rule, byte-identical: any bar that fails to widen refuses.
+    Otherwise a shrink of up to `tolerance` × the previous value is allowed.
+    A previous value at or below zero makes the threshold non-positive, so a
+    positive histogram coming up through zero is always open.
+    """
+    if tolerance == 0.0:
+        return hist <= prev_hist
+    return hist < prev_hist * (1.0 - tolerance)
+
+
 def _macd_1m_hist(bars_1m: pd.DataFrame, warmup_1m: pd.DataFrame | None) -> float | None:
     """1-minute MACD histogram for the record, None before warm-up."""
     state = _macd_open_state(bars_1m, warmup_1m)
@@ -1132,6 +1157,7 @@ def _entry_evidence(state: DayState, bars_1m: pd.DataFrame,
             "micro_pullback": cfg.require_micro_pullback,
             "light_pullback_volume": cfg.require_light_pullback_volume,
             "macd_positive_open": cfg.require_macd_positive_open,
+            "macd_open_tolerance": cfg.macd_open_tolerance,
             "peak_hours_only": cfg.peak_hours_only,
             "entry_deadline": cfg.entry_deadline.isoformat(),
             "pullback_ordinals": list(cfg.allowed_pullback_ordinals),
@@ -1267,11 +1293,10 @@ def _attention_confirmation(
         hist, prev_hist = state
         if hist <= 0.0:
             return None, "attention_macd_not_positive"
-        if hist <= prev_hist:
-            # "DON'T trade ... if the MACD is negative OR FLAT" — a histogram
-            # that is no longer widening is the flat/converging case.
+        if _macd_closing(hist, prev_hist, cfg.macd_open_tolerance):
             return None, "attention_macd_not_open"
         meta["macd_hist_1m"] = hist
+        meta["macd_prev_hist_1m"] = prev_hist
 
     if stop >= trigger:
         return None, "attention_invalid_stop"

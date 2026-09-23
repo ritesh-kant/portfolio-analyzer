@@ -24,6 +24,7 @@ from src.momentum_trader.engine import (
     GuideGates,
     _attention_confirmation,
     _attention_context,
+    _macd_closing,
     _macd_open_state,
     _pullback_ordinal_gate,
     _trend_ema,
@@ -375,3 +376,41 @@ def test_no_guide_means_the_original_code_path():
     ]
     bars = _bars(rows)
     assert _attention_confirmation(bars, 2.5) == _attention_confirmation(bars, 2.5, None)
+
+
+# ── MACD "open" tolerance (operator decision 2026-09-23) ─────────────────────
+# IKS 2026-09-23 09:30 on official candles: histogram 1.985 → 1.849, a 6.8%
+# shrink on the breakout candle after a red pause.
+
+def test_zero_tolerance_is_the_frozen_rule():
+    assert _macd_closing(1.849, 1.985, 0.0)
+    assert _macd_closing(1.985, 1.985, 0.0), "flat is 'not open' under the frozen rule"
+    assert not _macd_closing(1.986, 1.985, 0.0)
+
+
+def test_ten_percent_admits_the_iks_0930_dip():
+    assert not _macd_closing(1.849, 1.985, 0.10)
+
+
+def test_ten_percent_still_refuses_a_real_fade():
+    # 12% shrink: beyond the allowance
+    assert _macd_closing(1.985 * 0.88, 1.985, 0.10)
+
+
+def test_the_boundary_itself_passes():
+    assert not _macd_closing(1.985 * 0.90, 1.985, 0.10)
+
+
+def test_a_histogram_coming_up_through_zero_is_open():
+    assert not _macd_closing(0.2, -0.5, 0.10)
+
+
+def test_tolerance_is_validated():
+    with pytest.raises(ValueError):
+        EngineConfig(macd_open_tolerance=-0.01)
+    with pytest.raises(ValueError):
+        EngineConfig(macd_open_tolerance=1.0)
+
+
+def test_tolerance_defaults_to_the_frozen_rule():
+    assert EngineConfig().macd_open_tolerance == 0.0

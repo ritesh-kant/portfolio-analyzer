@@ -178,6 +178,7 @@ def _strategy_config(settings: Settings) -> EngineConfig:
             require_micro_pullback=True,
             require_light_pullback_volume=True,
             require_macd_positive_open=True,
+            macd_open_tolerance=settings.mt_macd_open_tolerance,
             allowed_pullback_ordinals=GUIDE_PULLBACK_ORDINALS,
             peak_hours_only=True,
             peak_hours_end=_parse_hhmm(settings.mt_peak_hours_end),

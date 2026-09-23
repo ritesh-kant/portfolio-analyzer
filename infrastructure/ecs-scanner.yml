@@ -172,6 +172,10 @@ Resources:
             # first 105 minutes of the NSE session. Chosen from volume shape,
             # never from returns — see the hypothesis.
             - { Name: MT_PEAK_HOURS_END, Value: '11:00' }
+            # "MACD open": how far the 1-min histogram may shrink vs the prior
+            # bar and still pass. 0 = the frozen 09-15 rule (any shrink refuses).
+            # Tried 5-10% on 2026-09-23; every level only added losers (BT48).
+            - { Name: MT_MACD_OPEN_TOLERANCE, Value: '0' }
             # 3 strikes / 50% give-back / starter size / size down on a loss.
             - { Name: MT_DISCIPLINE, Value: 'true' }
             # 50% give-back halt OFF (operator decision 2026-09-23); 3 strikes

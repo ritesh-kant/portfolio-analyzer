@@ -410,6 +410,10 @@ def main() -> int:
                          "scanner-only and are NOT replayed here: a pool backtest walks "
                          "one symbol at a time, so it has no coherent day-level P&L to "
                          "apply them to")
+    ap.add_argument("--macd-open-tolerance", type=float, default=0.0,
+                    help="with --warrior-strict: fraction the 1-min MACD histogram may "
+                         "shrink vs the previous bar and still count as open (default 0 "
+                         "= the live rule; 0.05-0.10 were replayed 2026-09-23, BT48)")
     ap.add_argument("--breakeven-at-r", type=float, default=None,
                     help="lift the stop to the ENTRY price only after this many R "
                     "of open profit (1R = the entry-to-stop distance). Default is "
@@ -513,6 +517,7 @@ def main() -> int:
         # Mirror scanner._strategy_config(STRATEGY_WARRIOR_STRICT)'s entry side.
         cfg_kw.update(require_micro_pullback=True, require_light_pullback_volume=True,
                       require_macd_positive_open=True,
+                      macd_open_tolerance=a.macd_open_tolerance,
                       allowed_pullback_ordinals=GUIDE_PULLBACK_ORDINALS,
                       peak_hours_only=True, warm_context=True,
                       vol_baseline_min_bars=VOL_BASELINE_MIN_BARS,

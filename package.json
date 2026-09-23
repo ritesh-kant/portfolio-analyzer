@@ -16,6 +16,7 @@
     "bt:coststop": "apps/signal-engine/.venv/bin/python research/backtests/bt45_cost_stop_report.py",
     "bt:breakeven": "apps/signal-engine/.venv/bin/python research/backtests/bt46_breakeven_at_1p5r.py",
     "bt:demo": "apps/signal-engine/.venv/bin/python research/backtests/bt17_momentum_pool.py --attention --multi-entry --start 2024-01-01 --end 2024-12-31 --symbols BALRAMCHIN,CUB,ABFRL,DELHIVERY,DEVYANI,CHAMBLFERT,COROMANDEL,CANFINHOME,BATAINDIA,BRIGADE,CYIENT,ATGL,AFFLE,ASTERDM,CLEAN --tag demo15 && apps/signal-engine/.venv/bin/python research/backtests/bt32_strategy_report.py --trades research/backtests/bt17_trades_demo15.csv",
+    "bt:macdbuffer": "apps/signal-engine/.venv/bin/python research/backtests/bt48_macd_buffer_report.py",
     "bt:serve": "python3 -m http.server 8899 --directory research/backtests",
     "bt:import": "apps/signal-engine/.venv/bin/python research/backtests/import_trades_to_mongo.py"
   },

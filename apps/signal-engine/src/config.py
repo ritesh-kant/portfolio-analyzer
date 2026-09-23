@@ -193,6 +193,11 @@ class Settings(BaseSettings):
     # is the first 105 minutes of the NSE session, its morning volume peak.
     # Chosen from session-volume shape, never from returns — hence configurable.
     mt_peak_hours_end: str = "11:00"
+    # warrior_strict's "MACD open" check: the fraction the 1-min histogram may
+    # shrink vs the previous bar and still pass (must stay positive). 0 = the
+    # frozen 2026-09-15 rule — kept at 0 by operator decision 2026-09-23 after
+    # the 1-year replay (every tolerance 5–10% only added losing trades; BT48).
+    mt_macd_open_tolerance: float = 0.0
     mt_attention_day_chg_min: float = 1.5      # promotion only; never sufficient to enter
     mt_attention_rvol_min: float = 1.5         # promotion only; never sufficient to enter
     # Five-minute entries only: refuse one whose own 1-min chart disagrees
