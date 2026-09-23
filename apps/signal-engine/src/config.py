@@ -185,6 +185,8 @@ class Settings(BaseSettings):
     # every loss. Scanner-only — a pool backtest replays one symbol at a time
     # and so has no coherent notion of the day's running P&L.
     mt_discipline: bool = False
+    # Only the 50%-give-back halt, independent of the rest of `mt_discipline`.
+    mt_giveback_halt: bool = True
     # Latest IST bar-start that may open a position when the strategy sets
     # `peak_hours_only`. The guide's 07:00–10:00 EST window ends 30 minutes
     # after the US open and is mostly pre-market, which NSE does not have; this

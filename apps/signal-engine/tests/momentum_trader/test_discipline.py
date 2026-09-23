@@ -155,3 +155,13 @@ def test_summary_mentions_the_halt():
     for _ in range(3):
         d.record(-100.0)
     assert HALT_THREE_STRIKES in d.summary()
+
+
+def test_giveback_halt_can_be_switched_off_alone():
+    d = _day(giveback_halt=False)
+    d.record(196.0)
+    d.record(-267.0)            # the 2026-09-23 day: would have tripped the give-back
+    assert d.can_trade() == (True, "ok")
+    d.record(-10.0)
+    d.record(-10.0)
+    assert d.can_trade() == (False, HALT_THREE_STRIKES), "strikes rule still on"

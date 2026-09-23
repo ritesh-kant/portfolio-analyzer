@@ -174,6 +174,9 @@ Resources:
             - { Name: MT_PEAK_HOURS_END, Value: '11:00' }
             # 3 strikes / 50% give-back / starter size / size down on a loss.
             - { Name: MT_DISCIPLINE, Value: 'true' }
+            # 50% give-back halt OFF (operator decision 2026-09-23); 3 strikes
+            # and the size ladder stay on. 'true' to restore.
+            - { Name: MT_GIVEBACK_HALT, Value: 'false' }
             # Multi-entry + 20 slots (operator decision 2026-09-13). Re-entry is
             # sequential per symbol; the slot count is what lets the extra
             # trades actually be held. Counter-evidence is recorded on

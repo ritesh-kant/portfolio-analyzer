@@ -63,6 +63,10 @@ class DisciplineConfig:
     make pool backtests depend on the order symbols happen to be processed in."""
 
     enabled: bool = False
+    # The 50% give-back halt can be switched off on its own while the strikes
+    # rule and size ladder stay on (operator decision 2026-09-23: one winner
+    # then one loser was enough to end the day).
+    giveback_halt: bool = True
     max_consecutive_losses: int = MAX_CONSECUTIVE_LOSSES
     giveback_frac: float = GIVEBACK_FRAC
     starter_frac: float = STARTER_FRAC
@@ -144,7 +148,8 @@ class DayDiscipline:
             return
         if self.consecutive_losses >= self.cfg.max_consecutive_losses:
             self.halted_reason = HALT_THREE_STRIKES
-        elif self.peak_inr > 0.0 and self.net_inr <= self.peak_inr * self.cfg.giveback_frac:
+        elif (self.cfg.giveback_halt and self.peak_inr > 0.0
+              and self.net_inr <= self.peak_inr * self.cfg.giveback_frac):
             # Only meaningful once the day HAS been profitable: you cannot give
             # back profit you never made, so a day that opens red never trips it.
             self.halted_reason = HALT_GIVEBACK
