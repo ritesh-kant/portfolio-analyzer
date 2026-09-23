@@ -25,9 +25,15 @@ from src.momentum_trader.engine import (
     ClosedTrade,
     DayState,
     Pending,
+    Position,
     Setup,
 )
-from src.momentum_trader.scanner import STRATEGY_WARRIOR_STRICT, Scanner, _strategy_config
+from src.momentum_trader.scanner import (
+    STRATEGY_WARRIOR_STRICT,
+    Scanner,
+    _strategy_config,
+    entry_message,
+)
 
 IST = "Asia/Kolkata"
 NOW = pd.Timestamp("2026-09-15 10:00", tz=IST)
@@ -142,3 +148,35 @@ def test_closes_are_folded_in_chronological_order():
         s._record_close(t)
     assert s.discipline.consecutive_losses == 1, "the winner in the middle resets"
     assert not s.discipline.halted
+
+
+def _iks_position(symbol: str = "IKS") -> Position:
+    from src.momentum_trader.exits import ExitState
+    from src.momentum_trader.risk import TradePlan
+
+    setup = Setup(name="attention_1m_confirmation", trigger=1935.10, stop=1921.40)
+    cand = Candidate(symbol=symbol, time=NOW, setup=setup, day_chg_pct=5.0, rvol=3.0,
+                     catalyst=0, event_type="", candle_tags=[])
+    plan = TradePlan(entry=1935.10, stop=1921.40, target=1962.50, qty=18,
+                     risk_inr=246.6, reward_inr=493.2, notional_inr=34831.8)
+    return Position(cand=cand, entry_time=NOW, plan=plan, highest=1935.10,
+                    exit_state=ExitState.__new__(ExitState), target_source="disabled")
+
+
+def test_entry_message_shows_target_on_its_own_line():
+    msg = entry_message(_iks_position(), fixed_exit=False)
+    lines = msg.split("\n")
+    assert lines[0] == "📝 <b>ENTER IKS</b>"
+    assert "Stop: <b>₹1,921.40</b> (-0.71%, risk ₹247)" in lines
+    target = next(line for line in lines if line.startswith("Target:"))
+    assert "<b>₹1,962.50</b>" in target and "2.0R" in target
+    assert "reference only" in target, "a signal exit must not imply a resting target"
+
+
+def test_entry_message_fixed_exit_names_the_target_source():
+    msg = entry_message(_iks_position(), fixed_exit=True)
+    assert "reference only" not in msg
+
+
+def test_entry_message_escapes_symbols_for_telegram_html():
+    assert "ENTER M&amp;M" in entry_message(_iks_position("M&M"), fixed_exit=False)

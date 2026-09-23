@@ -15,6 +15,7 @@ module in this file by design (hypothesis v2 §3, no-relax rules).
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 import signal
@@ -244,6 +245,32 @@ def _now() -> pd.Timestamp:
     return pd.Timestamp.now(tz=IST)
 
 
+def entry_message(p: Position, *, fixed_exit: bool) -> str:
+    """Telegram body for a new position (HTML parse mode, one fact per line).
+
+    The target is always shown. Under a signal-based exit it is the plan's 2R
+    price and nothing sells there, so the line says so rather than implying an
+    order is resting at it.
+    """
+    plan = p.plan
+    entry, stop, target = plan.entry, plan.stop, plan.target
+    stop_pct = (stop - entry) / entry * 100.0
+    tgt_pct = (target - entry) / entry * 100.0
+    rr = (target - entry) / (entry - stop) if entry > stop else 0.0
+    if fixed_exit:
+        tgt_note = f"{rr:.1f}R, {tgt_pct:+.2f}% · {html.escape(p.target_source)}"
+    else:
+        tgt_note = f"{rr:.1f}R, {tgt_pct:+.2f}% · <i>reference only — exit is signal-based</i>"
+    return "\n".join([
+        f"📝 <b>ENTER {html.escape(p.cand.symbol)}</b>",
+        f"Setup: <code>{html.escape(p.cand.setup.name)}</code>",
+        f"Entry: <b>₹{entry:,.2f}</b> × {plan.qty} (₹{plan.notional_inr:,.0f})",
+        f"Stop: <b>₹{stop:,.2f}</b> ({stop_pct:+.2f}%, risk ₹{plan.risk_inr:,.0f})",
+        f"Target: <b>₹{target:,.2f}</b> ({tgt_note})",
+        f"Catalyst: {p.cand.catalyst}",
+    ])
+
+
 class Scanner:
     def __init__(self, settings: Settings) -> None:
         self.s = settings
@@ -271,7 +298,8 @@ class Scanner:
         # They act on the DAY, across every symbol, so they live on the scanner
         # rather than in the per-symbol engine.
         self.discipline = DayDiscipline(
-            DisciplineConfig(enabled=settings.mt_discipline)
+            DisciplineConfig(enabled=settings.mt_discipline,
+                             giveback_halt=settings.mt_giveback_halt)
         )
         self._full_risk_inr = settings.mt_risk_inr
         self._sync_risk()
@@ -748,11 +776,7 @@ class Scanner:
                 daemon=True,
                 name=f"news-context-{p.cand.symbol}",
             ).start()
-        exit_note = (f"target ₹{p.plan.target:.2f}"
-                     if self.cfg.exit_mode == MODE_FIXED else "negative-signal exit")
-        self._tg(f"📝 ENTER <b>{p.cand.symbol}</b> {p.cand.setup.name} "
-                 f"@₹{p.plan.entry:.2f} ×{p.plan.qty} stop ₹{p.plan.stop:.2f} "
-                 f"{exit_note} cat={p.cand.catalyst}")
+        self._tg(entry_message(p, fixed_exit=self.cfg.exit_mode == MODE_FIXED))
 
     def _attach_news_context(self, doc_id: str, symbol: str, at: pd.Timestamp) -> None:
         """Best-effort background annotation for review — never on the live
