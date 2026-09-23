@@ -4,6 +4,18 @@ Upstox FULL-mode feed gives, per tick: last price (ltp), last trade time (ltt,
 ms epoch) and `vtt` = cumulative volume traded today. Bar volume is therefore
 the *difference* in vtt across the bar, which is exact, rather than a sum of
 last-trade quantities, which misses trades between ticks.
+
+The same message also carries the exchange's own 1-minute candle
+(`marketOHLC`, interval `I1`, `ts` = the minute's start). That candle wins
+wherever it exists: a FULL-mode message is a periodic SNAPSHOT, not every
+trade, so a bar built from its `ltp` misses the wicks and opens late. Measured
+on 2026-09-23 against the official intraday candles: IKS high wrong in 18/26
+minutes (always too low), low in 17/26 (always too high), open off by up to
+₹5.90; ELECON had 6/71 candles of the wrong colour. It flipped a decision: on
+the official IKS bars the 09:34 entry never forms (09:33 is a green
+continuation candle, not a doji pause). Backtests replay official candles, so
+until this the live arm was not trading the tested strategy. The snapshot bar
+is kept as the fallback for any minute with no `I1` candle.
 """
 
 from __future__ import annotations
@@ -55,6 +67,12 @@ class BarBuilder:
 
     _bars: dict[str, list[_Bar]] = field(default_factory=dict)
     _last_vtt: dict[str, float] = field(default_factory=dict)
+    # key → minute start → exchange (open, high, low, close, volume). The
+    # latest message for a minute overwrites the earlier ones, so a candle
+    # still forming when first seen ends as the final one.
+    _candles: dict[str, dict[pd.Timestamp, tuple[float, float, float, float, float]]] = field(
+        default_factory=dict
+    )
 
     def on_tick(self, key: str, ts_ms: int, ltp: float, vtt: float | None) -> None:
         ts = pd.Timestamp(ts_ms, unit="ms", tz="UTC").tz_convert(IST).floor("min")
@@ -74,6 +92,14 @@ class BarBuilder:
         prev_vtt = bars[-1].vtt_last if bars else vtt
         bars.append(_Bar(start=ts, open=ltp, high=ltp, low=ltp, close=ltp,
                          vtt_start=prev_vtt, vtt_last=vtt))
+
+    def on_candle(self, key: str, ts_ms: int, open_: float, high: float,
+                  low: float, close: float, volume: float) -> None:
+        """Record the exchange's 1-minute candle for the minute starting at `ts_ms`."""
+        ts = pd.Timestamp(ts_ms, unit="ms", tz="UTC").tz_convert(IST).floor("min")
+        self._candles.setdefault(key, {})[ts] = (
+            float(open_), float(high), float(low), float(close), float(volume)
+        )
 
     def seed(self, key: str, bars_1m: pd.DataFrame) -> None:
         """Pre-load today's bars fetched over REST (scanner started late / restarted)."""
@@ -104,15 +130,21 @@ class BarBuilder:
         opened = cutoff.normalize() + pd.Timedelta(
             hours=SESSION_OPEN[0], minutes=SESSION_OPEN[1]
         )
-        rows = [b for b in self._bars.get(key, []) if opened <= b.start < cutoff]
+        rows = {b.start: (b.open, b.high, b.low, b.close, b.volume)
+                for b in self._bars.get(key, []) if opened <= b.start < cutoff}
+        rows.update({ts: c for ts, c in self._candles.get(key, {}).items()
+                     if opened <= ts < cutoff})
         if not rows:
             return pd.DataFrame(columns=COLS)
-        df = pd.DataFrame(
-            [(b.open, b.high, b.low, b.close, b.volume) for b in rows],
-            index=pd.DatetimeIndex([b.start for b in rows]),
-            columns=COLS,
-        )
-        return df
+        idx = sorted(rows)
+        return pd.DataFrame([rows[ts] for ts in idx], index=pd.DatetimeIndex(idx),
+                            columns=COLS)
+
+    def candle_coverage(self, key: str, now: pd.Timestamp) -> tuple[int, int]:
+        """(minutes served from the exchange candle, closed minutes in total)."""
+        bars = self.closed_bars(key, now)
+        official = self._candles.get(key, {})
+        return sum(1 for ts in bars.index if ts in official), len(bars)
 
     def keys(self) -> list[str]:
         return list(self._bars.keys())

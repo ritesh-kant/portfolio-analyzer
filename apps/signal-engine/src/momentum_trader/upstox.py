@@ -142,6 +142,29 @@ def candles_to_frame(candles: list[list[object]]) -> pd.DataFrame:
     return df.astype(float)[COLS]
 
 
+def _route_candles(
+    key: str,
+    market_ff: dict,
+    on_candle: Callable[[str, int, float, float, float, float, float], None],
+) -> None:
+    """Hand every `I1` candle in one FULL-mode message to `on_candle`.
+
+    int64 fields (`ts`, `vol`) arrive as strings from the SDK's protobuf→dict
+    decode. A malformed entry is skipped rather than raised: the snapshot bar
+    remains as the fallback for that minute.
+    """
+    for c in (market_ff.get("marketOHLC") or {}).get("ohlc") or []:
+        if c.get("interval") != "I1":
+            continue
+        try:
+            on_candle(key, int(c["ts"]), float(c["open"]), float(c["high"]),
+                      float(c["low"]), float(c["close"]), float(c.get("vol", 0)))
+        except (KeyError, TypeError, ValueError):
+            logger.debug("skipping malformed I1 candle for %s: %s", key, c)
+        except Exception:  # noqa: BLE001 — never let a bad candle kill the feed thread
+            logger.exception("on_candle failed for %s", key)
+
+
 class UpstoxClient:
     def __init__(self, access_token: str | None, cache_dir: Path | None = None) -> None:
         self.token = access_token or ""
@@ -298,11 +321,18 @@ class UpstoxClient:
         on_tick: Callable[[str, int, float, float | None], None],
         mode: str = "full",
         on_status: Callable[[str], None] | None = None,
+        on_candle: Callable[[str, int, float, float, float, float, float], None] | None = None,
     ) -> object:
         """Open the V3 feed and route ticks to `on_tick(key, ltt_ms, ltp, vtt)`.
 
         Returns the SDK streamer (call .disconnect()). FULL mode carries `vtt`
         (volume traded today) which the bar builder needs; LTPC does not.
+
+        FULL mode also carries the exchange's 1-minute candle
+        (`marketOHLC.ohlc[interval == "I1"]`, `ts` = minute start in ms), routed
+        to `on_candle(key, ts_ms, open, high, low, close, volume)`. Checked on
+        2026-09-23 against the official intraday endpoint: IKS 15:29 matched to
+        the paisa and the share (1922.2/1927.8/1921.0/1927.8, 2244).
         """
         import upstox_client  # heavy import (protobuf); keep it lazy
 
@@ -321,6 +351,8 @@ class UpstoxClient:
                     ltpc = ff.get("ltpc")
                     if ff.get("vtt") is not None:
                         vtt = float(ff["vtt"])
+                    if on_candle is not None:
+                        _route_candles(key, ff, on_candle)
                 if not ltpc or "ltp" not in ltpc:
                     continue
                 try:

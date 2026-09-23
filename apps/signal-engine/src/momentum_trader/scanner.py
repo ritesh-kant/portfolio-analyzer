@@ -539,6 +539,13 @@ class Scanner:
                 self._tick_entries.append(pos)
             self._tick_rejections.extend(st.rejections[n_r:])
 
+    def _on_candle(self, key: str, ts_ms: int, open_: float, high: float,
+                   low: float, close: float, volume: float) -> None:
+        if key not in self.states:
+            return
+        with self._state_lock:
+            self.builder.on_candle(key, ts_ms, open_, high, low, close, volume)
+
     def _open_count(self) -> int:
         return sum(1 for st in self.states.values() if st.position is not None)
 
@@ -779,6 +786,17 @@ class Scanner:
         )
         if self.discipline.cfg.enabled:
             self._tg(f"guardrails: {self.discipline.summary()}")
+        # How much of the session the engine saw as exchange candles rather than
+        # snapshot-built bars. Anything well under 100% means the feed stopped
+        # sending `I1` and the live arm drifted back to the approximate bars.
+        now = _now()
+        official = total = 0
+        for key in self.states:
+            o, t = self.builder.candle_coverage(key, now)
+            official, total = official + o, total + t
+        if total:
+            self._tg(f"bar source: {official}/{total} minutes "
+                     f"({100.0 * official / total:.1f}%) from exchange 1m candles")
 
     def run(self) -> int:
         today = _now().date()
@@ -813,7 +831,8 @@ class Scanner:
             if s.startswith("error"):
                 self._tg(f"⚠️ feed {s}")
 
-        streamer = self.client.stream(keys, self._on_tick, mode="full", on_status=_status)
+        streamer = self.client.stream(keys, self._on_tick, mode="full", on_status=_status,
+                                      on_candle=self._on_candle)
 
         def _sig(_signum: int, _frame: FrameType | None) -> None:
             self._stop.set()
