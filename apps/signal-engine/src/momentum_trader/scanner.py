@@ -34,7 +34,7 @@ from src.news_trader.market_calendar import is_trading_day
 
 from . import universe
 from .bars import IST, SESSION_OPEN, BarBuilder
-from .catalyst import LOOKBACK as CATALYST_LOOKBACK, feed_last_signal, hard_catalyst
+from .catalyst import FEED_ALIVE_WITHIN, feed_last_signal, hard_catalyst
 from .discipline import DayDiscipline, DisciplineConfig
 from .engine import (
     FILL_FUTURE_TRIGGER,
@@ -416,7 +416,7 @@ class Scanner:
             print("FAIL: Mongo/news signals unavailable; catalyst labels would all be unknown")
             return 5
         last_signal = feed_last_signal(self._signals)
-        feed_stale = last_signal is None or last_signal < datetime.utcnow() - CATALYST_LOOKBACK
+        feed_stale = last_signal is None or last_signal < datetime.utcnow() - FEED_ALIVE_WITHIN
 
         log_path = _repo_path(self.s.mt_log_csv)
         probe = log_path.parent / f".{log_path.name}.dry-run"

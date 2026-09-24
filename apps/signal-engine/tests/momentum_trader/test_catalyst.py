@@ -56,6 +56,15 @@ def test_feed_silent_for_the_whole_window_is_unknown_not_zero():
     assert hard_catalyst(signals, "IKS", AT) == (None, "")
 
 
+def test_monday_morning_after_a_quiet_weekend_is_still_a_live_feed():
+    # Last write Friday 15:00 IST, entry Monday 09:30 IST: no signal in the
+    # 24h event window, but the feed is healthy — the feed never runs weekends.
+    monday = pd.Timestamp("2026-09-28 09:30", tz="Asia/Kolkata")
+    friday = datetime(2026, 9, 25, 9, 30)  # 15:00 IST, naive UTC
+    signals = FakeSignals([{"created_at": friday, "stocks": ["OTHER"], "event_type": "other"}])
+    assert hard_catalyst(signals, "IKS", monday) == (0, "")
+
+
 def test_empty_feed_is_unknown():
     assert hard_catalyst(FakeSignals([]), "IKS", AT) == (None, "")
 

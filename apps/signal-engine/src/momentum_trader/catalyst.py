@@ -8,8 +8,10 @@ classifier's bullish/bearish call is deliberately ignored.
 Absence only means "no catalyst" while the feed is running. `nt_signals` stopped
 on 2026-06-26 (news-trader paused), and every live trade after that was
 stamped 0 — "no event" when the truth was "not looked at". So when the feed
-has written nothing inside the lookback window the answer is `None`
-(unknown), and the forward screen keeps those trades out of both groups.
+has written nothing for FEED_ALIVE_WITHIN the answer is `None` (unknown), and
+the forward screen keeps those trades out of both groups. That is wider than
+LOOKBACK on purpose: the feed has never written on a Saturday or Sunday, so a
+24h liveness test would call a healthy feed dead every Monday morning.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import pandas as pd
 
 HARD_EVENTS = frozenset({"m_and_a", "earnings", "order_win", "regulatory", "capital_action"})
 LOOKBACK = timedelta(hours=24)
+FEED_ALIVE_WITHIN = timedelta(days=4)   # a weekend plus a holiday
 
 
 class _Collection(Protocol):
@@ -41,10 +44,10 @@ def feed_last_signal(signals: _Collection) -> datetime | None:
 def hard_catalyst(signals: _Collection, symbol: str, at: pd.Timestamp) -> tuple[int | None, str]:
     """(1, event_type) if a Group-A signal names `symbol` in the prior 24h,
     (0, '') if none did while the feed was running, (None, '') if the feed
-    wrote nothing at all in that window."""
+    wrote nothing at all for FEED_ALIVE_WITHIN."""
     at_utc = _naive_utc(at)
     feed_alive = signals.find_one(
-        {"created_at": {"$gte": at_utc - LOOKBACK, "$lte": at_utc}},
+        {"created_at": {"$gte": at_utc - FEED_ALIVE_WITHIN, "$lte": at_utc}},
         projection={"_id": 1},
     )
     if not feed_alive:
