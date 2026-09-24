@@ -32,7 +32,8 @@ class _Collection(Protocol):
 
 def _naive_utc(at: pd.Timestamp) -> datetime:
     # pymongo hands back naive UTC datetimes; query with the same convention
-    return (at.tz_convert("UTC").tz_localize(None) if at.tzinfo else at).to_pydatetime()
+    naive: datetime = (at.tz_convert("UTC").tz_localize(None) if at.tzinfo else at).to_pydatetime()
+    return naive
 
 
 def feed_last_signal(signals: _Collection) -> datetime | None:
