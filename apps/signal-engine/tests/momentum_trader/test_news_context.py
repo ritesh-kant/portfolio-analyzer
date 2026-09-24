@@ -89,4 +89,4 @@ def test_results_sorted_newest_first_and_capped():
 def test_output_shape_is_display_only_fields():
     articles = [_article(raw_text="RELIANCE news")]
     [match] = select_matches(articles, "RELIANCE", AT)
-    assert set(match) == {"headline", "source", "publisher", "tier", "url", "published_at"}
+    assert set(match) == {"headline", "source", "publisher", "tier", "url", "text", "published_at"}

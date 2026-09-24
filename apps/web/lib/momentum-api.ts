@@ -137,6 +137,8 @@ export interface NewsContextItem {
   publisher?: string;
   tier?: string;
   url?: string | null;
+  /** Filing summary or feed description, headline stripped. */
+  text?: string | null;
   published_at: string;
 }
 

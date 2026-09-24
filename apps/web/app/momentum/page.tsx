@@ -397,6 +397,7 @@ function NewsContext({ trade }: { trade: MomentumTrade }) {
             ) : (
               <p className="font-medium">{item.headline}</p>
             )}
+            {item.text && <p className="mt-1 text-xs text-ink/75">{item.text}</p>}
             <p className="mt-0.5 text-xs text-ink/55">
               {newsAt(item.published_at)} · {item.publisher ?? item.source}
               {item.tier ? ` · ${item.tier}` : ''}
