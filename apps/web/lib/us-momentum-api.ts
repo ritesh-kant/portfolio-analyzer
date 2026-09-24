@@ -59,7 +59,7 @@ export interface USMomentumTrade {
   day_chg_pct?: number;
   rvol?: number;
   float_shares?: number | null;
-  catalyst?: number;
+  catalyst?: number | null;
   exchange?: string;
   /** Which of the five criteria actually ran on this entry. */
   screen_flags?: Record<string, number>;

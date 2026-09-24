@@ -376,7 +376,7 @@ function NewsContext({ trade }: { trade: MomentumTrade }) {
     <section className="rounded-xl border border-black/10 bg-panel p-4 shadow-card">
       <h3 className="font-display text-lg">News around entry</h3>
       <p className="text-xs text-ink/55">
-        Headlines mentioning {trade.symbol} in the 24h before entry — for context only, not a signal
+        NSE filings by {trade.symbol} in the 24h before entry — for context only, not a signal
         input.
       </p>
       <ul className="mt-3 space-y-2">
@@ -466,7 +466,7 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
             RVOL {trade.rvol?.toFixed(2) ?? '—'}×
           </span>
           <span className="rounded-full bg-black/5 px-2.5 py-1">
-            Catalyst {trade.catalyst ? 'yes' : 'no'}
+            Catalyst {trade.catalyst == null ? 'unknown' : trade.catalyst ? 'yes' : 'no'}
           </span>
           <span className="rounded-full bg-black/5 px-2.5 py-1">
             News{' '}

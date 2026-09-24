@@ -487,8 +487,8 @@ class _FakeSignals:
     def find_one(self, filter: dict, sort=None, projection=None):  # noqa: ANN001
         lo, hi = filter["created_at"]["$gte"], filter["created_at"]["$lte"]
         hits = [d for d in self.docs
-                if filter["stocks"] in d["stocks"]
-                and d["event_type"] in filter["event_type"]["$in"]
+                if ("stocks" not in filter or filter["stocks"] in d["stocks"])
+                and ("event_type" not in filter or d["event_type"] in filter["event_type"]["$in"])
                 and lo <= d["created_at"] <= hi]
         hits.sort(key=lambda d: d["created_at"], reverse=True)
         return hits[0] if hits else None

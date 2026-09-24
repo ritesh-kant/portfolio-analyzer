@@ -152,7 +152,8 @@ VOL_BASELINE_MIN_BARS = 3
 # so it is RECORDED on every entry and drawn on the review chart — never gated.
 TREND_EMA_SPAN = 200
 
-CatalystLookup = Callable[[str, pd.Timestamp], tuple[int, str]]
+# (1 | 0 | None-if-the-feed-was-down, event_type)
+CatalystLookup = Callable[[str, pd.Timestamp], tuple[int | None, str]]
 
 
 @dataclass
@@ -462,7 +463,7 @@ class Candidate:
     setup: Setup
     day_chg_pct: float
     rvol: float
-    catalyst: int
+    catalyst: int | None       # None = catalyst feed down, not "no catalyst"
     event_type: str
     candle_tags: list[str]
     # Context-checked formations, with exact timeframe, candles and rule version.

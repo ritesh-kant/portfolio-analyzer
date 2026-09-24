@@ -34,7 +34,7 @@ from src.news_trader.market_calendar import is_trading_day
 
 from . import universe
 from .bars import IST, SESSION_OPEN, BarBuilder
-from .catalyst import hard_catalyst
+from .catalyst import LOOKBACK as CATALYST_LOOKBACK, feed_last_signal, hard_catalyst
 from .discipline import DayDiscipline, DisciplineConfig
 from .engine import (
     FILL_FUTURE_TRIGGER,
@@ -268,7 +268,7 @@ def entry_message(p: Position, *, fixed_exit: bool) -> str:
         f"Entry: <b>₹{entry:,.2f}</b> × {plan.qty} (₹{plan.notional_inr:,.0f})",
         f"Stop: <b>₹{stop:,.2f}</b> ({stop_pct:+.2f}%, risk ₹{plan.risk_inr:,.0f})",
         f"Target: <b>₹{target:,.2f}</b> ({tgt_note})",
-        f"Catalyst: {p.cand.catalyst}",
+        f"Catalyst: {'unknown (feed down)' if p.cand.catalyst is None else p.cand.catalyst}",
     ])
 
 
@@ -367,7 +367,7 @@ class Scanner:
             self._db.list_collection_names()
             self._signals = self._db["nt_signals"]
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Mongo unavailable (%s) — CSV-only ledger, catalyst=0 for all", exc)
+            logger.warning("Mongo unavailable (%s) — CSV-only ledger, catalyst unknown for all", exc)
             self._db = None
             self._signals = None
 
@@ -413,8 +413,10 @@ class Scanner:
 
         self._connect_db()
         if self._signals is None:
-            print("FAIL: Mongo/news signals unavailable; catalyst labels would all be zero")
+            print("FAIL: Mongo/news signals unavailable; catalyst labels would all be unknown")
             return 5
+        last_signal = feed_last_signal(self._signals)
+        feed_stale = last_signal is None or last_signal < datetime.utcnow() - CATALYST_LOOKBACK
 
         log_path = _repo_path(self.s.mt_log_csv)
         probe = log_path.parent / f".{log_path.name}.dry-run"
@@ -430,18 +432,22 @@ class Scanner:
         print(f"  strategy={self.s.mt_strategy}")
         print(f"  REST={inst.symbol} intraday bars={len(bars)}")
         print("  WebSocket=open")
-        print("  catalyst database=connected")
+        if feed_stale:
+            print(f"  WARN: catalyst feed stale (last nt_signals write {last_signal or 'never'} UTC) "
+                  "— every catalyst label will be recorded as unknown")
+        else:
+            print(f"  catalyst feed=live (last write {last_signal} UTC)")
         print(f"  paper log={log_path}")
         return 0
 
-    def _catalyst(self, symbol: str, at: pd.Timestamp) -> tuple[int, str]:
+    def _catalyst(self, symbol: str, at: pd.Timestamp) -> tuple[int | None, str]:
         if self._signals is None:
-            return 0, ""
+            return None, ""
         try:
             return hard_catalyst(self._signals, symbol, at)
         except Exception:  # noqa: BLE001
             logger.exception("catalyst lookup failed")
-            return 0, ""
+            return None, ""
 
     def prepare(self, today: date) -> list[str]:
         """Resolve the universe and pull the per-name context. Returns instrument keys.
