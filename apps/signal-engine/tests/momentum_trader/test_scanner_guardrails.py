@@ -166,7 +166,7 @@ def _iks_position(symbol: str = "IKS") -> Position:
 def test_entry_message_shows_target_on_its_own_line():
     msg = entry_message(_iks_position(), fixed_exit=False)
     lines = msg.split("\n")
-    assert lines[0] == "📝 <b>ENTER IKS</b>"
+    assert lines[0] == "🟢 <b>ENTER IKS</b>"
     assert "Stop: <b>₹1,921.40</b> (-0.71%, risk ₹247)" in lines
     target = next(line for line in lines if line.startswith("Target:"))
     assert "<b>₹1,962.50</b>" in target and "2.0R" in target

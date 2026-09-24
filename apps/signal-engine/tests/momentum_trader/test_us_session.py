@@ -402,3 +402,16 @@ def test_holiday_exits_without_touching_the_network():
     thanksgiving = pd.Timestamp("2026-11-26 09:20", tz=ET)
     assert us_session_mod.run(Settings(), dry_run=True, clock=lambda: thanksgiving) == 0
 
+
+
+def test_telegram_says_when_a_stock_joins_the_watchlist_and_when_it_gets_attention(hist):
+    sent: list[str] = []
+    feed = FakeFeed(guide_day(float(hist["close"].iloc[-1]), minutes=60), hist)
+    sess = USSession(feed, us_cfg(), USPaperLedger(FakeDB(), "us_test"), notify=sent.append)
+    run_minutes(sess, "09:31", "10:29")
+    added = [m for m in sent if "added to watchlist" in m]
+    assert len(added) == 1 and "<b>USX</b>" in added[0], sent    # once, not every cycle
+    assert "float 4.0M" in added[0] and "RVOL 8.0x" in added[0]
+    first_attention = next(i for i, m in enumerate(sent) if m.startswith("👀"))
+    assert sent.index(added[0]) < first_attention
+    assert any(m.startswith("🟢 <b>ENTER USX") for m in sent)

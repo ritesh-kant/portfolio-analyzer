@@ -55,6 +55,14 @@ import pandas as pd
 from src.config import Settings
 from src.news_trader import telegram
 
+from .alerts import (
+    US_TAG,
+    attention_message,
+    entry_message,
+    eod_message,
+    exit_message,
+    watchlist_message,
+)
 from .discipline import DayDiscipline, DisciplineConfig
 from .engine import (
     FILL_FUTURE_TRIGGER,
@@ -69,6 +77,7 @@ from .engine import (
     resample_5m,
     step,
 )
+from .exits import MODE_FIXED
 from .market import US
 from .us_ledger import USPaperLedger
 from .us_scanner import Feed, USScanner, session_times
@@ -190,6 +199,11 @@ class USSession:
         # not rewritten every cycle.
         self._bars_saved: dict[str, pd.Timestamp] = {}
         self.closed_trades: list[ClosedTrade] = []
+        # Day totals for the EOD message; the per-cycle lists on each watch's
+        # state are cleared once written to the ledger.
+        self.attention_count = 0
+        self.candidate_count = 0
+        self.rejection_reasons: list[str] = []
 
     # ── helpers ─────────────────────────────────────────────────────────────
     def _open_count(self) -> int:
@@ -364,14 +378,24 @@ class USSession:
                 self._sync_risk()
                 if self.discipline.halted and not was:
                     self.notify(f"🛑 HALTED <b>{self.discipline.halted_reason}</b>")
+        for sym in report.discovered:
+            row = self.rows.get(sym)
+            if row is not None:
+                self.notify(watchlist_message(
+                    sym, price=row.price, day_chg_pct=row.day_chg_pct, rvol=row.rvol,
+                    float_shares=row.float_shares, can_enter=self.watch[sym].has_profile))
         for w in self.watch.values():
             st = w.state
             for ev in st.attention_events:
                 self.ledger.attention(ev)
+                self.notify(attention_message(ev))
             for c in st.candidates:
                 self.ledger.candidate(c)
             for r in st.rejections:
                 self.ledger.rejected(r)
+            self.attention_count += len(st.attention_events)
+            self.candidate_count += len(st.candidates)
+            self.rejection_reasons.extend(r.reason for r in st.rejections)
             st.attention_events.clear()
             st.candidates.clear()
             st.rejections.clear()
@@ -380,17 +404,14 @@ class USSession:
             self.ledger.opened(p, self.rows.get(sym), self.feed.exchange_of.get(sym, ""),
                                self.feed.quote_source.get(sym, ""))
             report.opened.append(sym)
-            self.notify(f"📝 ENTER <b>{sym}</b> ${p.plan.entry:.2f} ×{p.plan.qty} "
-                        f"stop ${p.plan.stop:.2f} target ${p.plan.target:.2f}")
+            self.notify(entry_message(p, fixed_exit=self.cfg.exit_mode == MODE_FIXED, cur="$"))
         for t in closed:
             sym = t.cand.symbol
             self.ledger.closed(t, self.bars.get(sym),
                                held_through_halt=sym in self.scanner.halts.held_through_halt)
             self.closed_trades.append(t)
             report.closed.append(sym)
-            mark = "✅" if t.net_inr > 0 else "❌"
-            self.notify(f"{mark} EXIT <b>{sym}</b> {t.exit_reason} ${t.exit:.2f} "
-                        f"net ${t.net_inr:,.2f}")
+            self.notify(exit_message(t, cur="$"))
 
     def _write_watchlist(self, now: pd.Timestamp) -> None:
         """The DAY's funnel: every stock seen, its latest verdict, and whether
@@ -436,6 +457,14 @@ class USSession:
         return (f"{len(self.rows)} screened, {len(self.watch)} passed, "
                 f"{len(self.closed_trades)} trades ({wins} won), net ${net:,.2f}")
 
+    def eod_message(self, day: date) -> str:
+        return eod_message(
+            day=day, trades=self.closed_trades, attention=self.attention_count,
+            candidates=self.candidate_count, rejection_reasons=self.rejection_reasons,
+            cur="$",
+            extra=[f"🧮 Screen: {len(self.rows)} screened → {len(self.watch)} passed"],
+        )
+
 
 # ── the scheduled task ──────────────────────────────────────────────────────
 def _now() -> pd.Timestamp:
@@ -458,7 +487,7 @@ def run(settings: Settings, *, once: bool = False, dry_run: bool = False,
     def tg(text: str) -> None:
         if not dry_run:
             telegram._send(settings.telegram_bot_token, settings.telegram_chat_id,
-                           f"🇺🇸 <b>US</b> {text}")
+                           f"{US_TAG} {text}")
 
     now = clock()
     today = now.date()
@@ -504,7 +533,7 @@ def run(settings: Settings, *, once: bool = False, dry_run: bool = False,
     _, _, sweep = session_times(today)
     finish = _at(day, sweep) + pd.Timedelta(minutes=2)
     exit_at = _at(day, US.process_end)
-    tg(f"ready {today}: entries {US.session_start:%H:%M}–{cfg.entry_deadline:%H:%M} ET, "
+    tg(f"🔔 ready {today}: entries {US.session_start:%H:%M}–{cfg.entry_deadline:%H:%M} ET, "
        f"risk ${settings.mt_us_risk_usd:.0f}/trade"
        + (" · early close" if session_times(today)[1] != US.eod_close else ""))
     if not settings.mt_us_bypass_market_hours:
@@ -545,7 +574,7 @@ def run(settings: Settings, *, once: bool = False, dry_run: bool = False,
             _time.sleep(max(0.0, min(settings.mt_us_quote_poll_seconds,
                                      (next_bar - clock()).total_seconds())))
 
-    tg(f"done {today}: {session.summary()}")
+    tg(session.eod_message(today))
     if clock() < exit_at:
         _sleep_until(exit_at, clock)
     return 0

@@ -15,7 +15,6 @@ module in this file by design (hypothesis v2 §3, no-relax rules).
 
 from __future__ import annotations
 
-import html
 import logging
 import os
 import signal
@@ -33,6 +32,7 @@ from src.news_trader import telegram
 from src.news_trader.market_calendar import is_trading_day
 
 from . import universe
+from .alerts import NSE_TAG, attention_message, entry_message, eod_message, exit_message
 from .bars import IST, SESSION_OPEN, BarBuilder
 from .catalyst import FEED_ALIVE_WITHIN, feed_last_signal, hard_catalyst
 from .discipline import DayDiscipline, DisciplineConfig
@@ -246,32 +246,6 @@ def _now() -> pd.Timestamp:
     return pd.Timestamp.now(tz=IST)
 
 
-def entry_message(p: Position, *, fixed_exit: bool) -> str:
-    """Telegram body for a new position (HTML parse mode, one fact per line).
-
-    The target is always shown. Under a signal-based exit it is the plan's 2R
-    price and nothing sells there, so the line says so rather than implying an
-    order is resting at it.
-    """
-    plan = p.plan
-    entry, stop, target = plan.entry, plan.stop, plan.target
-    stop_pct = (stop - entry) / entry * 100.0
-    tgt_pct = (target - entry) / entry * 100.0
-    rr = (target - entry) / (entry - stop) if entry > stop else 0.0
-    if fixed_exit:
-        tgt_note = f"{rr:.1f}R, {tgt_pct:+.2f}% · {html.escape(p.target_source)}"
-    else:
-        tgt_note = f"{rr:.1f}R, {tgt_pct:+.2f}% · <i>reference only — exit is signal-based</i>"
-    return "\n".join([
-        f"📝 <b>ENTER {html.escape(p.cand.symbol)}</b>",
-        f"Setup: <code>{html.escape(p.cand.setup.name)}</code>",
-        f"Entry: <b>₹{entry:,.2f}</b> × {plan.qty} (₹{plan.notional_inr:,.0f})",
-        f"Stop: <b>₹{stop:,.2f}</b> ({stop_pct:+.2f}%, risk ₹{plan.risk_inr:,.0f})",
-        f"Target: <b>₹{target:,.2f}</b> ({tgt_note})",
-        f"Catalyst: {'unknown (feed down)' if p.cand.catalyst is None else p.cand.catalyst}",
-    ])
-
-
 class Scanner:
     def __init__(self, settings: Settings) -> None:
         self.s = settings
@@ -355,7 +329,7 @@ class Scanner:
     # ── notifications ─────────────────────────────────────────────────────────
 
     def _tg(self, text: str) -> None:
-        telegram._send(self.s.telegram_bot_token, self.s.telegram_chat_id, f"🧭 <b>MT</b> {text}")
+        telegram._send(self.s.telegram_bot_token, self.s.telegram_chat_id, f"{NSE_TAG} {text}")
 
     # ── startup ───────────────────────────────────────────────────────────────
 
@@ -518,7 +492,7 @@ class Scanner:
             self.turnover[sym] = turnover_cr
             keys.append(inst.key)
         logger.info("universe ready: %d names tradeable, skipped=%s", len(keys), skipped)
-        self._tg(f"ready {today}: {len(keys)} names in scan, skipped {skipped}")
+        self._tg(f"🔔 ready {today}: {len(keys)} names in scan, skipped {skipped}")
         return keys
 
     def _cached_daily(self, inst: Instrument, start: date, end: date) -> pd.DataFrame:
@@ -670,11 +644,7 @@ class Scanner:
                 "attention %s reason=%s chg=%.1f%% rvol=%.1f tags=%s",
                 a.symbol, a.reason, a.day_chg_pct, a.rvol, ",".join(a.candle_tags) or "-",
             )
-            self._tg(
-                f"👀 ATTENTION <b>{a.symbol}</b> {a.reason} "
-                f"chg {a.day_chg_pct:.1f}% RVOL {a.rvol:.1f}x "
-                f"tags={','.join(a.candle_tags) or '-'}"
-            )
+            self._tg(attention_message(a))
         for c in candidates:
             self._ledger.candidate(c)
             logger.info(
@@ -704,11 +674,7 @@ class Scanner:
                 else pd.DataFrame()
             )
             self._ledger.closed(t, round_levels_above(t.entry)[0], chart_bars)
-            mark = "✅" if t.net_inr > 0 else "❌"
-            self._tg(
-                f"{mark} EXIT <b>{t.cand.symbol}</b> {t.exit_reason} "
-                f"@₹{t.exit:.2f} net ₹{t.net_inr:,.0f}"
-            )
+            self._tg(exit_message(t))
 
     def _market_looks_closed(self, now: pd.Timestamp) -> bool:
         """True once the grace time has passed with not one bar built anywhere.
@@ -804,19 +770,10 @@ class Scanner:
         closed = [t for st in self.states.values() for t in st.closed]
         cands = sum(len(st.candidates) for st in self.states.values())
         attention = sum(len(st.attention_events) for st in self.states.values())
-        rejections = sum(len(st.rejections) for st in self.states.values())
-        net = sum(t.net_inr for t in closed)
-        wins = sum(1 for t in closed if t.net_inr > 0)
-        by_setup: dict[str, int] = {}
-        for t in closed:
-            by_setup[t.cand.setup.name] = by_setup.get(t.cand.setup.name, 0) + 1
-        self._tg(
-            f"EOD: {attention} attention, {cands} candidates, {rejections} rejections, "
-            f"{len(closed)} trades, {wins}W/{len(closed) - wins}L, net ₹{net:,.0f}, "
-            f"setups={by_setup}, feed={self._feed_status}"
-        )
+        reasons = [r.reason for st in self.states.values() for r in st.rejections]
+        extra: list[str] = []
         if self.discipline.cfg.enabled:
-            self._tg(f"guardrails: {self.discipline.summary()}")
+            extra.append(f"🛡️ Guardrails: {self.discipline.summary()}")
         # How much of the session the engine saw as exchange candles rather than
         # snapshot-built bars. Anything well under 100% means the feed stopped
         # sending `I1` and the live arm drifted back to the approximate bars.
@@ -825,9 +782,11 @@ class Scanner:
         for key in self.states:
             from_exchange, minutes = self.builder.candle_coverage(key, now)
             official, total = official + from_exchange, total + minutes
-        if total:
-            self._tg(f"bar source: {official}/{total} minutes "
-                     f"({100.0 * official / total:.1f}%) from exchange 1m candles")
+        bars = (f"{100.0 * official / total:.1f}% exchange candles "
+                f"({official:,} of {total:,} min)" if total else "no bars")
+        extra.append(f"📊 Bars: {bars} · feed {self._feed_status}")
+        self._tg(eod_message(day=now.date(), trades=closed, attention=attention,
+                             candidates=cands, rejection_reasons=reasons, extra=extra))
 
     def run(self) -> int:
         today = _now().date()
