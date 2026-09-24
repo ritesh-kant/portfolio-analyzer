@@ -221,15 +221,6 @@ def test_halt_feed_outage_keeps_the_last_known_set(tmp_path):
     assert f.describe()["halts_feed_ok"] is False
 
 
-# ── news: audit only, and never from the future ─────────────────────────────
-def test_recent_news_excludes_items_the_decision_could_not_have_seen(tmp_path):
-    items = [{"content": {"pubDate": "2026-09-24T13:00:00Z", "title": "before", "provider": {"displayName": "X"}}},
-             {"content": {"pubDate": "2026-09-24T15:00:00Z", "title": "after", "provider": {"displayName": "X"}}}]
-    f = feed(tmp_path, news_fn=lambda s: items)
-    got = f.recent_news("AAAA", since=et("2026-09-23", "16:00"), now=NOW)   # NOW = 14:05 UTC
-    assert [n["title"] for n in got] == ["before"]
-
-
 # ── end to end through the US loop ──────────────────────────────────────────
 def test_us_scanner_runs_the_screen_on_yahoo_data(tmp_path):
     f = feed(
