@@ -17,7 +17,8 @@ What a session does
                market profile (clock, costs, sizing) differs
           between bars, armed entries are checked against the latest price
           every ~10 s (Yahoo has no websocket)
-10:00     peak-hours deadline: no new entries after this (the guide's window)
+15:10     entry cutoff: no new entries after this. (The guide's 10:00
+          peak-hours deadline applies only with MT_US_PEAK_HOURS_ONLY=true.)
 15:54     the engine's own end-of-day exit; 15:56 wall-clock sweep backstop
 16:20     exit
 
@@ -111,7 +112,8 @@ def build_engine_config(settings: Settings, session_date: date,
 
     Only four kinds of value change, and each is a market fact, not a tuning:
     the market profile (costs + sizing), the clock (cutoff, EOD, and the peak
-    window, which shortens on early-close days), the money scale (dollars), and
+    window — off by default, see `mt_us_peak_hours_only` — which shortens on
+    early-close days), the money scale (dollars), and
     the attention day-change floor, which becomes criterion 2's +10% instead of
     NSE's +1.5%. Everything the checklist says is inherited unchanged.
     """
@@ -126,6 +128,7 @@ def build_engine_config(settings: Settings, session_date: date,
         max_notional_inr=settings.mt_us_max_notional_usd,
         entry_cutoff=cutoff,
         eod_close=eod_close,
+        peak_hours_only=settings.mt_us_peak_hours_only,
         peak_hours_end=min(_parse_hhmm(settings.mt_us_peak_hours_end), cutoff),
         attention_day_chg_min=ucfg.day_chg_min_pct,
         # Every name the engine sees has already passed 5x naive RVOL, which

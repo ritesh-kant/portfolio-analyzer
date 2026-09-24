@@ -242,7 +242,11 @@ class Settings(BaseSettings):
     mt_us_max_positions: int = 10
     mt_us_cache_dir: str = ".cache_yahoo_us"  # float cache (one file per day)
     # The guide's window is 07:00-10:00 ET; pre-market is not traded in v1, so
-    # this leaves 09:30-10:00. Widening it is a strategy change, not a fix.
+    # with the rule on it leaves 09:30-10:00. Operator turned it OFF 2026-09-24
+    # (entries run to the 15:10 cutoff): 6 of the day's 14 screen passes first
+    # appeared after 10:00. A strategy change, not a fix — the NSE arm keeps
+    # its own peak-hours rule. `mt_us_peak_hours_end` applies only when on.
+    mt_us_peak_hours_only: bool = False
     mt_us_peak_hours_end: str = "10:00"
     # Yahoo labels some quotes "Delayed Quote". Until `yahoo_feed --check` has
     # shown that label to be cosmetic during a live session, an entry is not

@@ -149,7 +149,7 @@ def test_a_tight_pause_is_refused_by_the_cost_gate_on_the_real_engine():
 # ── the config is the NSE strategy, moved, not rewritten ────────────────────
 ALLOWED_TO_DIFFER = {
     "market", "risk_inr", "max_notional_inr", "entry_cutoff", "eod_close",
-    "peak_hours_end", "attention_day_chg_min", "one_trade_per_day", "exit_cfg",
+    "peak_hours_only", "peak_hours_end", "attention_day_chg_min", "one_trade_per_day", "exit_cfg",
 }
 
 
@@ -167,7 +167,7 @@ def test_us_config_is_the_us_market_in_dollars():
     cfg = us_cfg()
     assert cfg.market is US
     assert (cfg.risk_inr, cfg.max_notional_inr) == (50.0, 5_000.0)
-    assert cfg.entry_deadline == time(10, 0)
+    assert cfg.entry_deadline == time(15, 10)     # peak-hours rule off by default
     assert cfg.eod_close == time(15, 54)
     assert cfg.attention_day_chg_min == 10.0
 
@@ -176,7 +176,14 @@ def test_early_close_day_shortens_the_session():
     cfg = build_engine_config(Settings(), date(2026, 11, 27), USUniverseConfig())
     assert cfg.eod_close == time(12, 54)
     assert cfg.entry_cutoff == time(12, 10)
-    assert cfg.entry_deadline == time(10, 0)
+    assert cfg.entry_deadline == time(12, 10)
+
+
+def test_peak_hours_rule_can_be_turned_back_on():
+    on = Settings(mt_us_peak_hours_only=True)
+    assert build_engine_config(on, DAY, USUniverseConfig()).entry_deadline == time(10, 0)
+    early = build_engine_config(on, date(2026, 11, 27), USUniverseConfig())
+    assert early.entry_deadline == time(10, 0)
 
 
 # ── the live loop, against a fake feed ──────────────────────────────────────
