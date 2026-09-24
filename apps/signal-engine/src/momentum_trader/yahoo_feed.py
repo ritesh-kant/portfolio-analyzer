@@ -58,6 +58,7 @@ from typing import Any
 import pandas as pd
 
 from .market import US
+from .us_calendar import is_early_close
 from .us_screener import USQuote
 from .us_universe import USNameFacts, USUniverseConfig
 
@@ -171,6 +172,42 @@ def _normalise(raw: pd.DataFrame | None) -> pd.DataFrame:
     df = raw.rename(columns=str.lower)[COLS].copy()
     df.index = pd.DatetimeIndex(df.index).tz_convert(ET_TZ)
     return df
+
+
+def fill_quiet_minutes(df: pd.DataFrame) -> pd.DataFrame:
+    """Give every regular-session minute of each PRIOR day a bar.
+
+    Yahoo omits a minute in which nothing traded. On the thin low-float names
+    this arm screens, that is most minutes (2026-09-24: GCTK had 13% of its
+    last five sessions' minutes, SPHL 2%). `resample_5m` keeps only 5-minute
+    bars whose five minutes all exist, so those names got 0-13 warm-up bars
+    against the 20 the EMA needs, and the volume profile had holes where RVOL
+    reads None — the engine could not enter them at all.
+
+    A minute with no trades is a flat, zero-volume bar at the last traded
+    price; that is what happened, not an invention. Only history is filled —
+    today's live bars are left as Yahoo sends them, so a missing minute still
+    cannot fabricate a pattern candle on the bar an entry is decided on.
+    Minutes before the first trade in the window have no price and are left
+    out.
+    """
+    if df.empty:
+        return df
+    full: list[pd.DatetimeIndex] = []
+    for day in sorted(set(df.index.normalize())):
+        end = pd.Timedelta(hours=13) if is_early_close(day.date()) else pd.Timedelta(
+            hours=US.session_end.hour, minutes=US.session_end.minute)
+        start = pd.Timedelta(hours=US.session_start.hour, minutes=US.session_start.minute)
+        full.append(pd.date_range(day + start, day + end, freq="1min", inclusive="left"))
+    idx = full[0].append(full[1:]) if len(full) > 1 else full[0]
+    out = df.reindex(idx.union(df.index))
+    quiet = out["close"].isna()
+    close = out["close"].ffill()
+    for col in ("open", "high", "low"):
+        out[col] = out[col].where(~quiet, close)
+    out["close"] = close
+    out["volume"] = out["volume"].fillna(0)
+    return out[out["close"].notna()]
 
 
 @dataclass
@@ -339,7 +376,7 @@ class YahooFeed:
             return pd.DataFrame(columns=COLS)
         df = pd.concat(frames).sort_index()
         df = df[~df.index.duplicated(keep="last")]
-        return df[df.index < today]
+        return fill_quiet_minutes(df[df.index < today])
 
     def daily(self, symbol: str, now: pd.Timestamp) -> pd.DataFrame:
         """Completed daily bars before today (yesterday's high/low/close)."""

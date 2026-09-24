@@ -308,6 +308,7 @@ Resources:
             - { Name: MT_US_RISK_USD, Value: '50' }
             - { Name: MT_US_MAX_NOTIONAL_USD, Value: '5000' }
             - { Name: MT_US_MAX_POSITIONS, Value: '10' }
+            - { Name: MT_US_PEAK_HOURS_ONLY, Value: 'false' }   # entries to the 15:10 ET cutoff
             - { Name: MT_US_PEAK_HOURS_END, Value: '10:00' }
             - { Name: MT_US_BLOCK_DELAYED_QUOTES, Value: 'true' }
             - { Name: MT_US_QUOTE_POLL_SECONDS, Value: '10' }

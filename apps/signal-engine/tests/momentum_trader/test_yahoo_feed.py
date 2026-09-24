@@ -250,3 +250,60 @@ def test_us_scanner_runs_the_screen_on_yahoo_data(tmp_path):
     stored = scanner.watchlist_document(NOW)
     assert stored["feed"]["source"] == "yahoo+nasdaq_halts"
     assert "criterion_3" in stored["feed"]
+
+
+# ── quiet minutes in prior-session history ──────────────────────────────────
+def _sparse_day(day: str, minutes: dict[str, float]) -> pd.DataFrame:
+    idx = pd.DatetimeIndex([et(day, m) for m in minutes])
+    px = list(minutes.values())
+    return pd.DataFrame({"open": px, "high": px, "low": px, "close": px,
+                         "volume": [500.0] * len(px)}, index=idx)
+
+
+def test_quiet_minutes_become_flat_zero_volume_bars_at_the_last_price():
+    raw = _sparse_day("2026-09-23", {"09:30": 2.0, "09:33": 2.2, "15:59": 2.1})
+    out = yf_mod.fill_quiet_minutes(raw)
+    assert len(out) == 390 and out.index.is_unique
+    gap = out.loc[et("2026-09-23", "09:31")]
+    assert (gap["open"], gap["high"], gap["low"], gap["close"], gap["volume"]) == (2.0, 2.0, 2.0, 2.0, 0)
+    assert out.loc[et("2026-09-23", "09:33"), "volume"] == 500      # real bars untouched
+    assert out["volume"].sum() == 1500                               # no volume invented
+
+
+def test_a_quiet_open_carries_the_previous_sessions_close():
+    raw = pd.concat([_sparse_day("2026-09-22", {"15:59": 3.0}),
+                     _sparse_day("2026-09-23", {"10:05": 3.4})])
+    out = yf_mod.fill_quiet_minutes(raw)
+    assert out.loc[et("2026-09-23", "09:30"), "close"] == 3.0
+    # nothing before the first trade in the window has a price, so it is left out
+    assert out.index[0] == et("2026-09-22", "15:59")
+
+
+def test_early_close_days_stop_at_13_00():
+    raw = _sparse_day("2026-11-27", {"09:30": 1.0})
+    out = yf_mod.fill_quiet_minutes(raw)
+    assert out.index[-1] == et("2026-11-27", "12:59") and len(out) == 210
+
+
+def test_filled_history_gives_a_thin_name_its_ema_warm_up():
+    """2026-09-24 GCTK: 13% of prior minutes present -> 3 complete 5m bars,
+    so the 20-bar EMA could not warm before the entry window closed."""
+    from src.momentum_trader.engine import resample_5m
+    mins = {f"{9 + (30 + i) // 60:02d}:{(30 + i) % 60:02d}": 2.0 + i / 1000
+            for i in range(0, 390, 8)}                                # 1 minute in 8
+    raw = _sparse_day("2026-09-23", mins)
+    assert len(resample_5m(raw)) == 0
+    assert len(resample_5m(yf_mod.fill_quiet_minutes(raw))) == 78
+
+
+def test_history_is_filled_but_todays_live_bars_are_not(tmp_path):
+    day = pd.concat([_sparse_day("2026-09-23", {"09:30": 1.0, "09:40": 1.1}),
+                     _sparse_day("2026-09-24", {"09:30": 1.2, "09:40": 1.3})])
+    raw = day.rename(columns=str.capitalize)
+    f = feed(tmp_path, history_fn=lambda s: raw, history_range_fn=lambda s, a, b: raw,
+             settle_seconds=0)
+    now = et("2026-09-24", "09:45")
+    assert len(f.history_1m("AAAA", now)) == 390
+    live = f.bars_1m("AAAA", now)
+    assert len(live[live.index >= et("2026-09-24", "09:30")]) == 2      # gaps kept
+    assert len(live) == 4                                                # raw, unfilled
