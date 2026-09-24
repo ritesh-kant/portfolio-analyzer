@@ -260,14 +260,20 @@ export const fetchWatchlistBars = (symbol: string, date: string) =>
     `/mt/watchlist/bars?symbol=${encodeURIComponent(symbol)}&date=${date}`,
   );
 
+/** news = the company announced something; offering = new shares (dilution); filing = routine paperwork. */
+export type WatchlistNewsKind = 'news' | 'offering' | 'filing';
+
+/** A company's own filing: an NSE announcement, or a SEC EDGAR filing (8-K/6-K headline = its press release). */
 export interface WatchlistNewsItem {
   headline: string;
   publisher: string;
   url: string | null;
   published_at: string;
+  kind: WatchlistNewsKind;
+  text: string | null;
 }
 
-/** Per-symbol headlines for one session; a symbol whose lookup failed carries `error`. */
+/** Per-symbol company filings for one session; a symbol whose lookup failed carries `error`. */
 export const fetchWatchlistNews = (date: string, symbols: string[], market: 'NSE' | 'US' = 'NSE') =>
   get<{ date: string; source: string; news: Record<string, WatchlistNewsItem[] | { error: string }> }>(
     `/mt/watchlist/news?date=${date}&market=${market}&symbols=${symbols.map(encodeURIComponent).join(',')}`,
