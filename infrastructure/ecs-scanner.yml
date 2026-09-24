@@ -289,6 +289,11 @@ Resources:
             - { Name: STAGE, Value: !Ref Stage }
             - { Name: AWS_REGION, Value: !Ref AWS::Region }
             - { Name: AWS_SECRETS_ENABLED, Value: 'true' }
+            # Same exemption as the NSE task: no HTTP API and no LLM calls, so
+            # Settings must not demand those keys (it still checks MONGODB_URI).
+            # Without it Settings() refuses to start in prod — first Fargate
+            # run on 2026-09-24 exited 1 on exactly that.
+            - { Name: MOMENTUM_SCANNER_ONLY, Value: 'true' }
             - { Name: TRADING_MODE, Value: paper }
             # The US engine config is DERIVED from this strategy (us_session.
             # build_engine_config), so the two arms run one checklist. These
