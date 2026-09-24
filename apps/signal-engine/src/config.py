@@ -232,6 +232,25 @@ class Settings(BaseSettings):
     mt_one_trade_per_day: bool = False
     mt_bypass_market_hours: bool = False      # run the loop outside 09:15–15:35 (tests)
 
+    # ── US momentum arm (us_scanner.py). DOLLARS, never summed with the above ──
+    # Paper sizing. Chosen, not measured: large enough that IBKR's per-order
+    # minimums do not dominate, small enough to stay a paper number. The
+    # cost-over-risk gate (us_risk) barely depends on size, because per-share
+    # fees scale with quantity, so this mostly sets the dollar scale.
+    mt_us_risk_usd: float = 50.0              # dollars lost if the stop fills
+    mt_us_max_notional_usd: float = 5_000.0   # cap on entry x qty
+    mt_us_max_positions: int = 10
+    mt_us_cache_dir: str = ".cache_yahoo_us"  # float cache (one file per day)
+    # The guide's window is 07:00-10:00 ET; pre-market is not traded in v1, so
+    # this leaves 09:30-10:00. Widening it is a strategy change, not a fix.
+    mt_us_peak_hours_end: str = "10:00"
+    # Yahoo labels some quotes "Delayed Quote". Until `yahoo_feed --check` has
+    # shown that label to be cosmetic during a live session, an entry is not
+    # filled from a price that may be 15 minutes old.
+    mt_us_block_delayed_quotes: bool = True
+    mt_us_quote_poll_seconds: int = 10        # armed entries only; Yahoo has no websocket
+    mt_us_bypass_market_hours: bool = False   # run outside the US session (local tests)
+
     # Observability
     langchain_tracing_v2: bool = False
     langchain_api_key: str = ""

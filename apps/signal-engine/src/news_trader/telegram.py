@@ -13,6 +13,14 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)
 _API_BASE = "https://api.telegram.org/bot{token}/sendMessage"
 
+# The Bot API puts the TOKEN IN THE URL, and httpx logs every request URL at
+# INFO ("HTTP Request: POST https://api.telegram.org/bot<token>/..."). Every
+# entrypoint that configures logging at INFO therefore wrote the bot token to
+# CloudWatch on each alert — found in the mt-scanner logs on 2026-09-24. Raise
+# httpx's own logger to WARNING here, in the one module that builds such a URL,
+# so no caller can re-leak it. Failures still surface: _send logs them itself.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 # Per-process debounce for failure alerts — prevents alert storms when many
 # Lambda invocations fail in the same outage window. Keyed by "category:provider".
 # Lambda warm starts reuse the module, so this persists across invocations within

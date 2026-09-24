@@ -1,0 +1,579 @@
+"""One US paper-trading session, end to end. The Fargate entrypoint.
+
+    python -m src.momentum_trader.us_session            # the scheduled task
+    python -m src.momentum_trader.us_session --once     # one cycle now, then exit
+    python -m src.momentum_trader.us_session --dry-run  # no Mongo, no Telegram
+
+What a session does
+-------------------
+09:20 ET  wake (EventBridge Scheduler, America/New_York — so DST cannot shift it)
+          exit at once on a US holiday
+09:31 →   every minute, a few seconds after each 1-minute bar closes:
+            1. screen: the five criteria (us_universe) over Yahoo's movers
+            2. a stock that newly passes is DISCOVERED: its prior 29 days of
+               1-minute bars build the volume profile and warm the indicators
+            3. every watched stock is stepped through the SAME engine and the
+               SAME rules as the deployed NSE arm (`warrior_strict`) — only the
+               market profile (clock, costs, sizing) differs
+          between bars, armed entries are checked against the latest price
+          every ~10 s (Yahoo has no websocket)
+10:00     peak-hours deadline: no new entries after this (the guide's window)
+15:54     the engine's own end-of-day exit; 15:56 wall-clock sweep backstop
+16:20     exit
+
+Two rules that exist to stop FAKE trades
+----------------------------------------
+* A stock discovered at 10:12 starts from its NEXT bar. Its earlier bars are
+  indicator history only. Replaying them would let the engine enter at 09:50 a
+  stock the screen had not yet found — a fill that could never have happened.
+* An entry fills only from a price observed strictly after the decision,
+  exactly like the NSE quote path. Polling can MISS a fill (a spike through the
+  trigger that reverses between polls); it cannot invent one.
+
+Same strategy, different market
+-------------------------------
+The engine config is DERIVED from the NSE `_strategy_config` for `MT_STRATEGY`
+and then given the US profile, rather than written out again here. A copy would
+drift the first time the NSE checklist changed, and the US arm would quietly be
+testing a different strategy from the one it is compared against.
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import logging
+import os
+import time as _time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from typing import Any, Protocol
+
+import pandas as pd
+
+from src.config import Settings
+from src.news_trader import telegram
+
+from .discipline import DayDiscipline, DisciplineConfig
+from .engine import (
+    FILL_FUTURE_TRIGGER,
+    ClosedTrade,
+    DayState,
+    EngineConfig,
+    Position,
+    Rejection,
+    build_cum_volume_profile,
+    fill_pending_quote,
+    force_close,
+    resample_5m,
+    step,
+)
+from .market import US
+from .us_ledger import USPaperLedger
+from .us_scanner import Feed, USScanner, session_times
+from .us_screener import USScreenRow
+from .us_universe import USUniverseConfig
+
+logger = logging.getLogger(__name__)
+
+PROFILE_DAYS = 20           # same as the NSE scanner
+WARMUP_SESSIONS = 5         # same as the NSE scanner
+NO_DATA_GRACE = (9, 45)     # a real session has printed SPY by now
+REFERENCE_SYMBOL = "SPY"    # the "is the market actually open?" canary
+
+
+class TradingFeed(Feed, Protocol):
+    """What a session needs beyond the screen."""
+
+    settle_seconds: int
+    prev_close_of: dict[str, float]
+    exchange_of: dict[str, str]
+    quote_source: dict[str, str]
+
+    def history_1m(self, symbol: str, now: pd.Timestamp, days: int = 29) -> pd.DataFrame: ...
+    def daily(self, symbol: str, now: pd.Timestamp) -> pd.DataFrame: ...
+    def last_price(self, symbol: str, now: pd.Timestamp) -> float | None: ...
+
+
+def build_engine_config(settings: Settings, session_date: date,
+                        ucfg: USUniverseConfig) -> EngineConfig:
+    """The deployed NSE strategy, moved onto the US profile.
+
+    Only four kinds of value change, and each is a market fact, not a tuning:
+    the market profile (costs + sizing), the clock (cutoff, EOD, and the peak
+    window, which shortens on early-close days), the money scale (dollars), and
+    the attention day-change floor, which becomes criterion 2's +10% instead of
+    NSE's +1.5%. Everything the checklist says is inherited unchanged.
+    """
+    from .scanner import _apply_env_overrides, _parse_hhmm, _strategy_config
+
+    base = _apply_env_overrides(_strategy_config(settings), settings)
+    cutoff, eod_close, _ = session_times(session_date)
+    return dataclasses.replace(
+        base,
+        market=US,
+        risk_inr=settings.mt_us_risk_usd,              # dollars, see EngineConfig.market
+        max_notional_inr=settings.mt_us_max_notional_usd,
+        entry_cutoff=cutoff,
+        eod_close=eod_close,
+        peak_hours_end=min(_parse_hhmm(settings.mt_us_peak_hours_end), cutoff),
+        attention_day_chg_min=ucfg.day_chg_min_pct,
+        # Every name the engine sees has already passed 5x naive RVOL, which
+        # implies a time-of-day RVOL of at least 5x, so NSE's 1.5x floor is
+        # inherited unchanged and never binds.
+        attention_rvol_min=settings.mt_attention_rvol_min,
+        one_trade_per_day=settings.mt_one_trade_per_day,
+    )
+
+
+def _recent_sessions(hist: pd.DataFrame, sessions: int) -> pd.DataFrame | None:
+    if hist.empty:
+        return None
+    days = sorted(set(hist.index.normalize()))[-sessions:]
+    recent = hist[hist.index.normalize().isin(days)]
+    return None if recent.empty else recent
+
+
+@dataclass
+class Watch:
+    """A stock the screen has found today."""
+
+    state: DayState
+    discovered_at: pd.Timestamp
+    last_bar: pd.Timestamp | None
+    has_profile: bool
+    first_passed_at: pd.Timestamp | None = None
+    row: USScreenRow | None = None
+
+
+@dataclass
+class CycleReport:
+    at: pd.Timestamp
+    screened: int
+    passed: int
+    discovered: list[str] = field(default_factory=list)
+    opened: list[str] = field(default_factory=list)
+    closed: list[str] = field(default_factory=list)
+
+
+class USSession:
+    def __init__(
+        self,
+        feed: TradingFeed,
+        cfg: EngineConfig,
+        ledger: USPaperLedger,
+        *,
+        ucfg: USUniverseConfig | None = None,
+        max_positions: int = 10,
+        discipline: DayDiscipline | None = None,
+        notify: Callable[[str], None] = lambda _t: None,
+    ) -> None:
+        if cfg.market is not US:
+            raise ValueError("USSession needs an EngineConfig with market=US")
+        if cfg.fill_mode != FILL_FUTURE_TRIGGER:
+            raise ValueError("the US arm fills from observed quotes only (FILL_FUTURE_TRIGGER)")
+        self.feed = feed
+        self.cfg = cfg
+        self.ucfg = ucfg or USUniverseConfig()
+        self.ledger = ledger
+        self.max_positions = max_positions
+        self.notify = notify
+        self.discipline = discipline or DayDiscipline(DisciplineConfig())
+        self._full_risk = cfg.risk_inr
+        self.scanner = USScanner(feed, self.ucfg, US)
+        self.watch: dict[str, Watch] = {}
+        self.bars: dict[str, pd.DataFrame] = {}
+        self.rows: dict[str, USScreenRow] = {}
+        self.first_seen: dict[str, pd.Timestamp] = {}
+        # Last bar already persisted per watched name, so an unchanged series is
+        # not rewritten every cycle.
+        self._bars_saved: dict[str, pd.Timestamp] = {}
+        self.closed_trades: list[ClosedTrade] = []
+
+    # ── helpers ─────────────────────────────────────────────────────────────
+    def _open_count(self) -> int:
+        return sum(1 for w in self.watch.values() if w.state.position is not None)
+
+    def _sync_risk(self) -> None:
+        self.cfg.risk_inr = self.discipline.risk_inr(self._full_risk)
+
+    def _cancel_pending(self, st: DayState, when: pd.Timestamp, reason: str) -> None:
+        pending = st.pending
+        if pending is None:
+            return
+        st.rejections.append(Rejection(
+            symbol=st.symbol, time=when, reason=reason,
+            setup=pending.cand.setup.name, trigger=pending.cand.setup.trigger,
+        ))
+        st.pending = None
+
+    # ── discovery ───────────────────────────────────────────────────────────
+    def discover(self, symbol: str, now: pd.Timestamp) -> Watch | None:
+        """Build a DayState the moment a stock first passes the screen."""
+        prev_close = self.feed.prev_close_of.get(symbol)
+        if not prev_close:
+            logger.warning("%s passed the screen but has no previous close — skipped", symbol)
+            return None
+        hist = self.feed.history_1m(symbol, now)
+        profile = build_cum_volume_profile(hist, PROFILE_DAYS) if not hist.empty else None
+        if profile is not None and profile.empty:
+            profile = None
+        warm_1m = _recent_sessions(hist, WARMUP_SESSIONS)
+        prev_day = None
+        daily = self.feed.daily(symbol, now)
+        if not daily.empty:
+            prev_day = {"high": float(daily["high"].iloc[-1]),
+                        "low": float(daily["low"].iloc[-1]), "close": prev_close}
+        st = DayState(
+            symbol=symbol, prev_close=prev_close, cum_vol_profile=profile,
+            prev_day=prev_day, warmup_1m=warm_1m,
+            warmup_5m=resample_5m(warm_1m) if warm_1m is not None else None,
+        )
+        bars = self.feed.bars_1m(symbol, now)
+        self.bars[symbol] = bars
+        w = Watch(state=st, discovered_at=now, has_profile=profile is not None,
+                  # Start from the NEXT bar: see the module docstring.
+                  last_bar=bars.index[-1] if not bars.empty else None)
+        self.watch[symbol] = w
+        if profile is None:
+            # The attention path refuses every entry without a profile. Say so
+            # now rather than let the stock sit on the watchlist doing nothing.
+            logger.warning("%s: no 1-minute history, so no volume profile — "
+                           "it is watched but the engine cannot enter it", symbol)
+        return w
+
+    # ── one minute ──────────────────────────────────────────────────────────
+    def cycle(self, now: pd.Timestamp) -> CycleReport:
+        open_syms = {s for s, w in self.watch.items() if w.state.position is not None}
+        result = self.scanner.step(now, open_syms)
+        report = CycleReport(now, result.summary.considered, result.summary.passed)
+
+        for row in result.summary.rows:
+            self.rows[row.symbol] = row
+            self.first_seen.setdefault(row.symbol, now)
+        for sym in result.tradeable:
+            if sym not in self.watch and self.discover(sym, now) is not None:
+                report.discovered.append(sym)
+            if sym in self.watch:
+                w = self.watch[sym]
+                w.row = self.rows.get(sym)
+                w.first_passed_at = w.first_passed_at or now
+
+        entries: list[Position] = []
+        closed: list[ClosedTrade] = []
+        for sym, w in self.watch.items():
+            st = w.state
+            bars = self.feed.bars_1m(sym, now)
+            if not bars.empty:
+                self.bars[sym] = bars
+            may_arm = sym in result.tradeable
+            if st.pending is not None and not may_arm:
+                self._cancel_pending(st, now, result.blocked.get(sym, "left_screen"))
+            if w.last_bar is not None:
+                new = bars[bars.index > w.last_bar]
+            else:
+                # Discovered while its bars could not be read: a bar is only
+                # new if it CLOSED after discovery (start > discovered - 60s).
+                new = bars[bars.index > w.discovered_at - pd.Timedelta(seconds=60)]
+            n_x = len(st.closed)
+            had_pos = st.position
+            for ts in new.index:
+                w.last_bar = ts
+                if st.position is None and st.pending is None and not may_arm:
+                    continue            # nothing to manage and not allowed to arm
+                window = bars.loc[:ts]
+                if (st.pending is not None and st.pending.expires_at is not None
+                        and now > st.pending.expires_at):
+                    fill_pending_quote(st, now, float(window["close"].iloc[-1]), self.cfg, window)
+                had_pending = st.pending
+                step(st, window, self.cfg, lambda _s, _t: (0, ""), allow_replay_fill=False)
+                if had_pending is None and st.pending is not None:
+                    # The decision happened now, on the wall clock, exactly as
+                    # the NSE live path stamps it.
+                    st.pending.decision_time = now
+                    st.pending.expires_at = now + pd.Timedelta(
+                        minutes=self.cfg.attention_pending_minutes)
+                    self._guard(st, now)
+                    if st.pending is not None and self._open_count() >= self.max_positions:
+                        self._cancel_pending(st, now, "max_positions")
+            if st.position is not None and had_pos is None:
+                entries.append(st.position)
+            closed.extend(st.closed[n_x:])
+
+        closed.extend(self._eod_sweep(now))
+        self._record(entries, closed, report)
+        self._write_watchlist(now)
+        return report
+
+    def poll_pending(self, now: pd.Timestamp) -> list[str]:
+        """Between bars: check every armed entry against the latest price."""
+        opened: list[Position] = []
+        for sym, w in self.watch.items():
+            st = w.state
+            if st.pending is None:
+                continue
+            if self.scanner.halts.blocks_entry(sym, now) is not None:
+                continue
+            if self._guard(st, now):
+                continue
+            price = self.feed.last_price(sym, now)
+            if price is None:
+                continue
+            had_pos = st.position
+            pos = fill_pending_quote(st, now, price, self.cfg, self.bars.get(sym, pd.DataFrame()))
+            if pos is not None and had_pos is None:
+                opened.append(pos)
+        report = CycleReport(now, 0, 0)
+        self._record(opened, [], report)
+        return report.opened
+
+    def _guard(self, st: DayState, when: pd.Timestamp) -> bool:
+        allowed, reason = self.discipline.can_trade()
+        if allowed or st.pending is None:
+            return False
+        self._cancel_pending(st, when, f"halted:{reason}")
+        return True
+
+    def _eod_sweep(self, now: pd.Timestamp) -> list[ClosedTrade]:
+        _, _, sweep = session_times(now.date())
+        if (now.hour, now.minute) < sweep:
+            return []
+        swept: list[ClosedTrade] = []
+        for sym, w in self.watch.items():
+            if w.state.position is None:
+                continue
+            bars = self.bars.get(sym, pd.DataFrame())
+            if bars.empty:
+                logger.error("eod_sweep: %s open with no price to mark — reconcile by hand", sym)
+                continue
+            trade = force_close(w.state, now, float(bars["close"].iloc[-1]), self.cfg)
+            if trade is not None:
+                logger.warning("eod_sweep closed %s at %.2f — it stopped printing before "
+                               "the close", sym, trade.exit)
+                swept.append(trade)
+        return swept
+
+    # ── output ──────────────────────────────────────────────────────────────
+    def _record(self, entries: list[Position], closed: list[ClosedTrade],
+                report: CycleReport) -> None:
+        for t in sorted(closed, key=lambda x: x.exit_time):
+            if self.discipline.cfg.enabled:
+                was = self.discipline.halted
+                self.discipline.record(t.net_inr)
+                self._sync_risk()
+                if self.discipline.halted and not was:
+                    self.notify(f"🛑 HALTED <b>{self.discipline.halted_reason}</b>")
+        for w in self.watch.values():
+            st = w.state
+            for ev in st.attention_events:
+                self.ledger.attention(ev)
+            for c in st.candidates:
+                self.ledger.candidate(c)
+            for r in st.rejections:
+                self.ledger.rejected(r)
+            st.attention_events.clear()
+            st.candidates.clear()
+            st.rejections.clear()
+        for p in entries:
+            sym = p.cand.symbol
+            self.ledger.opened(p, self.rows.get(sym), self.feed.exchange_of.get(sym, ""),
+                               self.feed.quote_source.get(sym, ""))
+            report.opened.append(sym)
+            self.notify(f"📝 ENTER <b>{sym}</b> ${p.plan.entry:.2f} ×{p.plan.qty} "
+                        f"stop ${p.plan.stop:.2f} target ${p.plan.target:.2f}")
+        for t in closed:
+            sym = t.cand.symbol
+            self.ledger.closed(t, self.bars.get(sym),
+                               held_through_halt=sym in self.scanner.halts.held_through_halt)
+            self.closed_trades.append(t)
+            report.closed.append(sym)
+            mark = "✅" if t.net_inr > 0 else "❌"
+            self.notify(f"{mark} EXIT <b>{sym}</b> {t.exit_reason} ${t.exit:.2f} "
+                        f"net ${t.net_inr:,.2f}")
+
+    def _write_watchlist(self, now: pd.Timestamp) -> None:
+        """The DAY's funnel: every stock seen, its latest verdict, and whether
+        it EVER passed — a stock that qualified at 09:40 and faded by 11:00 is
+        still a stock the screen found."""
+        doc = self.scanner.watchlist_document(now)
+        if doc is None:
+            return
+        for sym, bars in self.bars.items():
+            if sym in self.watch and not bars.empty and self._bars_saved.get(sym) != bars.index[-1]:
+                self.ledger.watch_bars(doc["date"], sym, bars)
+                self._bars_saved[sym] = bars.index[-1]
+        names = []
+        for sym, row in self.rows.items():
+            w = self.watch.get(sym)
+            names.append({
+                "symbol": sym, "passed": w is not None, "reason": row.reason,
+                "screen_complete": row.screen_complete, "price": row.price,
+                "day_chg_pct": row.day_chg_pct, "rvol": row.rvol,
+                "float_shares": row.float_shares, "flags": row.flags,
+                "observed_at": row.observed_at,
+                "first_seen": self.first_seen[sym].isoformat(),
+                "first_passed_at": (w.first_passed_at.isoformat()
+                                    if w and w.first_passed_at else None),
+                "has_volume_profile": w.has_profile if w else None,
+            })
+        never = [n for n in names if not n["passed"]]
+        rejected: dict[str, int] = {}
+        for n in never:
+            rejected[n["reason"]] = rejected.get(n["reason"], 0) + 1
+        doc.update(
+            considered=len(names), passed=len(self.watch),
+            complete=sum(1 for n in names if n["passed"] and n["screen_complete"]),
+            rejected_by=rejected, names=names, updated_at=now.isoformat(),
+            open_positions=self._open_count(), closed_today=len(self.closed_trades),
+            net_usd_today=round(sum(t.net_inr for t in self.closed_trades), 2),
+        )
+        self.ledger.watchlist(doc)
+
+    def summary(self) -> str:
+        net = sum(t.net_inr for t in self.closed_trades)
+        wins = sum(1 for t in self.closed_trades if t.net_inr > 0)
+        return (f"{len(self.rows)} screened, {len(self.watch)} passed, "
+                f"{len(self.closed_trades)} trades ({wins} won), net ${net:,.2f}")
+
+
+# ── the scheduled task ──────────────────────────────────────────────────────
+def _now() -> pd.Timestamp:
+    return pd.Timestamp.now(tz=US.timezone)
+
+
+def _at(day: pd.Timestamp, hhmm: tuple[int, int]) -> pd.Timestamp:
+    return day.normalize() + pd.Timedelta(hours=hhmm[0], minutes=hhmm[1])
+
+
+def _sleep_until(target: pd.Timestamp, clock: Callable[[], pd.Timestamp]) -> None:
+    while (left := (target - clock()).total_seconds()) > 0:
+        _time.sleep(min(left, 30.0))
+
+
+def run(settings: Settings, *, once: bool = False, dry_run: bool = False,
+        clock: Callable[[], pd.Timestamp] = _now) -> int:
+    from .yahoo_feed import YahooFeed
+
+    def tg(text: str) -> None:
+        if not dry_run:
+            telegram._send(settings.telegram_bot_token, settings.telegram_chat_id,
+                           f"🇺🇸 <b>US</b> {text}")
+
+    now = clock()
+    today = now.date()
+    if not US.is_trading_day(today) and not settings.mt_us_bypass_market_hours:
+        logger.info("%s is not a US trading day — exiting", today)
+        tg(f"{today} is a US market holiday — no session")
+        return 0
+
+    db: Any = None
+    if not dry_run:
+        try:
+            from pymongo import MongoClient
+            db = MongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=5000)[
+                settings.mongodb_db_name]
+            db.list_collection_names()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Mongo unavailable (%s) — nothing will be recorded", exc)
+            tg(f"⚠️ Mongo unavailable ({exc}) — session runs unrecorded")
+            db = None
+
+    ucfg = USUniverseConfig()
+    feed = YahooFeed(cache_dir=_cache_dir(settings), cfg=ucfg,
+                     block_delayed=settings.mt_us_block_delayed_quotes)
+    cfg = build_engine_config(settings, today, ucfg)
+    session = USSession(
+        feed, cfg, USPaperLedger(db, strategy=f"us_{settings.mt_strategy}"),
+        ucfg=ucfg, max_positions=settings.mt_us_max_positions,
+        discipline=DayDiscipline(DisciplineConfig(
+            enabled=settings.mt_discipline, giveback_halt=settings.mt_giveback_halt)),
+        notify=tg,
+    )
+    session._sync_risk()
+
+    if once:
+        report = session.cycle(clock())
+        print(f"{report.at:%H:%M:%S} ET  screened {report.screened}, passed {report.passed}, "
+              f"discovered {report.discovered}")
+        print(session.summary())
+        return 0
+
+    day = pd.Timestamp(today, tz=US.timezone)
+    start = _at(day, (US.session_start.hour, US.session_start.minute)) + pd.Timedelta(minutes=1)
+    _, _, sweep = session_times(today)
+    finish = _at(day, sweep) + pd.Timedelta(minutes=2)
+    exit_at = _at(day, US.process_end)
+    tg(f"ready {today}: entries {US.session_start:%H:%M}–{cfg.entry_deadline:%H:%M} ET, "
+       f"risk ${settings.mt_us_risk_usd:.0f}/trade"
+       + (" · early close" if session_times(today)[1] != US.eod_close else ""))
+    if not settings.mt_us_bypass_market_hours:
+        _sleep_until(start, clock)
+
+    grace = _at(day, NO_DATA_GRACE)
+    grace_checked = False
+    failures = 0
+    while clock() < finish:
+        now = clock()
+        try:
+            session.cycle(now)
+            failures = 0
+        except Exception as exc:  # noqa: BLE001
+            # One bad Yahoo response must not end the session: open positions
+            # still need their stops and the end-of-day exit. Log and go on.
+            failures += 1
+            logger.exception("cycle failed at %s (%d in a row)", now, failures)
+            if failures in (1, 5, 30):
+                tg(f"⚠️ cycle failed {failures}× in a row: {type(exc).__name__}: {exc}")
+        if not grace_checked and now >= grace:
+            grace_checked = True
+            if feed.bars_1m(REFERENCE_SYMBOL, now).empty:
+                # Unscheduled closures are in no calendar. On any real session
+                # SPY has printed by 09:45; if it has not, the market is shut.
+                logger.error("no %s bars by %s — market looks shut; exiting",
+                             REFERENCE_SYMBOL, now)
+                tg(f"🟡 no {REFERENCE_SYMBOL} bars by {now:%H:%M} ET — "
+                   "market looks closed, exiting")
+                return 0
+        next_bar = now.floor("1min") + pd.Timedelta(seconds=60 + feed.settle_seconds + 2)
+        while (t := clock()) < next_bar:
+            if any(w.state.pending is not None for w in session.watch.values()):
+                try:
+                    session.poll_pending(t)
+                except Exception:  # noqa: BLE001
+                    logger.exception("pending poll failed at %s", t)
+            _time.sleep(max(0.0, min(settings.mt_us_quote_poll_seconds,
+                                     (next_bar - clock()).total_seconds())))
+
+    tg(f"done {today}: {session.summary()}")
+    if clock() < exit_at:
+        _sleep_until(exit_at, clock)
+    return 0
+
+
+def _cache_dir(settings: Settings) -> Any:
+    from pathlib import Path
+
+    path = Path(settings.mt_us_cache_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="US momentum paper session")
+    ap.add_argument("--once", action="store_true", help="one cycle now, then exit")
+    ap.add_argument("--dry-run", action="store_true", help="no Mongo writes, no Telegram")
+    args = ap.parse_args(argv)
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logger.info("US session start %s", datetime.now().isoformat(timespec="seconds"))
+    # Same bootstrap as the NSE entrypoint: SSM secrets into the environment,
+    # THEN Settings(), so MONGODB_URI and the Telegram keys are present.
+    if os.getenv("AWS_SECRETS_ENABLED", "").lower() == "true":
+        from src.secrets import bootstrap_secrets
+        bootstrap_secrets(stage=os.getenv("STAGE", "dev"))
+    return run(Settings(), once=args.once, dry_run=args.dry_run)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

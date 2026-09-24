@@ -1,8 +1,10 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Momentum-trader paper scanner: one Fargate task per NSE session, started by
-  EventBridge at 09:05 IST (03:35 UTC) Mon-Fri; the process exits itself at
-  15:35 IST. Reads secrets from SSM /portfolio-analyzer/<stage>/*.
+  Momentum-trader paper scanners. NSE: one Fargate task per session, started by
+  EventBridge at 09:05 IST (03:35 UTC) Mon-Fri, exits itself at 15:35 IST.
+  US: a second task definition on the same cluster and image, started by
+  EventBridge Scheduler at 09:20 America/New_York (DST-aware), exits at 16:20 ET.
+  Both read secrets from SSM /portfolio-analyzer/<stage>/*.
   Deploy:
     aws cloudformation deploy --stack-name mt-scanner-prod \
       --template-file infrastructure/ecs-scanner.yml --capabilities CAPABILITY_NAMED_IAM \
@@ -248,11 +250,146 @@ Resources:
                 Subnets: !Ref SubnetIds
                 SecurityGroups: [!Ref SecurityGroupId]
 
+  # ── US momentum arm ──────────────────────────────────────────────────────────
+  # Purely ADDITIVE: new task definition, new role, new schedule. It reuses the
+  # cluster, image, EFS volume, log group and the two task roles above WITHOUT
+  # modifying any of them, so an error here can only roll back these resources'
+  # creation — never change how the NSE task runs.
+  #
+  # Same image, different entrypoint: src/momentum_trader/us_session.py. Market
+  # data is Yahoo + the Nasdaq halt RSS, so no broker token is needed. Nothing is
+  # ever sent to a broker: this is a paper arm.
+  UsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub mt-us-scanner-${Stage}
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      Volumes:
+        - Name: data
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref DataVolumeFs
+            TransitEncryption: ENABLED
+      ContainerDefinitions:
+        - Name: us-scanner
+          Image: !Ref ImageUri
+          Essential: true
+          Command: [python, -m, src.momentum_trader.us_session]
+          MountPoints:
+            - SourceVolume: data
+              ContainerPath: /data
+          Environment:
+            - { Name: STAGE, Value: !Ref Stage }
+            - { Name: AWS_REGION, Value: !Ref AWS::Region }
+            - { Name: AWS_SECRETS_ENABLED, Value: 'true' }
+            - { Name: TRADING_MODE, Value: paper }
+            # The US engine config is DERIVED from this strategy (us_session.
+            # build_engine_config), so the two arms run one checklist. These
+            # mirror the NSE task above on purpose; change both or neither.
+            - { Name: MT_STRATEGY, Value: warrior_strict }
+            - { Name: MT_ATTENTION_RVOL_MIN, Value: '1.5' }
+            - { Name: MT_MACD_OPEN_TOLERANCE, Value: '0' }
+            - { Name: MT_DISCIPLINE, Value: 'true' }
+            - { Name: MT_GIVEBACK_HALT, Value: 'false' }
+            - { Name: MT_ONE_TRADE_PER_DAY, Value: 'false' }
+            # US-only values, in DOLLARS. See Settings.mt_us_* for why each is set.
+            - { Name: MT_US_RISK_USD, Value: '50' }
+            - { Name: MT_US_MAX_NOTIONAL_USD, Value: '5000' }
+            - { Name: MT_US_MAX_POSITIONS, Value: '10' }
+            - { Name: MT_US_PEAK_HOURS_END, Value: '10:00' }
+            - { Name: MT_US_BLOCK_DELAYED_QUOTES, Value: 'true' }
+            - { Name: MT_US_QUOTE_POLL_SECONDS, Value: '10' }
+            - { Name: MT_US_CACHE_DIR, Value: /data/.cache_yahoo_us }
+          Secrets:
+            - Name: MONGODB_URI
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/MONGODB_URI
+            - Name: TELEGRAM_BOT_TOKEN
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/TELEGRAM_BOT_TOKEN
+            - Name: TELEGRAM_CHAT_ID
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/TELEGRAM_CHAT_ID
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: us-scanner
+
+  UsSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub mt-us-scanner-scheduler-${Stage}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: run-us-task
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Any revision of the US family, so a redeploy cannot race the
+              # schedule against a policy still naming the old revision.
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/mt-us-scanner-${Stage}:*
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: [!GetAtt ExecutionRole.Arn, !GetAtt TaskRole.Arn]
+
+  # EventBridge SCHEDULER, not an EventBridge rule like the NSE start above.
+  # Rules only accept UTC, and IST never shifts, so a UTC cron is fine for NSE.
+  # The US switches clocks twice a year: 09:20 ET is 13:20 UTC in summer and
+  # 14:20 UTC in winter, so a UTC cron would start the session an hour wrong
+  # for half the year. The Scheduler takes the zone and follows DST itself.
+  UsMorningStart:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub mt-us-scanner-start-${Stage}
+      Description: >
+        Start the US paper scanner at 09:20 America/New_York Mon-Fri. US
+        holidays and early closes are handled in-process (us_calendar.py).
+      ScheduleExpression: cron(20 9 ? * MON-FRI *)
+      ScheduleExpressionTimezone: America/New_York
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      State: ENABLED
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt UsSchedulerRole.Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 2
+          MaximumEventAgeInSeconds: 900
+        EcsParameters:
+          TaskDefinitionArn: !Ref UsTaskDefinition
+          LaunchType: FARGATE
+          TaskCount: 1
+          PlatformVersion: LATEST
+          NetworkConfiguration:
+            AwsvpcConfiguration:
+              AssignPublicIp: ENABLED
+              Subnets: !Ref SubnetIds
+              SecurityGroups: [!Ref SecurityGroupId]
+
 Outputs:
   ClusterName:
     Value: !Ref Cluster
   TaskDefinitionArn:
     Value: !Ref TaskDefinition
+  UsTaskDefinitionArn:
+    Value: !Ref UsTaskDefinition
+  UsRunNow:
+    Description: Manual start of the US session (add the task networking configuration)
+    Value: !Sub >
+      aws ecs run-task --cluster ${Cluster} --launch-type FARGATE --task-definition ${UsTaskDefinition}
   RunNow:
     Description: Manual start command (add the task networking configuration from this stack)
     Value: !Sub >

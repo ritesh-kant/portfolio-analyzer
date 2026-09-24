@@ -213,3 +213,60 @@ export const fetchAnalyticsTrades = (source: string) =>
   get<{ source: string; kind: 'live' | 'backtest'; count: number; trades: AnalyticsTrade[] }>(
     `/mt/analytics?source=${encodeURIComponent(source)}`,
   );
+
+// ── attention watchlist ──────────────────────────────────────────────────────
+
+/** One time the scanner promoted a name onto the watchlist, and why. */
+export interface WatchlistFlag {
+  time: string;
+  strategy?: string;
+  reason: string;
+  day_chg_pct: number;
+  rvol: number;
+  candle_tags: string[];
+  pattern_matches: PatternMatch[];
+}
+
+export interface WatchlistName {
+  symbol: string;
+  first_seen: string;
+  last_seen: string;
+  max_day_chg_pct: number;
+  max_rvol: number;
+  strategies: string[];
+  flags: WatchlistFlag[];
+  /** Paper trades opened on this name in the same session, if any. US rows
+   * carry `net_usd` instead of `net_inr`. */
+  trades: (Pick<MomentumTrade, '_id' | 'symbol' | 'entry_time' | 'exit_time' | 'entry_price' | 'exit_price' | 'net_inr' | 'status' | 'strategy'> & {
+    net_usd?: number | null;
+  })[];
+  /** Extra per-name facts a market wants shown (the US screen's price and float). */
+  details?: { label: string; value: string }[];
+}
+
+export interface WatchlistSession {
+  /** IST session date, YYYY-MM-DD. */
+  date: string;
+  names: WatchlistName[];
+}
+
+export const fetchMomentumWatchlist = (days = 15) =>
+  get<{ sessions: WatchlistSession[]; count: number }>(`/mt/watchlist?days=${days}`);
+
+export const fetchWatchlistBars = (symbol: string, date: string) =>
+  get<{ symbol: string; date: string; interval: '1m'; bars: MomentumBar[] }>(
+    `/mt/watchlist/bars?symbol=${encodeURIComponent(symbol)}&date=${date}`,
+  );
+
+export interface WatchlistNewsItem {
+  headline: string;
+  publisher: string;
+  url: string | null;
+  published_at: string;
+}
+
+/** Per-symbol headlines for one session; a symbol whose lookup failed carries `error`. */
+export const fetchWatchlistNews = (date: string, symbols: string[], market: 'NSE' | 'US' = 'NSE') =>
+  get<{ date: string; source: string; news: Record<string, WatchlistNewsItem[] | { error: string }> }>(
+    `/mt/watchlist/news?date=${date}&market=${market}&symbols=${symbols.map(encodeURIComponent).join(',')}`,
+  );

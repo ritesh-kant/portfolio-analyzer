@@ -608,12 +608,26 @@ export default function MomentumPage() {
           <p className="mt-1 text-sm text-ink/65">
             Select any trade to review the exact one-minute candles, overlays, and execution points.
           </p>
-          <Link
-            href="/momentum/analytics"
-            className="mt-2 inline-block rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold hover:bg-black/5"
-          >
-            Analytics dashboard →
-          </Link>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Link
+              href="/momentum/analytics"
+              className="inline-block rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold hover:bg-black/5"
+            >
+              Analytics dashboard →
+            </Link>
+            <Link
+              href="/momentum/watchlist"
+              className="inline-block rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold hover:bg-black/5"
+            >
+              Watchlist →
+            </Link>
+            <Link
+              href="/momentum/us"
+              className="inline-block rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold hover:bg-black/5"
+            >
+              US momentum →
+            </Link>
+          </div>
         </div>
         <div className="flex gap-3">
           <div className="metric-chip text-right">

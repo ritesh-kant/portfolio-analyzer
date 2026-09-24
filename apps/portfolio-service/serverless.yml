@@ -179,6 +179,53 @@ functions:
       - httpApi:
           path: /mt/analytics
           method: get
+  mtWatchlist:
+    handler: src/handlers/mt-watchlist.handler
+    events:
+      - httpApi:
+          path: /mt/watchlist
+          method: get
+  mtWatchlistBars:
+    handler: src/handlers/mt-watchlist.bars
+    timeout: 20
+    memorySize: 1024
+    events:
+      - httpApi:
+          path: /mt/watchlist/bars
+          method: get
+  mtWatchlistNews:
+    handler: src/handlers/mt-watchlist.news
+    timeout: 25
+    events:
+      - httpApi:
+          path: /mt/watchlist/news
+          method: get
+
+  # ── US momentum arm (mt/us/*) — separate collections, USD ────────────────────
+  mtUsTrades:
+    handler: src/handlers/mt-us.handler
+    events:
+      - httpApi:
+          path: /mt/us/trades
+          method: get
+  mtUsWatchlist:
+    handler: src/handlers/mt-us.watchlist
+    events:
+      - httpApi:
+          path: /mt/us/watchlist
+          method: get
+  mtUsWatchlistDays:
+    handler: src/handlers/mt-watchlist.usHandler
+    events:
+      - httpApi:
+          path: /mt/us/watchlist/days
+          method: get
+  mtUsWatchlistBars:
+    handler: src/handlers/mt-watchlist.usBars
+    events:
+      - httpApi:
+          path: /mt/us/watchlist/bars
+          method: get
 
   # ── Options-trader API (opt/*) ───────────────────────────────────────────────
   optPositions:

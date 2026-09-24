@@ -264,19 +264,25 @@ def vwap_reclaim(bars: pd.DataFrame) -> Setup | None:
 
 # ── 5. opening range breakout (NSE stand-in for pre-market high) ──────────────
 
-def opening_range_breakout(bars: pd.DataFrame) -> Setup | None:
-    """High of the first ORB_MINUTES after 09:15 IST is the level; trigger = first
+def opening_range_breakout(bars: pd.DataFrame, session_open: time = SESSION_OPEN) -> Setup | None:
+    """High of the first ORB_MINUTES after the open is the level; trigger = first
     bar (after the range) that closes above it. Stop = opening-range low.
 
     NSE has no continuous pre-market, so the guide's "break of pre-market
-    highs" and "break of pre-market pivot" both collapse into this."""
+    highs" and "break of pre-market pivot" both collapse into this.
+
+    `session_open` is the exchange's first bar (09:15 NSE, 09:30 US). It was
+    fixed at 09:15, so on US bars the range was always empty and this setup
+    never fired — and since it is also an attention PROMOTION reason, that
+    silently removed the opening-drive promotion from the US arm entirely.
+    """
     validate_bars(bars)
     if len(bars) < 2:
         return None
     today = bars[bars.index.normalize() == bars.index[-1].normalize()]
     if today.empty:
         return None
-    open_ts = today.index[0].replace(hour=SESSION_OPEN.hour, minute=SESSION_OPEN.minute,
+    open_ts = today.index[0].replace(hour=session_open.hour, minute=session_open.minute,
                                      second=0, microsecond=0)
     range_end = open_ts + pd.Timedelta(minutes=ORB_MINUTES)
     orb = today[(today.index >= open_ts) & (today.index < range_end)]
@@ -420,15 +426,20 @@ def scan_setups(
     bars_5m: pd.DataFrame,
     bars_1m: pd.DataFrame | None = None,
     prev_close: float | None = None,
+    session_open: time = SESSION_OPEN,
 ) -> list[Setup]:
     """Run every long setup on the latest closed bar. 5-min frame is primary;
     1-min frame (if given) adds the micro pullback. Returns all that fire, in
     frozen priority order (first is the one the scanner acts on)."""
     found: list[Setup] = []
-    for fn in (bull_flag, flat_top_breakout, ma_pullback, vwap_reclaim, opening_range_breakout):
+    for fn in (bull_flag, flat_top_breakout, ma_pullback, vwap_reclaim):
         s = fn(bars_5m)
         if s is not None:
             found.append(s)
+    # Last of the five, exactly where it sat in the frozen priority order.
+    s = opening_range_breakout(bars_5m, session_open)
+    if s is not None:
+        found.append(s)
     if prev_close is not None:
         s = red_to_green(bars_5m, prev_close)
         if s is not None:

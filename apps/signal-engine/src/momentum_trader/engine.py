@@ -40,11 +40,14 @@ from .indicators import (
     volume_ratio,
 )
 from .levels import NEAR_PCT, derive_levels, nearest_structural_resistance
+from . import us_risk
+from .market import NSE, MarketProfile
 from .pullback import pullback_ordinal
 from .risk import DEFAULT_RR, TradePlan, plan_trade
 from .setups import (
     CHASE_MAX_EXT_PCT,
     MICRO_PAUSE_MAX_BARS,
+    SESSION_OPEN,
     Setup,
     false_break,
     micro_pullback,
@@ -162,6 +165,18 @@ class EngineConfig:
     rvol_min: float = RVOL_MIN
     entry_cutoff: time = ENTRY_CUTOFF
     eod_close: time = EOD_CLOSE
+    # Which exchange's rules apply. Defaults to NSE, and NSE.round_trip_cost is
+    # the same `calc_costs` this module called directly before, so every
+    # existing backtest and the live arm reproduce byte-for-byte.
+    #
+    # Sizing is routed too, through `_plan_entry`: NSE takes the exact call it
+    # always made, the US takes `us_risk` (cost-over-risk gate, reasons kept).
+    # Every money field in this module (`risk_inr`, `max_notional_inr`,
+    # `gross_inr`, ...) is in the MARKET's currency: rupees on NSE, dollars on
+    # the US arm. The names predate the second market; renaming them would be a
+    # large diff to the live arm for no behavioural change, so the US ledger
+    # writes them out as `*_usd` instead.
+    market: MarketProfile = NSE
     stress_slip: float = 0.0           # 0 in live paper (costs are real); bt17 passes STRESS_SLIP
     # True = at most one trade per SYMBOL per day. False = multi-entry: once a
     # position closes, a later qualifying confirmation on the same symbol can
@@ -693,7 +708,7 @@ def _exit(state: DayState, when: pd.Timestamp, px: float, reason: str, cfg: Engi
     qty = pos.plan.qty
     entry = pos.plan.entry
     gross = (px - entry) * qty
-    costs = calc_costs(entry, px, qty, direction="long")["total"]
+    costs = cfg.market.round_trip_cost(entry, px, qty)
     costs += (entry + px) * qty * cfg.stress_slip
     base_net = gross - costs
     # The add-on tranche is a second round trip: its own entry price, its own
@@ -1092,7 +1107,7 @@ def _attention_context(
 
 
 def _promotion_reason(
-    tf5: pd.DataFrame, bars_1m: pd.DataFrame
+    tf5: pd.DataFrame, bars_1m: pd.DataFrame, session_open: time = SESSION_OPEN
 ) -> tuple[str | None, list[str], list[dict[str, object]]]:
     """Return auditable attention context without authorizing entry.
 
@@ -1114,7 +1129,7 @@ def _promotion_reason(
         chosen = eligible[0]
         return f"pattern:{chosen.name}:{chosen.timeframe}", tags, matches
     # Detect structures even when the legacy +4% / 3x entry gate has not fired.
-    found = scan_setups(tf5, bars_1m, None)
+    found = scan_setups(tf5, bars_1m, None, session_open=session_open)
     if found:
         return f"setup:{found[0].name}", tags, matches
     return None, tags, matches
@@ -1465,7 +1480,7 @@ def _false_break_reclaim_confirmation(
             symbol=state.symbol, time=now, reason=f"reclaim_{reason}",
             setup=ATTENTION_FALSE_BREAK_RECLAIM_SETUP, trigger=reclaim.level,
             observed_price=float(bars_1m["close"].iloc[-1]),
-            evidence=(volume_confirmation_evidence(bars_1m)
+            evidence=(volume_confirmation_evidence(bars_1m, tz=cfg.market.timezone)
                       if reason.startswith("attention_price_volume_") else {}),
         ))
         return False
@@ -1586,6 +1601,38 @@ def _reject_pending(
     state.pending = None
 
 
+def _plan_entry(
+    cfg: EngineConfig, entry: float, stop: float, *, gate_entry: float
+) -> tuple[TradePlan | None, str]:
+    """Size an entry with the market's own planner. Returns (plan, refusal).
+
+    NSE takes precisely the call this module always made, so every backtest and
+    the live arm reproduce, and a refusal is the historical `stop_not_sane`.
+    The US planner gates on cost-over-risk instead of a percentage stop band and
+    says WHY it refused (`cost_over_risk`, `stop_inside_tick`, ...); that reason
+    is kept rather than flattened, so "found nothing" and "could not afford it"
+    stay distinguishable in the forward log.
+    """
+    risk = cfg.risk_inr * cfg.initial_risk_fraction
+    notional = cfg.max_notional_inr * cfg.initial_risk_fraction
+    if cfg.market.code == NSE.code:
+        return plan_trade(
+            entry, stop, risk_inr=risk, max_notional_inr=notional, rr=cfg.rr,
+            gate_entry=gate_entry,
+        ), "stop_not_sane"
+    result = us_risk.plan_trade(
+        entry, stop, risk_usd=risk, max_notional_usd=notional, rr=cfg.rr,
+        gate_entry=gate_entry,
+    )
+    if isinstance(result, us_risk.Rejection):
+        return None, result.reason
+    return TradePlan(
+        entry=result.entry, stop=result.stop, target=result.target, qty=result.qty,
+        risk_inr=result.risk_usd, reward_inr=result.reward_usd,
+        notional_inr=result.notional_usd,
+    ), ""
+
+
 def fill_pending_quote(
     state: DayState,
     when: pd.Timestamp,
@@ -1615,14 +1662,9 @@ def fill_pending_quote(
     if (price / trigger - 1.0) * 100.0 > CHASE_MAX_EXT_PCT:
         _reject_pending(state, when, "chased", price)
         return None
-    plan = plan_trade(
-        price, pending.cand.setup.stop,
-        risk_inr=cfg.risk_inr * cfg.initial_risk_fraction,
-        max_notional_inr=cfg.max_notional_inr * cfg.initial_risk_fraction,
-        rr=cfg.rr, gate_entry=price,
-    )
+    plan, refusal = _plan_entry(cfg, price, pending.cand.setup.stop, gate_entry=price)
     if plan is None:
-        _reject_pending(state, when, "stop_not_sane", price)
+        _reject_pending(state, when, refusal, price)
         return None
     cand = pending.cand
     state.pending = None
@@ -1704,13 +1746,12 @@ def step(
         if (fill / trigger - 1.0) * 100.0 > CHASE_MAX_EXT_PCT:
             _reject_pending(state, now, "chased", fill)
             return
-        plan = plan_trade(
-            fill, cand.setup.stop, risk_inr=cfg.risk_inr * cfg.initial_risk_fraction,
-            max_notional_inr=cfg.max_notional_inr * cfg.initial_risk_fraction, rr=cfg.rr,
+        plan, refusal = _plan_entry(
+            cfg, fill, cand.setup.stop,
             gate_entry=fill if cfg.fill_mode == FILL_RESTING_SIZED else float(bar["open"]),
         )
         if plan is None:
-            _reject_pending(state, now, "stop_not_sane", fill)
+            _reject_pending(state, now, refusal, fill)
             return
         state.pending = None
         _open_position(state, cand, now, fill, plan, cfg, bars_1m, full_5m)
@@ -1725,10 +1766,9 @@ def step(
         # same trades and only the fill price differs (fill-latency hyp. §2).
         chased = (next_open / cand.setup.trigger - 1.0) * 100.0 > CHASE_MAX_EXT_PCT
         fill = next_open if cfg.fill_mode == FILL_NEXT_OPEN else cand.setup.trigger
-        plan = None if chased else plan_trade(
-            fill, cand.setup.stop, risk_inr=cfg.risk_inr * cfg.initial_risk_fraction,
-            max_notional_inr=cfg.max_notional_inr * cfg.initial_risk_fraction, rr=cfg.rr, gate_entry=next_open,
-        )
+        plan = None if chased else _plan_entry(
+            cfg, fill, cand.setup.stop, gate_entry=next_open,
+        )[0]
         if plan is not None:
             _open_position(state, cand, now, fill, plan, cfg, bars_1m, full_5m)
 
@@ -1854,7 +1894,8 @@ def step(
             if chg < cfg.attention_day_chg_min or rv < cfg.attention_rvol_min:
                 return
             context_ok, _ = _attention_context(tf5, warm5)
-            reason, tags, matches = _promotion_reason(tf5, bars_1m)
+            reason, tags, matches = _promotion_reason(
+                tf5, bars_1m, session_open=cfg.market.session_start)
             if not context_ok or reason is None:
                 return
             state.attention = True
@@ -1915,7 +1956,7 @@ def step(
                 setup=ATTENTION_SETUP,
                 trigger=float(bar["high"]),
                 observed_price=float(bar["close"]),
-                evidence=(volume_confirmation_evidence(bars_1m)
+                evidence=(volume_confirmation_evidence(bars_1m, tz=cfg.market.timezone)
                           if confirmation_reason.startswith("attention_price_volume_") else {}),
             ))
             return
@@ -1975,7 +2016,8 @@ def step(
         return
 
     bars_5m = tf5 if at_5m_close else empty
-    found = scan_setups(bars_5m, bars_1m, state.prev_close if at_5m_close else None)
+    found = scan_setups(bars_5m, bars_1m, state.prev_close if at_5m_close else None,
+                        session_open=cfg.market.session_start)
     if not found:
         return
     setup = found[0]

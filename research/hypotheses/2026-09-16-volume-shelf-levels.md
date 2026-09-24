@@ -1,8 +1,7 @@
 # Volume shelves — the level type pivots cannot see
 
-*Registered 2026-09-16. Status: **built and visually audited, UNTESTED for
-P&L**. Shipped OFF behind `EngineConfig.volume_shelf_levels`. No window has
-been spent on it and no edge is claimed.*
+*Registered 2026-09-16. Status: **KILLED 2026-09-16 on Q4-2024, 0 of 3
+criteria** (§7). Stays shipped OFF behind `EngineConfig.volume_shelf_levels`.*
 
 ## 1. Provenance — a defect, not a strategy idea
 
@@ -136,3 +135,68 @@ the operator to decide which window it gets, or to wait for forward data.**
 * [[2026-09-13-resistance-headroom-v2]] — the headroom test this feeds.
 * [[2026-09-13-volume-surge-entry]] — the other volume-based entry study;
   killed as a filter but the first non-random one.
+
+
+## 7. Result — KILL (0 of 3), Q4 2024
+
+Run: `bt17 --start 2024-10-01 --end 2024-12-31 --attention --first-candidate-only
+[--volume-shelves]`, 170 fully-cached symbols, `--jobs 10`. Decided by
+`research/backtests/bt38_volume_shelves.py`.
+
+| | shelves OFF | shelves ON |
+|---|---|---|
+| trades | 157 | 148 (94.3% survive) |
+| gross %/trade | −0.0844 | −0.0607 |
+| net at real 0.21% | −0.294 | **−0.271** |
+| win % | 34.4 | 37.2 |
+
+| criterion | result | |
+|---|---|---|
+| C1 survivors clear the 0.21% cost | gross −0.061% | **FAIL** |
+| C2 anti-test p < 0.05 | **p = 0.403** | **FAIL** |
+| C3 lift positive in both halves | +0.072 / −0.005 pp | **FAIL** |
+
+### 7.1 The headline lift is mostly not the rule
+
+The +0.0237 pp looks like the filter working. It is not. Decomposed:
+
+| source | contribution |
+|---|---|
+| refusing 16 trades — **the actual filter** | **+0.0037 pp** |
+| exits changing on 9 surviving trades | +0.0068 pp |
+| 7 NEW trades the OFF arm never took | +0.0132 pp |
+
+Shelves are in `STRUCTURAL_KINDS`, so they also feed `resistance_reject` exits
+and the attention arm's resistance-breakout entry test. **The ON arm is
+therefore not a subset of OFF** — it is a different strategy, not a filter.
+Scoring it against random subsets of OFF (the naive anti-test) credits those
+side effects as selectivity and returns a spurious p = 0.011. Scored correctly
+— on the refused trades alone, where `kept` *is* a subset — the rule gets
+**p = 0.403: indistinguishable from deleting 16 trades at random.**
+
+This is the 5th selectivity idea to die on the anti-test, after quality
+(p=0.979), 1m-agreement (p=0.526), pullback-ordinal (p=0.469) and
+pattern-as-filter.
+
+### 7.2 Honest limits of this run
+
+* **n = 157 is small** and the window is 3 months. This can kill but not bless
+  ([[feedback_dirty_window_can_kill]]); a small real effect is not excluded.
+* **The rule barely fires here** — 5.7% refusal vs the 25–50% seen on
+  2026-09-16. Q4 2024 may simply not be the tape that builds shelves.
+* Symbols restricted to the 170 with a full 2022–2024 parquet cache. That is
+  selection on data availability, not on outcomes, but it is not the full pool.
+* Q4 2024 sits inside the already-spent 2024 entry-side window. 2025 (reserved
+  for `resistance_veto_v2` C1–C3) and 2021 (reserved for the BT35 absorption
+  single-shot) were **not** touched.
+
+### 7.3 Two script defects found and fixed while running this
+
+Both were in `bt38_volume_shelves.py`, written for this test:
+
+1. C2 was computed against the whole ON arm, which is not a subset of OFF —
+   it read p = 0.011 (PASS) when the honest figure is 0.403.
+2. C3 counted **calendar years**, so a 3-month window had one year and passed
+   vacuously. It now splits the window at its date midpoint, and fails.
+
+**A criterion that cannot fail on the window you ran is not a criterion.**

@@ -14,13 +14,21 @@ from .indicators import price_volume_slopes, validate_bars
 from .setups import FLAG_VOL_RATIO, MICRO_GREEN_RUN, MICRO_PAUSE_MAX_BARS, micro_pullback
 
 
-def volume_confirmation_evidence(bars: pd.DataFrame) -> dict[str, object]:
-    """JSON-safe evidence using only the supplied completed NSE one-minute bars."""
+def volume_confirmation_evidence(
+    bars: pd.DataFrame, tz: str = "Asia/Kolkata"
+) -> dict[str, object]:
+    """JSON-safe evidence using only the supplied completed one-minute bars.
+
+    `tz` is the exchange's own timezone, because "the session" is one local
+    trading date. It was hard-coded to IST, which is right for NSE and wrong
+    for the US: a US session runs 19:00-01:30 IST, so it crosses midnight in
+    India and the evidence would silently restart at 14:30 ET.
+    """
     validate_bars(bars)
     evidence: dict[str, object] = {"version": 1, "pattern": "none", "pattern_pass": False}
     if bars.empty:
         return evidence
-    local_index = bars.index.tz_convert("Asia/Kolkata")
+    local_index = bars.index.tz_convert(tz)
     session = bars[local_index.normalize() == local_index[-1].normalize()]
     window = session.tail(MICRO_GREEN_RUN + MICRO_PAUSE_MAX_BARS + 1)
     values = window[["open", "high", "low", "close", "volume"]].to_numpy()
