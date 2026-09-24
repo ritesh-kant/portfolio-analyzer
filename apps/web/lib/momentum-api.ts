@@ -137,6 +137,8 @@ export interface NewsContextItem {
   publisher?: string;
   tier?: string;
   url?: string | null;
+  /** Filing summary or feed description, headline stripped. */
+  text?: string | null;
   published_at: string;
 }
 
@@ -167,7 +169,7 @@ export interface MomentumTrade {
   net_inr?: number | null;
   day_chg_pct?: number;
   rvol?: number;
-  catalyst?: number;
+  catalyst?: number | null;
   event_type?: string;
   candle_tags?: string[];
   news_context?: NewsContextItem[];

@@ -81,7 +81,8 @@ def load(path: Path) -> pd.DataFrame:
     stress = (df["fill_px"] + df["exit_px"]) * df["qty"] * STRESS_SLIP
     df["net_stressed_inr"] = df["net_inr"] - stress
     df["net_pct"] = df["net_stressed_inr"] / notional * 100
-    df["catalyst"] = df["catalyst"].fillna(0).astype(int)
+    # Blank = the catalyst feed was down, so the label is unknown — never "no
+    # catalyst". Those rows sit out of both groups and the anti-test.
     return df
 
 
@@ -102,7 +103,9 @@ def run(path: Path, status_only: bool) -> int:
         print(f"bt18: forward log empty or missing ({path}). The scanner writes one row per closed trade.")
         return 0
     cat, noc = df[df.catalyst == 1], df[df.catalyst == 0]
+    unknown = len(df) - len(cat) - len(noc)
     print(f"bt18: {len(df)} closed paper trades | catalyst={len(cat)} no-catalyst={len(noc)} "
+          f"unknown={unknown} (catalyst feed down; excluded) "
           f"| float filter applied on {int(df['float_filter_applied'].fillna(0).sum())} rows")
     pd.set_option("display.width", 160)
     pd.set_option("display.float_format", lambda x: f"{x:,.2f}")
@@ -116,8 +119,9 @@ def run(path: Path, status_only: bool) -> int:
     spread = cat["gross_pct"].mean() - (noc["gross_pct"].mean() if len(noc) else 0.0)
 
     rng = np.random.default_rng(SEED)
-    g = df["gross_pct"].to_numpy()
-    labels = (df["catalyst"] == 1).to_numpy()
+    known = df[df.catalyst.isin([0, 1])]
+    g = known["gross_pct"].to_numpy()
+    labels = (known["catalyst"] == 1).to_numpy()
     k = int(labels.sum())
     obs = g[labels].mean() - (g[~labels].mean() if (~labels).any() else 0.0)
     ge = 0

@@ -285,7 +285,7 @@ function TradeDetail({ trade, onBack }: { trade: USMomentumTrade; onBack: () => 
           </span>
           <span className="rounded-full bg-black/5 px-2.5 py-1">RVOL {trade.rvol?.toFixed(2) ?? '—'}×</span>
           <span className="rounded-full bg-black/5 px-2.5 py-1">Float {shares(trade.float_shares)}</span>
-          <span className="rounded-full bg-black/5 px-2.5 py-1">Catalyst {trade.catalyst ? 'yes' : 'no'}</span>
+          <span className="rounded-full bg-black/5 px-2.5 py-1">Catalyst {trade.catalyst == null ? 'unknown' : trade.catalyst ? 'yes' : 'no'}</span>
           {trade.exchange && <span className="rounded-full bg-black/5 px-2.5 py-1">{trade.exchange}</span>}
         </div>
       </div>

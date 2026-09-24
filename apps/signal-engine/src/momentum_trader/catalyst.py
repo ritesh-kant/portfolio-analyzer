@@ -4,27 +4,54 @@ before the trigger? Frozen definition (hypothesis v1 §4 / v2 §0).
 Source = the news-trader's `nt_signals` collection, which already carries the
 classifier's `event_type`. Only *presence* of a Group-A type counts; the
 classifier's bullish/bearish call is deliberately ignored.
+
+Absence only means "no catalyst" while the feed is running. `nt_signals` stopped
+on 2026-06-26 (news-trader paused), and every live trade after that was
+stamped 0 — "no event" when the truth was "not looked at". So when the feed
+has written nothing for FEED_ALIVE_WITHIN the answer is `None` (unknown), and
+the forward screen keeps those trades out of both groups. That is wider than
+LOOKBACK on purpose: the feed has never written on a Saturday or Sunday, so a
+24h liveness test would call a healthy feed dead every Monday morning.
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 import pandas as pd
 
 HARD_EVENTS = frozenset({"m_and_a", "earnings", "order_win", "regulatory", "capital_action"})
 LOOKBACK = timedelta(hours=24)
+FEED_ALIVE_WITHIN = timedelta(days=4)   # a weekend plus a holiday
 
 
 class _Collection(Protocol):
     def find_one(self, filter: dict[str, Any], sort: Any = ..., projection: Any = ...) -> Any: ...
 
 
-def hard_catalyst(signals: _Collection, symbol: str, at: pd.Timestamp) -> tuple[int, str]:
-    """(1, event_type) if a Group-A signal names `symbol` in the prior 24h, else (0, '')."""
+def _naive_utc(at: pd.Timestamp) -> datetime:
     # pymongo hands back naive UTC datetimes; query with the same convention
-    at_utc = (at.tz_convert("UTC").tz_localize(None) if at.tzinfo else at).to_pydatetime()
+    return (at.tz_convert("UTC").tz_localize(None) if at.tzinfo else at).to_pydatetime()
+
+
+def feed_last_signal(signals: _Collection) -> datetime | None:
+    """When the feed last wrote any signal (naive UTC), or None if it never has."""
+    doc = signals.find_one({}, sort=[("created_at", -1)], projection={"created_at": 1})
+    return doc.get("created_at") if doc else None
+
+
+def hard_catalyst(signals: _Collection, symbol: str, at: pd.Timestamp) -> tuple[int | None, str]:
+    """(1, event_type) if a Group-A signal names `symbol` in the prior 24h,
+    (0, '') if none did while the feed was running, (None, '') if the feed
+    wrote nothing at all for FEED_ALIVE_WITHIN."""
+    at_utc = _naive_utc(at)
+    feed_alive = signals.find_one(
+        {"created_at": {"$gte": at_utc - FEED_ALIVE_WITHIN, "$lte": at_utc}},
+        projection={"_id": 1},
+    )
+    if not feed_alive:
+        return None, ""
     doc = signals.find_one(
         {
             "stocks": symbol,
