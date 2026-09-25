@@ -252,7 +252,14 @@ class Settings(BaseSettings):
     # shown that label to be cosmetic during a live session, an entry is not
     # filled from a price that may be 15 minutes old.
     mt_us_block_delayed_quotes: bool = True
-    mt_us_quote_poll_seconds: int = 10        # armed entries only; Yahoo has no websocket
+    mt_us_quote_poll_seconds: int = 10        # REST fallback for armed entries, stream down
+    # Yahoo's push stream (momentum_trader/yahoo_stream.py): armed entries are
+    # checked on every new trade (~1-2 s after it prints) instead of a 10 s poll.
+    mt_us_stream: bool = True
+    # Also decide on the stream's bar for the minute that just closed (~5 s
+    # after it) instead of waiting 22 s for Yahoo's REST bar to settle.
+    mt_us_stream_bars: bool = True
+    mt_us_stream_settle_seconds: float = 3.0  # a stream minute is final this long after it closes
     mt_us_bypass_market_hours: bool = False   # run outside the US session (local tests)
 
     # Observability
