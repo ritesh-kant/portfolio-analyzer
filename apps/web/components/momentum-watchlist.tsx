@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
+import { GateChecklist } from './momentum-gate-checklist';
 import { type ChartLocale, MomentumTradeChart, NSE_LOCALE } from './momentum-trade-chart';
 import {
   fetchMomentumWatchlist,
@@ -30,6 +31,10 @@ export interface WatchlistMarket {
   links: { href: string; label: string }[];
   tradesHref: string;
   barsNote: string;
+  /** Where the News panel's items come from, shown under its heading. */
+  newsNote: string;
+  /** Shown when the window had no items. */
+  newsEmpty: string;
   fetchSessions: () => Promise<{ sessions: WatchlistSession[] }>;
   fetchBars: (symbol: string, date: string) => Promise<{ bars: MomentumBar[] }>;
   empty: string;
@@ -48,6 +53,10 @@ export const NSE_WATCHLIST: WatchlistMarket = {
   ],
   tradesHref: '/momentum',
   barsNote: 'Exchange 1-minute candles for the whole session.',
+  newsNote:
+    "This company's own NSE filings from the start of the previous trading day to the end of this session, and nothing else: media recaps are written after a stock has moved. Routine filings (analyst meets, AGM notices) are dimmed; fund-raising is marked as dilution. Context only: the scanner never reads these.",
+  newsEmpty:
+    'No NSE filings in the window: nothing official from the company explains this move.',
   fetchSessions: () => fetchMomentumWatchlist(),
   fetchBars: fetchWatchlistBars,
   empty: 'The scanner has not put any names on its watchlist yet.',
@@ -130,21 +139,12 @@ function NewsPanel({ date, name, news }: { date: string; name: WatchlistName; ne
   return (
     <section className="rounded-xl border border-black/10 p-4">
       <h3 className="font-display text-lg">Company filings</h3>
-      <p className="text-xs text-ink/55">
-        What {name.symbol} itself disclosed from the start of the previous trading day to the end of this session (
-        {market.code === 'US' ? 'SEC EDGAR; an 8-K/6-K headline is its press release' : 'NSE corporate announcements'}
-        ). Media recaps are left out: they are written after the move. Context only: the scanner never reads these.
-      </p>
+      <p className="text-xs text-ink/55">{market.newsNote}</p>
       {(news === undefined || news === 'loading') && <p className="mt-3 text-sm text-ink/55">Looking up filings…</p>}
       {news && !Array.isArray(news) && news !== 'loading' && (
         <p className="mt-3 text-sm text-rose-700">News lookup failed: {news.error}</p>
       )}
-      {Array.isArray(news) && items.length === 0 && (
-        <p className="mt-3 text-sm text-ink/55">
-          No filings by this company in the window. Whatever moved it (promotion, social media, sector news), the
-          company itself said nothing.
-        </p>
-      )}
+      {Array.isArray(news) && items.length === 0 && <p className="mt-3 text-sm text-ink/55">{market.newsEmpty}</p>}
       {items.length > 0 && (
         <ul className="mt-3 space-y-2">
           {items.map((item, i) => {
@@ -389,6 +389,8 @@ function NameDetail({
           ))}
         </div>
       )}
+
+      <GateChecklist market={market.code} timeZone={market.locale.timeZone} name={name} />
 
       <NewsPanel date={date} name={name} news={news} />
 

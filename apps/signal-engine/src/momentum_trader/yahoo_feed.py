@@ -27,7 +27,7 @@ halted    Nasdaq Trader's official halt RSS (all US-listed names, 1-minute TTL,
 
 What it does NOT do
 -------------------
-* **Criterion 3 (news).** Yahoo's news list was checked against yesterday's top
+* **News, of any kind.** Yahoo's news list was checked against yesterday's top
   movers and found the cause for 1 of 5 (BENF); WHLR, VSA, ARTL had nothing
   newer than months, IPDN had nothing at all. Most items are articles ABOUT a
   move ("Top Midday Decliners"), which are caused by the price jump and would
