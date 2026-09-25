@@ -54,9 +54,9 @@ export const NSE_WATCHLIST: WatchlistMarket = {
   tradesHref: '/momentum',
   barsNote: 'Exchange 1-minute candles for the whole session.',
   newsNote:
-    'Headlines naming this company from the previous close to the end of this session (Google News). Context only: the scanner never reads these.',
+    "This company's own NSE filings from the start of the previous trading day to the end of this session, and nothing else: media recaps are written after a stock has moved. Routine filings (analyst meets, AGM notices) are dimmed; fund-raising is marked as dilution. Context only: the scanner never reads these.",
   newsEmpty:
-    "No headlines naming this company in the window. The move had no reported news catalyst, or the news wasn't indexed.",
+    'No NSE filings in the window: nothing official from the company explains this move.',
   fetchSessions: () => fetchMomentumWatchlist(),
   fetchBars: fetchWatchlistBars,
   empty: 'The scanner has not put any names on its watchlist yet.',
@@ -91,6 +91,14 @@ function useFormat() {
 /** One name's headlines: still loading, fetched (possibly empty), or failed. */
 type NameNews = 'loading' | WatchlistNewsItem[] | { error: string };
 const newsItems = (news: NameNews | undefined) => (Array.isArray(news) ? news : []);
+/** Announcements and offerings — the filings that can move a stock; routine paperwork left out. */
+const signalItems = (news: NameNews | undefined) => newsItems(news).filter((item) => item.kind !== 'filing');
+
+const KIND_CHIP: Record<WatchlistNewsItem['kind'], { label: string; className: string }> = {
+  news: { label: 'Announcement', className: 'bg-emerald-100 text-emerald-800' },
+  offering: { label: 'Offering · dilution', className: 'bg-amber-100 text-amber-800' },
+  filing: { label: 'Routine filing', className: 'bg-black/5 text-ink/55' },
+};
 
 const strategyLabel = (value: string | undefined) =>
   ({
@@ -130,9 +138,9 @@ function NewsPanel({ date, name, news }: { date: string; name: WatchlistName; ne
   const items = newsItems(news);
   return (
     <section className="rounded-xl border border-black/10 p-4">
-      <h3 className="font-display text-lg">News signal</h3>
+      <h3 className="font-display text-lg">Company filings</h3>
       <p className="text-xs text-ink/55">{market.newsNote}</p>
-      {(news === undefined || news === 'loading') && <p className="mt-3 text-sm text-ink/55">Searching headlines…</p>}
+      {(news === undefined || news === 'loading') && <p className="mt-3 text-sm text-ink/55">Looking up filings…</p>}
       {news && !Array.isArray(news) && news !== 'loading' && (
         <p className="mt-3 text-sm text-rose-700">News lookup failed: {news.error}</p>
       )}
@@ -141,8 +149,12 @@ function NewsPanel({ date, name, news }: { date: string; name: WatchlistName; ne
         <ul className="mt-3 space-y-2">
           {items.map((item, i) => {
             const timing = newsTiming(item, date, name.first_seen, market);
+            const kind = KIND_CHIP[item.kind];
             return (
-              <li key={`${item.published_at}-${i}`} className="rounded-lg bg-black/[0.03] p-2.5 text-sm">
+              <li
+                key={`${item.published_at}-${i}`}
+                className={`rounded-lg bg-black/[0.03] p-2.5 text-sm ${item.kind === 'filing' ? 'opacity-70' : ''}`}
+              >
                 {item.url ? (
                   <a href={item.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
                     {item.headline}
@@ -150,13 +162,12 @@ function NewsPanel({ date, name, news }: { date: string; name: WatchlistName; ne
                 ) : (
                   <p className="font-medium">{item.headline}</p>
                 )}
+                {item.text && item.text !== item.headline && (
+                  <p className="mt-1 line-clamp-2 text-xs text-ink/70">{item.text}</p>
+                )}
                 <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink/55">
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${kind.className}`}>{kind.label}</span>
                   <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${timing.className}`}>{timing.label}</span>
-                  {item.kind === 'dilution' && (
-                    <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
-                      Share offering · dilution
-                    </span>
-                  )}
                   {newsDay(item.published_at)} {at(item.published_at)} · {item.publisher}
                 </p>
               </li>
@@ -215,7 +226,7 @@ function NameRow({
   onClick: () => void;
 }) {
   const { money, at } = useFormat();
-  const headlines = newsItems(news);
+  const headlines = signalItems(news);
   const traded = name.trades.length > 0;
   const net = traded ? name.trades.reduce((sum, t) => sum + (t.net_inr ?? t.net_usd ?? 0), 0) : null;
   return (
@@ -232,7 +243,7 @@ function NameRow({
             </span>
             {headlines.length > 0 && (
               <span
-                title={`${headlines.length} headline(s) around this session`}
+                title={`${headlines.length} company announcement(s) or offering(s) around this session`}
                 className="shrink-0 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-700"
               >
                 📰 {headlines.length}
@@ -306,9 +317,9 @@ function NameDetail({
         label: `${at(flag.time)} ${flag.reason.replace(/^pattern:/, '')}`,
         kind: 'flag' as const,
       })),
-      // Only headlines published while the market was open land on a candle;
-      // earlier ones are listed in the news panel instead.
-      ...newsItems(news).map((item) => ({
+      // Only filings published while the market was open land on a candle;
+      // earlier ones are listed in the filings panel instead.
+      ...signalItems(news).map((item) => ({
         time: item.published_at,
         label: `${at(item.published_at)} ${truncate(item.headline, 48)}`,
         kind: 'news' as const,
@@ -418,7 +429,7 @@ function NameDetail({
             <h3 className="font-display text-lg">{name.symbol} · 1-minute chart</h3>
             <p className="text-xs text-ink/55">
               {market.barsNote} Amber lines mark each time the scanner
-              flagged the name; blue dotted lines mark headlines published during market hours.
+              flagged the name; blue dotted lines mark company filings published during market hours.
             </p>
           </div>
           <MomentumTradeChart trade={record} interval="1m" watchMarkers={markers} locale={market.locale} />

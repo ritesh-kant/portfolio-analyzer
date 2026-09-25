@@ -31,9 +31,10 @@ What it does NOT do
   movers and found the cause for 1 of 5 (BENF); WHLR, VSA, ARTL had nothing
   newer than months, IPDN had nothing at all. Most items are articles ABOUT a
   move ("Top Midday Decliners"), which are caused by the price jump and would
-  make every mover look catalysed. So it is not read at all: `has_catalyst`
-  stays None, and the only legitimate US news source is SEC EDGAR (the
-  watchlist's news panel, `mt-watchlist.ts`). The official `T1` halt code
+  make every mover look catalysed. So `has_catalyst` is left None and Yahoo's
+  news is not read at all (a 2026-09-24 audit found 0 of 42 media items on 16
+  movers published before the move; SEC EDGAR is the company's own source, see
+  `mt-watchlist.ts`). The official `T1` halt code
   ("news pending") is exposed as `news_pending` — rare, but a genuine marker.
 * **Guarantees.** Yahoo is unofficial. It can rate-limit or change shape
   without notice. Fine for paper; not something to put money behind.
