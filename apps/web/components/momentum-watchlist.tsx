@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
+import { GateChecklist } from './momentum-gate-checklist';
 import { type ChartLocale, MomentumTradeChart, NSE_LOCALE } from './momentum-trade-chart';
 import {
   fetchMomentumWatchlist,
@@ -372,6 +373,8 @@ function NameDetail({
           ))}
         </div>
       )}
+
+      <GateChecklist market={market.code} timeZone={market.locale.timeZone} name={name} />
 
       <NewsPanel date={date} name={name} news={news} />
 

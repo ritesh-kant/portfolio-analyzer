@@ -244,6 +244,18 @@ export interface WatchlistName {
   })[];
   /** Extra per-name facts a market wants shown (the US screen's price and float). */
   details?: { label: string; value: string }[];
+  /** Every refusal the engine logged for this name this session, by reason.
+   * `count` is minutes spent blocked (most gates re-check every minute). */
+  gates?: WatchlistGateHit[];
+  /** Buy-stops the engine armed on this name this session. */
+  armed?: number;
+}
+
+export interface WatchlistGateHit {
+  reason: string;
+  count: number;
+  first: string;
+  last: string;
 }
 
 export interface WatchlistSession {

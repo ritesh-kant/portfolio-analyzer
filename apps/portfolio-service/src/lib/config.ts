@@ -3,4 +3,6 @@ export const config = {
   allowedOrigin: process.env.ALLOWED_ORIGIN ?? 'http://localhost:3000',
   zerodhaApiKey: process.env.ZERODHA_API_KEY,
   zerodhaAccessToken: process.env.ZERODHA_ACCESS_TOKEN,
+  /** "<app> <contact email>" — SEC EDGAR refuses requests without one. */
+  secUserAgent: process.env.SEC_USER_AGENT,
 };

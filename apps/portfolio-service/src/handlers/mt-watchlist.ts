@@ -23,6 +23,60 @@ const istDate = (ms: number) => new Date(ms + IST_OFFSET_MS).toISOString().slice
 /** UTC instant of IST midnight at the start of `date`. */
 const istMidnight = (date: string) => Date.parse(`${date}T00:00:00Z`) - IST_OFFSET_MS;
 
+/** One engine gate that refused a watched name, folded over the session. */
+export interface GateHit {
+  reason: string;
+  count: number;
+  first: string;
+  last: string;
+}
+
+/**
+ * Every refusal the engine logged for each watched name, grouped by reason,
+ * plus how many buy-stops it armed. Keyed `${date}:${symbol}` in the market's
+ * own clock. Most reasons fire once per minute while the name waits (a red
+ * candle is a refusal), so `count` is minutes spent blocked, not attempts.
+ */
+async function gateLog(
+  db: NonNullable<typeof mongoose.connection.db>,
+  rejections: { collection: string; match: Record<string, unknown> },
+  candidates: { collection: string; match: Record<string, unknown> },
+  timezone: string,
+) {
+  const day = { $dateToString: { format: '%Y-%m-%d', date: '$time', timezone } };
+  const [hits, armed] = await Promise.all([
+    db
+      .collection(rejections.collection)
+      .aggregate<{ _id: { date: string; symbol: string; reason: string }; count: number; first: Date; last: Date }>([
+        { $match: rejections.match },
+        {
+          $group: {
+            _id: { date: day, symbol: '$symbol', reason: '$reason' },
+            count: { $sum: 1 },
+            first: { $min: '$time' },
+            last: { $max: '$time' },
+          },
+        },
+      ])
+      .toArray(),
+    db
+      .collection(candidates.collection)
+      .aggregate<{ _id: { date: string; symbol: string }; count: number }>([
+        { $match: candidates.match },
+        { $group: { _id: { date: day, symbol: '$symbol' }, count: { $sum: 1 } } },
+      ])
+      .toArray(),
+  ]);
+  const gates = new Map<string, GateHit[]>();
+  for (const h of hits) {
+    const key = `${h._id.date}:${h._id.symbol}`;
+    const list = gates.get(key) ?? [];
+    list.push({ reason: String(h._id.reason), count: h.count, first: h.first.toISOString(), last: h.last.toISOString() });
+    gates.set(key, list);
+  }
+  return { gates, armed: new Map(armed.map((a) => [`${a._id.date}:${a._id.symbol}`, a.count])) };
+}
+
 /**
  * The NSE attention watchlist, one entry per session.
  *
@@ -52,7 +106,8 @@ export const handler = requireAuth(async (event) => {
 
   const from = new Date(istMidnight(dates[dates.length - 1]!));
   const to = new Date(istMidnight(dates[0]!) + DAY_MS);
-  const [events, positions] = await Promise.all([
+  const window = { time: { $gte: from, $lt: to } };
+  const [events, positions, log] = await Promise.all([
     db
       .collection('mt_attention')
       .find(
@@ -73,6 +128,7 @@ export const handler = requireAuth(async (event) => {
         { projection: { symbol: 1, entry_time: 1, exit_time: 1, entry_price: 1, exit_price: 1, net_inr: 1, status: 1, strategy: 1 } },
       )
       .toArray(),
+    gateLog(db, { collection: 'mt_rejections', match: window }, { collection: 'mt_candidates', match: window }, IST),
   ]);
 
   type Flag = {
@@ -93,6 +149,8 @@ export const handler = requireAuth(async (event) => {
     strategies: string[];
     flags: Flag[];
     trades: Record<string, unknown>[];
+    gates: GateHit[];
+    armed: number;
   };
   const sessions = new Map<string, Map<string, Name>>(dates.map((d) => [d, new Map()]));
   for (const doc of events) {
@@ -110,6 +168,8 @@ export const handler = requireAuth(async (event) => {
       strategies: [],
       flags: [],
       trades: [],
+      gates: log.gates.get(`${date}:${symbol}`) ?? [],
+      armed: log.armed.get(`${date}:${symbol}`) ?? 0,
     };
     name.last_seen = time.toISOString();
     name.max_day_chg_pct = Math.max(name.max_day_chg_pct, Number(doc.day_chg_pct ?? -Infinity));
@@ -204,11 +264,13 @@ export const bars = requireAuth(async (event) => {
 // ── news ─────────────────────────────────────────────────────────────────────
 
 /*
- * Headlines for a watched name around one session, from Google News RSS.
+ * News for a watched name around one session. Context only, like
+ * `news_context.py` on the trade page: nothing here reaches the engine.
  *
- * Context only, like `news_context.py` on the trade page: nothing here reaches
- * the engine. Google News is used because it is the one source that answers
- * for an arbitrary past date without a key — the stored feeds cannot: the
+ * US: SEC EDGAR filings only — see `edgarNews` for why no aggregator is read.
+ *
+ * NSE: Google News RSS, because it is the one source that answers for an
+ * arbitrary past date without a key — the stored feeds cannot: the
  * news-trader pipeline (`nt_signals`) has been paused since 2026-06-26, and
  * BSE's announcement API refuses per-scrip queries off a browser (Akamai 403).
  * A search on the company name also returns peers and sector round-ups, so an
@@ -217,6 +279,7 @@ export const bars = requireAuth(async (event) => {
 
 const NEWS_TTL_MS = 10 * 60 * 1000;
 const MAX_NEWS_SYMBOLS = 40;
+const NEWS_BUDGET_MS = 18_000;
 const newsCache = new Map<string, { at: number; items: NewsItem[] }>();
 
 export interface NewsItem {
@@ -224,6 +287,8 @@ export interface NewsItem {
   publisher: string;
   url: string | null;
   published_at: string;
+  /** US only: an Exhibit 99 press release, a share offering, or any other filing. */
+  kind?: 'press_release' | 'dilution' | 'filing';
 }
 
 /** "CONCORD BIOTECH LIMITED" → "Concord Biotech"; the exchange's legal-suffix noise dropped. */
@@ -275,77 +340,216 @@ function zonedTime(date: string, hhmm: string, timeZone: string): number {
   return guess - (asLocal - guess);
 }
 
-// ── US company names ─────────────────────────────────────────────────────────
-// Nasdaq's public screener lists every Nasdaq/NYSE/AMEX stock with its name.
-// SEC's ticker file would do too, but it refuses any request whose User-Agent
-// does not carry a contact email.
-const NASDAQ_LIST_URL = 'https://api.nasdaq.com/api/screener/stocks?tableonly=true&download=true';
-const BROWSER_UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-let usNames: { at: number; bySymbol: Map<string, string> } | null = null;
+// ── US: SEC EDGAR filings ────────────────────────────────────────────────────
+/*
+ * The US arm reads EDGAR and nothing else. An audit of 16 big movers on
+ * 2026-09-24 found EDGAR carried 15 of its 17 items BEFORE the move, and an
+ * 8-K/6-K's Exhibit 99 is the wire press release itself (its dateline says
+ * /PRNewswire/ or GLOBE NEWSWIRE), with SEC's own acceptance timestamp. Every
+ * aggregator checked (Google News, Yahoo, Benzinga, StocksToTrade, RTTNews,
+ * MarketBeat…) had 0 of 42 items before the move: recaps written because the
+ * price jumped, which make every mover look catalysed. The wires themselves
+ * refuse scrapers, and PR Newswire also carries paid stock promotion.
+ *
+ * SEC refuses requests whose User-Agent has no contact email, and allows 10
+ * requests a second; `secGet` spaces calls under that.
+ */
+const SEC_TICKERS_URL = 'https://www.sec.gov/files/company_tickers_exchange.json';
+const SEC_GAP_MS = 120;
+let secNextAt = 0;
+let secCiks: { at: number; byTicker: Map<string, number> } | null = null;
 
-async function usCompanyName(symbol: string): Promise<string> {
-  if (!usNames || Date.now() - usNames.at > DAY_MS) {
-    const res = await fetch(NASDAQ_LIST_URL, { headers: { 'User-Agent': BROWSER_UA, Accept: 'application/json' } });
-    if (!res.ok) throw new Error(`nasdaq listing HTTP ${res.status}`);
-    const body = (await res.json()) as { data?: { rows?: { symbol: string; name: string }[] } };
-    usNames = { at: Date.now(), bySymbol: new Map((body.data?.rows ?? []).map((r) => [r.symbol.trim(), r.name])) };
-  }
-  const raw = usNames.bySymbol.get(symbol) ?? '';
-  // "SoundHound AI Inc Class A Common Stock" → "SoundHound AI"
-  return raw
-    .replace(/\b(Common Stock|Ordinary Shares?|American Depositary Shares?|Class [A-Z]|Inc\.?|Corp\.?|Corporation|Company|Co\.|Ltd\.?|Limited|plc|Holdings?|N\.V\.|S\.A\.)(?=\s|,|$)/gi, '')
-    .replace(/[,.]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+async function secGet(url: string): Promise<Response> {
+  if (!config.secUserAgent) throw new Error('SEC_USER_AGENT is not set (SEC refuses requests without a contact email)');
+  const wait = secNextAt - Date.now();
+  secNextAt = Math.max(Date.now(), secNextAt) + SEC_GAP_MS;
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  const res = await fetch(url, { headers: { 'User-Agent': config.secUserAgent } });
+  if (!res.ok) throw new Error(`sec ${new URL(url).pathname} HTTP ${res.status}`);
+  return res;
 }
 
-type Market = 'NSE' | 'US';
-const MARKETS: Record<Market, {
-  timeZone: string;
-  close: string;
-  edition: { hl: string; gl: string; ceid: string };
-  name: (symbol: string) => Promise<string>;
-}> = {
-  NSE: {
-    timeZone: 'Asia/Kolkata',
-    close: '15:30',
-    edition: { hl: 'en-IN', gl: 'IN', ceid: 'IN:en' },
-    name: async (symbol) => {
-      const inst = await instrument(symbol);
-      return inst ? companyName(inst.name) : '';
-    },
-  },
-  US: {
-    timeZone: 'America/New_York',
-    close: '16:00',
-    edition: { hl: 'en-US', gl: 'US', ceid: 'US:en' },
-    name: usCompanyName,
-  },
+/** Ticker → CIK. SEC's file lists warrants and units too (GLNDW → Greenland Energy). */
+async function cikOf(symbol: string): Promise<number | null> {
+  if (!secCiks || Date.now() - secCiks.at > DAY_MS) {
+    const body = (await (await secGet(SEC_TICKERS_URL)).json()) as { fields: string[]; data: unknown[][] };
+    const cik = body.fields.indexOf('cik');
+    const ticker = body.fields.indexOf('ticker');
+    secCiks = { at: Date.now(), byTicker: new Map(body.data.map((row) => [String(row[ticker]), Number(row[cik])])) };
+  }
+  return secCiks.byTicker.get(symbol) ?? null;
+}
+
+/** Ownership and correspondence forms: who holds the stock, not what the company did. */
+const SKIP_FORMS = /^(3|4|5|144|SC 13[DG]|SCHEDULE 13[DG]|13F-HR|13F-NT|CORRESP|UPLOAD)(\/A)?$/;
+/** Forms that sell new shares. A mover filing one is usually being sold into, not catalysed. */
+const DILUTION_FORMS = /^(424B\d|S-1|S-3|F-1|F-3|FWP|EFFECT|D)(\/A)?$/;
+const DILUTION_TITLE = /\b(offering|private placement|registered direct|at-the-market|warrant (inducement|exercise))\b/i;
+
+const FORM_NAMES: Record<string, string> = {
+  '424B1': 'Prospectus (share offering)',
+  '424B3': 'Prospectus (share offering)',
+  '424B4': 'Prospectus (share offering priced)',
+  '424B5': 'Prospectus supplement (share offering)',
+  '424B7': 'Prospectus (resale of shares)',
+  'S-1': 'Registration of new shares',
+  'S-3': 'Shelf registration of new shares',
+  'F-1': 'Registration of new shares',
+  'F-3': 'Shelf registration of new shares',
+  FWP: 'Offering term sheet',
+  EFFECT: 'Share registration declared effective',
+  D: 'Exempt share sale notice',
+  '10-Q': 'Quarterly report',
+  '10-K': 'Annual report',
+  '20-F': 'Annual report (foreign issuer)',
+  '6-K': 'Report of a foreign issuer',
+  '425': 'Merger communication',
+  'DEF 14A': 'Proxy statement',
+  'PRE 14A': 'Preliminary proxy statement',
 };
 
-async function sessionNews(symbol: string, date: string, market: Market): Promise<NewsItem[]> {
-  const cacheKey = `${market}:${symbol}:${date}`;
-  const cached = newsCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < NEWS_TTL_MS) return cached.items;
+const ITEM_NAMES: Record<string, string> = {
+  '1.01': 'Material agreement',
+  '1.02': 'Agreement terminated',
+  '2.01': 'Acquisition or sale completed',
+  '2.02': 'Results of operations',
+  '2.03': 'New debt',
+  '3.01': 'Listing-rule notice',
+  '3.02': 'Unregistered share sale',
+  '3.03': 'Change to shareholder rights',
+  '4.01': 'Auditor change',
+  '5.02': 'Director or officer change',
+  '5.03': 'Charter or bylaw change',
+  '5.07': 'Shareholder vote',
+  '7.01': 'Reg FD disclosure',
+  '8.01': 'Other events',
+};
 
-  const m = MARKETS[market];
+function decodeHtml(value: string): string {
+  const named: Record<string, string> = {
+    amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“',
+    mdash: '—', ndash: '–', trade: '™', reg: '®', copy: '©', hellip: '…',
+  };
+  return value
+    .replace(/&#x([0-9a-f]+);/gi, (_m, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_m, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&([a-z]+);/gi, (m, name: string) => named[name.toLowerCase()] ?? m);
+}
+
+/** A press release's dateline: a wire name, "RUTHERFORD, N.J.," or "Sept. 23, 2026". */
+const DATELINE =
+  /(PRNewswire|GLOBE NEWSWIRE|GlobeNewswire|ACCESSWIRE|ACCESS Newswire|Business Wire|BUSINESS WIRE|Newsfile|^[A-Z][A-Z .'’-]{2,},|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.? \d{1,2}, 20\d\d\b)/;
+/** Exhibit furniture that sits above the headline. */
+const PREAMBLE = /^(ex(hibit)?[\s.\-_]*99([.\-_]?\d+)?|exhibit|99[.\-]\d+|\d+|[\w.\-]+\.html?|(press|news) release|for immediate release)$/i;
+
+/** The headline of an Exhibit 99 press release: the lines above its dateline. */
+export function pressReleaseTitle(html: string): string {
+  const text = decodeHtml(
+    html
+      .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+      .replace(/<\/?(p|div|br|tr|td|h[1-6]|li|table)\b[^>]*>/gi, '\n')
+      .replace(/<[^>]+>/g, ''),
+  );
+  const title: string[] = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\s+/g, ' ').trim();
+    if (!line || (!title.length && PREAMBLE.test(line))) continue;
+    if (DATELINE.test(line)) break;
+    title.push(line);
+    if (title.length === 3) break;
+  }
+  const joined = title.join(' ');
+  return joined.length > 240 ? `${joined.slice(0, 239)}…` : joined;
+}
+
+/** The filing's Exhibit 99 (99.1 first), if it has one. */
+async function exhibit99(cik: number, accession: string): Promise<string | null> {
+  const base = `https://www.sec.gov/Archives/edgar/data/${cik}/${accession.replace(/-/g, '')}`;
+  const index = (await (await secGet(`${base}/index.json`)).json()) as { directory?: { item?: { name: string }[] } };
+  const names = (index.directory?.item ?? []).map((i) => i.name).filter((n) => /ex[-_]?99.*\.(htm|html|txt)$/i.test(n));
+  const first = names.find((n) => /99[-_.]?0?1\b|991/i.test(n)) ?? names[0];
+  return first ? `${base}/${first}` : null;
+}
+
+interface SecRecent {
+  accessionNumber: string[];
+  acceptanceDateTime: string[];
+  form: string[];
+  items: string[];
+}
+
+/**
+ * Every filing from the previous close to the end of `date`. Exhibit fetches
+ * stop at `deadline` (the page asks for a whole session's names in one call);
+ * `complete` is false when any headline fell back to the filing type.
+ */
+export async function edgarNews(symbol: string, date: string, deadline: number): Promise<{ items: NewsItem[]; complete: boolean }> {
+  const cik = await cikOf(symbol);
+  if (cik == null) throw new Error(`${symbol} is not in SEC's ticker list`);
+  const body = (await (await secGet(`https://data.sec.gov/submissions/CIK${String(cik).padStart(10, '0')}.json`)).json()) as {
+    filings: { recent: SecRecent };
+  };
+  const recent = body.filings.recent;
+  // From the previous session's close to the end of this session's day, New York time.
+  const from = zonedTime(previousWeekday(date), '16:00', 'America/New_York');
+  const to = zonedTime(addDays(date, 1), '00:00', 'America/New_York');
+
+  const items: NewsItem[] = [];
+  let complete = true;
+  for (let i = 0; i < recent.form.length; i++) {
+    const form = recent.form[i]!;
+    // acceptanceDateTime is true UTC: an 8-K accepted at 21:20 ET reads 01:20Z the next day.
+    const accepted = Date.parse(recent.acceptanceDateTime[i]!);
+    if (!Number.isFinite(accepted) || accepted < from || accepted >= to || SKIP_FORMS.test(form)) continue;
+    const accession = recent.accessionNumber[i]!;
+    const codes = (recent.items[i] ?? '').split(',').map((c) => c.trim()).filter((c) => c && c !== '9.01');
+    const baseForm = form.replace(/\/A$/, '');
+    let url = `https://www.sec.gov/Archives/edgar/data/${cik}/${accession.replace(/-/g, '')}/${accession}-index.htm`;
+    let headline = '';
+    if ((baseForm === '8-K' || baseForm === '6-K') && Date.now() > deadline) {
+      complete = false;
+    } else if (baseForm === '8-K' || baseForm === '6-K') {
+      const ex = await exhibit99(cik, accession).catch(() => null);
+      if (ex) {
+        url = ex;
+        headline = pressReleaseTitle(await (await secGet(ex)).text().catch(() => ''));
+      }
+    }
+    const described = codes.length
+      ? codes.map((c) => `${c} ${ITEM_NAMES[c] ?? ''}`.trim()).join(' · ')
+      : (FORM_NAMES[baseForm] ?? form);
+    const dilution = DILUTION_FORMS.test(form) || codes.includes('3.02') || DILUTION_TITLE.test(headline);
+    items.push({
+      headline: headline || described,
+      publisher: `SEC EDGAR · ${form}${headline && codes.length ? ` · ${described}` : ''}`,
+      url,
+      published_at: new Date(accepted).toISOString(),
+      kind: dilution ? 'dilution' : headline ? 'press_release' : 'filing',
+    });
+  }
+  items.sort((a, b) => a.published_at.localeCompare(b.published_at));
+  return { items, complete };
+}
+
+// ── NSE: Google News ─────────────────────────────────────────────────────────
+
+async function googleNews(symbol: string, date: string): Promise<NewsItem[]> {
   const prev = previousWeekday(date);
-  const name = await m.name(symbol).catch(() => '');
+  const inst = await instrument(symbol).catch(() => null);
+  const name = inst ? companyName(inst.name) : '';
   const query = `${name ? `"${symbol}" OR "${name}"` : `"${symbol}"`} after:${addDays(prev, -1)} before:${addDays(date, 1)}`;
-  const url = `https://news.google.com/rss/search?${new URLSearchParams({ q: query, ...m.edition })}`;
+  const url = `https://news.google.com/rss/search?${new URLSearchParams({ q: query, hl: 'en-IN', gl: 'IN', ceid: 'IN:en' })}`;
   const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
   if (!res.ok) throw new Error(`google news HTTP ${res.status}`);
   const xml = await res.text();
 
-  // From the previous session's close to the end of this session's day, in
-  // the market's own clock.
-  const from = zonedTime(prev, m.close, m.timeZone);
-  const to = zonedTime(addDays(date, 1), '00:00', m.timeZone);
-  // The name's first two words ("Concord Biotech", "SoundHound AI"): enough to
-  // reject peers, loose enough to survive the exchange's abbreviations.
+  // From the previous session's close to the end of this session's day, IST.
+  const from = zonedTime(prev, '15:30', IST);
+  const to = zonedTime(addDays(date, 1), '00:00', IST);
+  // The name's first two words ("Concord Biotech"): enough to reject peers,
+  // loose enough to survive the exchange's abbreviations.
   const nameKey = name.split(' ').slice(0, 2).join(' ').toLowerCase();
-  const symbolRe = new RegExp(`\\b${symbol.replace(/[.*+?^${}()|[\]\\&]/g, '\\$&')}\\b`, market === 'US' ? '' : 'i');
+  const symbolRe = new RegExp(`\\b${symbol.replace(/[.*+?^${}()|[\]\\&]/g, '\\$&')}\\b`, 'i');
   const seen = new Set<string>();
   const items: NewsItem[] = [];
   for (const block of xml.match(/<item>[\s\S]*?<\/item>/g) ?? []) {
@@ -361,11 +565,23 @@ async function sessionNews(symbol: string, date: string, market: Market): Promis
     items.push({ headline, publisher, url: tag(block, 'link') || null, published_at: new Date(published).toISOString() });
   }
   items.sort((a, b) => a.published_at.localeCompare(b.published_at));
-  newsCache.set(cacheKey, { at: Date.now(), items });
   return items;
 }
 
-/** Headlines for several watched names on one session: `?date=YYYY-MM-DD&symbols=A,B[&market=US]`. */
+type Market = 'NSE' | 'US';
+const NEWS_SOURCE: Record<Market, string> = { NSE: 'google_news', US: 'sec_edgar' };
+
+async function sessionNews(symbol: string, date: string, market: Market, deadline: number): Promise<NewsItem[]> {
+  const cacheKey = `${market}:${symbol}:${date}`;
+  const cached = newsCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < NEWS_TTL_MS) return cached.items;
+  const { items, complete } =
+    market === 'US' ? await edgarNews(symbol, date, deadline) : { items: await googleNews(symbol, date), complete: true };
+  if (complete) newsCache.set(cacheKey, { at: Date.now(), items });
+  return items;
+}
+
+/** News for several watched names on one session: `?date=YYYY-MM-DD&symbols=A,B[&market=US]`. */
 export const news = requireAuth(async (event) => {
   const date = event.queryStringParameters?.date ?? '';
   const market: Market = event.queryStringParameters?.market === 'US' ? 'US' : 'NSE';
@@ -373,20 +589,23 @@ export const news = requireAuth(async (event) => {
   if (!DATE_RE.test(date) || !symbols.length || symbols.length > MAX_NEWS_SYMBOLS || !symbols.every((s) => SYMBOL_RE.test(s))) {
     return json(400, { error: `date (YYYY-MM-DD) and 1-${MAX_NEWS_SYMBOLS} symbols are required` });
   }
+  // The function times out at 25 s; past this, US filings keep their form name instead of a headline.
+  const deadline = Date.now() + NEWS_BUDGET_MS;
   const out: Record<string, NewsItem[] | { error: string }> = {};
-  // A handful at a time: Google throttles a burst of 30 parallel searches.
+  // A handful at a time: Google throttles a burst of 30 parallel searches, and
+  // SEC calls are spaced by `secGet` anyway.
   for (let i = 0; i < symbols.length; i += 6) {
     await Promise.all(
       symbols.slice(i, i + 6).map(async (symbol) => {
         try {
-          out[symbol] = await sessionNews(symbol, date, market);
+          out[symbol] = await sessionNews(symbol, date, market, deadline);
         } catch (err) {
           out[symbol] = { error: err instanceof Error ? err.message : String(err) };
         }
       }),
     );
   }
-  return json(200, { date, market, source: 'google_news', news: out });
+  return json(200, { date, market, source: NEWS_SOURCE[market], news: out });
 });
 
 // ── US watchlist ─────────────────────────────────────────────────────────────
@@ -416,7 +635,8 @@ export const usHandler = requireAuth(async (event) => {
   const dates = docs.map((d) => String(d.date));
   const from = new Date(zonedTime(dates[dates.length - 1]!, '00:00', 'America/New_York'));
   const to = new Date(zonedTime(addDays(dates[0]!, 1), '00:00', 'America/New_York'));
-  const [attention, positions] = await Promise.all([
+  const window = { time: { $gte: from, $lt: to } };
+  const [attention, positions, log] = await Promise.all([
     db
       .collection('mt_us_candidates')
       .find(
@@ -432,6 +652,12 @@ export const usHandler = requireAuth(async (event) => {
         { projection: { symbol: 1, entry_time: 1, exit_time: 1, entry_price: 1, exit_price: 1, net_usd: 1, status: 1, strategy: 1 } },
       )
       .toArray(),
+    gateLog(
+      db,
+      { collection: 'mt_us_candidates', match: { ...window, kind: 'rejection' } },
+      { collection: 'mt_us_candidates', match: { ...window, kind: 'candidate' } },
+      'America/New_York',
+    ),
   ]);
   const etDate = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(d);
 
@@ -477,6 +703,8 @@ export const usHandler = requireAuth(async (event) => {
         trades: positions
           .filter((p) => p.symbol === n.symbol && etDate(p.entry_time as Date) === date)
           .map((p) => ({ ...p, _id: String(p._id) })),
+        gates: log.gates.get(`${date}:${n.symbol}`) ?? [],
+        armed: log.armed.get(`${date}:${n.symbol}`) ?? 0,
         details: [
           { label: 'Price', value: `$${Number(n.price).toFixed(2)}` },
           { label: 'Float', value: n.float_shares == null ? 'unknown' : `${(n.float_shares / 1e6).toFixed(1)}M shares` },

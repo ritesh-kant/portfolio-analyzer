@@ -37,6 +37,7 @@ provider:
     ALLOWED_ORIGIN: ${env:ALLOWED_ORIGIN, 'http://localhost:3000'}
     SIGNAL_ENGINE_INGESTER_FN: signal-engine-${self:provider.stage}-newsIngester
     NT_NEWS_DELAY_SECONDS: ${env:NT_NEWS_DELAY_SECONDS, '900'}
+    SEC_USER_AGENT: ${ssm:/portfolio-analyzer/${sls:stage}/SEC_USER_AGENT, ''}
   iam:
     role:
       statements:
