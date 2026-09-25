@@ -372,7 +372,14 @@ async function cikOf(symbol: string): Promise<number | null> {
 const SKIP_FORMS = /^(3|4|5|144|SC 13[DG]|SCHEDULE 13[DG]|13F-HR|13F-NT|CORRESP|UPLOAD)(\/A)?$/;
 /** Forms that sell new shares. A mover filing one is usually being sold into, not catalysed. */
 const DILUTION_FORMS = /^(424B\d|S-1|S-3|F-1|F-3|FWP|EFFECT|D)(\/A)?$/;
-const DILUTION_TITLE = /\b(offering|private placement|registered direct|at-the-market|warrant (inducement|exercise))\b/i;
+/**
+ * A press release announcing a share sale. "Offering" alone is not enough: a
+ * company "expands its service offering" too. It has to be a kind of offering
+ * ("public", "underwritten"…), a sized one ("$10 Million Offering", "offering
+ * of 2,000,000 shares"), or one being priced or closed.
+ */
+const DILUTION_TITLE =
+  /\b((public|underwritten|registered|secondary|follow-on|best[- ]efforts|direct|proposed|overnight|confidentially marketed|firm[- ]commitment|equity|stock|share|unit) offering|offering of (\$|US\$|up to|approximately|\d|common|ordinary|shares|units|American Depositary|pre-funded|warrants)|\$[\d.,]+\s*(million|billion|[mbk])?\b(\s+[\w-]+){0,3}\s+offering|(pricing|prices|priced|closing|closes|closed|upsized?)\b[^.]{0,60}\boffering|private placement|registered direct|at[- ]the[- ]market|warrant (inducement|exercise)|equity (line|purchase agreement))\b/i;
 
 const FORM_NAMES: Record<string, string> = {
   '424B1': 'Prospectus (share offering)',
