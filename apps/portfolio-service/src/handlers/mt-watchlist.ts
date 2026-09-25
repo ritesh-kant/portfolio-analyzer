@@ -369,7 +369,11 @@ async function secGet(url: string): Promise<Response> {
   return res;
 }
 
-/** Ticker → CIK. SEC's file lists warrants and units too (GLNDW → Greenland Energy). */
+/**
+ * Ticker → CIK. SEC's file lists some warrants and units (GLNDW) but not all
+ * (NWCLW), so a miss falls back to the issuer's own ticker: Nasdaq's fifth
+ * letter W/U/R and NYSE's .WS/.U mark a warrant, unit or right on the stock.
+ */
 async function cikOf(symbol: string): Promise<number | null> {
   if (!secCiks || Date.now() - secCiks.at > DAY_MS) {
     const body = (await (await secGet(SEC_TICKERS_URL)).json()) as { fields: string[]; data: unknown[][] };
@@ -377,7 +381,8 @@ async function cikOf(symbol: string): Promise<number | null> {
     const ticker = body.fields.indexOf('ticker');
     secCiks = { at: Date.now(), byTicker: new Map(body.data.map((row) => [String(row[ticker]), Number(row[cik])])) };
   }
-  return secCiks.byTicker.get(symbol) ?? null;
+  const issuer = symbol.length >= 5 ? symbol.replace(/[.-]?(WS|W|U|R|RT)$/, '') : symbol;
+  return secCiks.byTicker.get(symbol) ?? secCiks.byTicker.get(issuer) ?? null;
 }
 
 /** Ownership and correspondence forms: who holds the stock, not what the company did. */
@@ -428,37 +433,48 @@ const ITEM_NAMES: Record<string, string> = {
 function decodeHtml(value: string): string {
   const named: Record<string, string> = {
     amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“',
-    mdash: '—', ndash: '–', trade: '™', reg: '®', copy: '©', hellip: '…',
+    mdash: '—', ndash: '–', trade: '™', reg: '®', copy: '©', hellip: '…', sup1: '¹', sup2: '²', sup3: '³',
+    deg: '°', middot: '·', bull: '•', euro: '€', pound: '£', eacute: 'é', egrave: 'è', ouml: 'ö', uuml: 'ü',
   };
   return value
     .replace(/&#x([0-9a-f]+);/gi, (_m, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
     .replace(/&#(\d+);/g, (_m, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/&([a-z]+);/gi, (m, name: string) => named[name.toLowerCase()] ?? m);
+    .replace(/&([a-z][a-z0-9]*);/gi, (m, name: string) => named[name.toLowerCase()] ?? m);
 }
 
 /** A press release's dateline: a wire name, "RUTHERFORD, N.J.," or "Sept. 23, 2026". */
 const DATELINE =
   /(PRNewswire|GLOBE NEWSWIRE|GlobeNewswire|ACCESSWIRE|ACCESS Newswire|Business Wire|BUSINESS WIRE|Newsfile|^[A-Z][A-Z .'’-]{2,},|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.? \d{1,2}, 20\d\d\b)/;
-/** Exhibit furniture that sits above the headline. */
-const PREAMBLE = /^(ex(hibit)?[\s.\-_]*99([.\-_]?\d+)?|exhibit|99[.\-]\d+|\d+|[\w.\-]+\.html?|(press|news) release|for immediate release)$/i;
+/** Exhibit furniture ("EX-99.1", "PRESS RELEASE, DATED …"). Above the headline it is skipped; below, it ends it. */
+const PREAMBLE = /^(ex(hibit)?[\s.\-_]*99([.\-_]?\d+)?|exhibit|99[.\-]\d+|\d+|[\w.\-]+\.html?|for immediate release)$|^(press|news) release\b/i;
 
 /** The headline of an Exhibit 99 press release: the lines above its dateline. */
 export function pressReleaseTitle(html: string): string {
   const text = decodeHtml(
     html
       .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
-      .replace(/<\/?(p|div|br|tr|td|h[1-6]|li|table)\b[^>]*>/gi, '\n')
+      .replace(/<br\b[^>]*>/gi, ' ')
+      .replace(/<\/?(p|div|tr|td|h[1-6]|li|table)\b[^>]*>/gi, '\n')
       .replace(/<[^>]+>/g, ''),
   );
-  const title: string[] = [];
+  let joined = '';
+  let lines = 0;
   for (const raw of text.split('\n')) {
     const line = raw.replace(/\s+/g, ' ').trim();
-    if (!line || (!title.length && PREAMBLE.test(line))) continue;
+    if (!line) continue;
+    if (PREAMBLE.test(line)) {
+      if (lines) break;
+      continue;
+    }
     if (DATELINE.test(line)) break;
-    title.push(line);
-    if (title.length === 3) break;
+    // A headline split across paragraphs continues with a short fragment
+    // ("Lōkahi" / "Therapeutics™ and …") or a lowercase word ("… Extension" /
+    // "of Jameson Land …"); anything else is its sub-headline.
+    const words = (t: string) => t.split(' ').length;
+    const subhead = words(joined) >= 5 && words(line) >= 5 && !/^[a-z]/.test(line);
+    joined = !lines ? line : `${joined}${subhead ? ' — ' : ' '}${line}`;
+    if (++lines === 3) break;
   }
-  const joined = title.join(' ');
   return joined.length > 240 ? `${joined.slice(0, 239)}…` : joined;
 }
 
@@ -483,7 +499,7 @@ interface SecRecent {
  * stop at `deadline` (the page asks for a whole session's names in one call);
  * `complete` is false when any headline fell back to the filing type.
  */
-export async function edgarNews(symbol: string, date: string, deadline: number): Promise<{ items: NewsItem[]; complete: boolean }> {
+async function edgarNews(symbol: string, date: string, deadline: number): Promise<{ items: NewsItem[]; complete: boolean }> {
   const cik = await cikOf(symbol);
   if (cik == null) throw new Error(`${symbol} is not in SEC's ticker list`);
   const body = (await (await secGet(`https://data.sec.gov/submissions/CIK${String(cik).padStart(10, '0')}.json`)).json()) as {

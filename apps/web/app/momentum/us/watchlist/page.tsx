@@ -17,6 +17,9 @@ const US_WATCHLIST: WatchlistMarket = {
   ],
   tradesHref: '/momentum/us',
   barsNote: 'The 1-minute bars the US session read from its feed (Yahoo).',
+  newsNote:
+    "This company's SEC EDGAR filings from the previous close to the end of this session, and nothing else: news aggregators (Google News, Yahoo, Benzinga, StocksToTrade) publish recaps after a stock has moved, so every mover would look like it had a catalyst. An 8-K or 6-K is shown by its press-release headline; share offerings are marked. Context only: the scanner never reads these.",
+  newsEmpty: 'No SEC filings in the window: nothing official from the company explains this move.',
   fetchSessions: () => fetchUSWatchlistDays(),
   fetchBars: fetchUSWatchlistBars,
   empty:

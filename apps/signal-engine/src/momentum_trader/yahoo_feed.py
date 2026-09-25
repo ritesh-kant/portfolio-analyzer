@@ -27,12 +27,13 @@ halted    Nasdaq Trader's official halt RSS (all US-listed names, 1-minute TTL,
 
 What it does NOT do
 -------------------
-* **Criterion 3 (news).** Yahoo's news list was checked against yesterday's top
+* **News, of any kind.** Yahoo's news list was checked against yesterday's top
   movers and found the cause for 1 of 5 (BENF); WHLR, VSA, ARTL had nothing
   newer than months, IPDN had nothing at all. Most items are articles ABOUT a
   move ("Top Midday Decliners"), which are caused by the price jump and would
-  make every mover look catalysed. So `has_catalyst` is left None and
-  `recent_news` exists for the audit trail only. The official `T1` halt code
+  make every mover look catalysed. So it is not read at all: `has_catalyst`
+  stays None, and the only legitimate US news source is SEC EDGAR (the
+  watchlist's news panel, `mt-watchlist.ts`). The official `T1` halt code
   ("news pending") is exposed as `news_pending` — rare, but a genuine marker.
 * **Guarantees.** Yahoo is unofficial. It can rate-limit or change shape
   without notice. Fine for paper; not something to put money behind.
@@ -222,7 +223,6 @@ class YahooFeed:
     screen_fn: Callable[..., dict] | None = None
     history_fn: Callable[[str], pd.DataFrame] | None = None
     info_fn: Callable[[str], dict] | None = None
-    news_fn: Callable[[str], list] | None = None
     halts_fetch_fn: Callable[[], bytes] | None = None
     history_range_fn: Callable[[str, pd.Timestamp, pd.Timestamp], pd.DataFrame] | None = None
     daily_fn: Callable[[str], pd.DataFrame] | None = None
@@ -282,12 +282,6 @@ class YahooFeed:
             return self.info_fn(symbol)
         import yfinance as yf
         return yf.Ticker(symbol).info or {}
-
-    def _news(self, symbol: str) -> list:
-        if self.news_fn is not None:
-            return self.news_fn(symbol)
-        import yfinance as yf
-        return yf.Ticker(symbol).news or []
 
     def _fetch_halts(self) -> bytes:
         if self.halts_fetch_fn is not None:
@@ -461,26 +455,6 @@ class YahooFeed:
         """Halted with `T1` ("news pending") — the exchange's own marker that
         material news is due. Rare, but a real hard event, unlike news lists."""
         return {s for s, r in self.halt_reasons.items() if r == "T1" and s in self._halted}
-
-    def recent_news(self, symbol: str, since: pd.Timestamp, now: pd.Timestamp) -> list[dict]:
-        """Items published in [since, now]. Never after `now` — a headline the
-        decision could not have seen is look-ahead. AUDIT ONLY: not criterion 3,
-        see the module docstring for why."""
-        out = []
-        for n in self._news(symbol):
-            c = n.get("content", n)
-            pub = c.get("pubDate")
-            if not pub:
-                continue
-            at = pd.Timestamp(pub)
-            at = at.tz_localize("UTC") if at.tzinfo is None else at
-            if since <= at <= now:
-                out.append({
-                    "published_at": at.isoformat(),
-                    "provider": (c.get("provider") or {}).get("displayName", ""),
-                    "title": c.get("title", ""),
-                })
-        return out
 
     def describe(self) -> dict:
         """What this feed did and did not do, stored with every watchlist."""

@@ -31,6 +31,10 @@ export interface WatchlistMarket {
   links: { href: string; label: string }[];
   tradesHref: string;
   barsNote: string;
+  /** Where the News panel's items come from, shown under its heading. */
+  newsNote: string;
+  /** Shown when the window had no items. */
+  newsEmpty: string;
   fetchSessions: () => Promise<{ sessions: WatchlistSession[] }>;
   fetchBars: (symbol: string, date: string) => Promise<{ bars: MomentumBar[] }>;
   empty: string;
@@ -49,6 +53,10 @@ export const NSE_WATCHLIST: WatchlistMarket = {
   ],
   tradesHref: '/momentum',
   barsNote: 'Exchange 1-minute candles for the whole session.',
+  newsNote:
+    'Headlines naming this company from the previous close to the end of this session (Google News). Context only: the scanner never reads these.',
+  newsEmpty:
+    "No headlines naming this company in the window. The move had no reported news catalyst, or the news wasn't indexed.",
   fetchSessions: () => fetchMomentumWatchlist(),
   fetchBars: fetchWatchlistBars,
   empty: 'The scanner has not put any names on its watchlist yet.',
@@ -123,20 +131,12 @@ function NewsPanel({ date, name, news }: { date: string; name: WatchlistName; ne
   return (
     <section className="rounded-xl border border-black/10 p-4">
       <h3 className="font-display text-lg">News signal</h3>
-      <p className="text-xs text-ink/55">
-        Headlines naming {name.symbol} from the previous close to the end of this session (Google News). Context
-        only: the scanner never reads these.
-      </p>
+      <p className="text-xs text-ink/55">{market.newsNote}</p>
       {(news === undefined || news === 'loading') && <p className="mt-3 text-sm text-ink/55">Searching headlines…</p>}
       {news && !Array.isArray(news) && news !== 'loading' && (
         <p className="mt-3 text-sm text-rose-700">News lookup failed: {news.error}</p>
       )}
-      {Array.isArray(news) && items.length === 0 && (
-        <p className="mt-3 text-sm text-ink/55">
-          No headlines naming this company in the window. The move had no reported news catalyst, or the news
-          wasn&apos;t indexed.
-        </p>
-      )}
+      {Array.isArray(news) && items.length === 0 && <p className="mt-3 text-sm text-ink/55">{market.newsEmpty}</p>}
       {items.length > 0 && (
         <ul className="mt-3 space-y-2">
           {items.map((item, i) => {
@@ -152,6 +152,11 @@ function NewsPanel({ date, name, news }: { date: string; name: WatchlistName; ne
                 )}
                 <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink/55">
                   <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${timing.className}`}>{timing.label}</span>
+                  {item.kind === 'dilution' && (
+                    <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                      Share offering · dilution
+                    </span>
+                  )}
                   {newsDay(item.published_at)} {at(item.published_at)} · {item.publisher}
                 </p>
               </li>

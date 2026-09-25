@@ -277,6 +277,8 @@ export interface WatchlistNewsItem {
   publisher: string;
   url: string | null;
   published_at: string;
+  /** US (SEC EDGAR) only: a press-release exhibit, a share offering, or any other filing. */
+  kind?: 'press_release' | 'dilution' | 'filing';
 }
 
 /** Per-symbol headlines for one session; a symbol whose lookup failed carries `error`. */
