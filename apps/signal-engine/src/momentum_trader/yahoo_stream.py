@@ -34,11 +34,17 @@ What it cannot do
 -----------------
 It is conflated: SPY arrives at ~1 message a second, not every print. A bar
 built from it can miss the extreme of a wick that lived under a second — the
-same defect as NSE's sampled LTP (`project_live_bar_sampling`). That is why the
-stream only ever supplies the NEWEST minute, the one REST has not settled yet;
-every older minute is Yahoo's REST bar, and `compare_bars` measures how often
-the two disagree. It is also unofficial and can vanish; `healthy()` goes False
-within `stale_after` seconds and every caller falls back to REST.
+same defect as NSE's sampled LTP (`project_live_bar_sampling`). Measured on the
+screen's small caps (2026-09-25, full afternoon, 9 names, ~950 minutes): close
+matched REST ~90%, but the high read low on ~25% of minutes and the low read
+high on ~24% (median miss 0.16-0.20% of price, max 6.7%; a bar spans ~1.2%).
+So stream bars are OFF for decisions by default (`mt_us_stream_bars`); when
+on, the stream supplies only the NEWEST minute, the one REST has not settled
+yet. They are always built and stored, so `compare_bars` can keep measuring
+them. Fills do not have this problem: they are judged on real prints.
+
+It is also unofficial and can vanish; `healthy()` goes False within
+`stale_after` seconds and every caller falls back to REST.
 """
 
 from __future__ import annotations
@@ -203,7 +209,7 @@ class YahooStream:
 
     def _on_drop(self) -> None:
         with self._lock:
-            if self._connected:
+            if self._connected and not self._stop.is_set():   # our own stop is not a drop
                 self.drops += 1
             self._connected = False
             self._dropped_at = self._clock()

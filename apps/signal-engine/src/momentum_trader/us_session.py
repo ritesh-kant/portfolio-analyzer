@@ -8,8 +8,8 @@ What a session does
 -------------------
 09:20 ET  wake (EventBridge Scheduler, America/New_York — so DST cannot shift it)
           exit at once on a US holiday
-09:31 →   every minute, ~5 s after each 1-minute bar closes (22 s if the
-          stream is down or MT_US_STREAM_BARS is off):
+09:31 →   every minute, 22 s after each 1-minute bar closes (REST settle;
+          ~5 s with MT_US_STREAM_BARS=true and a healthy stream):
             1. screen: the five criteria (us_universe) over Yahoo's movers
             2. a stock that newly passes is DISCOVERED: its prior 29 days of
                1-minute bars build the volume profile and warm the indicators
@@ -601,8 +601,8 @@ def _loop(settings: Settings, session: USSession, feed: Any, stream: Any, cfg: E
                 tg(f"🟡 no {REFERENCE_SYMBOL} bars by {now:%H:%M} ET — "
                    "market looks closed, exiting")
                 return 0
-        # The next decision: as soon as the minute's bar can be read — ~3 s
-        # after it closes from the stream, 20 s from REST if the stream is down.
+        # The next decision: as soon as the minute's bar can be read — 20 s
+        # after it closes from REST, ~3 s from the stream if stream bars are on.
         next_bar = now.floor("1min") + pd.Timedelta(seconds=60 + feed.ready_seconds() + 2)
         while (t := clock()) < next_bar:
             armed = any(w.state.pending is not None for w in session.watch.values())
