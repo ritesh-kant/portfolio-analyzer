@@ -166,25 +166,47 @@ class FakeWS:
         self.closed = True
 
 
+class LiveWS(FakeWS):
+    """A socket that stays up until closed. `listen` runs only after the stream
+    has counted the connect (and every earlier drop), so `done` marks a moment
+    when those counts are final."""
+
+    def __init__(self, done: threading.Event) -> None:
+        super().__init__([], done)
+        self._closed = threading.Event()
+
+    def listen(self, handler):
+        self.done.set()
+        self._closed.wait(5)
+
+    def close(self):
+        self.closed = True
+        self._closed.set()
+
+
 def test_run_subscribes_heartbeat_and_reconnects_after_a_drop(monkeypatch):
     monkeypatch.setattr("src.momentum_trader.yahoo_stream.RECONNECT_BACKOFF", (0.01,))
-    first, second = threading.Event(), threading.Event()
-    sockets = [FakeWS([msg("ABC", 5.0, T0)], first), FakeWS([], second)]
+    # Stop only once the stream is back up after the second drop: stopping
+    # while a drop is still unwinding would (rightly) not count it as one.
+    live = threading.Event()
+    sockets = [FakeWS([msg("ABC", 5.0, T0)], threading.Event()),
+               FakeWS([], threading.Event()), LiveWS(live)]
     made: list[FakeWS] = []
 
     def factory():
-        ws = sockets[len(made)] if len(made) < len(sockets) else FakeWS([], threading.Event())
+        ws = sockets[len(made)]
         made.append(ws)
         return ws
 
     s = YahooStream(ws_factory=factory)
     s.subscribe(["abc"])
     s.start()
-    assert second.wait(2)
+    assert live.wait(2)
     s.stop()
-    assert made[0].subscribed[0] == ["ABC", HEARTBEAT]
-    assert made[1].subscribed[0] == ["ABC", HEARTBEAT]        # full resubscribe
-    assert s.connects >= 2 and s.drops >= 2
+    assert [ws.subscribed[0] for ws in made] == [["ABC", HEARTBEAT]] * 3   # full resubscribe
+    assert s.connects == 3
+    assert s.drops == 2                                      # our own stop is not a drop
+    assert made[2].closed
     assert s.has_seen("ABC")
 
 
