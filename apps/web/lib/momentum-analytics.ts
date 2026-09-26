@@ -13,11 +13,15 @@
  *      would hide which of the two a bucket is actually telling you about.
  */
 
+import { direction, sideOf } from './momentum-side';
+
 const IST = 'Asia/Kolkata';
 
 export interface AnalyticsTrade {
   _id: string;
   symbol: string;
+  /** Absent on every row written before shorts existed — read as long. */
+  side?: 'long' | 'short';
   setup?: string;
   strategy?: string;
   entry_time: string;
@@ -156,7 +160,8 @@ export function holdMinutes(trade: AnalyticsTrade): number | undefined {
 /** Stop distance as a percentage of entry — how much room the trade was given. */
 export function stopDistancePct(trade: AnalyticsTrade): number | undefined {
   if (trade.stop === undefined || !trade.entry_price) return undefined;
-  const distance = trade.entry_price - trade.stop;
+  // A short's stop sits ABOVE its entry.
+  const distance = direction(trade) * (trade.entry_price - trade.stop);
   return distance > 0 ? (distance / trade.entry_price) * 100 : undefined;
 }
 
@@ -169,9 +174,10 @@ export function stopDistancePct(trade: AnalyticsTrade): number | undefined {
  */
 export function rMultiple(trade: AnalyticsTrade): number | undefined {
   if (trade.stop === undefined || trade.exit_price === undefined) return undefined;
-  const risk = trade.entry_price - trade.stop;
+  const dir = direction(trade);
+  const risk = dir * (trade.entry_price - trade.stop);
   if (risk <= 0) return undefined;
-  return (trade.exit_price - trade.entry_price) / risk;
+  return (dir * (trade.exit_price - trade.entry_price)) / risk;
 }
 
 // ── aggregate statistics ─────────────────────────────────────────────────────
@@ -368,6 +374,13 @@ const optional = (value: number | null | undefined, make: (n: number) => string)
 
 export const DIMENSIONS: Dimension[] = [
   {
+    id: 'side',
+    label: 'Long or short',
+    question: 'Do buys or short sales work better?',
+    order: ['Long', 'Short'],
+    bucket: (trade) => (sideOf(trade) === 'short' ? 'Short' : 'Long'),
+  },
+  {
     id: 'time',
     label: 'Time of day',
     question: 'At what time of day do these trades work?',
@@ -391,9 +404,11 @@ export const DIMENSIONS: Dimension[] = [
   {
     id: 'dayChg',
     label: 'Day move at entry',
-    question: 'How far up should the stock already be when you buy it?',
+    // Size of the move: a short enters a stock that is DOWN, so its day change
+    // is negative. Split by the "Long or short" dimension to separate them.
+    question: 'How far should the stock already have moved (up for a buy, down for a short)?',
     order: bandOrder(DAY_CHG_CUTS, percent),
-    bucket: (trade) => optional(trade.day_chg_pct, (v) => band(v, DAY_CHG_CUTS, percent)),
+    bucket: (trade) => optional(trade.day_chg_pct, (v) => band(Math.abs(v), DAY_CHG_CUTS, percent)),
   },
   {
     id: 'rvol',

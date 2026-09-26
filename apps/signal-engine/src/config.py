@@ -231,6 +231,12 @@ class Settings(BaseSettings):
     # switch only changes what the LIVE scanner runs.
     mt_one_trade_per_day: bool = False
     mt_bypass_market_hours: bool = False      # run the loop outside 09:15–15:35 (tests)
+    # Short side (short_side.py): the same engine on the price chart flipped
+    # about yesterday's close, i.e. stocks DOWN 4-8% sold short on the mirror
+    # of every long setup. OFF by default - deploys run on merge, so trading
+    # shorts must be a deliberate switch, not a side effect of merging.
+    # research/hypotheses/2026-09-26-momentum-short-mirror.md
+    mt_enable_shorts: bool = False
 
     # ── US momentum arm (us_scanner.py). DOLLARS, never summed with the above ──
     # Paper sizing. Chosen, not measured: large enough that IBKR's per-order
@@ -252,8 +258,25 @@ class Settings(BaseSettings):
     # shown that label to be cosmetic during a live session, an entry is not
     # filled from a price that may be 15 minutes old.
     mt_us_block_delayed_quotes: bool = True
-    mt_us_quote_poll_seconds: int = 10        # armed entries only; Yahoo has no websocket
+    mt_us_quote_poll_seconds: int = 10        # REST fallback for armed entries, stream down
+    # Yahoo's push stream (momentum_trader/yahoo_stream.py): armed entries are
+    # checked on every new trade (~1-2 s after it prints) instead of a 10 s poll.
+    mt_us_stream: bool = True
+    # Also decide on the stream's bar for the minute that just closed (~5 s
+    # after it) instead of waiting 22 s for Yahoo's REST bar to settle. OFF:
+    # measured 2026-09-25 on the screen's small caps, ~25% of stream bars had
+    # a high too low and ~24% a low too high vs REST (median ~0.18% of price),
+    # so live triggers/stops would differ from the bars the backtests replay.
+    mt_us_stream_bars: bool = False
+    mt_us_stream_settle_seconds: float = 3.0  # a stream minute is final this long after it closes
     mt_us_bypass_market_hours: bool = False   # run outside the US session (local tests)
+    # US short side. OFF by default, as on NSE. The screen is stocks DOWN at
+    # least `mt_us_short_day_chg_min` - NOT the long's 10%: at -10% SEC Rule
+    # 201 (SSR) forbids selling at or below the bid, which is exactly what a
+    # breakdown short does, so a -10% screen could never trade. 4.0 is the
+    # repo's one measured day-change floor (BT23), not a fitted number.
+    mt_us_enable_shorts: bool = False
+    mt_us_short_day_chg_min: float = 4.0
 
     # Observability
     langchain_tracing_v2: bool = False

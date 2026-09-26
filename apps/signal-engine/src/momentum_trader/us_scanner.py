@@ -30,6 +30,7 @@ one of them marks the position at a price that never traded.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, time, timedelta
 from typing import Protocol
@@ -164,9 +165,13 @@ class USScanner:
         feed: Feed,
         cfg: USUniverseConfig | None = None,
         profile: MarketProfile = US,
+        snapshot_fn: Callable[[pd.Timestamp], list[USQuote]] | None = None,
     ) -> None:
         self.feed = feed
         self.cfg = cfg or USUniverseConfig()
+        # A second screen on the same feed (the short arm's losers) supplies
+        # its own snapshot; the default is the feed's own screen.
+        self.snapshot_fn = snapshot_fn or feed.snapshot
         self.profile = profile
         self.halts = HaltState()
         self.last_summary: ScreenSummary | None = None
@@ -201,7 +206,7 @@ class USScanner:
             empty = screen([], {}, self.cfg)
             return CycleResult(now, empty, [], {}, session_open=False, eod=eod)
 
-        quotes = self.feed.snapshot(now)
+        quotes = self.snapshot_fn(now)
         facts = self.feed.facts([q.symbol for q in quotes])
         summary = screen(quotes, facts, self.cfg)
         self.last_summary = summary

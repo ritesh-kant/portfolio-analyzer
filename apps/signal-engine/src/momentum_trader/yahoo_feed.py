@@ -20,10 +20,13 @@ snapshot  Yahoo screener. Criteria 2 and 4 (up 10%, $1-$20) and the listed
           exchanges are applied AT THE SOURCE to keep the request count down,
           so the funnel only ever shows rejections on criteria 1, 3 and 5.
           `describe()` says so on every stored watchlist.
-bars_1m   Yahoo chart history, regular session only.
+bars_1m   Yahoo chart history, regular session only — plus, with
+          `stream_bars`, the stream's bar for the minute REST has not settled.
 facts     Yahoo `floatShares`, cached once per day with `as_of` = that day.
 halted    Nasdaq Trader's official halt RSS (all US-listed names, 1-minute TTL,
           with the reason code). Not inferred from gaps in the bars.
+fills     Yahoo's push stream (`yahoo_stream`) when set: every new last sale
+          of a watched name, ~1-2 s after it prints. REST quote as fallback.
 
 What it does NOT do
 -------------------
@@ -63,6 +66,7 @@ from .market import US
 from .us_calendar import is_early_close
 from .us_screener import USQuote
 from .us_universe import USNameFacts, USUniverseConfig
+from .yahoo_stream import YahooStream
 
 logger = logging.getLogger(__name__)
 
@@ -115,9 +119,12 @@ def build_query(cfg: USUniverseConfig) -> Any:
     comes back. Built from `cfg` so the source and the screen cannot disagree."""
     import yfinance as yf
 
+    move = (yf.EquityQuery("lte", ["percentchange", -cfg.day_chg_min_pct])
+            if cfg.side == "short"
+            else yf.EquityQuery("gte", ["percentchange", cfg.day_chg_min_pct]))
     return yf.EquityQuery("and", [
         yf.EquityQuery("eq", ["region", "us"]),
-        yf.EquityQuery("gte", ["percentchange", cfg.day_chg_min_pct]),
+        move,
         yf.EquityQuery("btwn", ["intradayprice", cfg.price_min, cfg.price_max]),
         yf.EquityQuery("is-in", ["exchange", *LISTED_YAHOO_CODES]),
     ])
@@ -228,6 +235,12 @@ class YahooFeed:
     history_range_fn: Callable[[str, pd.Timestamp, pd.Timestamp], pd.DataFrame] | None = None
     daily_fn: Callable[[str], pd.DataFrame] | None = None
     quote_fn: Callable[[str], float | None] | None = None
+    # The push stream (`yahoo_stream`). When set and healthy it supplies every
+    # new trade for armed entries; with `stream_bars` it also supplies the
+    # newest, not-yet-settled minute. REST remains the fallback for both.
+    stream: YahooStream | None = None
+    stream_bars: bool = False
+    rest_poll_seconds: float = 10.0
 
     # state the scanner never needs but the stored watchlist should carry
     quote_source: dict[str, str] = field(default_factory=dict)
@@ -241,13 +254,16 @@ class YahooFeed:
     _halts_at: float = 0.0
     _facts: dict[str, dict] = field(default_factory=dict)
     _facts_day: str = ""
+    _rest_polled: dict[str, float] = field(default_factory=dict)
+    _stream_served: set[tuple[str, pd.Timestamp]] = field(default_factory=set)
 
     # ── network defaults ────────────────────────────────────────────────────
-    def _screen(self, query: Any) -> dict:
+    def _screen(self, query: Any, sort_asc: bool = False) -> dict:
         if self.screen_fn is not None:
             return self.screen_fn(query)
         import yfinance as yf
-        result: dict = yf.screen(query, size=SCREEN_PAGE, sortField="percentchange", sortAsc=False)
+        result: dict = yf.screen(query, size=SCREEN_PAGE, sortField="percentchange",
+                                 sortAsc=sort_asc)
         return result
 
     def _history(self, symbol: str) -> pd.DataFrame:
@@ -293,13 +309,20 @@ class YahooFeed:
         return r.content
 
     # ── Feed ────────────────────────────────────────────────────────────────
-    def snapshot(self, now: pd.Timestamp) -> list[USQuote]:
+    def snapshot(self, now: pd.Timestamp,
+                 cfg: USUniverseConfig | None = None) -> list[USQuote]:
         """Today's movers. Quotes not stamped inside TODAY's regular session are
         dropped: before the first print of the day Yahoo still reports
         yesterday's change, so a name that ran +190% yesterday would look like
-        a +190% mover at 09:31 without having traded."""
+        a +190% mover at 09:31 without having traded.
+
+        `cfg` overrides the feed's own screen - the short arm passes its losers
+        screen here and shares every cache with the long arm."""
         now = now.tz_convert(ET_TZ)
-        result = self._screen(build_query(self.cfg))
+        use = cfg or self.cfg
+        # Biggest movers first in the move's own direction: a losers screen
+        # truncated at one page must drop the SMALLEST drops, not the largest.
+        result = self._screen(build_query(use), sort_asc=use.side == "short")
         quotes = result.get("quotes", []) or []
         total = result.get("total")
         self.truncated = bool(total and total > len(quotes))
@@ -342,7 +365,41 @@ class YahooFeed:
         now = now.tz_convert(ET_TZ)
         df = _normalise(self._history(symbol))
         cutoff = now - pd.Timedelta(seconds=60 + self.settle_seconds)
-        return df[df.index <= cutoff]
+        rest = df[df.index <= cutoff]
+        if not self._stream_bars_live():
+            return rest
+        # REST wins every minute it has settled; the stream supplies only the
+        # minutes after it — in practice the one that closed seconds ago.
+        assert self.stream is not None
+        live = self.stream.closed_bars(symbol, now)
+        if not rest.empty:
+            live = live[live.index > rest.index[-1]]
+        if live.empty:
+            return rest
+        self._stream_served.update((symbol, ts) for ts in live.index)
+        return pd.concat([rest, live]) if not rest.empty else live
+
+    def live_bars(self, symbol: str, now: pd.Timestamp) -> pd.DataFrame:
+        """The stream's own bars for `symbol` — stored so they can be compared
+        with REST after the session (`yahoo_stream compare-db`)."""
+        if self.stream is None:
+            return _normalise(None)
+        return self.stream.closed_bars(symbol, now)
+
+    def _stream_bars_live(self) -> bool:
+        return self.stream is not None and self.stream_bars and self.stream.healthy()
+
+    def ready_seconds(self) -> float:
+        """How long after a minute closes its bar can be read."""
+        if self._stream_bars_live():
+            assert self.stream is not None
+            return self.stream.settle_seconds
+        return float(self.settle_seconds)
+
+    def watch(self, symbols: list[str]) -> None:
+        """Start streaming these names (a no-op without a stream)."""
+        if self.stream is not None:
+            self.stream.subscribe(symbols)
 
     def history_1m(self, symbol: str, now: pd.Timestamp, days: int = 29) -> pd.DataFrame:
         """PRIOR sessions' 1-minute bars — today excluded — for the time-of-day
@@ -379,9 +436,9 @@ class YahooFeed:
         return df[df.index < now.tz_convert(ET_TZ).normalize()]
 
     def last_price(self, symbol: str, now: pd.Timestamp) -> float | None:
-        """Latest trade price, for armed entries only. Yahoo has no websocket,
-        so an armed buy-stop is checked by polling this every few seconds —
-        coarser than NSE's ticks, which can only MISS a fill (a spike through
+        """Latest trade price over REST — the fallback for armed entries when
+        the push stream is down (`fresh_prices`). Polled every few seconds it
+        is coarser than the stream, which can only MISS a fill (a spike through
         the trigger that reverses between polls), never invent one.
 
         Returns None for a quote Yahoo labels delayed when blocking is on:
@@ -394,6 +451,27 @@ class YahooFeed:
         except Exception as exc:
             logger.warning("yahoo quote failed for %s: %s", symbol, exc)
             return None
+
+    def fresh_prices(self, symbol: str, now: pd.Timestamp) -> list[tuple[pd.Timestamp, float]]:
+        """Every price to check an armed entry against since the last call,
+        each stamped with when it traded.
+
+        From the stream: every new last sale, in order, at its own trade time —
+        so a sale at 10:31:04 cannot fill an order decided at 10:31:05, and a
+        spike to the trigger that reverses a second later is still seen.
+        Without a healthy stream, or for a name it has sent nothing for yet,
+        one REST quote stamped `now`, at most every `rest_poll_seconds`.
+        """
+        if self.block_delayed and "delayed" in self.quote_source.get(symbol, "").lower():
+            return []
+        if self.stream is not None and self.stream.healthy() and self.stream.has_seen(symbol):
+            return [(t.at, t.price) for t in self.stream.drain(symbol)]
+        clock = _time.monotonic()
+        if clock - self._rest_polled.get(symbol, -1e9) < self.rest_poll_seconds:
+            return []
+        self._rest_polled[symbol] = clock
+        price = self.last_price(symbol, now)
+        return [] if price is None else [(now, price)]
 
     def facts(self, symbols: list[str]) -> dict[str, USNameFacts]:
         """Float and venue. Fetched once per symbol per day; the figure is that
@@ -470,6 +548,9 @@ class YahooFeed:
             "halts_feed_ok": self.halts_ok,
             "halt_reasons": dict(sorted(self.halt_reasons.items())),
             "settle_seconds": self.settle_seconds,
+            "stream": self.stream.describe() if self.stream is not None else None,
+            "stream_bars": self.stream_bars,
+            "stream_minutes_used": len(self._stream_served),
         }
 
     # ── facts cache ─────────────────────────────────────────────────────────

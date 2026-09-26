@@ -190,6 +190,13 @@ Resources:
             - { Name: MT_ONE_TRADE_PER_DAY, Value: 'false' }
             - { Name: MT_MAX_POSITIONS, Value: '20' }
             - { Name: MT_LOG_CSV, Value: /data/mt_warrior_strict_forward_log.csv }
+            # Paper SHORTS (operator decision 2026-09-26): the same warrior_strict
+            # rules mirrored onto losers (short_side.py). Rows are stored as
+            # strategy warrior_strict_short with side=short, so the long arm's
+            # forward sample is untouched. BT51 KILLED the short edge on 2024
+            # and the trailing year — this collects forward data, nothing more.
+            # Set 'false' to stop shorting.
+            - { Name: MT_ENABLE_SHORTS, Value: 'true' }
           Secrets:
             - Name: MONGODB_URI
               ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/MONGODB_URI
@@ -311,8 +318,20 @@ Resources:
             - { Name: MT_US_PEAK_HOURS_ONLY, Value: 'false' }   # entries to the 15:10 ET cutoff
             - { Name: MT_US_PEAK_HOURS_END, Value: '10:00' }
             - { Name: MT_US_BLOCK_DELAYED_QUOTES, Value: 'true' }
-            - { Name: MT_US_QUOTE_POLL_SECONDS, Value: '10' }
+            - { Name: MT_US_QUOTE_POLL_SECONDS, Value: '10' }   # REST fallback only
+            # Yahoo push stream: fills on every trade instead of a 10 s poll.
+            # STREAM_BARS=true would also decide ~5 s after the bar instead of
+            # 22 s, on stream bars that miss wicks — see Settings.mt_us_stream_bars.
+            - { Name: MT_US_STREAM, Value: 'true' }
+            - { Name: MT_US_STREAM_BARS, Value: 'false' }
+            - { Name: MT_US_STREAM_SETTLE_SECONDS, Value: '3' }
             - { Name: MT_US_CACHE_DIR, Value: /data/.cache_yahoo_us }
+            # Paper SHORTS (2026-09-26): losers down >= 4% (not 10% - SEC Rule
+            # 201 forbids breakdown shorts at -10%), SSR entries refused, every
+            # short marked locate_verified=false. Stored as
+            # us_warrior_strict_short. Set 'false' to stop shorting.
+            - { Name: MT_US_ENABLE_SHORTS, Value: 'true' }
+            - { Name: MT_US_SHORT_DAY_CHG_MIN, Value: '4' }
           Secrets:
             - Name: MONGODB_URI
               ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/MONGODB_URI

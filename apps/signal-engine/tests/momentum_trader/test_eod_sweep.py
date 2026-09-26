@@ -84,6 +84,7 @@ class _FakeScanner:
     def __init__(self, st: eng.DayState, price: float | None) -> None:
         import threading
         self.states = {"NSE_EQ|QUIET": st}
+        self.shorts: dict[str, object] = {}      # short side off
         self.builder = _FakeBuilder(price)
         self.cfg = eng.EngineConfig(stress_slip=0.0)
         self._state_lock = threading.Lock()

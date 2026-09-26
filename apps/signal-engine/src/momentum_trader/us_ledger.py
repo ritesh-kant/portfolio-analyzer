@@ -10,6 +10,8 @@ mt_us_positions  — open + closed paper positions (read by /mt/us/trades)
 mt_us_watchlist  — one document per session: the whole screen funnel
 mt_us_candidates — attention promotions, setups and refused entries, by `kind`
 mt_us_watch_bars — the session's 1-minute bars for every watched name (charts)
+mt_us_stream_bars — the same names' bars as built from the push stream alone,
+                    kept to measure the stream against REST (`yahoo_stream compare-db`)
 
 Every write swallows its own failure after logging it: a Mongo outage must not
 stop the session from managing positions it already holds. The CSV-free design
@@ -25,13 +27,14 @@ from typing import Any
 import pandas as pd
 
 from .engine import AttentionEvent, Candidate, ClosedTrade, Position, Rejection
-from .ledger import _cand_doc, _structural_doc, chart_bars_doc
+from .ledger import _cand_doc, _structural_doc, chart_bars_doc, strategy_label
 from .market import US, MarketProfile
 from .us_screener import USScreenRow
 
 logger = logging.getLogger(__name__)
 
 WATCH_BARS_COLLECTION = "mt_us_watch_bars"
+STREAM_BARS_COLLECTION = "mt_us_stream_bars"
 
 
 def _position_filter(symbol: str, entry_time: pd.Timestamp, strategy: str) -> dict[str, Any]:
@@ -70,13 +73,19 @@ class USPaperLedger:
         doc = {
             **_cand_doc(p.cand),
             "market": self._p.code, "currency": self._p.currency_code,
-            "status": "open", "paper": True, "strategy": self._strategy,
+            "status": "open", "paper": True,
+            "strategy": strategy_label(self._strategy, p.cand.side),
             "entry_time": p.entry_time.to_pydatetime(),
             "entry_price": p.plan.entry, "stop": p.plan.stop, "target": p.plan.target,
             "qty": p.plan.qty,
             "risk_usd": risk, "notional_usd": p.plan.notional_inr,
             "cost_usd_modelled": cost,
             "cost_over_risk": cost / risk if risk > 0 else None,
+            # A US short needs borrowable shares (a locate). No free feed says
+            # which names have them, so every paper short ASSUMES one; this
+            # flag stays False until a broker check is wired. Filter on it
+            # before reading any short result as tradeable.
+            **({"locate_verified": False} if p.cand.side == "short" else {}),
             "float_shares": row.float_shares if row else None,
             "screen_flags": dict(row.flags) if row else {},
             "screen_complete": bool(row.screen_complete) if row else False,
@@ -99,7 +108,8 @@ class USPaperLedger:
         bounded by the plan, so the forward log must be readable without it."""
         self._write(
             self._p.positions_collection, "update_one",
-            _position_filter(t.cand.symbol, t.entry_time, self._strategy),
+            _position_filter(t.cand.symbol, t.entry_time,
+                             strategy_label(self._strategy, t.side)),
             {"$set": {
                 "status": "closed",
                 "exit_time": t.exit_time.to_pydatetime(),
@@ -131,7 +141,8 @@ class USPaperLedger:
 
     def _event(self, kind: str, doc: dict[str, Any]) -> None:
         self._write(self._p.candidates_collection, "insert_one",
-                    {**doc, "kind": kind, "market": self._p.code, "strategy": self._strategy})
+                    {**doc, "kind": kind, "market": self._p.code,
+                     "strategy": strategy_label(self._strategy, str(doc.get("side", "long")))})
 
     # ── the watched names' candles ──────────────────────────────────────────
     def watch_bars(self, session_date: str, symbol: str, bars: pd.DataFrame) -> None:
@@ -145,6 +156,18 @@ class USPaperLedger:
             {"market": self._p.code, "date": session_date, "symbol": symbol},
             {"market": self._p.code, "date": session_date, "symbol": symbol,
              "interval": "1m", "bars": chart_bars_doc(bars)},
+            upsert=True,
+        )
+
+    def stream_bars(self, session_date: str, symbol: str, bars: pd.DataFrame) -> None:
+        """The bars the push stream built for a watched name, apart from REST.
+        The engine decides on the stream's newest minute; this is the record of
+        what it saw, for comparing with the REST bars in `watch_bars`."""
+        self._write(
+            STREAM_BARS_COLLECTION, "replace_one",
+            {"market": self._p.code, "date": session_date, "symbol": symbol},
+            {"market": self._p.code, "date": session_date, "symbol": symbol,
+             "interval": "1m", "source": "yahoo_websocket", "bars": chart_bars_doc(bars)},
             upsert=True,
         )
 

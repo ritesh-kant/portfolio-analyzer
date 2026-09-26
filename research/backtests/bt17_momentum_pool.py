@@ -21,6 +21,12 @@ Usage (from repo root; needs UPSTOX_ACCESS_TOKEN in .env for the history API):
   uv run research/backtests/bt17_momentum_pool.py --start 2024-01-01 --end 2024-12-31 --limit 50
   uv run research/backtests/bt17_momentum_pool.py --start 2022-01-01 --end 2025-12-31
   uv run research/backtests/bt17_momentum_pool.py ... --events research/data/results_dates.csv
+  uv run research/backtests/bt17_momentum_pool.py ... --side short   # losers, sold short
+
+`--side short` replays the SAME engine on each day's reflected tape (see
+src/momentum_trader/short_side.py): the universe becomes stocks DOWN 4-8% on
+the day, every setup is its bearish mirror, and money is recomputed in real
+prices with the short's own costs (STT on the entry sale).
 
 First full pull is ~40k paced requests (hours); every rerun reads the parquet
 cache in research/backtests/.cache_upstox/1m/.
@@ -58,7 +64,11 @@ from src.momentum_trader.engine import (  # noqa: E402
 )
 from src.momentum_trader.exits import MODES  # noqa: E402
 from src.momentum_trader.indicators import atr  # noqa: E402
+<<<<<<< HEAD
 from src.momentum_trader.levels import SESSION_LEVEL_SESSIONS, TARGET_BUFFER_PCT  # noqa: E402
+=======
+from src.momentum_trader.short_side import SIDES, Reflection, run_day_short  # noqa: E402
+>>>>>>> origin/main
 from src.momentum_trader.upstox import Instrument, UpstoxClient  # noqa: E402
 
 # Measured on live resting buy-stop fills: the first quote at or above the trigger
@@ -95,16 +105,21 @@ def _daily_from_1m(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def eligible_span(daily: pd.DataFrame, start: date, end: date, chg_min: float) -> tuple[date, date] | None:
-    """First/last date in [start, end] where high/prev_close−1 ≥ chg_min and the
-    price + 20-day-turnover bands pass. None if no such day."""
+def eligible_span(daily: pd.DataFrame, start: date, end: date, chg_min: float,
+                  side: str = "long") -> tuple[date, date] | None:
+    """First/last date in [start, end] where high/prev_close−1 ≥ chg_min (for a
+    short: low/prev_close−1 ≤ −chg_min) and the price + 20-day-turnover bands
+    pass. None if no such day."""
     if daily.empty or len(daily) < 25:
         return None
     d = daily.copy()
     d["prev_close"] = d["close"].shift(1)
     d["turnover_cr"] = (d["close"] * d["volume"]).rolling(20).mean().shift(1) / 1e7
     d = d[(d.index.date >= start) & (d.index.date <= end)]
-    reached = d["high"] / d["prev_close"] - 1.0 >= chg_min / 100.0
+    if side == "short":
+        reached = d["low"] / d["prev_close"] - 1.0 <= -chg_min / 100.0
+    else:
+        reached = d["high"] / d["prev_close"] - 1.0 >= chg_min / 100.0
     price_ok = d["prev_close"].between(universe.PRICE_MIN, universe.PRICE_MAX)
     turn_ok = d["turnover_cr"].between(universe.TURNOVER_MIN_CR, universe.TURNOVER_MAX_CR)
     ok = d[reached & price_ok & turn_ok]
@@ -115,7 +130,7 @@ def eligible_span(daily: pd.DataFrame, start: date, end: date, chg_min: float) -
 
 def simulate_symbol(
     inst: Instrument, df: pd.DataFrame, start: date, end: date, cfg: EngineConfig, catalyst,
-    prefilter_chg_min: float | None = None,
+    prefilter_chg_min: float | None = None, side: str = "long",
 ) -> tuple[list[ClosedTrade], list[dict]]:
     trades: list[ClosedTrade] = []
     cands: list[dict] = []
@@ -136,7 +151,12 @@ def simulate_symbol(
         prev_close = float(prev["close"])
         row = daily.iloc[i]
         # cheap pre-filter: the day must have reached the floor at some point
-        if prev_close <= 0 or float(row["high"]) / prev_close - 1.0 < floor_pct / 100.0:
+        if prev_close <= 0:
+            continue
+        if side == "short":
+            if float(row["low"]) / prev_close - 1.0 > -floor_pct / 100.0:
+                continue
+        elif float(row["high"]) / prev_close - 1.0 < floor_pct / 100.0:
             continue
         turnover = float(daily["turnover_cr"].iloc[max(0, i - 20):i].mean())
         ok, _ = universe.passes_dynamic(prev_close, turnover)
@@ -158,7 +178,10 @@ def simulate_symbol(
         day_bars = df[df.index.normalize() == d]
         if len(day_bars) < 30:
             continue
-        prev_gainer = i >= 2 and float(prev["close"] / daily.iloc[i - 2]["close"] - 1.0) >= 0.04
+        prev_ret = float(prev["close"] / daily.iloc[i - 2]["close"] - 1.0) if i >= 2 else 0.0
+        # A short's "prev-day gainer" is yesterday's LOSER - the same flag seen
+        # through the reflection.
+        prev_gainer = i >= 2 and (prev_ret <= -0.04 if side == "short" else prev_ret >= 0.04)
         # Prior sessions, for warming up the exit indicators (entries untouched)
         # and, under `warm_context`, the 5-minute trend context too. The 5-min
         # 200 EMA needs ~2.7 sessions, so that arm takes 5; every other arm keeps
@@ -166,6 +189,7 @@ def simulate_symbol(
         # would shift exits in runs that are meant to reproduce exactly.
         warm_days = days[max(0, i - (5 if cfg.warm_context else 3)):i]
         warmup = df[df.index.normalize().isin(warm_days)]
+<<<<<<< HEAD
         # Earlier sessions' highs for the target cap - the same builder the
         # live scanner calls pre-open, fed only days strictly before today.
         session_levels = build_session_levels(
@@ -178,10 +202,27 @@ def simulate_symbol(
                                "close": prev_close},
                      chart_quality=cq, daily_sma20=sma20, daily_atr_pct=atr_pct,
                      session_levels=session_levels)
+=======
+        prev_day = {"high": float(prev["high"]), "low": float(prev["low"]), "close": prev_close}
+        if side == "short":
+            refl = Reflection(prev_close)
+            # F2 judges the chart's SHAPE on prior sessions, so a short reads it
+            # off the reflected history. Out of domain (it doubled) = no reading.
+            cq_s = chart_quality(refl.bars(hist)) if refl.admits(hist) else None
+            st = run_day_short(inst.symbol, day_bars, prev_close, profile, cfg, catalyst,
+                               prev_gainer, warmup_1m=warmup if not warmup.empty else None,
+                               prev_day=prev_day, chart_quality=cq_s, daily_sma20=sma20,
+                               daily_atr_pct=atr_pct)
+        else:
+            st = run_day(inst.symbol, day_bars, prev_close, profile, cfg, catalyst, prev_gainer,
+                         warmup_1m=warmup if not warmup.empty else None,
+                         prev_day=prev_day,
+                         chart_quality=cq, daily_sma20=sma20, daily_atr_pct=atr_pct)
+>>>>>>> origin/main
         trades.extend(st.closed)
         for c in st.candidates:
             cands.append({
-                "date": str(d.date()), "symbol": c.symbol, "setup": c.setup.name,
+                "date": str(d.date()), "symbol": c.symbol, "side": c.side, "setup": c.setup.name,
                 "time": c.time.strftime("%H:%M"), "trigger": c.setup.trigger, "stop": c.setup.stop,
                 "day_chg_pct": c.day_chg_pct, "rvol": c.rvol, "catalyst": c.catalyst,
                 "event_type": c.event_type, "tags": "|".join(c.candle_tags),
@@ -203,7 +244,8 @@ def _trade_row(t: ClosedTrade) -> dict:
     """
     c = t.cand
     return {
-        "date": str(c.time.date()), "year": c.time.year, "symbol": c.symbol, "setup": c.setup.name,
+        "date": str(c.time.date()), "year": c.time.year, "symbol": c.symbol, "side": t.side,
+        "setup": c.setup.name,
         "trigger_time": c.time.strftime("%H:%M"), "entry_time": t.entry_time.strftime("%H:%M"),
         "trigger": c.setup.trigger, "entry": t.entry, "stop": c.setup.stop,
         "target": t.target, "target_source": t.target_source,
@@ -245,7 +287,7 @@ _W: dict = {}
 
 def _init_worker(token: str, insts: dict, cfg: EngineConfig, catalyst, start: date,
                  end: date, fetch_start: date, prefilter_chg_min: float,
-                 fetch_only: bool, log_level: int) -> None:
+                 fetch_only: bool, log_level: int, side: str = "long") -> None:
     """One Upstox client per process; everything else is plain data."""
     # A spawned worker does not inherit the parent's logging config, so without
     # this its HTTP traffic is silently invisible - which is exactly the thing
@@ -253,7 +295,7 @@ def _init_worker(token: str, insts: dict, cfg: EngineConfig, catalyst, start: da
     logging.basicConfig(level=log_level, format="%(asctime)s %(levelname)s %(message)s")
     _W.update(client=UpstoxClient(token, cache_dir=CACHE), insts=insts, cfg=cfg,
               catalyst=catalyst, start=start, end=end, fetch_start=fetch_start,
-              prefilter_chg_min=prefilter_chg_min, fetch_only=fetch_only)
+              prefilter_chg_min=prefilter_chg_min, fetch_only=fetch_only, side=side)
 
 
 def _symbol_job(sym: str) -> dict:
@@ -268,7 +310,7 @@ def _symbol_job(sym: str) -> dict:
         d = _W["client"].daily(inst.key, _W["fetch_start"], _W["end"])
     except Exception as exc:  # noqa: BLE001
         return {**out, "status": f"daily_failed: {exc}"}
-    elig = eligible_span(d, _W["start"], _W["end"], _W["prefilter_chg_min"])
+    elig = eligible_span(d, _W["start"], _W["end"], _W["prefilter_chg_min"], _W["side"])
     if elig is None:
         return {**out, "status": "skipped_daily"}
     try:
@@ -279,7 +321,7 @@ def _symbol_job(sym: str) -> dict:
     if _W["fetch_only"]:
         return {**out, "status": "cached"}
     tr, cd = simulate_symbol(inst, df, _W["start"], _W["end"], _W["cfg"], _W["catalyst"],
-                             _W["prefilter_chg_min"])
+                             _W["prefilter_chg_min"], _W["side"])
     out["rows"] = [_trade_row(t) for t in tr]
     out["cands"] = cd
     return out
@@ -306,8 +348,9 @@ def report(tr: pd.DataFrame, n_symbols: int, start: date, end: date, events: boo
     pd.set_option("display.width", 160)
     pd.set_option("display.float_format", lambda x: f"{x:,.2f}")
     print("\n" + "=" * 78)
+    side = str(tr["side"].iloc[0]) if not tr.empty and "side" in tr.columns else "long"
     print(f"BT17 — momentum POOL (no catalyst split) | {start}..{end} | {n_symbols} symbols"
-          f" | exit={exit_mode} fill={fill_mode}")
+          f" | side={side} exit={exit_mode} fill={fill_mode}")
     print("   context test for hypothesis v2 §5.1 — NOT a gate; float/band filters not applied")
     if fill_mode == "next_open":
         print("   !! fill=next_open is the LEGACY model and is NOT how production fills:")
@@ -332,7 +375,9 @@ def report(tr: pd.DataFrame, n_symbols: int, start: date, end: date, events: boo
         print(f"\n  spread (cat − no-cat, gross): {spread:+.3f}%/trade  n_cat={len(cat)}")
     if "trigger" in tr.columns:
         gap = (tr["entry"] / tr["trigger"] - 1.0) * 100.0
-        print("\nfill gap vs trigger level (entry/trigger − 1, %) — the latency cost:")
+        if side == "short":
+            gap = -gap      # a short pays by selling BELOW its trigger
+        print("\nfill gap vs trigger level (% paid past the trigger) — the latency cost:")
         print(f"  mean {gap.mean():+.4f}  median {gap.median():+.4f}  p90 {gap.quantile(.9):+.4f}"
               f"  max {gap.max():+.4f}  at-or-below-trigger {(gap <= 0).mean() * 100:.1f}%")
         print(f"  mean qty {tr['qty'].mean():,.0f}")
@@ -471,12 +516,18 @@ def main() -> int:
     ap.add_argument("--rising-price-volume", action="store_true",
                     help="require positive 4-bar close AND total-volume slopes at the "
                     "1-minute confirmation (the 2026-09-18 quadrant gate, default OFF)")
+<<<<<<< HEAD
     ap.add_argument("--session-levels", type=int, default=None,
                     help="earlier sessions whose highs cap the fixed target (BT50). "
                          f"Default {SESSION_LEVEL_SESSIONS} with --warrior-strict, else 0")
     ap.add_argument("--target-buffer-pct", type=float, default=None,
                     help="capped target sits this %% under its level (BT50). "
                          f"Default {TARGET_BUFFER_PCT} with --warrior-strict, else 0")
+=======
+    ap.add_argument("--side", default="long", choices=list(SIDES),
+                    help="long = buy gainers (every run before 2026-09-26); short = sell "
+                         "losers short on the reflected tape (short_side.py)")
+>>>>>>> origin/main
     ap.add_argument("--tag", default="", help="suffix for the output CSV names")
     ap.add_argument("--fetch-only", action="store_true", help="just fill the parquet cache")
     ap.add_argument("--jobs", type=int, default=min(8, mp.cpu_count()),
@@ -585,7 +636,7 @@ def main() -> int:
     jobs = max(1, a.jobs)
     initargs = (_token(), insts, cfg, catalyst, start, end, fetch_start,
                 prefilter_chg_min, a.fetch_only,
-                logging.DEBUG if a.v else logging.INFO)
+                logging.DEBUG if a.v else logging.INFO, a.side)
     log.info("simulating %d symbols on %d worker%s",
              len(symbols), jobs, "" if jobs == 1 else "s")
 
@@ -625,6 +676,8 @@ def main() -> int:
         return 0
     tag = a.tag or (a.exit_mode if a.fill_mode == "next_open"
                     else f"{a.exit_mode}_{a.fill_mode}")
+    if a.side == "short" and not a.tag:
+        tag = f"short_{tag}"
     out_tr = OUT_TRADES.with_name(f"bt17_trades_{tag}.csv")
     out_cd = OUT_CANDS.with_name(f"bt17_candidates_{tag}.csv")
     # Workers finish out of order, so sort to a fixed key: the CSV must not

@@ -34,6 +34,10 @@ async function get<T>(path: string): Promise<T> {
 export interface USMomentumTrade {
   _id: string;
   symbol: string;
+  /** Trade direction — unrelated to `US_CRITERIA`'s Demand/Supply `side`. */
+  side?: 'long' | 'short';
+  /** Shorts only: whether borrowable shares were confirmed. Always false in paper. */
+  locate_verified?: boolean;
   strategy?: string;
   status: 'open' | 'closed';
   setup: string;
@@ -97,6 +101,26 @@ export interface USWatchlistSession {
   rejected_by: Record<string, number>;
   missing_criteria: string[];
   names: USWatchlistName[];
+  /** The short side's LOSERS screen, when shorts are on. Kept apart from the
+   * long funnel above so its counts keep their meaning. */
+  short?: {
+    /** e.g. -4: names must be down at least this much. */
+    day_chg_max_pct: number;
+    considered: number;
+    passed: number;
+    names: {
+      symbol: string;
+      side: 'short';
+      passed: boolean;
+      reason: string;
+      price: number;
+      day_chg_pct: number;
+      rvol: number | null;
+      float_shares: number | null;
+      /** SEC Rule 201 carried from yesterday: shorts refused all day. */
+      ssr_carried: boolean | null;
+    }[];
+  };
 }
 
 export const fetchUSMomentumTrades = () =>
