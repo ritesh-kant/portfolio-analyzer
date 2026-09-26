@@ -158,20 +158,8 @@ def build_html(cards: list[dict]) -> str:
         "This is a visual sample only; see the BT47 paired report for the full-"
         "population result."
     )
-    report = bt32.build_html("BT47 — structural exit trades, chart review", sub, data)
-    return (
-        report.replace("Target 2R", "Target")
-        .replace("2R target", "Target")
-        .replace('var cards = [], tf = "5m";', 'var cards = [], tf = "1m";')
-        .replace(
-            '["Target", tr.target, "#34d399"]',
-            '[tr.target_label || "Target", tr.target, "#34d399"]',
-        )
-        .replace(
-            '<option value="1m">1-minute</option>',
-            '<option value="1m" selected>1-minute (default)</option>',
-        )
-    )
+    data["default_tf"] = "1m"
+    return bt32.build_html("BT47 — structural exit trades, chart review", sub, data)
 
 
 def main() -> int:

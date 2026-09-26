@@ -53,10 +53,12 @@ from src.momentum_trader.engine import (  # noqa: E402
     ClosedTrade,
     EngineConfig,
     build_cum_volume_profile,
+    build_session_levels,
     run_day,
 )
 from src.momentum_trader.exits import MODES  # noqa: E402
 from src.momentum_trader.indicators import atr  # noqa: E402
+from src.momentum_trader.levels import SESSION_LEVEL_SESSIONS, TARGET_BUFFER_PCT  # noqa: E402
 from src.momentum_trader.upstox import Instrument, UpstoxClient  # noqa: E402
 
 # Measured on live resting buy-stop fills: the first quote at or above the trigger
@@ -164,11 +166,18 @@ def simulate_symbol(
         # would shift exits in runs that are meant to reproduce exactly.
         warm_days = days[max(0, i - (5 if cfg.warm_context else 3)):i]
         warmup = df[df.index.normalize().isin(warm_days)]
+        # Earlier sessions' highs for the target cap - the same builder the
+        # live scanner calls pre-open, fed only days strictly before today.
+        session_levels = build_session_levels(
+            df[df.index.normalize().isin(days[max(0, i - cfg.session_level_sessions):i])],
+            cfg.session_level_sessions,
+        ) if cfg.session_level_sessions else []
         st = run_day(inst.symbol, day_bars, prev_close, profile, cfg, catalyst, prev_gainer,
                      warmup_1m=warmup if not warmup.empty else None,
                      prev_day={"high": float(prev["high"]), "low": float(prev["low"]),
                                "close": prev_close},
-                     chart_quality=cq, daily_sma20=sma20, daily_atr_pct=atr_pct)
+                     chart_quality=cq, daily_sma20=sma20, daily_atr_pct=atr_pct,
+                     session_levels=session_levels)
         trades.extend(st.closed)
         for c in st.candidates:
             cands.append({
@@ -462,6 +471,12 @@ def main() -> int:
     ap.add_argument("--rising-price-volume", action="store_true",
                     help="require positive 4-bar close AND total-volume slopes at the "
                     "1-minute confirmation (the 2026-09-18 quadrant gate, default OFF)")
+    ap.add_argument("--session-levels", type=int, default=None,
+                    help="earlier sessions whose highs cap the fixed target (BT50). "
+                         f"Default {SESSION_LEVEL_SESSIONS} with --warrior-strict, else 0")
+    ap.add_argument("--target-buffer-pct", type=float, default=None,
+                    help="capped target sits this %% under its level (BT50). "
+                         f"Default {TARGET_BUFFER_PCT} with --warrior-strict, else 0")
     ap.add_argument("--tag", default="", help="suffix for the output CSV names")
     ap.add_argument("--fetch-only", action="store_true", help="just fill the parquet cache")
     ap.add_argument("--jobs", type=int, default=min(8, mp.cpu_count()),
@@ -521,7 +536,15 @@ def main() -> int:
                       allowed_pullback_ordinals=GUIDE_PULLBACK_ORDINALS,
                       peak_hours_only=True, warm_context=True,
                       vol_baseline_min_bars=VOL_BASELINE_MIN_BARS,
-                      use_fixed_target=True)
+                      use_fixed_target=True,
+                      session_level_sessions=SESSION_LEVEL_SESSIONS,
+                      target_buffer_pct=TARGET_BUFFER_PCT)
+    # Explicit flags win over the warrior_strict mirror, so `0` replays the
+    # pre-BT50 control.
+    if a.session_levels is not None:
+        cfg_kw["session_level_sessions"] = a.session_levels
+    if a.target_buffer_pct is not None:
+        cfg_kw["target_buffer_pct"] = a.target_buffer_pct
     if a.live_fill:
         if "--fill-mode" not in sys.argv:
             a.fill_mode = "resting_sized"

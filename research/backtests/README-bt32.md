@@ -52,34 +52,50 @@ the file size), `--title`.
 
 ## What the report shows
 
-One card per trade, with the same chart controls as the **/momentum** review
-chart in the web app. Three stacked panels:
+One card per trade, drawn with **TradingView Lightweight Charts™ v5.2.1**
+(Apache-2.0). The library is vendored in `bt32_assets/` (licence beside it) and
+inlined into the page, so the report still opens with no network. TradingView's
+attribution logo stays on, as the licence notice asks. Each chart has three
+panes:
 
-* **Price** — candles, EMA9, EMA20, VWAP (dashed), every support/resistance
-  level with its source, `BUY` / `SELL` / `Stop` / `Target 2R` lines, ▲/▼ entry
-  and exit markers, the holding period shaded, and every candlestick formation
-  bracketed and labelled with its strength multiple.
+* **Price** — candles, EMA9, EMA20, EMA200, VWAP (dashed), every
+  support/resistance level with its source on the price axis, `BUY` / `SELL` /
+  `Stop` / `Target 2R` lines, ▲/▼ entry and exit markers, the holding period
+  shaded, and every candlestick formation marked with its strength multiple. A
+  TradingView-style legend at the top left shows the values of the bar under the
+  crosshair (the entry bar otherwise).
 * **MACD** — 12/26/9 histogram, line and signal, which is what the trend exits
   read.
-* **Volume** — per-bar volume, plus the day RVOL and the 5-minute volume ratio
-  at entry.
+* **Volume** — per-bar volume and the 20-prior-bar average that the engine's
+  `volume_ratio` divides by, with the bar and day RVOL in the readout below.
+
+Under each chart a collapsible **Levels** table lists every level with its
+kind, touches, whether it is structural, and its distance from the entry in %
+and in R (1R = entry − stop). Dense level sets stack their labels on the price
+axis, so the table is the readable copy.
 
 Controls (all per chart):
 
 | | |
 | --- | --- |
-| **Timeframe** | 1-minute or 5-minute, switched for every chart at once from the side panel |
+| **Timeframe** | 1-minute or 5-minute, switched for every chart at once from the side panel. A report can pick its default with `data["default_tf"]` |
 | **Zoom / pan** | `− Zoom` `+ Zoom` and `←` `→`; **drag** the chart to pan |
-| **Price zoom / pan** | `− V-Zoom` `+ V-Zoom` and `↑` `↓` — separates stop, entry and target when they nearly coincide; drag pans vertically once zoomed |
-| **Pinch** | ctrl+scroll or trackpad pinch zooms **both** axes around the cursor |
+| **Axis stretch** | drag the price or time axis to stretch it (then dragging the chart pans vertically too); double-click an axis to reset it |
+| **Price zoom / pan** | `− V-Zoom` `+ V-Zoom` and `↑` `↓` — separates stop, entry and target when they nearly coincide |
+| **Pinch** | ctrl+scroll or trackpad pinch zooms **both** axes around the pointer. A plain scroll wheel scrolls the page, not the chart |
 | **Keyboard** | click a chart, then `+` `−` zoom, `0` reset, `←` `→` pan, `↑` `↓` price |
-| **Crosshair** | follows the pointer with a price / MACD / volume readout on the axis it is over, a time badge, and a full OHLC + indicator line under the chart |
 | **Full screen** | `⛶ Full screen`; `Esc` exits. Native Fullscreen API where the browser allows it, with a fixed-position fallback where it does not (some embedded webviews refuse the request) |
+
+Charts are built as a card nears the viewport, so a 120-trade report opens
+quickly. A per-trade `target_label` overrides the `Target 2R` name.
+
+`bt45_cost_stop_report.py` and `bt48_macd_buffer_report.py` ship their own
+forked assets and still draw with the older SVG renderer.
 
 The side panel filters by symbol, exit reason and outcome; clicking a table row
 jumps to its chart.
 
-A faint, dashed formation sits on a candle smaller than
+A faint formation marker sits on a candle smaller than
 `candles.STRENGTH_WEAK_BELOW` (0.75×) of the stock's recent average range — the
 label is right, the candle is not worth acting on.
 

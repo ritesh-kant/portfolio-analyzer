@@ -39,7 +39,14 @@ from .indicators import (
     session_vwap,
     volume_ratio,
 )
-from .levels import NEAR_PCT, derive_levels, nearest_structural_resistance
+from .levels import (
+    NEAR_PCT,
+    Level,
+    derive_levels,
+    nearest_structural_resistance,
+    resistance_target,
+    session_resistance_levels,
+)
 from . import us_risk
 from .market import NSE, MarketProfile
 from .pullback import pullback_ordinal
@@ -268,6 +275,14 @@ class EngineConfig:
     # the support replaces the two-close false-break exit; a nearer resistance
     # caps a live fixed target. This is the production default.
     use_structural_exit_levels: bool = True
+    # BT50 (research/hypotheses/2026-09-25-session-resistance-target.md). The
+    # target cap above also considers the highs of this many earlier sessions,
+    # and every capped target sits `target_buffer_pct` under its level instead
+    # of on it. Target cap ONLY: entries, the headroom test, the support exit
+    # and the resistance-reject exit keep today's level set. 0 / 0.0 reproduce
+    # every earlier run exactly; `warrior_strict` turns both on.
+    session_level_sessions: int = 0
+    target_buffer_pct: float = 0.0
 
     # ── the Warrior transcript's stated entry checklist (all default OFF) ────
     # Each maps to one line of the guide and each REFUSES trades, so turning any
@@ -423,6 +438,16 @@ class EngineConfig:
             raise ValueError(
                 "require_light_pullback_volume needs require_micro_pullback"
             )
+        if self.session_level_sessions < 0 or not 0.0 <= self.target_buffer_pct < 5.0:
+            raise ValueError("session_level_sessions must be >= 0 and "
+                             "target_buffer_pct in [0, 5)")
+        if (self.session_level_sessions or self.target_buffer_pct) and not (
+            self.use_structural_exit_levels
+        ):
+            # Both only change the structural target cap; without it they
+            # would be silently ignored.
+            raise ValueError("session levels and the target buffer need "
+                             "use_structural_exit_levels")
         if self.use_structural_exit_levels and self.allow_false_break_reentry:
             raise ValueError(
                 "use_structural_exit_levels replaces false-break exits and cannot "
@@ -637,6 +662,9 @@ class DayState:
     warmup_1m: pd.DataFrame | None = None
     warmup_5m: pd.DataFrame | None = None
     prev_day: dict[str, float] | None = None
+    # Resistance from sessions before today, known pre-open. Only the fixed-
+    # target cap reads it (see EngineConfig.session_level_sessions).
+    session_levels: list[Level] = field(default_factory=list)
     # F2 is judged on PRIOR sessions and F1's daily leg on the prior daily close,
     # so both are supplied by the caller and cannot see today.
     chart_quality: quality.ChartQuality | None = None
@@ -1562,19 +1590,16 @@ def _open_position(state: DayState, cand: Candidate, when: pd.Timestamp, fill: f
         add_shelves=cfg.volume_shelf_levels,
     )
     target_source = "fixed_2r" if ec.has_target else "disabled"
-    resistance = exit_state.structural_resistance
-    if (
-        cfg.use_structural_exit_levels
-        and ec.has_target
-        and resistance is not None
-        and fill < resistance.price < plan.target
-    ):
-        plan = replace(
-            plan,
-            target=resistance.price,
-            reward_inr=(resistance.price - fill) * plan.qty,
-        )
-        target_source = f"structural_resistance:{resistance.kind}"
+    if cfg.use_structural_exit_levels:
+        # Today's levels plus earlier sessions' highs. With no session levels
+        # and a zero buffer this picks exactly the level initial_state froze.
+        pick = resistance_target(exit_state.levels + state.session_levels, fill,
+                                 cfg.target_buffer_pct)
+        exit_state.structural_resistance = pick[0] if pick is not None else None
+        if ec.has_target and pick is not None and pick[1] < plan.target:
+            level, capped = pick
+            plan = replace(plan, target=capped, reward_inr=(capped - fill) * plan.qty)
+            target_source = f"structural_resistance:{level.kind}"
     state.position = Position(
         cand=cand, entry_time=when, plan=plan, highest=fill, exit_state=exit_state,
         target_source=target_source,
@@ -2080,13 +2105,15 @@ def run_day(
     chart_quality: quality.ChartQuality | None = None,
     daily_sma20: float | None = None,
     daily_atr_pct: float | None = None,
+    session_levels: list[Level] | None = None,
 ) -> DayState:
     """Replay a full session bar by bar (backtest entry point)."""
     state = DayState(symbol=symbol, prev_close=prev_close, cum_vol_profile=cum_vol_profile,
                      prev_day_gainer=prev_day_gainer, warmup_1m=warmup_1m,
                      warmup_5m=resample_5m(warmup_1m) if warmup_1m is not None else None,
                      prev_day=prev_day, chart_quality=chart_quality,
-                     daily_sma20=daily_sma20, daily_atr_pct=daily_atr_pct)
+                     daily_sma20=daily_sma20, daily_atr_pct=daily_atr_pct,
+                     session_levels=list(session_levels or []))
     # every 5-min bucket incl. the partial last one; _bars_5m only exposes complete ones
     full_5m: pd.DataFrame | None = None
     if len(bars_1m_day):
@@ -2100,6 +2127,21 @@ def run_day(
         last = bars_1m_day.iloc[-1]
         _exit(state, bars_1m_day.index[-1], float(last["close"]), "eod_close", cfg)
     return state
+
+
+def build_session_levels(history_1m: pd.DataFrame | None, sessions: int) -> list[Level]:
+    """Resistance from the last `sessions` sessions of `history_1m`.
+
+    The caller passes history that ends BEFORE today (the scanner's pre-open
+    cache, or the replay's prior days), so this cannot see the session it is
+    used in. One function for live and replay, so they cannot drift apart.
+    """
+    if sessions <= 0 or history_1m is None or history_1m.empty:
+        return []
+    days = sorted(set(history_1m.index.normalize()))[-sessions:]
+    prior = history_1m[history_1m.index.normalize().isin(days)]
+    prior_5m = pd.concat([resample_5m(g) for _, g in prior.groupby(prior.index.normalize())])
+    return session_resistance_levels(prior, prior_5m)
 
 
 def build_cum_volume_profile(history_1m: pd.DataFrame, lookback_days: int = 20) -> pd.Series:

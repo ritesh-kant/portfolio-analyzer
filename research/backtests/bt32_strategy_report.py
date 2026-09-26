@@ -6,9 +6,11 @@ session's 5-minute chart from the cached 1-minute bars, recomputes the exact
 indicator series the engine uses, derives the support/resistance levels AS OF
 THE ENTRY BAR (no look-ahead), and writes ONE self-contained HTML file:
 
-  * three stacked panels per trade — price (candles, EMA9, EMA20, EMA200, VWAP, every
-    support/resistance level, BUY/STOP/TARGET/EXIT, holding period shaded),
-    volume (with its 20-bar average and the RVOL at entry), and MACD(12/26/9)
+  * one TradingView Lightweight Charts™ chart per trade (Apache-2.0, vendored in
+    bt32_assets/ and inlined, so the file still needs no network) with three panes —
+    price (candles, EMA9, EMA20, EMA200, VWAP, every support/resistance level,
+    BUY/SELL markers, stop and target lines, holding period shaded), MACD(12/26/9),
+    and volume (with the 20-prior-bar average the engine's volume ratio divides by)
   * a sortable, filterable trade table
   * headline P&L at BOTH cost models: bt17's stressed net (its +40 bps/side
     slippage on top of real charges) and a realistic net recomputed per trade
@@ -49,6 +51,10 @@ from src.news_trader.trailing_sl import calc_costs  # noqa: E402
 
 CACHE = ROOT / "research" / "backtests" / ".cache_upstox" / "1m"
 ASSETS = Path(__file__).resolve().parent / "bt32_assets"
+# TradingView Lightweight Charts v5.2.1, copied from apps/web's pnpm install
+# (sha256 e21cc5ca…98cf). Its licence is LIGHTWEIGHT-CHARTS-LICENSE.txt beside it;
+# the chart keeps TradingView's attribution logo on, as the licence notice asks.
+CHART_LIB = ASSETS / "lightweight-charts.standalone.production.js"
 # bt17 nets its CSV at the +40 bps/side Gate-0 stress, so its `net_pct` column
 # IS the stressed number and is used as-is. The realistic figure is recomputed
 # per trade with `calc_costs` — the same itemised MIS model the engine books
@@ -199,8 +205,11 @@ def summarise(rows: list[dict]) -> dict:
 
 
 def build_html(title: str, sub: str, data: dict) -> str:
+    """The self-contained page. `data` may carry `default_tf` ("1m" or "5m",
+    default "5m") and per-trade `target_label` (default "Target 2R")."""
     css = (ASSETS / "report.css").read_text()
     js = (ASSETS / "report.js").read_text()
+    lib = CHART_LIB.read_text()
     s = data["summary"]
 
     def chip(label: str, value: str, tone: str = "") -> str:
@@ -260,6 +269,7 @@ def build_html(title: str, sub: str, data: dict) -> str:
     </div>
   </div>
 </div>
+<script>{lib}</script>
 <script>var DATA = {json.dumps(data)};</script>
 <script>{js}</script>
 </body></html>"""
