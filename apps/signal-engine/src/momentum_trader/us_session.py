@@ -8,15 +8,17 @@ What a session does
 -------------------
 09:20 ET  wake (EventBridge Scheduler, America/New_York — so DST cannot shift it)
           exit at once on a US holiday
-09:31 →   every minute, a few seconds after each 1-minute bar closes:
+09:31 →   every minute, 22 s after each 1-minute bar closes (REST settle;
+          ~5 s with MT_US_STREAM_BARS=true and a healthy stream):
             1. screen: the five criteria (us_universe) over Yahoo's movers
             2. a stock that newly passes is DISCOVERED: its prior 29 days of
                1-minute bars build the volume profile and warm the indicators
             3. every watched stock is stepped through the SAME engine and the
                SAME rules as the deployed NSE arm (`warrior_strict`) — only the
                market profile (clock, costs, sizing) differs
-          between bars, armed entries are checked against the latest price
-          every ~10 s (Yahoo has no websocket)
+          between bars, armed entries are checked against every new trade
+          from Yahoo's push stream (`yahoo_stream`), ~1-2 s after it prints;
+          if the stream is down, against a REST quote every ~10 s
 15:10     entry cutoff: no new entries after this. (The guide's 10:00
           peak-hours deadline applies only with MT_US_PEAK_HOURS_ONLY=true.)
 15:54     the engine's own end-of-day exit; 15:56 wall-clock sweep backstop
@@ -28,8 +30,9 @@ Two rules that exist to stop FAKE trades
   indicator history only. Replaying them would let the engine enter at 09:50 a
   stock the screen had not yet found — a fill that could never have happened.
 * An entry fills only from a price observed strictly after the decision,
-  exactly like the NSE quote path. Polling can MISS a fill (a spike through the
-  trigger that reverses between polls); it cannot invent one.
+  exactly like the NSE quote path, and only from a trade printed after it. The
+  stream is conflated (~1 message a second at most), so it can still MISS a
+  spike through the trigger that lived under a second; it cannot invent one.
 
 Short side (MT_US_ENABLE_SHORTS, default off)
 ---------------------------------------------
@@ -115,6 +118,9 @@ class TradingFeed(Feed, Protocol):
     def history_1m(self, symbol: str, now: pd.Timestamp, days: int = 29) -> pd.DataFrame: ...
     def daily(self, symbol: str, now: pd.Timestamp) -> pd.DataFrame: ...
     def last_price(self, symbol: str, now: pd.Timestamp) -> float | None: ...
+    def fresh_prices(self, symbol: str, now: pd.Timestamp) -> list[tuple[pd.Timestamp, float]]: ...
+    def watch(self, symbols: list[str]) -> None: ...
+    def live_bars(self, symbol: str, now: pd.Timestamp) -> pd.DataFrame: ...
 
 
 def build_engine_config(settings: Settings, session_date: date,
@@ -283,6 +289,9 @@ class USSession:
         if not prev_close:
             logger.warning("%s passed the screen but has no previous close — skipped", symbol)
             return None
+        # Stream it from now on: its fills, and its bars once a full minute
+        # has been seen (the minute it is subscribed in is never complete).
+        self.feed.watch([symbol])
         hist = self.feed.history_1m(symbol, now)
         profile = build_cum_volume_profile(hist, PROFILE_DAYS) if not hist.empty else None
         if profile is not None and profile.empty:
@@ -317,6 +326,7 @@ class USSession:
         if not prev_close:
             logger.warning("%s passed the short screen but has no previous close", symbol)
             return None
+        self.feed.watch([symbol])        # stream its prints, as `discover` does
         hist = self.feed.history_1m(symbol, now)
         profile = build_cum_volume_profile(hist, PROFILE_DAYS) if not hist.empty else None
         if profile is not None and profile.empty:
@@ -478,13 +488,17 @@ class USSession:
                 continue
             if self._guard(st, now):
                 continue
-            price = self.feed.last_price(sym, now)
-            if price is None:
-                continue
             had_pos = st.position
-            pos = fill_pending_quote(st, now, price, self.cfg, self.bars.get(sym, pd.DataFrame()))
-            if pos is not None and had_pos is None:
-                opened.append(pos)
+            bars = self.bars.get(sym, pd.DataFrame())
+            # Every print since the last look, in order, at its own time: the
+            # first one through the trigger is the fill, as a resting stop
+            # would have it. Nothing between prints is invented.
+            for when, price in self.feed.fresh_prices(sym, now):
+                fill_pending_quote(st, when, price, self.cfg, bars)
+                if st.pending is None:
+                    break
+            if st.position is not None and had_pos is None:
+                opened.append(st.position)
         short_events = ShortEvents()
         for sym, sw in self.short_watch.items():
             book = sw.book
@@ -498,14 +512,16 @@ class USSession:
                 if rej is not None:
                     short_events.rejections.append(rej)
                 continue
-            price = self.feed.last_price(sym, now)
-            if price is None:
-                continue
-            ev = book.fill_quote(now, price, self.short_cfg,
-                                 self.bars.get(sym, pd.DataFrame()))
-            short_events.rejections.extend(ev.rejections)
-            if ev.opened is not None:
-                opened.append(ev.opened)
+            bars = self.bars.get(sym, pd.DataFrame())
+            # Same print-by-print rule as the long side: the first trade at or
+            # below the sell-stop fills it.
+            for when, price in self.feed.fresh_prices(sym, now):
+                ev = book.fill_quote(when, price, self.short_cfg, bars)
+                short_events.rejections.extend(ev.rejections)
+                if ev.opened is not None:
+                    opened.append(ev.opened)
+                if not book.has_pending:
+                    break
         report = CycleReport(now, 0, 0)
         self._record(opened, [], report, short_events)
         return report.opened
@@ -628,6 +644,9 @@ class USSession:
             if watched and not bars.empty and self._bars_saved.get(sym) != bars.index[-1]:
                 self.ledger.watch_bars(doc["date"], sym, bars)
                 self._bars_saved[sym] = bars.index[-1]
+                live = self.feed.live_bars(sym, now)
+                if not live.empty:
+                    self.ledger.stream_bars(doc["date"], sym, live)
         names = []
         for sym, row in self.rows.items():
             w = self.watch.get(sym)
@@ -728,8 +747,16 @@ def run(settings: Settings, *, once: bool = False, dry_run: bool = False,
             db = None
 
     ucfg = USUniverseConfig()
+    stream = None
+    if settings.mt_us_stream:
+        from .yahoo_stream import YahooStream
+
+        stream = YahooStream(settle_seconds=settings.mt_us_stream_settle_seconds)
+        stream.start()
     feed = YahooFeed(cache_dir=_cache_dir(settings), cfg=ucfg,
-                     block_delayed=settings.mt_us_block_delayed_quotes)
+                     block_delayed=settings.mt_us_block_delayed_quotes,
+                     stream=stream, stream_bars=settings.mt_us_stream_bars,
+                     rest_poll_seconds=settings.mt_us_quote_poll_seconds)
     cfg = build_engine_config(settings, today, ucfg)
     short_scanner = None
     if settings.mt_us_enable_shorts:
@@ -746,6 +773,16 @@ def run(settings: Settings, *, once: bool = False, dry_run: bool = False,
     )
     session._sync_risk()
 
+    try:
+        return _loop(settings, session, feed, stream, cfg, today, once, tg, clock)
+    finally:
+        if stream is not None:
+            stream.stop()
+
+
+def _loop(settings: Settings, session: USSession, feed: Any, stream: Any, cfg: EngineConfig,
+          today: date, once: bool, tg: Callable[[str], None],
+          clock: Callable[[], pd.Timestamp]) -> int:
     if once:
         report = session.cycle(clock())
         print(f"{report.at:%H:%M:%S} ET  screened {report.screened}, passed {report.passed}, "
@@ -789,15 +826,23 @@ def run(settings: Settings, *, once: bool = False, dry_run: bool = False,
                 tg(f"🟡 no {REFERENCE_SYMBOL} bars by {now:%H:%M} ET — "
                    "market looks closed, exiting")
                 return 0
-        next_bar = now.floor("1min") + pd.Timedelta(seconds=60 + feed.settle_seconds + 2)
+        # The next decision: as soon as the minute's bar can be read — 20 s
+        # after it closes from REST, ~3 s from the stream if stream bars are on.
+        next_bar = now.floor("1min") + pd.Timedelta(seconds=60 + feed.ready_seconds() + 2)
         while (t := clock()) < next_bar:
-            if session.has_pending():
+            armed = session.has_pending()     # a long OR a short armed
+            if armed:
                 try:
                     session.poll_pending(t)
                 except Exception:  # noqa: BLE001
                     logger.exception("pending poll failed at %s", t)
-            _time.sleep(max(0.0, min(settings.mt_us_quote_poll_seconds,
-                                     (next_bar - clock()).total_seconds())))
+            left = max(0.0, (next_bar - clock()).total_seconds())
+            if armed and stream is not None and stream.healthy():
+                # Wake on the next print (prices come from memory, not the
+                # network), so an armed entry sees every trade as it lands.
+                stream.wait_for_trade(min(0.5, left))
+            else:
+                _time.sleep(min(settings.mt_us_quote_poll_seconds, left))
 
     tg(session.eod_message(today))
     if clock() < exit_at:

@@ -23,7 +23,7 @@ from src.momentum_trader.ledger import chart_bars_doc
 from src.momentum_trader.market import US
 from src.momentum_trader.scanner import STRATEGY_WARRIOR_STRICT, _strategy_config
 from src.momentum_trader.setups import opening_range_breakout
-from src.momentum_trader.us_ledger import WATCH_BARS_COLLECTION, USPaperLedger
+from src.momentum_trader.us_ledger import STREAM_BARS_COLLECTION, WATCH_BARS_COLLECTION, USPaperLedger
 from src.momentum_trader.us_screener import USQuote
 from src.momentum_trader.us_session import USSession, build_engine_config
 from src.momentum_trader.us_universe import USNameFacts, USUniverseConfig
@@ -234,6 +234,16 @@ class FakeFeed:
         live = self.day[self.day.index <= now]
         return float(live["close"].iloc[-1]) if not live.empty else None
 
+    def fresh_prices(self, symbol, now):
+        price = self.last_price(symbol, now)
+        return [] if price is None else [(now, price)]
+
+    def watch(self, symbols):
+        self.watched = getattr(self, "watched", []) + list(symbols)
+
+    def live_bars(self, symbol, now):
+        return self.day.iloc[0:0]
+
 
 class FakeCollection:
     def __init__(self):
@@ -422,3 +432,60 @@ def test_telegram_says_when_a_stock_joins_the_watchlist_and_when_it_gets_attenti
     first_attention = next(i for i, m in enumerate(sent) if m.startswith("👀"))
     assert sent.index(added[0]) < first_attention
     assert any(m.startswith("🟢 <b>ENTER USX") for m in sent)
+
+
+# ── fills from the push stream ──────────────────────────────────────────────
+def _armed(hist):
+    """Step the guide day with no polling until an entry is armed."""
+    feed = FakeFeed(guide_day(float(hist["close"].iloc[-1]), minutes=60), hist)
+    db = FakeDB()
+    sess = session(feed, db)
+    t = pd.Timestamp(f"{DAY} 09:31", tz=ET)
+    while t <= pd.Timestamp(f"{DAY} 10:29", tz=ET):
+        sess.cycle(t + pd.Timedelta(seconds=5))
+        st = sess.watch.get("USX")
+        if st is not None and st.state.pending is not None:
+            return feed, db, sess, st.state, t + pd.Timedelta(seconds=5)
+        t += pd.Timedelta(minutes=1)
+    pytest.fail("the guide day never armed an entry")
+
+
+def test_a_spike_through_the_trigger_that_reverses_between_looks_still_fills(hist):
+    """The case the 10 s poll lost: by the time it looked, the price was back
+    under the trigger. Every print since the last look is checked in order."""
+    feed, db, sess, st, decided = _armed(hist)
+    trig = st.pending.cand.setup.trigger
+    prints = [(decided + pd.Timedelta(seconds=1), trig * 0.999),
+              (decided + pd.Timedelta(seconds=2), trig * 1.002),     # through it
+              (decided + pd.Timedelta(seconds=3), trig * 0.995)]     # and back
+    feed.fresh_prices = lambda sym, now: list(prints)
+    assert sess.poll_pending(decided + pd.Timedelta(seconds=4)) == ["USX"]
+    pos = sess.watch["USX"].state.position
+    assert pos.plan.entry == pytest.approx(trig * 1.002)
+    assert pos.entry_time == decided + pd.Timedelta(seconds=2)
+
+
+def test_a_print_from_before_the_decision_never_fills(hist):
+    feed, db, sess, st, decided = _armed(hist)
+    trig = st.pending.cand.setup.trigger
+    feed.fresh_prices = lambda sym, now: [(decided - pd.Timedelta(seconds=1), trig * 1.002),
+                                          (decided, trig * 1.002)]
+    assert sess.poll_pending(decided + pd.Timedelta(seconds=4)) == []
+    assert sess.watch["USX"].state.pending is not None
+
+
+def test_discovery_starts_streaming_the_name(hist):
+    feed = FakeFeed(guide_day(float(hist["close"].iloc[-1])), hist)
+    session(feed).discover("USX", pd.Timestamp(f"{DAY} 09:40", tz=ET))
+    assert feed.watched == ["USX"]
+
+
+def test_the_streams_own_bars_are_kept_beside_rest_for_comparison(hist):
+    db = FakeDB()
+    feed = FakeFeed(guide_day(float(hist["close"].iloc[-1]), minutes=60), hist)
+    feed.live_bars = lambda sym, now: feed._closed(now).iloc[-2:]
+    sess = session(feed, db)
+    run_minutes(sess, "09:31", "09:33", poll=False)
+    flt, doc, upsert = db[STREAM_BARS_COLLECTION].replaced[-1]
+    assert upsert and flt == {"market": "US", "date": str(DAY), "symbol": "USX"}
+    assert doc["source"] == "yahoo_websocket" and len(doc["bars"]) == 2

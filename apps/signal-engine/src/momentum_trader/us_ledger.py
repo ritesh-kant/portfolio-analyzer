@@ -10,6 +10,8 @@ mt_us_positions  — open + closed paper positions (read by /mt/us/trades)
 mt_us_watchlist  — one document per session: the whole screen funnel
 mt_us_candidates — attention promotions, setups and refused entries, by `kind`
 mt_us_watch_bars — the session's 1-minute bars for every watched name (charts)
+mt_us_stream_bars — the same names' bars as built from the push stream alone,
+                    kept to measure the stream against REST (`yahoo_stream compare-db`)
 
 Every write swallows its own failure after logging it: a Mongo outage must not
 stop the session from managing positions it already holds. The CSV-free design
@@ -32,6 +34,7 @@ from .us_screener import USScreenRow
 logger = logging.getLogger(__name__)
 
 WATCH_BARS_COLLECTION = "mt_us_watch_bars"
+STREAM_BARS_COLLECTION = "mt_us_stream_bars"
 
 
 def _position_filter(symbol: str, entry_time: pd.Timestamp, strategy: str) -> dict[str, Any]:
@@ -150,6 +153,18 @@ class USPaperLedger:
             {"market": self._p.code, "date": session_date, "symbol": symbol},
             {"market": self._p.code, "date": session_date, "symbol": symbol,
              "interval": "1m", "bars": chart_bars_doc(bars)},
+            upsert=True,
+        )
+
+    def stream_bars(self, session_date: str, symbol: str, bars: pd.DataFrame) -> None:
+        """The bars the push stream built for a watched name, apart from REST.
+        The engine decides on the stream's newest minute; this is the record of
+        what it saw, for comparing with the REST bars in `watch_bars`."""
+        self._write(
+            STREAM_BARS_COLLECTION, "replace_one",
+            {"market": self._p.code, "date": session_date, "symbol": symbol},
+            {"market": self._p.code, "date": session_date, "symbol": symbol,
+             "interval": "1m", "source": "yahoo_websocket", "bars": chart_bars_doc(bars)},
             upsert=True,
         )
 
