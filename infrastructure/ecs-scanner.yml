@@ -311,7 +311,13 @@ Resources:
             - { Name: MT_US_PEAK_HOURS_ONLY, Value: 'false' }   # entries to the 15:10 ET cutoff
             - { Name: MT_US_PEAK_HOURS_END, Value: '10:00' }
             - { Name: MT_US_BLOCK_DELAYED_QUOTES, Value: 'true' }
-            - { Name: MT_US_QUOTE_POLL_SECONDS, Value: '10' }
+            - { Name: MT_US_QUOTE_POLL_SECONDS, Value: '10' }   # REST fallback only
+            # Yahoo push stream: fills on every trade instead of a 10 s poll.
+            # STREAM_BARS=true would also decide ~5 s after the bar instead of
+            # 22 s, on stream bars that miss wicks — see Settings.mt_us_stream_bars.
+            - { Name: MT_US_STREAM, Value: 'true' }
+            - { Name: MT_US_STREAM_BARS, Value: 'false' }
+            - { Name: MT_US_STREAM_SETTLE_SECONDS, Value: '3' }
             - { Name: MT_US_CACHE_DIR, Value: /data/.cache_yahoo_us }
           Secrets:
             - Name: MONGODB_URI
