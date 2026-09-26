@@ -56,11 +56,7 @@ from .engine import (
     step,
 )
 from .exits import MODE_FIXED, MODE_TREND_FULL, MODE_TREND_RESISTANCE_STATE
-<<<<<<< HEAD
-from .indicators import round_levels_above
 from .levels import SESSION_LEVEL_SESSIONS, TARGET_BUFFER_PCT
-=======
->>>>>>> origin/main
 from .ledger import PaperLedger
 from .news_context import recent_news
 from .short_side import ShortBook, ShortEvents, next_round_level

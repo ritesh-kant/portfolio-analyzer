@@ -64,11 +64,8 @@ from src.momentum_trader.engine import (  # noqa: E402
 )
 from src.momentum_trader.exits import MODES  # noqa: E402
 from src.momentum_trader.indicators import atr  # noqa: E402
-<<<<<<< HEAD
 from src.momentum_trader.levels import SESSION_LEVEL_SESSIONS, TARGET_BUFFER_PCT  # noqa: E402
-=======
 from src.momentum_trader.short_side import SIDES, Reflection, run_day_short  # noqa: E402
->>>>>>> origin/main
 from src.momentum_trader.upstox import Instrument, UpstoxClient  # noqa: E402
 
 # Measured on live resting buy-stop fills: the first quote at or above the trigger
@@ -189,20 +186,6 @@ def simulate_symbol(
         # would shift exits in runs that are meant to reproduce exactly.
         warm_days = days[max(0, i - (5 if cfg.warm_context else 3)):i]
         warmup = df[df.index.normalize().isin(warm_days)]
-<<<<<<< HEAD
-        # Earlier sessions' highs for the target cap - the same builder the
-        # live scanner calls pre-open, fed only days strictly before today.
-        session_levels = build_session_levels(
-            df[df.index.normalize().isin(days[max(0, i - cfg.session_level_sessions):i])],
-            cfg.session_level_sessions,
-        ) if cfg.session_level_sessions else []
-        st = run_day(inst.symbol, day_bars, prev_close, profile, cfg, catalyst, prev_gainer,
-                     warmup_1m=warmup if not warmup.empty else None,
-                     prev_day={"high": float(prev["high"]), "low": float(prev["low"]),
-                               "close": prev_close},
-                     chart_quality=cq, daily_sma20=sma20, daily_atr_pct=atr_pct,
-                     session_levels=session_levels)
-=======
         prev_day = {"high": float(prev["high"]), "low": float(prev["low"]), "close": prev_close}
         if side == "short":
             refl = Reflection(prev_close)
@@ -214,11 +197,18 @@ def simulate_symbol(
                                prev_day=prev_day, chart_quality=cq_s, daily_sma20=sma20,
                                daily_atr_pct=atr_pct)
         else:
+            # Earlier sessions' highs for the target cap - the same builder the
+            # live scanner calls pre-open, fed only days strictly before today.
+            # Long side only: prior highs are resistance for a buyer.
+            session_levels = build_session_levels(
+                df[df.index.normalize().isin(days[max(0, i - cfg.session_level_sessions):i])],
+                cfg.session_level_sessions,
+            ) if cfg.session_level_sessions else []
             st = run_day(inst.symbol, day_bars, prev_close, profile, cfg, catalyst, prev_gainer,
                          warmup_1m=warmup if not warmup.empty else None,
                          prev_day=prev_day,
-                         chart_quality=cq, daily_sma20=sma20, daily_atr_pct=atr_pct)
->>>>>>> origin/main
+                         chart_quality=cq, daily_sma20=sma20, daily_atr_pct=atr_pct,
+                         session_levels=session_levels)
         trades.extend(st.closed)
         for c in st.candidates:
             cands.append({
@@ -516,18 +506,15 @@ def main() -> int:
     ap.add_argument("--rising-price-volume", action="store_true",
                     help="require positive 4-bar close AND total-volume slopes at the "
                     "1-minute confirmation (the 2026-09-18 quadrant gate, default OFF)")
-<<<<<<< HEAD
     ap.add_argument("--session-levels", type=int, default=None,
                     help="earlier sessions whose highs cap the fixed target (BT50). "
                          f"Default {SESSION_LEVEL_SESSIONS} with --warrior-strict, else 0")
     ap.add_argument("--target-buffer-pct", type=float, default=None,
                     help="capped target sits this %% under its level (BT50). "
                          f"Default {TARGET_BUFFER_PCT} with --warrior-strict, else 0")
-=======
     ap.add_argument("--side", default="long", choices=list(SIDES),
                     help="long = buy gainers (every run before 2026-09-26); short = sell "
                          "losers short on the reflected tape (short_side.py)")
->>>>>>> origin/main
     ap.add_argument("--tag", default="", help="suffix for the output CSV names")
     ap.add_argument("--fetch-only", action="store_true", help="just fill the parquet cache")
     ap.add_argument("--jobs", type=int, default=min(8, mp.cpu_count()),
