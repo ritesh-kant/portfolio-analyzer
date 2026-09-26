@@ -49,12 +49,14 @@ from .engine import (
     Position,
     Rejection,
     build_cum_volume_profile,
+    build_session_levels,
     fill_pending_quote,
     force_close,
     resample_5m,
     step,
 )
 from .exits import MODE_FIXED, MODE_TREND_FULL, MODE_TREND_RESISTANCE_STATE
+from .levels import SESSION_LEVEL_SESSIONS, TARGET_BUFFER_PCT
 from .ledger import PaperLedger
 from .news_context import recent_news
 from .short_side import ShortBook, ShortEvents, next_round_level
@@ -188,6 +190,11 @@ def _strategy_config(settings: Settings) -> EngineConfig:
             warm_context=True,
             vol_baseline_min_bars=VOL_BASELINE_MIN_BARS,
             use_fixed_target=True,
+            # Operator decision 2026-09-25 after GODREJIND topped ₹1 under the
+            # Sep 17 high: cap the target just below earlier sessions' highs
+            # too. research/hypotheses/2026-09-25-session-resistance-target.md
+            session_level_sessions=SESSION_LEVEL_SESSIONS,
+            target_buffer_pct=TARGET_BUFFER_PCT,
         )
     raise ValueError(
         f"unknown MT_STRATEGY {settings.mt_strategy!r}; expected "
@@ -497,6 +504,9 @@ class Scanner:
             self.states[inst.key] = DayState(
                 symbol=sym, prev_close=prev_close, cum_vol_profile=profile,
                 prev_day_gainer=prev_gainer, prev_day=prev_day,
+                # hist_1m ends yesterday, so these are all pre-open facts.
+                session_levels=build_session_levels(
+                    hist_1m, self.cfg.session_level_sessions),
                 # Prior-session bars for the indicators. Held for every strategy
                 # so exits are warm live as they already are in bt17; the
                 # attention CONTEXT only consults them when `warm_context` is on,

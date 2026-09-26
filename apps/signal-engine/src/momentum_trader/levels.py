@@ -29,6 +29,7 @@ dynamic level handled directly in exits.py.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -44,7 +45,14 @@ NEAR_PCT = 0.35        # "price is at the level" band, in percent
 # overrule a live trend.  Anchors are structural by definition; a pivot becomes
 # structural only after the market has made a second, independently confirmed
 # attempt at it.  This is a rule about the source of a level, not its price.
-STRUCTURAL_KINDS = frozenset({"prev_day", "orb", "round", "shelf"})
+STRUCTURAL_KINDS = frozenset({"prev_day", "orb", "round", "shelf", "session_high"})
+
+# Prior-session resistance for the fixed-target cap (BT50,
+# research/hypotheses/2026-09-25-session-resistance-target.md). Both numbers
+# were fixed from the GODREJIND 2026-09-25 chart before any replay ran.
+SESSION_LEVEL_SESSIONS = 10   # sessions before today whose highs are known
+TARGET_BUFFER_PCT = 0.15      # a capped target sits this far under its level
+TICK = 0.05                   # NSE equity tick
 
 # Volume-shelf parameters. A shelf is a local peak in the volume-by-price
 # profile, so the bucket width sets what "one level" means. The default scales
@@ -60,6 +68,7 @@ SHELF_PEAK_WIDTH = 1             # buckets either side the peak must beat
 class Level:
     price: float
     kind: str          # pivot_high | pivot_low | prev_day | orb | round | shelf
+                       # | session_high | session_pivot
     touches: int
     volume: float
     strength: float    # touches, plus a small bonus for volume traded there
@@ -254,6 +263,59 @@ def derive_levels(
     if add_shelves:
         levels += volume_shelf_levels(bars, atr)
     return [x for x in levels if x.touches >= MIN_TOUCHES]
+
+
+def session_resistance_levels(prior_1m: pd.DataFrame, prior_5m: pd.DataFrame) -> list[Level]:
+    """Resistance left behind by earlier sessions, for the target cap only.
+
+    `prior_1m` / `prior_5m` must hold only sessions strictly before today, so
+    nothing here can see the current session. Two kinds come out:
+
+    * `session_high` - each prior session's high. An anchor, like `prev_day`:
+      it is structural with one touch because the whole market saw it.
+    * `session_pivot` - swing pivot highs on the prior sessions' 5-minute bars,
+      clustered like today's pivots. A stall in the middle of an older session
+      is not any day's high, so the anchor alone misses it. Structural only
+      with two or more touches, the same rule today's pivots follow.
+
+    Highs only: these feed where a long takes profit, never an entry or a stop.
+    """
+    if prior_1m is None or prior_1m.empty:
+        return []
+    day_high = prior_1m["high"].groupby(prior_1m.index.normalize()).max()
+    levels = [Level(float(h), "session_high", 1, 0.0, 1.5) for h in day_high]
+    if prior_5m is not None and not prior_5m.empty:
+        highs, _ = swing_pivots(prior_5m)
+        levels += cluster(highs, "session_pivot")
+    return levels
+
+
+def buffered_target(level_price: float, buffer_pct: float) -> float:
+    """The sell price for a target capped at `level_price`.
+
+    Sellers who know a level offer in front of it, so an order resting exactly
+    at the level is last in the queue. The target sits `buffer_pct` under it,
+    floored to the tick. 0 returns the level untouched, which is how every run
+    recorded before the buffer existed reproduces exactly.
+    """
+    if buffer_pct <= 0:
+        return level_price
+    raw = level_price * (1.0 - buffer_pct / 100.0)
+    return round(math.floor(raw / TICK + 1e-9) * TICK, 2)
+
+
+def resistance_target(levels: list[Level], fill: float,
+                      buffer_pct: float = 0.0) -> tuple[Level, float] | None:
+    """Nearest structural resistance that can still serve as a target.
+
+    Returns the level and its buffered target. A level whose buffered target
+    is not above the fill has in effect already been reached, so it is skipped
+    and the next one up is used. With `buffer_pct=0` this is exactly
+    `nearest_structural_resistance(levels, fill)`.
+    """
+    picks = [(x, buffered_target(x.price, buffer_pct)) for x in levels if is_structural(x)]
+    picks = [(x, t) for x, t in picks if t > fill]
+    return min(picks, key=lambda p: (p[1], p[0].price)) if picks else None
 
 
 def nearest_resistance(levels: list[Level], price: float,
