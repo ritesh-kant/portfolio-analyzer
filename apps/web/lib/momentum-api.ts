@@ -145,6 +145,8 @@ export interface NewsContextItem {
 export interface MomentumTrade {
   _id: string;
   symbol: string;
+  /** "short" = sold first, bought back at exit. Absent on older rows = long. */
+  side?: 'long' | 'short';
   /** Paper strategy that produced this row. Older records predate strategy labels. */
   strategy?: string;
   status: 'open' | 'closed';
@@ -222,6 +224,7 @@ export const fetchAnalyticsTrades = (source: string) =>
 export interface WatchlistFlag {
   time: string;
   strategy?: string;
+  side?: 'long' | 'short';
   reason: string;
   day_chg_pct: number;
   rvol: number;
@@ -236,10 +239,12 @@ export interface WatchlistName {
   max_day_chg_pct: number;
   max_rvol: number;
   strategies: string[];
+  /** Which screen flagged it. A name on both screens appears twice. Absent = long. */
+  side?: 'long' | 'short';
   flags: WatchlistFlag[];
   /** Paper trades opened on this name in the same session, if any. US rows
    * carry `net_usd` instead of `net_inr`. */
-  trades: (Pick<MomentumTrade, '_id' | 'symbol' | 'entry_time' | 'exit_time' | 'entry_price' | 'exit_price' | 'net_inr' | 'status' | 'strategy'> & {
+  trades: (Pick<MomentumTrade, '_id' | 'symbol' | 'side' | 'entry_time' | 'exit_time' | 'entry_price' | 'exit_price' | 'net_inr' | 'status' | 'strategy'> & {
     net_usd?: number | null;
   })[];
   /** Extra per-name facts a market wants shown (the US screen's price and float). */

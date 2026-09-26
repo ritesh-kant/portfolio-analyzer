@@ -17,8 +17,11 @@ import type { WatchlistGateHit, WatchlistName } from '../lib/momentum-api';
  */
 
 type Market = 'NSE' | 'US';
+type Side = 'long' | 'short';
 
 interface Gate {
+  /** Stable handle for gates the logic below looks up. */
+  id?: string;
   label: string;
   detail: string;
   /** Rejection reasons that mean THIS gate refused the name. */
@@ -68,27 +71,68 @@ const screen: Record<Market, Stage> = {
   },
 };
 
-const promotion = (market: Market): Stage => ({
+/** The short side's screen: losers instead of gainers. */
+const shortScreen: Record<Market, Stage> = {
+  NSE: {
+    ...screen.NSE,
+    gates: [
+      ...screen.NSE.gates,
+      { label: 'Short allowed intraday (MIS)', detail: 'Cash-segment shorts must be bought back the same day — the 15:15 close does that. Trade-to-trade (BE) names cannot be shorted and are already excluded above.' },
+    ],
+  },
+  US: {
+    ...screen.US,
+    gates: screen.US.gates.map((g) =>
+      g.label === 'Up ≥ 10% on the day'
+        ? { label: 'Down ≥ 4% on the day', detail: 'The short screen. Not 10%: at −10% SEC Rule 201 forbids breakdown shorts.' }
+        : g,
+    ),
+  },
+};
+
+// [long wording, short wording] — the engine's reason codes are the same keys
+// on both sides; a short passed or failed the MIRROR image of each check.
+const byside = (side: Side, long: string, short: string) => (side === 'short' ? short : long);
+
+const promotion = (market: Market, side: Side): Stage => ({
   title: '2 · Promoted to attention (5-minute chart)',
   gates: [
     {
-      label: `Day change ≥ ${market === 'NSE' ? '1.5' : '10'}% and time-of-day RVOL ≥ 1.5×`,
+      label: byside(
+        side,
+        `Day change ≥ ${market === 'NSE' ? '1.5' : '10'}% and time-of-day RVOL ≥ 1.5×`,
+        `Day change ≤ −${market === 'NSE' ? '1.5' : '4'}% and time-of-day RVOL ≥ 1.5×`,
+      ),
       detail: 'RVOL here = volume so far today ÷ the usual volume by this clock time.',
     },
-    { label: '5-min EMA9 above EMA20, close above VWAP', detail: 'Short trend up and price above the day’s average traded price.' },
-    { label: 'A completed bullish/indecision candle pattern or setup', detail: 'Promotion is only "watch closely" — it never buys by itself.' },
+    {
+      label: byside(side, '5-min EMA9 above EMA20, close above VWAP', '5-min EMA9 below EMA20, close below VWAP'),
+      detail: byside(
+        side,
+        'Short trend up and price above the day’s average traded price.',
+        'Short trend down and price below the day’s average traded price.',
+      ),
+    },
+    {
+      label: byside(side, 'A completed bullish/indecision candle pattern or setup', 'A completed bearish/indecision candle pattern or setup'),
+      detail: byside(side, 'Promotion is only "watch closely" — it never buys by itself.', 'Promotion is only "watch closely" — it never sells by itself.'),
+    },
   ],
 });
 
-const stages = (market: Market): Stage[] => [
-  screen[market],
-  promotion(market),
+const stages = (market: Market, side: Side = 'long'): Stage[] => [
+  side === 'short' ? shortScreen[market] : screen[market],
+  promotion(market, side),
   {
     title: '3 · Still in trend (checked every minute)',
     gates: [
       {
         label: 'Trend context holds',
-        detail: 'Falling below VWAP or EMA9 under EMA20 drops the name back off attention; it must be promoted again.',
+        detail: byside(
+          side,
+          'Falling below VWAP or EMA9 under EMA20 drops the name back off attention; it must be promoted again.',
+          'Rising above VWAP or EMA9 over EMA20 drops the name back off attention; it must be promoted again.',
+        ),
         reasons: ['attention_removed:below_vwap', 'attention_removed:ema_down', 'attention_removed:ema_warmup'],
       },
     ],
@@ -97,11 +141,19 @@ const stages = (market: Market): Stage[] => [
     title: '4 · 1-minute confirmation candle',
     gates: [
       { label: 'Enough bars', detail: 'At least 3 one-minute bars today.', reasons: ['attention_insufficient_bars'] },
-      { label: 'Candle is green', detail: 'Close above open.', reasons: ['attention_red_or_flat'] },
-      { label: 'Closes in the top 40% of its range', detail: 'Buyers held the high into the close.', reasons: ['attention_weak_close'] },
+      {
+        label: byside(side, 'Candle is green', 'Candle is red'),
+        detail: byside(side, 'Close above open.', 'Close below open.'),
+        reasons: ['attention_red_or_flat'],
+      },
+      {
+        label: byside(side, 'Closes in the top 40% of its range', 'Closes in the bottom 40% of its range'),
+        detail: byside(side, 'Buyers held the high into the close.', 'Sellers held the low into the close.'),
+        reasons: ['attention_weak_close'],
+      },
       { label: 'Volume ≥ 2.5× recent 1-min volume', detail: 'The push has real participation.', reasons: ['attention_low_1m_volume'] },
       {
-        label: 'Rising price and volume (4 bars)',
+        label: byside(side, 'Rising price and volume (4 bars)', 'Falling price, rising volume (4 bars)'),
         detail: 'Only when MT_REQUIRE_RISING_PRICE_VOLUME is on (off in prod).',
         reasons: ['attention_price_volume_insufficient', 'attention_price_volume_not_confirmed'],
       },
@@ -110,30 +162,77 @@ const stages = (market: Market): Stage[] => [
   {
     title: '5 · Warrior checklist',
     gates: [
-      { label: 'A micro pullback', detail: '2+ green bars, a 1–2 bar pause, then the break. Buy-stop goes at the pause high.', reasons: ['attention_no_micro_pullback'] },
-      { label: 'Pullback on light volume', detail: 'The pause traded lighter than the push (sellers absent).', reasons: ['attention_heavy_pullback_volume'] },
       {
-        label: '1-min MACD positive and still widening',
-        detail: 'Histogram > 0 and not shrinking vs the previous bar.',
+        label: byside(side, 'A micro pullback', 'A micro bounce'),
+        detail: byside(
+          side,
+          '2+ green bars, a 1–2 bar pause, then the break. Buy-stop goes at the pause high.',
+          '2+ red bars, a 1–2 bar pause, then the break down. Sell-stop goes at the pause low.',
+        ),
+        reasons: ['attention_no_micro_pullback'],
+      },
+      {
+        label: byside(side, 'Pullback on light volume', 'Bounce on light volume'),
+        detail: byside(side, 'The pause traded lighter than the push (sellers absent).', 'The pause traded lighter than the drop (buyers absent).'),
+        reasons: ['attention_heavy_pullback_volume'],
+      },
+      {
+        label: byside(side, '1-min MACD positive and still widening', '1-min MACD negative and still widening'),
+        detail: byside(side, 'Histogram > 0 and not shrinking vs the previous bar.', 'Histogram < 0 and not shrinking (toward zero) vs the previous bar.'),
         reasons: ['attention_macd_warmup', 'attention_macd_not_positive', 'attention_macd_not_open'],
       },
-      { label: 'Stop below the buy price', detail: 'Pullback low must sit under the trigger.', reasons: ['attention_invalid_stop'] },
       {
-        label: 'Room to the next resistance ≥ 1R',
-        detail: 'Distance to the next ceiling must be at least the stop distance, or it waits for the break.',
+        label: byside(side, 'Stop below the buy price', 'Stop above the short-sale price'),
+        detail: byside(side, 'Pullback low must sit under the trigger.', 'Bounce high must sit over the trigger.'),
+        reasons: ['attention_invalid_stop'],
+      },
+      {
+        label: byside(side, 'Room to the next resistance ≥ 1R', 'Room down to the next support ≥ 1R'),
+        detail: byside(
+          side,
+          'Distance to the next ceiling must be at least the stop distance, or it waits for the break.',
+          'Distance to the next floor must be at least the stop distance, or it waits for the break.',
+        ),
         reasons: ['attention_wait_resistance_break', 'attention_wait_next_resistance_break'],
       },
-      { label: '1st or 2nd pullback of the move', detail: 'Later pullbacks are refused.', reasons: ['pullback_no_anchor', 'pullback_not_allowed'] },
+      {
+        label: byside(side, '1st or 2nd pullback of the move', '1st or 2nd bounce of the move'),
+        detail: 'Later ones are refused.',
+        reasons: ['pullback_no_anchor', 'pullback_not_allowed'],
+      },
     ],
   },
   {
     title: '6 · Order and size',
     gates: [
-      { label: 'Buy-stop armed', detail: 'All of the above passed on one candle; a buy-stop sits at the trigger for 3 minutes.' },
+      {
+        id: 'armed',
+        label: byside(side, 'Buy-stop armed', 'Sell-stop armed (short)'),
+        detail: byside(
+          side,
+          'All of the above passed on one candle; a buy-stop sits at the trigger for 3 minutes.',
+          'All of the above passed on one candle; a sell-stop sits at the trigger for 3 minutes.',
+        ),
+      },
       { label: 'Price reached the trigger within 3 minutes', detail: 'Otherwise the order expires.', reasons: ['pending_expired'] },
-      { label: 'Not chased > 1% above the trigger', detail: 'A fill more than 1% above the plan is cancelled.', reasons: ['chased'] },
+      {
+        label: byside(side, 'Not chased > 1% above the trigger', 'Not chased > 1% below the trigger'),
+        detail: 'A fill more than 1% past the plan is cancelled.',
+        reasons: ['chased'],
+      },
+      ...(side === 'short' && market === 'US'
+        ? [{
+            label: 'Not under the short-sale restriction (SEC Rule 201)',
+            detail: 'Once a stock trades 10% below yesterday’s close (or carried SSR from yesterday), a short may only be sold above the bid — a breakdown short cannot be placed, so it is refused.',
+            reasons: ['ssr_active'],
+          }]
+        : []),
       market === 'NSE'
-        ? { label: 'Stop 0.3–3% below entry', detail: 'Tighter is noise; wider is not a low-risk entry.', reasons: ['stop_not_sane'] }
+        ? {
+            label: byside(side, 'Stop 0.3–3% below entry', 'Stop 0.3–3% above the short sale'),
+            detail: 'Tighter is noise; wider is not a low-risk entry.',
+            reasons: ['stop_not_sane'],
+          }
         : {
             label: 'Stop ≥ 2 ticks and ≤ 10%, costs ≤ 25% of risk',
             detail: 'Round-trip cost over dollars at risk; above 0.25 the 2:1 target needs > 41.7% wins.',
@@ -158,8 +257,13 @@ const stages = (market: Market): Stage[] => [
       },
       {
         label: 'Day not halted',
-        detail: '3 losses in a row stops the day (discipline on).',
+        detail: '3 losses in a row stops the day (discipline on). Longs and shorts share the count.',
         reasons: ['halted:three_strikes', 'halted:profit_giveback'],
+      },
+      {
+        label: byside(side, 'No short open on the same stock', 'No long open on the same stock'),
+        detail: 'A symbol never holds a long and a short at the same time.',
+        reasons: ['opposite_side_open'],
       },
       ...(market === 'US'
         ? [{
@@ -203,12 +307,14 @@ export function GateChecklist({
   const armed = name.armed ?? 0;
   // A US name can pass the screen and never be promoted; an NSE watchlist
   // name is, by construction, one that was.
-  const promoted = market === 'NSE' || name.flags.some((f) => f.reason !== 'passed_screen');
+  const promoted =
+    market === 'NSE' || name.flags.some((f) => f.reason !== 'passed_screen' && f.reason !== 'passed_short_screen');
 
-  const plan = stages(market);
+  const side: Side = name.side === 'short' ? 'short' : 'long';
+  const plan = stages(market, side);
   const flat = plan.flatMap((stage, s) => stage.gates.map((gate, g) => ({ stage, s, gate, g })));
   const hitsFor = (gate: Gate) => (gate.reasons ?? []).map((r) => byReason.get(r)).filter((h): h is WatchlistGateHit => !!h);
-  const armedIndex = flat.findIndex((x) => x.gate.label === 'Buy-stop armed');
+  const armedIndex = flat.findIndex((x) => x.gate.id === 'armed');
   const clockIndex = flat.findIndex((x) => x.s === plan.length - 1);
 
   // The furthest gate the name demonstrably reached: the deepest one that
@@ -262,11 +368,12 @@ export function GateChecklist({
     <section className="rounded-xl border border-black/10 p-4">
       <h3 className="font-display text-lg">Why it was / wasn&apos;t traded</h3>
       <p className="text-xs text-ink/55">
-        Every filter in the order the engine applies it ({market === 'NSE' ? 'warrior_strict' : 'us_warrior_strict'}), marked against what it logged for {name.symbol} this session. Minutes = how many 1-minute checks that gate refused.
+        Every filter in the order the engine applies it ({market === 'NSE' ? 'warrior_strict' : 'us_warrior_strict'}
+        {side === 'short' ? ', mirrored for a short sale' : ''}), marked against what it logged for {name.symbol} this session. Minutes = how many 1-minute checks that gate refused.
       </p>
       <p className={`mt-3 rounded-lg p-2.5 text-sm font-medium ${traded ? 'bg-emerald-50 text-emerald-900' : 'bg-rose-50 text-rose-900'}`}>
         {verdict}
-        {armed > 0 && !traded ? ` A buy-stop was armed ${armed}× but never filled.` : ''}
+        {armed > 0 && !traded ? ` A ${side === 'short' ? 'sell' : 'buy'}-stop was armed ${armed}× but never filled.` : ''}
       </p>
 
       <div className="mt-3 space-y-3">

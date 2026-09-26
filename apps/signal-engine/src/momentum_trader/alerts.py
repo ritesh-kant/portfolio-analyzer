@@ -56,14 +56,17 @@ def entry_message(p: Position, *, fixed_exit: bool, cur: str = "₹", decimals: 
     entry, stop, target = plan.entry, plan.stop, plan.target
     stop_pct = (stop - entry) / entry * 100.0
     tgt_pct = (target - entry) / entry * 100.0
-    rr = (target - entry) / (entry - stop) if entry > stop else 0.0
+    risk = abs(entry - stop)
+    rr = abs(target - entry) / risk if risk > 0 else 0.0
+    short = p.cand.side == "short"
     if fixed_exit:
         tgt_note = f"{rr:.1f}R, {tgt_pct:+.2f}% · {_esc(p.target_source)}"
     else:
         tgt_note = f"{rr:.1f}R, {tgt_pct:+.2f}% · <i>reference only — exit is signal-based</i>"
     risk_dp = 0 if cur == "₹" else 2
     return "\n".join([
-        f"🟢 <b>ENTER {_esc(p.cand.symbol)}</b>",
+        (f"🔴 <b>SHORT {_esc(p.cand.symbol)}</b>" if short
+         else f"🟢 <b>ENTER {_esc(p.cand.symbol)}</b>"),
         f"Setup: <code>{_esc(p.cand.setup.name)}</code>",
         f"Entry: <b>{money(entry, cur, decimals=decimals)}</b> × {plan.qty} "
         f"({money(plan.notional_inr, cur, decimals=risk_dp)})",
@@ -81,11 +84,13 @@ def exit_message(t: ClosedTrade, *, cur: str = "₹", decimals: int = 2) -> str:
     unit the plan sized in, so -1.0R means "stopped out as planned".
     """
     net_dp = 0 if cur == "₹" else 2
-    risk_per_share = t.entry - t.cand.setup.stop
-    r = (t.exit - t.entry) / risk_per_share if risk_per_share > 0 else None
+    sign = -1.0 if t.side == "short" else 1.0
+    risk_per_share = sign * (t.entry - t.cand.setup.stop)
+    r = sign * (t.exit - t.entry) / risk_per_share if risk_per_share > 0 else None
     move = f"{t.gross_pct:+.2f}%" + (f" · {r:+.1f}R" if r is not None else "")
     return "\n".join([
-        f"{pnl_emoji(t.net_inr)} <b>EXIT {_esc(t.cand.symbol)}</b> "
+        f"{pnl_emoji(t.net_inr)} <b>{'COVER' if t.side == 'short' else 'EXIT'} "
+        f"{_esc(t.cand.symbol)}</b> "
         f"{money(t.net_inr, cur, signed=True, decimals=net_dp)}",
         f"Reason: <code>{_esc(t.exit_reason)}</code>",
         f"Price: {money(t.avg_entry, cur, decimals=decimals)} → "
@@ -104,7 +109,8 @@ def attention_message(a: AttentionEvent) -> str:
     what = a.reason.removeprefix("pattern:").replace(":", " ")
     extra = [t for t in a.candle_tags if t not in what]
     tags = f" [{_esc(','.join(extra))}]" if extra else ""
-    return (f"👀 <b>{_esc(a.symbol)}</b> {_esc(what)}{tags} · "
+    side = " (short watch)" if a.side == "short" else ""
+    return (f"👀 <b>{_esc(a.symbol)}</b>{side} {_esc(what)}{tags} · "
             f"{a.day_chg_pct:+.1f}% · RVOL {a.rvol:.1f}x")
 
 
@@ -125,6 +131,7 @@ def watchlist_message(
     float_shares: float | None,
     can_enter: bool = True,
     cur: str = "$",
+    side: str = "long",
 ) -> str:
     """A stock just passed the screen and is now watched — not an order.
 
@@ -134,7 +141,8 @@ def watchlist_message(
     """
     rv = f"{rvol:.1f}x" if rvol is not None else "n/a"
     fl = _shares(float_shares) if float_shares is not None else "n/a"
-    line = (f"📋 <b>{_esc(symbol)}</b> added to watchlist · "
+    which = "short watchlist" if side == "short" else "watchlist"
+    line = (f"📋 <b>{_esc(symbol)}</b> added to {which} · "
             f"{money(price, cur, decimals=2)} · {day_chg_pct:+.1f}% · "
             f"RVOL {rv} · float {fl}")
     if not can_enter:

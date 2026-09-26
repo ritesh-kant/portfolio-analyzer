@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
+import { orderVerbs } from '../lib/momentum-side';
+import { SideBadge } from './momentum-side-badge';
 import { GateChecklist } from './momentum-gate-checklist';
 import { type ChartLocale, MomentumTradeChart, NSE_LOCALE } from './momentum-trade-chart';
 import {
@@ -107,8 +109,21 @@ const strategyLabel = (value: string | undefined) =>
     attention_1m_false_break_reclaim: 'False-break reclaim',
     attention_1m_merged: 'Attention merged',
     warrior_strict: 'Warrior strict',
+    warrior_strict_short: 'Warrior strict · short',
+    us_warrior_strict: 'Warrior strict',
+    us_warrior_strict_short: 'Warrior strict · short',
   })[value ?? ''] ?? (value ? value.replaceAll('_', ' ') : 'Earlier paper run');
+/** News is about the company, so it is keyed by symbol whatever the side. */
 const nameKey = (date: string, symbol: string) => `${date}:${symbol}`;
+/** A name can be on the long AND the short screen on one day: two entries. */
+const selectKey = (date: string, name: WatchlistName) => `${date}:${name.symbol}:${name.side ?? 'long'}`;
+/** Day change with its sign, red when the stock is down. */
+const dayChg = (value: number, digits: number) => (
+  <span className={value < 0 ? 'text-rose-600' : 'text-emerald-700'}>
+    {value > 0 ? '+' : ''}
+    {value.toFixed(digits)}%
+  </span>
+);
 const truncate = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
 /** Where a headline sits against the session and the scanner's first flag. */
@@ -200,7 +215,7 @@ function asChartRecord(date: string, name: WatchlistName, bars: MomentumBar[]): 
     }
   }
   return {
-    _id: nameKey(date, name.symbol),
+    _id: selectKey(date, name),
     symbol: name.symbol,
     status: 'closed',
     setup: 'watchlist',
@@ -238,6 +253,7 @@ function NameRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="shrink-0 font-display font-semibold">{name.symbol}</span>
+            {name.side === 'short' && <SideBadge trade={name} />}
             <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink/60">
               {name.flags.length} flag{name.flags.length === 1 ? '' : 's'}
             </span>
@@ -262,7 +278,7 @@ function NameRow({
           </p>
         </div>
         <div className="shrink-0 text-right text-sm font-bold tabular-nums">
-          <span className="text-emerald-700">+{name.max_day_chg_pct.toFixed(1)}%</span>
+          {dayChg(name.max_day_chg_pct, 1)}
           <p className="mt-1 whitespace-nowrap text-[11px] font-medium text-ink/45">
             RVOL {name.max_rvol.toFixed(1)}×
           </p>
@@ -340,13 +356,15 @@ function NameDetail({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink/45">{dateLabel(date)}</p>
-          <h2 className="font-display text-2xl">{name.symbol}</h2>
+          <h2 className="flex items-center gap-2 font-display text-2xl">
+            {name.symbol} {name.side === 'short' && <SideBadge trade={name} />}
+          </h2>
           <p className="text-xs text-ink/55">{name.strategies.map(strategyLabel).join(' · ')}</p>
         </div>
         <div className="flex gap-3">
           <div className="metric-chip text-right">
             <p className="text-xs text-ink/55">Max day change</p>
-            <p className="font-display text-lg text-emerald-700">+{name.max_day_chg_pct.toFixed(2)}%</p>
+            <p className="font-display text-lg">{dayChg(name.max_day_chg_pct, 2)}</p>
           </div>
           <div className="metric-chip text-right">
             <p className="text-xs text-ink/55">Max RVOL</p>
@@ -401,8 +419,8 @@ function NameDetail({
             const net = t.net_inr ?? t.net_usd;
             return (
               <p key={t._id} className="mt-1 text-sm">
-                {strategyLabel(t.strategy)} · Buy {money(t.entry_price)} at {at(t.entry_time)}
-                {t.exit_price != null ? ` → Sell ${money(t.exit_price)} at ${at(t.exit_time)}` : ' · Open'}
+                <SideBadge trade={t} /> {strategyLabel(t.strategy)} · {orderVerbs(t).open} {money(t.entry_price)} at {at(t.entry_time)}
+                {t.exit_price != null ? ` → ${orderVerbs(t).close} ${money(t.exit_price)} at ${at(t.exit_time)}` : ' · Open'}
                 {net != null && (
                   <span className={`ml-2 font-semibold ${pnlClass(net)}`}>
                     {net >= 0 ? '+' : ''}
@@ -480,7 +498,7 @@ function WatchlistView() {
         setSessions(next);
         const first = next[0];
         const firstName = first?.names[0];
-        setSelected(first && firstName ? nameKey(first.date, firstName.symbol) : null);
+        setSelected(first && firstName ? selectKey(first.date, firstName) : null);
         setOpenDates(first ? new Set([first.date]) : new Set());
       })
       .catch((err: unknown) =>
@@ -516,7 +534,7 @@ function WatchlistView() {
   const current = useMemo(() => {
     for (const session of sessions) {
       for (const name of session.names) {
-        if (nameKey(session.date, name.symbol) === selected) return { date: session.date, name };
+        if (selectKey(session.date, name) === selected) return { date: session.date, name };
       }
     }
     return null;
@@ -637,12 +655,12 @@ function WatchlistView() {
                   {isOpen &&
                     names.map((name) => (
                       <NameRow
-                        key={name.symbol}
+                        key={selectKey(date, name)}
                         name={name}
                         news={news[nameKey(date, name.symbol)]}
-                        active={nameKey(date, name.symbol) === selected}
+                        active={selectKey(date, name) === selected}
                         onClick={() => {
-                          setSelected(nameKey(date, name.symbol));
+                          setSelected(selectKey(date, name));
                           setMobileView('detail');
                         }}
                       />

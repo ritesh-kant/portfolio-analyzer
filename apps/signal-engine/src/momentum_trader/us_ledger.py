@@ -27,7 +27,7 @@ from typing import Any
 import pandas as pd
 
 from .engine import AttentionEvent, Candidate, ClosedTrade, Position, Rejection
-from .ledger import _cand_doc, _structural_doc, chart_bars_doc
+from .ledger import _cand_doc, _structural_doc, chart_bars_doc, strategy_label
 from .market import US, MarketProfile
 from .us_screener import USScreenRow
 
@@ -73,13 +73,19 @@ class USPaperLedger:
         doc = {
             **_cand_doc(p.cand),
             "market": self._p.code, "currency": self._p.currency_code,
-            "status": "open", "paper": True, "strategy": self._strategy,
+            "status": "open", "paper": True,
+            "strategy": strategy_label(self._strategy, p.cand.side),
             "entry_time": p.entry_time.to_pydatetime(),
             "entry_price": p.plan.entry, "stop": p.plan.stop, "target": p.plan.target,
             "qty": p.plan.qty,
             "risk_usd": risk, "notional_usd": p.plan.notional_inr,
             "cost_usd_modelled": cost,
             "cost_over_risk": cost / risk if risk > 0 else None,
+            # A US short needs borrowable shares (a locate). No free feed says
+            # which names have them, so every paper short ASSUMES one; this
+            # flag stays False until a broker check is wired. Filter on it
+            # before reading any short result as tradeable.
+            **({"locate_verified": False} if p.cand.side == "short" else {}),
             "float_shares": row.float_shares if row else None,
             "screen_flags": dict(row.flags) if row else {},
             "screen_complete": bool(row.screen_complete) if row else False,
@@ -102,7 +108,8 @@ class USPaperLedger:
         bounded by the plan, so the forward log must be readable without it."""
         self._write(
             self._p.positions_collection, "update_one",
-            _position_filter(t.cand.symbol, t.entry_time, self._strategy),
+            _position_filter(t.cand.symbol, t.entry_time,
+                             strategy_label(self._strategy, t.side)),
             {"$set": {
                 "status": "closed",
                 "exit_time": t.exit_time.to_pydatetime(),
@@ -134,7 +141,8 @@ class USPaperLedger:
 
     def _event(self, kind: str, doc: dict[str, Any]) -> None:
         self._write(self._p.candidates_collection, "insert_one",
-                    {**doc, "kind": kind, "market": self._p.code, "strategy": self._strategy})
+                    {**doc, "kind": kind, "market": self._p.code,
+                     "strategy": strategy_label(self._strategy, str(doc.get("side", "long")))})
 
     # ── the watched names' candles ──────────────────────────────────────────
     def watch_bars(self, session_date: str, symbol: str, bars: pd.DataFrame) -> None:

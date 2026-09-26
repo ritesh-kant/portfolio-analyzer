@@ -88,6 +88,11 @@ class USUniverseConfig:
     """OTC / pink sheets are excluded: they are where the guide's screen finds
     its worst fills, and IBKR routing and borrow there are a different problem."""
 
+    side: str = "long"
+    """"short" screens for WEAKNESS: down at least `day_chg_min_pct`. The short
+    arm does not use the long's 10%: at -10% SEC Rule 201 (SSR) forbids the
+    breakdown sale the short setups make - see short_side.py."""
+
 
 @dataclass(frozen=True)
 class USNameFacts:
@@ -157,7 +162,11 @@ def passes_intraday(
     # 2 — already up 10% on the day. One-sided: the guide screens for strength,
     # and there is no upper bound, because a stock up 40% is MORE interesting to
     # it, not less. (The NSE arm had an upper bound only because of circuits.)
-    if day_chg_pct < cfg.day_chg_min_pct:
+    # The short arm's mirror: down at least the floor.
+    if cfg.side == "short":
+        if day_chg_pct > -cfg.day_chg_min_pct:
+            return ScreenResult(False, "day_chg", flags)
+    elif day_chg_pct < cfg.day_chg_min_pct:
         return ScreenResult(False, "day_chg", flags)
 
     # 1 — relative volume

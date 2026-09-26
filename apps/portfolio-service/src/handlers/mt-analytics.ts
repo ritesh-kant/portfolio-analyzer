@@ -25,6 +25,7 @@ const RUNS_COLLECTION = 'mt_backtest_runs';
  */
 const ANALYSIS_FIELDS = {
   symbol: 1,
+  side: 1,
   setup: 1,
   strategy: 1,
   status: 1,

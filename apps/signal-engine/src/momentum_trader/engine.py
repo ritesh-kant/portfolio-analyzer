@@ -504,6 +504,10 @@ class Candidate:
     support_px: float | None = None
     resist_kind: str = ""
     support_kind: str = ""
+    # "long", or "short" for a candidate produced by short_side.py. The engine
+    # itself only ever trades long; a short is this same engine run on a
+    # reflected tape, converted back to real prices before anyone reads it.
+    side: str = "long"
 
 
 @dataclass
@@ -532,6 +536,7 @@ class AttentionEvent:
     reason: str
     candle_tags: tuple[str, ...]
     evidence: dict[str, object] = field(default_factory=dict)
+    side: str = "long"
 
 
 @dataclass(frozen=True)
@@ -543,6 +548,7 @@ class Rejection:
     trigger: float
     observed_price: float | None = None
     evidence: dict[str, object] = field(default_factory=dict)
+    side: str = "long"
 
 
 @dataclass(frozen=True)
@@ -605,6 +611,9 @@ class ClosedTrade:
     add_time: pd.Timestamp | None = None
     base_net_inr: float = 0.0    # first tranche only
     add_net_inr: float = 0.0     # add-on tranche only
+    # "short" rows come from short_side.py, already in real prices: entry is
+    # the sale, exit the buy-back, and gross/costs/net are the short's own.
+    side: str = "long"
 
     @property
     def total_qty(self) -> int:
@@ -620,7 +629,9 @@ class ClosedTrade:
 
     @property
     def gross_pct(self) -> float:
-        return (self.exit / self.avg_entry - 1.0) * 100.0
+        """Price move in the trade's favour, in percent of the entry."""
+        move = self.exit / self.avg_entry - 1.0
+        return (-move if self.side == "short" else move) * 100.0
 
     @property
     def net_pct(self) -> float:

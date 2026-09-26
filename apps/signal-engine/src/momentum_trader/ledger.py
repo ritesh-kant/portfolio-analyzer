@@ -68,6 +68,13 @@ def _structural_doc(resistance: Level | None, support: Level | None) -> dict[str
     }
 
 
+def strategy_label(strategy: str, side: str) -> str:
+    """The `strategy` a row is stored under. Shorts get their own label so a
+    long arm's forward sample (read by strategy) never silently counts them;
+    `side` is stored as well."""
+    return f"{strategy}_short" if side == "short" else strategy
+
+
 def _cand_doc(c: Candidate) -> dict[str, Any]:
     d = asdict(c)
     d["setup"] = c.setup.name
@@ -90,6 +97,10 @@ class PaperLedger:
     ) -> None:
         self._db = db
         self._csv = csv_path
+        # Short trades go to a sibling file with the same columns, so the long
+        # log's schema - and every reader of it - is untouched by the short arm.
+        self._csv_short = (csv_path.with_name(f"{csv_path.stem}_short{csv_path.suffix}")
+                           if csv_path else None)
         self._ff = int(float_filter_applied)
         self._strategy = strategy
         if self._csv and not self._csv.exists():
@@ -102,7 +113,8 @@ class PaperLedger:
     def candidate(self, c: Candidate) -> None:
         if self._db is not None:
             try:
-                self._db["mt_candidates"].insert_one({**_cand_doc(c), "strategy": self._strategy})
+                doc = {**_cand_doc(c), "strategy": strategy_label(self._strategy, c.side)}
+                self._db["mt_candidates"].insert_one(doc)
             except Exception:  # noqa: BLE001
                 logger.exception("mt_candidates insert failed")
 
@@ -111,9 +123,10 @@ class PaperLedger:
             return
         try:
             self._db["mt_attention"].insert_one({
-                "strategy": self._strategy,
+                "strategy": strategy_label(self._strategy, event.side),
                 "symbol": event.symbol,
                 "time": event.time.to_pydatetime(),
+                "side": event.side,
                 "day_chg_pct": event.day_chg_pct,
                 "rvol": event.rvol,
                 "reason": event.reason,
@@ -128,10 +141,11 @@ class PaperLedger:
             return
         try:
             self._db["mt_rejections"].insert_one({
-                "strategy": self._strategy,
+                "strategy": strategy_label(self._strategy, rejection.side),
                 "symbol": rejection.symbol,
                 "time": rejection.time.to_pydatetime(),
                 "reason": rejection.reason,
+                "side": rejection.side,
                 "setup": rejection.setup,
                 "trigger": rejection.trigger,
                 "observed_price": rejection.observed_price,
@@ -143,7 +157,7 @@ class PaperLedger:
     def opened(self, p: Position) -> str | None:
         doc = {
             **_cand_doc(p.cand), "status": "open", "entry_time": p.entry_time.to_pydatetime(),
-            "strategy": self._strategy,
+            "strategy": strategy_label(self._strategy, p.cand.side),
             "entry_price": p.plan.entry, "stop": p.plan.stop, "target": p.plan.target,
             "qty": p.plan.qty, "risk_inr": p.plan.risk_inr, "notional_inr": p.plan.notional_inr,
             "paper": True, "float_filter_applied": self._ff,
@@ -173,7 +187,8 @@ class PaperLedger:
             try:
                 self._db["mt_positions"].update_one(
                     {"symbol": t.cand.symbol, "status": "open",
-                     "entry_time": t.entry_time.to_pydatetime(), "strategy": self._strategy},
+                     "entry_time": t.entry_time.to_pydatetime(),
+                     "strategy": strategy_label(self._strategy, t.side)},
                     {"$set": {
                         "status": "closed", "exit_time": t.exit_time.to_pydatetime(),
                         "exit_price": t.exit, "exit_reason": t.exit_reason,
@@ -196,12 +211,16 @@ class PaperLedger:
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("mt_positions close failed")
-        if self._csv:
+        path = self._csv_short if t.side == "short" else self._csv
+        if path:
             c = t.cand
+            # The plan's own target (capped by structure when that applied);
+            # the 2R reconstruction only for rows that never carried one.
+            target = t.target or t.entry + (t.entry - c.setup.stop) * 2
             row = [
                 str(c.time.date()), c.symbol, c.setup.name, c.time.strftime("%H:%M"),
                 f"{c.setup.trigger:.2f}", f"{t.entry:.2f}", f"{c.setup.stop:.2f}",
-                f"{t.entry + (t.entry - c.setup.stop) * 2:.2f}", t.qty,
+                f"{target:.2f}", t.qty,
                 f"{c.day_chg_pct:.2f}", f"{c.rvol:.2f}", c.catalyst, c.event_type,
                 "|".join(c.candle_tags),
                 "" if next_round_level is None else f"{next_round_level:.0f}",
@@ -209,5 +228,9 @@ class PaperLedger:
                 t.exit_reason, f"{t.gross_inr:.2f}", f"{t.costs_inr:.2f}", f"{t.net_inr:.2f}",
                 self._ff,
             ]
-            with self._csv.open("a", newline="") as f:
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("w", newline="") as f:
+                    csv.writer(f).writerow(CSV_COLUMNS)
+            with path.open("a", newline="") as f:
                 csv.writer(f).writerow(row)
