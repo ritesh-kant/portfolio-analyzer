@@ -115,9 +115,12 @@ def build_query(cfg: USUniverseConfig) -> Any:
     comes back. Built from `cfg` so the source and the screen cannot disagree."""
     import yfinance as yf
 
+    move = (yf.EquityQuery("lte", ["percentchange", -cfg.day_chg_min_pct])
+            if cfg.side == "short"
+            else yf.EquityQuery("gte", ["percentchange", cfg.day_chg_min_pct]))
     return yf.EquityQuery("and", [
         yf.EquityQuery("eq", ["region", "us"]),
-        yf.EquityQuery("gte", ["percentchange", cfg.day_chg_min_pct]),
+        move,
         yf.EquityQuery("btwn", ["intradayprice", cfg.price_min, cfg.price_max]),
         yf.EquityQuery("is-in", ["exchange", *LISTED_YAHOO_CODES]),
     ])
@@ -243,11 +246,12 @@ class YahooFeed:
     _facts_day: str = ""
 
     # ── network defaults ────────────────────────────────────────────────────
-    def _screen(self, query: Any) -> dict:
+    def _screen(self, query: Any, sort_asc: bool = False) -> dict:
         if self.screen_fn is not None:
             return self.screen_fn(query)
         import yfinance as yf
-        result: dict = yf.screen(query, size=SCREEN_PAGE, sortField="percentchange", sortAsc=False)
+        result: dict = yf.screen(query, size=SCREEN_PAGE, sortField="percentchange",
+                                 sortAsc=sort_asc)
         return result
 
     def _history(self, symbol: str) -> pd.DataFrame:
@@ -293,13 +297,20 @@ class YahooFeed:
         return r.content
 
     # ── Feed ────────────────────────────────────────────────────────────────
-    def snapshot(self, now: pd.Timestamp) -> list[USQuote]:
+    def snapshot(self, now: pd.Timestamp,
+                 cfg: USUniverseConfig | None = None) -> list[USQuote]:
         """Today's movers. Quotes not stamped inside TODAY's regular session are
         dropped: before the first print of the day Yahoo still reports
         yesterday's change, so a name that ran +190% yesterday would look like
-        a +190% mover at 09:31 without having traded."""
+        a +190% mover at 09:31 without having traded.
+
+        `cfg` overrides the feed's own screen - the short arm passes its losers
+        screen here and shares every cache with the long arm."""
         now = now.tz_convert(ET_TZ)
-        result = self._screen(build_query(self.cfg))
+        use = cfg or self.cfg
+        # Biggest movers first in the move's own direction: a losers screen
+        # truncated at one page must drop the SMALLEST drops, not the largest.
+        result = self._screen(build_query(use), sort_asc=use.side == "short")
         quotes = result.get("quotes", []) or []
         total = result.get("total")
         self.truncated = bool(total and total > len(quotes))

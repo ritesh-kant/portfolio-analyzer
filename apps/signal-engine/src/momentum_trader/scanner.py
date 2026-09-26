@@ -9,8 +9,11 @@ task, or `make mt-scan` locally).
     15:35  EOD summary, disconnect, exit 0
 
 The engine is the same code bt17 replays historically, so the forward log and
-the backtest are directly comparable. Long-only, paper-only: there is no order
-module in this file by design (hypothesis v2 §3, no-relax rules).
+the backtest are directly comparable. Paper-only: there is no order module in
+this file by design (hypothesis v2 §3, no-relax rules). Long by default; with
+MT_ENABLE_SHORTS each name also gets a `short_side.ShortBook` - the same engine
+on the reflected tape - sharing the position cap and the day's guardrails, and
+a symbol never holds a long and a short at the same time.
 """
 
 from __future__ import annotations
@@ -52,9 +55,9 @@ from .engine import (
     step,
 )
 from .exits import MODE_FIXED, MODE_TREND_FULL, MODE_TREND_RESISTANCE_STATE
-from .indicators import round_levels_above
 from .ledger import PaperLedger
 from .news_context import recent_news
+from .short_side import ShortBook, ShortEvents, next_round_level
 from .upstox import (
     Instrument,
     UpstoxAuthError,
@@ -259,6 +262,7 @@ class Scanner:
         self.client = UpstoxClient(token, cache_dir=self.cache)
         self.builder = BarBuilder()
         self.states: dict[str, DayState] = {}        # instrument key → state
+        self.shorts: dict[str, ShortBook] = {}       # same keys; empty unless shorts on
         self.inst_by_key: dict[str, Instrument] = {}
         self.turnover: dict[str, float] = {}
         self._stop = threading.Event()
@@ -478,6 +482,18 @@ class Scanner:
                     "close": prev_close,
                 }
             warmup_1m = _recent_sessions(hist_1m, WARMUP_SESSIONS)
+            if self.s.mt_enable_shorts:
+                prev_loser = (len(closes) >= 2
+                              and float(closes.iloc[-1] / closes.iloc[-2] - 1) <= -0.04)
+                self.shorts[inst.key] = ShortBook(
+                    sym, prev_close, profile, warmup_1m=warmup_1m, prev_day_loser=prev_loser,
+                    # The long arm reads yesterday's anchors only under the
+                    # resistance-state rules; the mirror reads them on the same
+                    # condition so the two sides run the same rules.
+                    prev_day={"high": float(daily["high"].iloc[-1]),
+                              "low": float(daily["low"].iloc[-1]), "close": prev_close}
+                    if self.cfg.require_resistance_breakout else None,
+                )
             self.states[inst.key] = DayState(
                 symbol=sym, prev_close=prev_close, cum_vol_profile=profile,
                 prev_day_gainer=prev_gainer, prev_day=prev_day,
@@ -491,8 +507,10 @@ class Scanner:
             self.inst_by_key[inst.key] = inst
             self.turnover[sym] = turnover_cr
             keys.append(inst.key)
-        logger.info("universe ready: %d names tradeable, skipped=%s", len(keys), skipped)
-        self._tg(f"🔔 ready {today}: {len(keys)} names in scan, skipped {skipped}")
+        logger.info("universe ready: %d names tradeable, skipped=%s, shorts=%s",
+                    len(keys), skipped, "on" if self.shorts else "off")
+        sides = " · long + short" if self.shorts else ""
+        self._tg(f"🔔 ready {today}: {len(keys)} names in scan{sides}, skipped {skipped}")
         return keys
 
     def _cached_daily(self, inst: Instrument, start: date, end: date) -> pd.DataFrame:
@@ -520,8 +538,13 @@ class Scanner:
             return
         with self._state_lock:
             self.builder.on_tick(key, ts_ms, ltp, vtt)
+            if self.cfg.fill_mode != FILL_FUTURE_TRIGGER:
+                return
+            book = self.shorts.get(key)
+            if book is not None and book.has_pending:
+                self._tick_short(key, book, ts_ms, ltp)
             st = self.states[key]
-            if self.cfg.fill_mode != FILL_FUTURE_TRIGGER or st.pending is None:
+            if st.pending is None:
                 return
             when = pd.Timestamp(ts_ms, unit="ms", tz="UTC").tz_convert(IST)
             if self._guard_pending(st, when, ltp):
@@ -555,8 +578,35 @@ class Scanner:
         with self._state_lock:
             self.builder.on_candle(key, ts_ms, open_, high, low, close, volume)
 
+    def _tick_short(self, key: str, book: ShortBook, ts_ms: int, ltp: float) -> None:
+        """Quote-thread fill for an armed short. Caller holds the state lock."""
+        when = pd.Timestamp(ts_ms, unit="ms", tz="UTC").tz_convert(IST)
+        blocked = self._short_block_reason(key)
+        if blocked is not None:
+            rej = book.cancel_pending(when, blocked, ltp)
+            if rej is not None:
+                self._tick_rejections.append(rej)
+            return
+        ev = book.fill_quote(when, ltp, self.cfg, self.builder.closed_bars(key, when))
+        if ev.opened is not None:
+            self._tick_entries.append(ev.opened)
+        self._tick_rejections.extend(ev.rejections)
+
+    def _short_block_reason(self, key: str) -> str | None:
+        """Why an armed short may not proceed right now, or None."""
+        allowed, reason = self.discipline.can_trade()
+        if not allowed:
+            return f"halted:{reason}"
+        if self._open_count() >= self.s.mt_max_positions:
+            return "max_positions"
+        st = self.states.get(key)
+        if st is not None and (st.position is not None or st.pending is not None):
+            return "opposite_side_open"
+        return None
+
     def _open_count(self) -> int:
-        return sum(1 for st in self.states.values() if st.position is not None)
+        longs = sum(1 for st in self.states.values() if st.position is not None)
+        return longs + sum(1 for b in self.shorts.values() if b.has_position)
 
     def _process(self, now: pd.Timestamp) -> None:
         assert self._ledger is not None
@@ -620,12 +670,30 @@ class Scanner:
                         trigger=pending.cand.setup.trigger,
                     ))
                     st.pending = None
+                book = self.shorts.get(key)
+                if st.pending is not None and book is not None and (
+                    book.has_position or book.has_pending
+                ):
+                    pending = st.pending
+                    st.rejections.append(Rejection(
+                        symbol=st.symbol, time=now, reason="opposite_side_open",
+                        setup=pending.cand.setup.name, trigger=pending.cand.setup.trigger,
+                    ))
+                    st.pending = None
                 attention_events.extend(st.attention_events[n_a:])
                 candidates.extend(st.candidates[n_c:])
                 rejections.extend(st.rejections[n_r:])
                 if st.position is not None and had_pos is None:
                     entries.append(st.position)
                 closed.extend(st.closed[n_x:])
+
+        if self.shorts:
+            short_ev, short_opened = self._process_shorts(now, snapshots)
+            attention_events.extend(short_ev.attention)
+            candidates.extend(short_ev.candidates)
+            rejections.extend(short_ev.rejections)
+            closed.extend(short_ev.closed)
+            entries.extend(short_opened)
 
         closed.extend(self._eod_sweep(now, snapshots))
 
@@ -648,15 +716,16 @@ class Scanner:
         for c in candidates:
             self._ledger.candidate(c)
             logger.info(
-                "candidate %s %s trig=%.2f stop=%.2f chg=%.1f%% rvol=%.1f cat=%d",
-                c.symbol, c.setup.name, c.setup.trigger, c.setup.stop,
+                "candidate %s %s %s trig=%.2f stop=%.2f chg=%.1f%% rvol=%.1f cat=%s",
+                c.symbol, c.side, c.setup.name, c.setup.trigger, c.setup.stop,
                 c.day_chg_pct, c.rvol, c.catalyst,
             )
         for rejection in rejections:
             self._ledger.rejected(rejection)
             logger.info(
-                "rejected %s %s reason=%s trigger=%.2f observed=%s",
-                rejection.symbol, rejection.setup, rejection.reason, rejection.trigger,
+                "rejected %s %s %s reason=%s trigger=%.2f observed=%s",
+                rejection.symbol, rejection.side, rejection.setup, rejection.reason,
+                rejection.trigger,
                 "-" if rejection.observed_price is None else f"{rejection.observed_price:.2f}",
             )
         for p in entries:
@@ -673,8 +742,47 @@ class Scanner:
                 if snapshot_key is not None
                 else pd.DataFrame()
             )
-            self._ledger.closed(t, round_levels_above(t.entry)[0], chart_bars)
+            self._ledger.closed(t, next_round_level(t.entry, t.side), chart_bars)
             self._tg(exit_message(t))
+
+    def _process_shorts(
+        self, now: pd.Timestamp, snapshots: dict[str, pd.DataFrame]
+    ) -> tuple[ShortEvents, list[Position]]:
+        """Step every name's short book on this bar; the short twin of the
+        long loop in `_process`. Returns the bar's events in real prices and
+        the positions opened on it."""
+        out = ShortEvents()
+        opened: list[Position] = []
+        for key, bars in snapshots.items():
+            book = self.shorts.get(key)
+            if book is None or bars.empty:
+                continue
+            with self._state_lock:
+                close = float(bars["close"].iloc[-1])
+                if self.cfg.fill_mode == FILL_FUTURE_TRIGGER and book.pending_expired(now):
+                    self._absorb(out, opened, book.fill_quote(now, close, self.cfg, bars))
+                had_pending = book.has_pending
+                ev = book.step(bars, self.cfg, lambda _symbol, _at: (0, ""),
+                               allow_replay_fill=self.cfg.fill_mode != FILL_FUTURE_TRIGGER)
+                self._absorb(out, opened, ev)
+                if not had_pending and book.has_pending:
+                    book.stamp_decision(now, self.cfg.attention_pending_minutes)
+                if book.has_pending:
+                    blocked = self._short_block_reason(key)
+                    if blocked is not None:
+                        rej = book.cancel_pending(now, blocked, close)
+                        if rej is not None:
+                            out.rejections.append(rej)
+        return out, opened
+
+    @staticmethod
+    def _absorb(out: ShortEvents, opened: list[Position], ev: ShortEvents) -> None:
+        out.attention.extend(ev.attention)
+        out.candidates.extend(ev.candidates)
+        out.rejections.extend(ev.rejections)
+        out.closed.extend(ev.closed)
+        if ev.opened is not None:
+            opened.append(ev.opened)
 
     def _market_looks_closed(self, now: pd.Timestamp) -> bool:
         """True once the grace time has passed with not one bar built anywhere.
@@ -737,6 +845,22 @@ class Scanner:
                         else str(snapshots[key].index[-1]),
                     )
                     swept.append(trade)
+            for key, book in self.shorts.items():
+                if not book.has_position:
+                    continue
+                px = self.builder.latest_close(key)
+                if px is None:
+                    bars = snapshots.get(key, pd.DataFrame())
+                    px = float(bars["close"].iloc[-1]) if not bars.empty else None
+                if px is None:
+                    logger.error("eod_sweep: SHORT %s still open and no price to mark it "
+                                 "at — reconcile by hand", book.symbol)
+                    continue
+                short_trade = book.force_close(now, float(px), self.cfg)
+                if short_trade is not None:
+                    logger.warning("eod_sweep: covered short %s at last-seen ₹%.2f",
+                                   book.symbol, px)
+                    swept.append(short_trade)
         return swept
 
     def _record_open(self, p: Position) -> None:
@@ -768,9 +892,13 @@ class Scanner:
 
     def _eod_summary(self) -> None:
         closed = [t for st in self.states.values() for t in st.closed]
+        closed += [t for b in self.shorts.values() for t in b.closed]
         cands = sum(len(st.candidates) for st in self.states.values())
+        cands += sum(len(b.candidates) for b in self.shorts.values())
         attention = sum(len(st.attention_events) for st in self.states.values())
+        attention += sum(len(b.attention) for b in self.shorts.values())
         reasons = [r.reason for st in self.states.values() for r in st.rejections]
+        reasons += [r.reason for b in self.shorts.values() for r in b.rejections]
         extra: list[str] = []
         if self.discipline.cfg.enabled:
             extra.append(f"🛡️ Guardrails: {self.discipline.summary()}")

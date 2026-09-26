@@ -1,0 +1,790 @@
+2026-09-26 10:28:42,083 INFO simulating 504 symbols on 8 workers
+2026-09-26 10:28:45,141 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE358A01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,141 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE470A01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,147 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE216P01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,150 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE883F01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,150 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE466L01038/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,153 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE117A01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,178 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE769A01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,200 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE674K01013/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,330 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE552Z01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,332 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE055A01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,333 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE404A01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,336 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE14LE01019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,343 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE647O01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,398 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE731H01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,398 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE012A01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,449 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE883F01010/minutes/1/2024-07-28/2024-06-30 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,456 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE622W01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,527 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE00FF01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,696 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE883F01010/minutes/1/2024-08-26/2024-07-29 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,797 INFO [1/504] AAVAS bars=33579 trades=0 (4s)
+2026-09-26 10:28:45,870 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE931S01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:45,949 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE423A01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,024 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE364U01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,071 INFO [2/504] ABREL bars=19591 trades=0 (4s)
+2026-09-26 10:28:46,085 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE883F01010/minutes/1/2024-09-24/2024-08-27 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,100 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE742F01042/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,130 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE814H01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,165 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE208C01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,181 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE883F01010/minutes/1/2024-10-23/2024-09-25 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,194 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0INX01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,212 INFO [3/504] ABDL bars=34525 trades=0 (4s)
+2026-09-26 10:28:46,263 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE101I01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,287 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE00WC01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,330 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE212H01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,401 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE206F01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,406 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE883F01010/minutes/1/2024-11-21/2024-10-24 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,591 INFO [4/504] ACE bars=87638 trades=2 (5s)
+2026-09-26 10:28:46,637 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE883F01010/minutes/1/2024-11-25/2024-11-22 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,655 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE031B01049/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,723 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE540L01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,726 INFO [5/504] 360ONE bars=73701 trades=0 (5s)
+2026-09-26 10:28:46,779 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE079A01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,785 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE371P01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,843 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE463V01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,844 INFO [6/504] ABSLAMC bars=63942 trades=0 (5s)
+2026-09-26 10:28:46,846 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE242C01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,912 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE732I01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:46,971 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0CZ201020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,009 INFO [7/504] ANANTRAJ bars=10605 trades=0 (5s)
+2026-09-26 10:28:47,037 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE930P01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,096 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE372A01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,203 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE702C01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,203 INFO [8/504] AADHARHFC bars=37560 trades=0 (5s)
+2026-09-26 10:28:47,266 INFO [9/504] AFFLE bars=81953 trades=0 (5s)
+2026-09-26 10:28:47,292 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE437A01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,314 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE438A01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,335 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE852O01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,346 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE885A01032/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,391 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE439A01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,647 INFO [10/504] ACUTAAS bars=92509 trades=1 (6s)
+2026-09-26 10:28:47,705 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE208A01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,719 INFO [11/504] ARE&M bars=13980 trades=1 (6s)
+2026-09-26 10:28:47,775 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE914M01019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,798 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE021A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,899 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE006I01046/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:47,971 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE399L01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,372 INFO [12/504] ATGL bars=18435 trades=1 (6s)
+2026-09-26 10:28:48,426 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0LEZ01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,493 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE100A01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,515 INFO [13/504] ASAHIINDIA bars=92775 trades=0 (6s)
+2026-09-26 10:28:48,554 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE949L01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,589 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE406A01037/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,605 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE699H01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,649 INFO [14/504] ANURAS bars=83449 trades=2 (7s)
+2026-09-26 10:28:48,652 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE238A01034/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,712 INFO [15/504] ASTERDM bars=71077 trades=1 (7s)
+2026-09-26 10:28:48,718 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE918I01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,722 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE917I01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,773 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE377Y01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,782 INFO [16/504] APTUS bars=98503 trades=1 (7s)
+2026-09-26 10:28:48,789 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE296A01032/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,793 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE118A01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,839 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE787D01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,839 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE119A01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,852 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE545U01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,864 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE028A01039/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,870 INFO [17/504] AEGISLOG bars=96262 trades=1 (7s)
+2026-09-26 10:28:48,914 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE176A01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,920 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE050A01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,922 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE462A01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,922 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE084A01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:48,988 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE171Z01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,014 INFO [18/504] AWL bars=28560 trades=1 (7s)
+2026-09-26 10:28:49,049 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE263A01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,067 INFO [19/504] BATAINDIA bars=12375 trades=0 (7s)
+2026-09-26 10:28:49,070 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE894V01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,073 INFO [20/504] BANKINDIA bars=11625 trades=0 (7s)
+2026-09-26 10:28:49,108 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE258A01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,129 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE465A01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,132 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE463A01038/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,138 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE397D01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,162 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE343G01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,169 INFO [21/504] ANANDRATHI bars=85667 trades=3 (7s)
+2026-09-26 10:28:49,189 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE257A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,207 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE00E101023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,223 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE153T01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,240 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE376G01013/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,248 INFO [22/504] BALRAMCHIN bars=62409 trades=1 (7s)
+2026-09-26 10:28:49,264 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE233B01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,286 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0KBH01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,310 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE472A01039/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,327 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE323A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,331 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE029A01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,392 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE791I01019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,407 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE216A01030/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,484 INFO [23/504] BLUESTARCO bars=13980 trades=0 (7s)
+2026-09-26 10:28:49,487 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE118H01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,540 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE836A01035/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,547 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE596I01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,591 INFO [24/504] AIIL bars=61084 trades=1 (8s)
+2026-09-26 10:28:49,594 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE476A01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,631 INFO [25/504] BERGEPAINT bars=39849 trades=0 (8s)
+2026-09-26 10:28:49,644 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE477A01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,656 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE01TY01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,665 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE475E01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,706 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE120A01034/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:49,717 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE290S01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:50,231 INFO [26/504] CANFINHOME bars=79390 trades=1 (8s)
+2026-09-26 10:28:50,300 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE172A01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:50,356 INFO [27/504] BIKAJI bars=91005 trades=1 (8s)
+2026-09-26 10:28:50,368 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE421D01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:50,422 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE736A01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:50,487 INFO [28/504] BBTC bars=50033 trades=0 (8s)
+2026-09-26 10:28:50,500 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE482A01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:50,547 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE686A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:50,561 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE483A01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:50,624 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE486A01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:50,684 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE180C01042/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:50,762 INFO [29/504] CARBORUNIV bars=65064 trades=0 (9s)
+2026-09-26 10:28:50,815 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE067A01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:50,861 INFO [30/504] CCL bars=57916 trades=0 (9s)
+2026-09-26 10:28:50,882 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE427F01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:50,918 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE085A01013/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:50,976 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE178A01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:51,035 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE102B01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:51,486 INFO [31/504] CAPLIPOINT bars=70687 trades=1 (9s)
+2026-09-26 10:28:51,547 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE121A01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:51,606 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE149A01033/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:51,615 INFO [32/504] BRIGADE bars=91762 trades=0 (10s)
+2026-09-26 10:28:51,619 INFO [33/504] CARTRADE bars=78624 trades=2 (10s)
+2026-09-26 10:28:51,671 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE536H01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:51,677 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE059A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:51,742 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE227W01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:52,141 INFO [34/504] CHOICEIN bars=75305 trades=0 (10s)
+2026-09-26 10:28:52,200 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE522F01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:52,252 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE704P01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:52,313 INFO [35/504] BLUEJET bars=93096 trades=1 (10s)
+2026-09-26 10:28:52,315 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE591G01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:52,365 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE259A01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:52,368 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE03QK01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:52,424 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE111A01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:52,477 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE338H01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:52,831 INFO [36/504] CEMPRO bars=44827 trades=1 (11s)
+2026-09-26 10:28:52,888 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE169A01031/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,124 INFO [37/504] CIEINDIA bars=72636 trades=1 (11s)
+2026-09-26 10:28:53,181 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE819V01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,207 INFO [38/504] CLEAN bars=82760 trades=2 (11s)
+2026-09-26 10:28:53,245 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE00LO01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,270 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE741K01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,305 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE007A01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,363 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE299U01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,422 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE491A01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,515 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE491A01021/minutes/1/2023-12-31/2023-12-19 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,536 INFO [39/504] CGCL bars=89072 trades=4 (11s)
+2026-09-26 10:28:53,537 INFO [40/504] CHALET bars=84254 trades=2 (11s)
+2026-09-26 10:28:53,591 INFO [41/504] COROMANDEL bars=83514 trades=0 (12s)
+2026-09-26 10:28:53,591 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE298A01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,591 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE136B01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,648 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE016A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,653 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE00R701025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,724 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE499A01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,750 INFO [42/504] CYIENT bars=12105 trades=0 (12s)
+2026-09-26 10:28:53,753 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0IX101010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,755 INFO [43/504] COHANCE bars=99263 trades=2 (12s)
+2026-09-26 10:28:53,814 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE288B01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,819 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE148O01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,820 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE501A01019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,870 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE872J01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,890 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE361B01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,901 INFO [44/504] CHOLAHLDNG bars=96982 trades=1 (12s)
+2026-09-26 10:28:53,946 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE935N01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:53,959 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE271C01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:54,013 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE192R01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:54,025 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE321T01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:54,083 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE089A01031/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:54,116 INFO [45/504] CUB bars=42205 trades=3 (12s)
+2026-09-26 10:28:54,155 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE738I01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:54,182 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE066A01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:54,253 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE126A01031/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:54,507 INFO [46/504] CONCORDBIO bars=83800 trades=1 (12s)
+2026-09-26 10:28:54,564 INFO [47/504] DEEPAKFERT bars=42577 trades=2 (12s)
+2026-09-26 10:28:54,574 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE230A01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:54,633 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE205B01031/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:54,900 INFO [48/504] CREDITACC bars=92513 trades=5 (13s)
+2026-09-26 10:28:54,966 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE285A01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:55,007 INFO [49/504] DOMS bars=41783 trades=0 (13s)
+2026-09-26 10:28:55,057 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE548C01032/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:55,697 INFO [50/504] DEVYANI bars=97388 trades=0 (14s)
+2026-09-26 10:28:55,760 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE168P01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:55,777 INFO [51/504] EIDPARRY bars=88761 trades=1 (14s)
+2026-09-26 10:28:55,834 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE1C6T01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:55,893 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE913H01037/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:55,944 INFO [52/504] DCMSHRIRAM bars=100463 trades=3 (14s)
+2026-09-26 10:28:55,994 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE510A01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:56,049 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE1NPP01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:56,093 INFO [53/504] ECLERX bars=99225 trades=3 (14s)
+2026-09-26 10:28:56,113 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE406M01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:56,165 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE042A01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:56,234 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE758T01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:56,297 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE302A01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:56,356 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE188A01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:56,447 INFO [54/504] ENDURANCE bars=33463 trades=1 (14s)
+2026-09-26 10:28:56,504 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE171A01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:56,518 INFO [55/504] EIHOTEL bars=65511 trades=2 (14s)
+2026-09-26 10:28:56,563 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE235A01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:56,569 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE02RE01045/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:56,583 INFO [56/504] EMCURE bars=27059 trades=0 (14s)
+2026-09-26 10:28:56,655 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE128S01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:56,856 INFO [57/504] EMAMILTD bars=101138 trades=1 (15s)
+2026-09-26 10:28:56,913 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE09N301011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:56,978 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE451A01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:57,031 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE061F01013/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:57,081 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE684F01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:57,341 INFO [58/504] ELECON bars=99262 trades=3 (15s)
+2026-09-26 10:28:57,401 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE524A01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:57,450 INFO [59/504] FIRSTCRY bars=27060 trades=1 (15s)
+2026-09-26 10:28:57,515 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE129A01019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:57,578 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE297H01019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:57,646 INFO [60/504] FSL bars=32079 trades=1 (16s)
+2026-09-26 10:28:57,667 INFO [61/504] ELGIEQUIP bars=93612 trades=0 (16s)
+2026-09-26 10:28:57,698 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE017A01032/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:57,724 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE481Y01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:57,930 INFO [62/504] FIVESTAR bars=60193 trades=0 (16s)
+2026-09-26 10:28:57,973 INFO [63/504] FINCABLES bars=82012 trades=0 (16s)
+2026-09-26 10:28:57,991 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE322A01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,020 INFO [64/504] GICRE bars=17310 trades=0 (16s)
+2026-09-26 10:28:58,033 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE068V01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,057 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE159A01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,072 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE935A01035/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,112 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE131A01031/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,137 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE776C01039/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,212 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE260B01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,458 INFO [65/504] GLAND bars=25602 trades=1 (16s)
+2026-09-26 10:28:58,532 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE03JT01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,563 INFO [66/504] FACT bars=77135 trades=0 (16s)
+2026-09-26 10:28:58,618 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE102D01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,679 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE233A01035/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,808 INFO [67/504] GMDCLTD bars=33809 trades=0 (17s)
+2026-09-26 10:28:58,826 INFO [68/504] ERIS bars=97629 trades=0 (17s)
+2026-09-26 10:28:58,846 INFO [69/504] GESHIP bars=94013 trades=0 (17s)
+2026-09-26 10:28:58,860 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE484J01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,892 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE177H01039/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,903 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE101D01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:58,920 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE371A01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:59,194 INFO [70/504] GRANULES bars=10870 trades=0 (17s)
+2026-09-26 10:28:59,209 INFO [71/504] GRAPHITE bars=12750 trades=0 (17s)
+2026-09-26 10:28:59,255 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE047A01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:59,263 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE024L01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:59,304 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0HOQ01053/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:59,358 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE382Z01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:59,674 INFO [72/504] GRSE bars=13230 trades=0 (18s)
+2026-09-26 10:28:59,746 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE200A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:28:59,873 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE200A01026/minutes/1/2024-01-29/2024-01-01 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,083 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE200A01026/minutes/1/2024-02-27/2024-01-30 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,218 INFO [73/504] GODIGIT bars=55148 trades=2 (18s)
+2026-09-26 10:29:00,267 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE200A01026/minutes/1/2024-03-27/2024-02-28 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,276 INFO [74/504] GODFRYPHLP bars=94005 trades=1 (18s)
+2026-09-26 10:29:00,281 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE066F01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,329 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE176B01034/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,342 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE292B01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,392 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE860A01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,460 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE756I01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,479 INFO [75/504] GPIL bars=91006 trades=0 (18s)
+2026-09-26 10:29:00,486 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE200A01026/minutes/1/2024-04-25/2024-03-28 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,520 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE127D01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,537 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE040A01034/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,569 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE200A01026/minutes/1/2024-05-24/2024-04-26 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,586 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE795G01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,621 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE158A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,644 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE093A01041/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,703 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE531E01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,707 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE038A01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,708 INFO [76/504] HBLENGINE bars=12435 trades=0 (19s)
+2026-09-26 10:29:00,726 INFO [77/504] GALLANTT bars=63683 trades=0 (19s)
+2026-09-26 10:29:00,733 INFO [78/504] GABRIEL bars=92884 trades=1 (19s)
+2026-09-26 10:29:00,742 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE200A01026/minutes/1/2024-06-22/2024-05-25 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,762 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE094A01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,775 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE030A01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,783 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE481N01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,801 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0J5401028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,816 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE267A01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,828 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE671A01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,836 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE019C01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,899 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE031A01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,957 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE019C01026/minutes/1/2023-12-31/2023-12-26 "HTTP/1.1 200 OK"
+2026-09-26 10:29:00,960 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0V6F01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,026 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE346A01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,093 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE090A01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,102 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE200A01026/minutes/1/2024-07-21/2024-06-23 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,163 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE765G01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,186 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE200A01026/minutes/1/2024-08-19/2024-07-22 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,240 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE726G01019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,288 INFO [79/504] GODREJIND bars=92866 trades=1 (19s)
+2026-09-26 10:29:01,297 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE008A01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,349 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE669E01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,363 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE200A01026/minutes/1/2024-09-17/2024-08-20 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,425 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE092T01019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,466 INFO [80/504] IDBI bars=11625 trades=0 (19s)
+2026-09-26 10:29:01,467 INFO [81/504] HINDZINC bars=50079 trades=1 (19s)
+2026-09-26 10:29:01,490 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE022Q01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,518 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE039A01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,519 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0Q9301021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,582 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE200A01026/minutes/1/2024-09-20/2024-09-18 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,582 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE203G01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,587 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE530B01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,616 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE115Q01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,620 INFO [82/504] GRAVITA bars=46298 trades=6 (20s)
+2026-09-26 10:29:01,660 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE065X01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,675 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE383A01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,689 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE053A01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,751 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE933S01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,816 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE562A01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,881 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE646L01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:01,974 INFO [83/504] IIFL bars=13980 trades=1 (20s)
+2026-09-26 10:29:01,979 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE095A01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,043 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE121J01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,073 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE009A01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,107 INFO [84/504] INDIACEM bars=60533 trades=1 (20s)
+2026-09-26 10:29:02,117 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE066P01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,137 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE306R01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,182 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE565A01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,277 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE242A01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,321 INFO [85/504] INOXWIND bars=10861 trades=0 (20s)
+2026-09-26 10:29:02,349 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE571A01038/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,417 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE821I01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,503 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE962Y01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,579 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE335Y01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,654 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE202E01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,725 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE053F01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,741 INFO [86/504] INDGN bars=45060 trades=1 (21s)
+2026-09-26 10:29:02,791 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE154A01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,817 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE379A01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,861 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE248A01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,869 INFO [87/504] IPCALAB bars=45580 trades=1 (21s)
+2026-09-26 10:29:02,884 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE168A01041/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,923 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0YD401026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:02,981 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE927D01051/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:03,316 INFO [88/504] HONASA bars=86070 trades=4 (21s)
+2026-09-26 10:29:03,384 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE324A01032/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:03,401 INFO [89/504] HOMEFIRST bars=90259 trades=1 (21s)
+2026-09-26 10:29:03,436 INFO [90/504] HSCL bars=45204 trades=2 (21s)
+2026-09-26 10:29:03,455 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE749A01030/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:03,499 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE758E01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:03,518 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE823G01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:03,565 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE573A01042/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:03,581 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE780C01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:03,609 INFO [91/504] INTELLECT bars=81953 trades=0 (22s)
+2026-09-26 10:29:03,673 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE351F01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:03,731 INFO [92/504] ITI bars=19499 trades=0 (22s)
+2026-09-26 10:29:03,734 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE220G01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:03,786 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE718I01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:03,842 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE133A01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:03,907 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE121E01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:03,980 INFO [93/504] JSL bars=11685 trades=1 (22s)
+2026-09-26 10:29:03,988 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE880J01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:04,024 INFO [94/504] J&KBANK bars=62406 trades=1 (22s)
+2026-09-26 10:29:04,037 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE019A01038/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:04,056 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE797F01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:04,083 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0BY001018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:04,102 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE700A01033/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:04,121 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE209L01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:04,364 INFO [95/504] JINDALSAW bars=83137 trades=0 (22s)
+2026-09-26 10:29:04,419 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE980O01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:04,761 INFO [96/504] JBMA bars=99988 trades=0 (23s)
+2026-09-26 10:29:04,772 INFO [97/504] JMFINANCIL bars=53829 trades=1 (23s)
+2026-09-26 10:29:04,829 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE303R01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:04,847 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE217B01036/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:04,976 INFO [98/504] KALYANKJIL bars=11349 trades=0 (23s)
+2026-09-26 10:29:05,032 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE036D01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:05,047 INFO [99/504] JWL bars=70329 trades=1 (23s)
+2026-09-26 10:29:05,111 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE918Z01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:05,176 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE389H01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:05,316 INFO [100/504] JUBLINGREA bars=83116 trades=1 (23s)
+2026-09-26 10:29:05,384 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE878B01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:05,388 INFO [101/504] KEC bars=50408 trades=1 (23s)
+2026-09-26 10:29:05,459 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE138Y01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:05,459 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE967H01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:05,724 INFO [102/504] KARURVYSYA bars=86138 trades=2 (24s)
+2026-09-26 10:29:05,779 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE146L01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:05,814 INFO [103/504] JKTYRE bars=86514 trades=0 (24s)
+2026-09-26 10:29:05,872 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE237A01036/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:05,941 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE220B01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:06,125 INFO [104/504] KAJARIACER bars=89501 trades=0 (24s)
+2026-09-26 10:29:06,207 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE04I401011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:06,290 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE930H01031/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:06,414 INFO [105/504] KIMS bars=71025 trades=1 (24s)
+2026-09-26 10:29:06,503 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE600L01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:06,731 INFO [106/504] KFINTECH bars=51954 trades=2 (25s)
+2026-09-26 10:29:06,794 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0I7C01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:06,827 INFO [107/504] LALPATHLAB bars=83514 trades=0 (25s)
+2026-09-26 10:29:06,895 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE947Q01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:06,957 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE970X01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:06,966 INFO [108/504] JUBLPHARMA bars=95874 trades=1 (25s)
+2026-09-26 10:29:07,001 INFO [109/504] KPRMILL bars=73759 trades=0 (25s)
+2026-09-26 10:29:07,034 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE956O01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,062 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE324D01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,101 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE115A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,132 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0J1Y01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,184 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE473A01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,188 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE281B01032/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,267 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE670K01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,342 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE018A01030/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,415 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE498L01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,483 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE818H01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,522 INFO [110/504] KPIL bars=83867 trades=0 (25s)
+2026-09-26 10:29:07,583 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE214T01019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,683 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE010V01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,766 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE326A01037/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,857 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE101A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,861 INFO [111/504] JYOTICNC bars=73748 trades=2 (26s)
+2026-09-26 10:29:07,932 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE774D01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:07,964 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE457A01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,015 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE522D01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,054 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE634S01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,092 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0BV301023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,110 INFO [112/504] LEMONTREE bars=53032 trades=1 (26s)
+2026-09-26 10:29:08,120 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE196A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,183 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE585B01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,232 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE027H01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,295 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE249Z01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,308 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE745G01043/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,354 INFO [113/504] LATENTVIEW bars=97383 trades=0 (26s)
+2026-09-26 10:29:08,366 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE474Q01031/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,409 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE180A01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,410 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0VDM01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,481 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE842C01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,509 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE002S01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,582 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE123F01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:08,900 INFO [114/504] KIRLOSENG bars=90264 trades=2 (27s)
+2026-09-26 10:29:08,958 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE775A01035/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,028 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE338I01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,031 INFO [115/504] LLOYDSME bars=92800 trades=1 (27s)
+2026-09-26 10:29:09,088 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE356A01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,148 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE883A01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,210 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE103A01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,211 INFO [116/504] GVT&D bars=74808 trades=2 (27s)
+2026-09-26 10:29:09,299 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0FS801015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,368 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE414G01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,445 INFO [117/504] MEDANTA bars=82763 trades=3 (27s)
+2026-09-26 10:29:09,453 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE414G01012/minutes/1/2023-12-31/2023-12-09 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,503 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE298J01013/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,551 INFO [118/504] MAPMYINDIA bars=88760 trades=2 (27s)
+2026-09-26 10:29:09,620 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE987B01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,696 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE139A01034/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,733 INFO [119/504] MINDACORP bars=73751 trades=1 (28s)
+2026-09-26 10:29:09,754 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE663F01032/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,763 INFO [120/504] MUTHOOTFIN bars=11625 trades=0 (28s)
+2026-09-26 10:29:09,792 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE725A01030/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,815 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE048G01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,820 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE095N01031/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,870 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE868B01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,887 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE239A01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,930 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0NT901020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:09,943 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE794A01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:10,014 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE619B01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:10,086 INFO [121/504] MOTILALOFS bars=22980 trades=1 (28s)
+2026-09-26 10:29:10,146 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE410P01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:10,483 INFO [122/504] MRPL bars=25935 trades=1 (28s)
+2026-09-26 10:29:10,546 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE848E01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:10,614 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE470Y01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:10,805 INFO [123/504] MMTC bars=74889 trades=0 (29s)
+2026-09-26 10:29:10,854 INFO [124/504] NAM-INDIA bars=75579 trades=1 (29s)
+2026-09-26 10:29:10,866 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE995S01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:10,920 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE589A01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:10,922 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE584A01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:10,965 INFO [125/504] NH bars=85012 trades=1 (29s)
+2026-09-26 10:29:10,991 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0NNS01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,038 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE733E01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,052 INFO [126/504] LTFOODS bars=86889 trades=2 (29s)
+2026-09-26 10:29:11,060 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0ONG01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,085 INFO [127/504] NLCINDIA bars=11310 trades=0 (29s)
+2026-09-26 10:29:11,112 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE531F01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,117 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE118D01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,119 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE388Y01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,139 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE093I01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,186 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE881D01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,202 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE274J01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,238 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0LXG01040/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,271 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE260D01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,294 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE013P01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,329 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE213A01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,346 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE761H01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,388 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE088F01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,425 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE619A01035/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,495 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE982J01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:11,552 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE602A01031/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,096 INFO [128/504] NUVOCO bars=73734 trades=2 (30s)
+2026-09-26 10:29:12,143 INFO [129/504] PCBL bars=17349 trades=0 (30s)
+2026-09-26 10:29:12,165 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE262H01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,199 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE347G01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,228 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE134E01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,266 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE182A01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,291 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE457L01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,354 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE211B01039/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,393 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE457L01029/minutes/1/2024-01-29/2024-01-01 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,419 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE318A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,426 INFO [130/504] NETWEB bars=41985 trades=0 (30s)
+2026-09-26 10:29:12,464 INFO [131/504] NIACL bars=97388 trades=0 (30s)
+2026-09-26 10:29:12,476 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE15B701018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,481 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE603J01030/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,508 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE202B01038/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,530 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE160A01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,544 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE572E01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,563 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE417T01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,587 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE457L01029/minutes/1/2024-02-27/2024-01-30 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,591 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE455K01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,620 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE205C01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,642 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE511C01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,726 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE572E01012/minutes/1/2024-02-17/2024-01-20 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,769 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE457L01029/minutes/1/2024-03-27/2024-02-28 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,830 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE572E01012/minutes/1/2024-03-17/2024-02-18 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,926 INFO [132/504] PARADEEP bars=69201 trades=0 (31s)
+2026-09-26 10:29:12,959 INFO [133/504] POONAWALLA bars=12849 trades=2 (31s)
+2026-09-26 10:29:12,965 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE457L01029/minutes/1/2024-04-25/2024-03-28 "HTTP/1.1 200 OK"
+2026-09-26 10:29:12,987 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE752E01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,011 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE07Y701011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,041 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0DK501011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,063 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0BS701011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,113 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE811K01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,166 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE572E01012/minutes/1/2024-04-15/2024-03-18 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,167 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE457L01029/minutes/1/2024-05-24/2024-04-26 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,173 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE596F01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,225 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE191H01014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,259 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE572E01012/minutes/1/2024-05-14/2024-04-16 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,280 INFO [134/504] NAVA bars=92116 trades=1 (31s)
+2026-09-26 10:29:13,284 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0LP301011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,330 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE944F01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,341 INFO [135/504] PPLPHARMA bars=12855 trades=0 (31s)
+2026-09-26 10:29:13,344 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0DD101019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,403 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE961O01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,404 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE457L01029/minutes/1/2024-06-04/2024-05-25 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,407 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE331A01037/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,464 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE572E01012/minutes/1/2024-05-29/2024-05-15 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,485 INFO [136/504] POLYMED bars=55272 trades=0 (31s)
+2026-09-26 10:29:13,537 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE976G01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,541 INFO [137/504] RAMCOCEM bars=12375 trades=1 (31s)
+2026-09-26 10:29:13,589 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE020B01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,595 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE891D01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,654 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE002A01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:13,710 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE743M01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:14,081 INFO [138/504] PNBHOUSING bars=32079 trades=1 (32s)
+2026-09-26 10:29:14,107 INFO [139/504] NUVAMA bars=59791 trades=1 (32s)
+2026-09-26 10:29:14,138 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE320J01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:14,175 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE399G01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:14,306 INFO [140/504] RITES bars=22935 trades=0 (32s)
+2026-09-26 10:29:14,366 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE614G01033/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:14,383 INFO [141/504] RADICO bars=62074 trades=0 (32s)
+2026-09-26 10:29:14,429 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE777K01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:14,441 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE415G01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:14,509 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0W2G01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:14,518 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE777K01022/minutes/1/2023-12-25/2023-11-27 "HTTP/1.1 200 OK"
+2026-09-26 10:29:14,579 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE114A01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:14,663 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE570L01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:14,744 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE148I01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:14,770 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE777K01022/minutes/1/2023-12-31/2023-12-26 "HTTP/1.1 200 OK"
+2026-09-26 10:29:14,822 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE806T01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:15,060 INFO [142/504] RAINBOW bars=85012 trades=3 (33s)
+2026-09-26 10:29:15,120 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE385C01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:15,152 INFO [143/504] REDINGTON bars=93638 trades=1 (33s)
+2026-09-26 10:29:15,213 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE979A01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:15,408 INFO [144/504] PGEL bars=49661 trades=1 (33s)
+2026-09-26 10:29:15,467 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE423Y01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:15,633 INFO [145/504] RKFORGE bars=88014 trades=0 (34s)
+2026-09-26 10:29:15,711 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE018E01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:15,783 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE123W01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:15,842 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE062A01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:15,915 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE513A01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:15,965 INFO [146/504] NEWGEN bars=90256 trades=2 (34s)
+2026-09-26 10:29:15,976 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE839M01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,045 INFO [147/504] RRKABEL bars=85326 trades=3 (34s)
+2026-09-26 10:29:16,056 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE109A01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,111 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE070A01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,171 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE721A01047/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,219 INFO [148/504] RHIM bars=92111 trades=1 (34s)
+2026-09-26 10:29:16,237 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE810G01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,280 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE003A01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,341 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE903U01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,443 INFO [149/504] SBFC bars=83138 trades=0 (34s)
+2026-09-26 10:29:16,504 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE002L01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,508 INFO [150/504] SCI bars=15810 trades=0 (34s)
+2026-09-26 10:29:16,518 INFO [151/504] SIGNATURE bars=11802 trades=0 (34s)
+2026-09-26 10:29:16,561 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE343H01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,568 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE671H01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,577 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE073K01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,617 INFO [152/504] SAPPHIRE bars=94631 trades=3 (35s)
+2026-09-26 10:29:16,620 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE269A01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,647 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE663A01033/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,685 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE647A01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:16,769 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE575P01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:17,309 INFO [153/504] STARHEALTH bars=68453 trades=1 (35s)
+2026-09-26 10:29:17,369 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE258G01013/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:17,959 INFO [154/504] SAREGAMA bars=95868 trades=0 (36s)
+2026-09-26 10:29:18,021 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE660A01013/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,082 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE044A01036/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,137 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE424H01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,234 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE424H01027/minutes/1/2023-12-31/2023-12-09 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,254 INFO [155/504] SHYAMMETL bars=86133 trades=1 (36s)
+2026-09-26 10:29:18,313 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE195A01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,388 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE040H01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,407 INFO [156/504] SUMICHEM bars=65453 trades=0 (36s)
+2026-09-26 10:29:18,461 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE00H001014/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,465 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE665A01038/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,516 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE398R01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,531 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0DYJ01015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,569 INFO [157/504] SONATSOFTW bars=93264 trades=1 (36s)
+2026-09-26 10:29:18,622 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE763I01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,688 INFO [158/504] SYNGENE bars=12105 trades=0 (37s)
+2026-09-26 10:29:18,747 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE976I01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,804 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE092A01019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,868 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE151A01013/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,922 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE192A01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:18,979 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE670A01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:19,038 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE672A01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:19,211 INFO [159/504] SUNTV bars=93265 trades=0 (37s)
+2026-09-26 10:29:19,281 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE245A01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:19,283 INFO [160/504] SOBHA bars=83139 trades=1 (37s)
+2026-09-26 10:29:19,333 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE081A01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:19,345 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE142M01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:19,395 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE673O01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:19,410 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE467B01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:19,453 INFO [161/504] SARDAEN bars=86089 trades=2 (37s)
+2026-09-26 10:29:19,482 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE669C01036/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:19,529 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE285K01026/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:19,550 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE011K01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:19,598 INFO [162/504] TATAINVEST bars=48094 trades=1 (38s)
+2026-09-26 10:29:19,647 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE010J01012/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,068 INFO [163/504] SPLPETRO bars=87693 trades=1 (38s)
+2026-09-26 10:29:20,120 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE19RI01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,178 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0AQ201015/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,230 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE152A01029/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,292 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE974X01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,356 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE325A01013/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,416 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE615H01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,487 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE280A01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,536 INFO [164/504] SYRMA bars=77825 trades=2 (38s)
+2026-09-26 10:29:20,570 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE1TAE01010/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,591 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE155A01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,632 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE685A01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,655 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE813H01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,690 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE103V01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,720 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE849A01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,762 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE064C01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,805 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE152M01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,828 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE517B01013/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,929 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE517B01013/minutes/1/2024-02-23/2024-01-26 "HTTP/1.1 200 OK"
+2026-09-26 10:29:20,947 INFO [165/504] TEJASNET bars=77453 trades=1 (39s)
+2026-09-26 10:29:21,005 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE494B01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,051 INFO [166/504] TBOTEK bars=51066 trades=0 (39s)
+2026-09-26 10:29:21,060 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE686F01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,101 INFO [167/504] UBL bars=11250 trades=0 (39s)
+2026-09-26 10:29:21,106 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE691A01018/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,114 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE517B01013/minutes/1/2024-03-23/2024-02-24 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,162 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE481G01011/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,170 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE692A01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,240 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE405E01023/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,265 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE854D01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,290 INFO [168/504] TRITURBINE bars=56829 trades=0 (39s)
+2026-09-26 10:29:21,327 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE628A01036/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,339 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE0CAZ01013/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,343 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE517B01013/minutes/1/2024-04-21/2024-03-24 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,396 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE228A01035/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,396 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE094J01016/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,589 INFO [169/504] UNOMINDA bars=12375 trades=0 (40s)
+2026-09-26 10:29:21,592 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE517B01013/minutes/1/2024-05-20/2024-04-22 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,643 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE200M01039/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,672 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE517B01013/minutes/1/2024-06-18/2024-05-21 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,702 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE205A01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,773 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE043W01024/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:21,875 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE517B01013/minutes/1/2024-07-17/2024-06-19 "HTTP/1.1 200 OK"
+2026-09-26 10:29:22,047 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE517B01013/minutes/1/2024-08-15/2024-07-18 "HTTP/1.1 200 OK"
+2026-09-26 10:29:22,254 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE517B01013/minutes/1/2024-09-13/2024-08-16 "HTTP/1.1 200 OK"
+2026-09-26 10:29:22,449 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE517B01013/minutes/1/2024-10-12/2024-09-14 "HTTP/1.1 200 OK"
+2026-09-26 10:29:22,473 INFO [170/504] UTIAMC bars=86504 trades=0 (40s)
+2026-09-26 10:29:22,524 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE01EA01019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:22,587 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE226A01021/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:22,634 INFO [171/504] TEGA bars=95375 trades=2 (41s)
+2026-09-26 10:29:22,638 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE517B01013/minutes/1/2024-11-10/2024-10-13 "HTTP/1.1 200 OK"
+2026-09-26 10:29:22,643 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE825A01020/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:22,699 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE377N01017/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:22,764 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE191B01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:22,822 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE517B01013/minutes/1/2024-11-13/2024-11-11 "HTTP/1.1 200 OK"
+2026-09-26 10:29:22,975 INFO [172/504] SCHNEIDER bars=95430 trades=4 (41s)
+2026-09-26 10:29:23,069 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE192B01031/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:23,788 INFO [173/504] USHAMART bars=64701 trades=2 (42s)
+2026-09-26 10:29:23,841 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE716A01013/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:23,879 INFO [174/504] VIJAYA bars=99602 trades=4 (42s)
+2026-09-26 10:29:23,891 INFO [175/504] WELCORP bars=88388 trades=1 (42s)
+2026-09-26 10:29:23,940 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE075A01022/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:23,964 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE049B01025/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:23,998 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE528G01035/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:24,058 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE256A01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:24,145 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE520A01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:24,145 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE049B01025/minutes/1/2023-12-31/2023-12-26 "HTTP/1.1 200 OK"
+2026-09-26 10:29:24,372 INFO [176/504] TTML bars=73764 trades=0 (42s)
+2026-09-26 10:29:24,445 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE251B01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:24,558 INFO [177/504] VTL bars=91694 trades=0 (42s)
+2026-09-26 10:29:24,622 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE342J01019/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:24,643 INFO [178/504] WELSPUNLIV bars=86139 trades=2 (43s)
+2026-09-26 10:29:24,679 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE010B01027/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:24,712 INFO HTTP Request: GET https://api.upstox.com/v3/historical-candle/NSE_EQ|INE768C01028/days/1/2024-12-31/2023-11-17 "HTTP/1.1 200 OK"
+2026-09-26 10:29:24,909 INFO [179/504] TECHNOE bars=94360 trades=2 (43s)
+2026-09-26 10:29:25,038 INFO [180/504] WHIRLPOOL bars=90253 trades=0 (43s)
+2026-09-26 10:29:25,064 INFO [181/504] ZENSARTECH bars=83513 trades=0 (43s)
+2026-09-26 10:29:25,575 INFO [182/504] ZYDUSWELL bars=74127 trades=0 (43s)
+2026-09-26 10:29:27,203 INFO [183/504] ZENTEC bars=46703 trades=1 (45s)
+2026-09-26 10:29:27,479 INFO [184/504] WOCKPHARMA bars=77756 trades=0 (45s)
+2026-09-26 10:29:29,372 INFO [185/504] TARIL bars=98938 trades=2 (47s)
+2026-09-26 10:29:29,394 INFO daily pre-filter skipped 312 symbols with no eligible day
+/Users/ritesh/codebase/ritesh-codebase/portfolio-analyzer-short/research/backtests/bt17_momentum_pool.py:345: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  print("\nby setup:");             print(tr.groupby("setup").apply(_summ).sort_values("n", ascending=False))
+/Users/ritesh/codebase/ritesh-codebase/portfolio-analyzer-short/research/backtests/bt17_momentum_pool.py:346: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  print("\nby year:");              print(tr.groupby("year").apply(_summ))
+/Users/ritesh/codebase/ritesh-codebase/portfolio-analyzer-short/research/backtests/bt17_momentum_pool.py:349: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  print("\nprev-day gainer vs fresh:"); print(tr.groupby("prev_day_gainer").apply(_summ))
+
+wrote bt17_trades_short_mirror_2024.csv (171 trades), bt17_candidates_short_mirror_2024.csv (406 candidates)
+
+==============================================================================
+BT17 — momentum POOL (no catalyst split) | 2024-01-01..2024-12-31 | 185 symbols | side=short exit=fixed_2r fill=resting_sized
+   context test for hypothesis v2 §5.1 — NOT a gate; float/band filters not applied
+==============================================================================
+
+ALL trades:
+         n  win%  gross%/tr  net%/tr  ...  sharpe  false_break%  stop%  target%
+all 171.00 18.71       0.15    -0.86  ...  -16.14          0.00  35.09    52.05
+
+[1 rows x 10 columns]
+
+by setup:
+                      n  win%  gross%/tr  ...  false_break%  stop%  target%
+setup                                     ...                              
+micro_pullback    69.00 13.04       0.03  ...          0.00  44.93    47.83
+flat_top_breakout 34.00 23.53       0.34  ...          0.00  17.65    55.88
+ma9_pullback      33.00 21.21       0.15  ...          0.00  27.27    57.58
+bull_flag         19.00 10.53      -0.03  ...          0.00  52.63    42.11
+vwap_reclaim      12.00 25.00       0.18  ...          0.00  33.33    58.33
+orb15              4.00 75.00       1.34  ...          0.00   0.00    75.00
+
+[6 rows x 10 columns]
+
+by year:
+          n  win%  gross%/tr  net%/tr  ...  sharpe  false_break%  stop%  target%
+year                                   ...                                      
+2024 171.00 18.71       0.15    -0.86  ...  -16.14          0.00  35.09    52.05
+
+[1 rows x 10 columns]
+
+by exit reason (share of trades, mean net%):
+                  count  mean
+exit_reason                  
+eod_close            14 -0.82
+resistance_break      8 -1.32
+stop                 60 -1.74
+target               89 -0.23
+
+prev-day gainer vs fresh:
+                     n  win%  gross%/tr  ...  false_break%  stop%  target%
+prev_day_gainer                          ...                              
+0               145.00 20.00       0.18  ...          0.00  34.48    51.72
+1                26.00 11.54      -0.01  ...          0.00  38.46    53.85
+
+[2 rows x 10 columns]
+
+fill gap vs trigger level (% paid past the trigger) — the latency cost:
+  mean +0.0319  median +0.0330  p90 +0.0343  max +0.0355  at-or-below-trigger 0.0%
+  mean qty 101
+
+>>> POOL stressed net/trade = -0.856%  (negative — this is the fade the catalyst must overcome)
+    wins needed at 2:1 to break even = 33%; observed win rate = 18.7%

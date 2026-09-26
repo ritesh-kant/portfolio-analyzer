@@ -1,4 +1,5 @@
 import type { MomentumTrade } from './momentum-api';
+import { direction } from './momentum-side';
 
 export const MOMENTUM_CONFIDENCE_RUBRIC_VERSION = 'momentum-entry-v1';
 
@@ -83,13 +84,15 @@ export function calculateTradeConfidence(trade: MomentumTrade): TradeConfidence 
 
   const trendAligned =
     trend && [trend.ema9, trend.ema20, trend.close, trend.vwap].every(finiteNumber);
+  // Distances in the trade's favour: a short's stop is above, its target below.
+  const dir = direction(trade);
   const riskPerShare =
     finiteNumber(trade.entry_price) && finiteNumber(trade.stop)
-      ? trade.entry_price - trade.stop
+      ? dir * (trade.entry_price - trade.stop)
       : null;
   const riskReward =
     riskPerShare && riskPerShare > 0 && finiteNumber(trade.target)
-      ? ratio(trade.target - trade.entry_price, riskPerShare)
+      ? ratio(dir * (trade.target - trade.entry_price), riskPerShare)
       : null;
 
   const factors = [

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { MomentumTradeChart, US_LOCALE } from '../../../components/momentum-trade-chart';
 import type { MomentumTrade } from '../../../lib/momentum-api';
+import { orderVerbs } from '../../../lib/momentum-side';
 import {
   CRITERION_FLAG,
   US_CRITERIA,
@@ -221,8 +222,8 @@ function TradeRow({ trade, active, onClick }: { trade: USMomentumTrade; active: 
             )}
           </div>
           <p className="mt-1 text-xs text-ink/55">
-            Buy {money(trade.entry_price)} at {at(trade.entry_time)}
-            {trade.exit_price !== undefined ? ` → Sell ${money(trade.exit_price)} at ${at(trade.exit_time)}` : ' · Open'}
+            {orderVerbs(trade).open} {money(trade.entry_price)} at {at(trade.entry_time)}
+            {trade.exit_price !== undefined ? ` → ${orderVerbs(trade).close} ${money(trade.exit_price)} at ${at(trade.exit_time)}` : ' · Open'}
           </p>
         </div>
         <div className={`shrink-0 text-right text-sm font-bold ${pnlClass(net)}`}>

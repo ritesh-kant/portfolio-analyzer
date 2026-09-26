@@ -125,7 +125,7 @@ export const handler = requireAuth(async (event) => {
       .collection('mt_positions')
       .find(
         { entry_time: { $gte: from, $lt: to } },
-        { projection: { symbol: 1, entry_time: 1, exit_time: 1, entry_price: 1, exit_price: 1, net_inr: 1, status: 1, strategy: 1 } },
+        { projection: { symbol: 1, side: 1, entry_time: 1, exit_time: 1, entry_price: 1, exit_price: 1, net_inr: 1, status: 1, strategy: 1 } },
       )
       .toArray(),
     gateLog(db, { collection: 'mt_rejections', match: window }, { collection: 'mt_candidates', match: window }, IST),
@@ -690,7 +690,7 @@ export const usHandler = requireAuth(async (event) => {
       .collection('mt_us_positions')
       .find(
         { entry_time: { $gte: from, $lt: to } },
-        { projection: { symbol: 1, entry_time: 1, exit_time: 1, entry_price: 1, exit_price: 1, net_usd: 1, status: 1, strategy: 1 } },
+        { projection: { symbol: 1, side: 1, entry_time: 1, exit_time: 1, entry_price: 1, exit_price: 1, net_usd: 1, status: 1, strategy: 1 } },
       )
       .toArray(),
     gateLog(

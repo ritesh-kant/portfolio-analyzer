@@ -90,6 +90,10 @@ class PaperLedger:
     ) -> None:
         self._db = db
         self._csv = csv_path
+        # Short trades go to a sibling file with the same columns, so the long
+        # log's schema - and every reader of it - is untouched by the short arm.
+        self._csv_short = (csv_path.with_name(f"{csv_path.stem}_short{csv_path.suffix}")
+                           if csv_path else None)
         self._ff = int(float_filter_applied)
         self._strategy = strategy
         if self._csv and not self._csv.exists():
@@ -114,6 +118,7 @@ class PaperLedger:
                 "strategy": self._strategy,
                 "symbol": event.symbol,
                 "time": event.time.to_pydatetime(),
+                "side": event.side,
                 "day_chg_pct": event.day_chg_pct,
                 "rvol": event.rvol,
                 "reason": event.reason,
@@ -132,6 +137,7 @@ class PaperLedger:
                 "symbol": rejection.symbol,
                 "time": rejection.time.to_pydatetime(),
                 "reason": rejection.reason,
+                "side": rejection.side,
                 "setup": rejection.setup,
                 "trigger": rejection.trigger,
                 "observed_price": rejection.observed_price,
@@ -196,12 +202,16 @@ class PaperLedger:
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("mt_positions close failed")
-        if self._csv:
+        path = self._csv_short if t.side == "short" else self._csv
+        if path:
             c = t.cand
+            # The plan's own target (capped by structure when that applied);
+            # the 2R reconstruction only for rows that never carried one.
+            target = t.target or t.entry + (t.entry - c.setup.stop) * 2
             row = [
                 str(c.time.date()), c.symbol, c.setup.name, c.time.strftime("%H:%M"),
                 f"{c.setup.trigger:.2f}", f"{t.entry:.2f}", f"{c.setup.stop:.2f}",
-                f"{t.entry + (t.entry - c.setup.stop) * 2:.2f}", t.qty,
+                f"{target:.2f}", t.qty,
                 f"{c.day_chg_pct:.2f}", f"{c.rvol:.2f}", c.catalyst, c.event_type,
                 "|".join(c.candle_tags),
                 "" if next_round_level is None else f"{next_round_level:.0f}",
@@ -209,5 +219,9 @@ class PaperLedger:
                 t.exit_reason, f"{t.gross_inr:.2f}", f"{t.costs_inr:.2f}", f"{t.net_inr:.2f}",
                 self._ff,
             ]
-            with self._csv.open("a", newline="") as f:
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("w", newline="") as f:
+                    csv.writer(f).writerow(CSV_COLUMNS)
+            with path.open("a", newline="") as f:
                 csv.writer(f).writerow(row)

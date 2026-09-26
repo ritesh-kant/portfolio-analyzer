@@ -145,6 +145,8 @@ export interface NewsContextItem {
 export interface MomentumTrade {
   _id: string;
   symbol: string;
+  /** "short" = sold first, bought back at exit. Absent on older rows = long. */
+  side?: 'long' | 'short';
   /** Paper strategy that produced this row. Older records predate strategy labels. */
   strategy?: string;
   status: 'open' | 'closed';
@@ -239,7 +241,7 @@ export interface WatchlistName {
   flags: WatchlistFlag[];
   /** Paper trades opened on this name in the same session, if any. US rows
    * carry `net_usd` instead of `net_inr`. */
-  trades: (Pick<MomentumTrade, '_id' | 'symbol' | 'entry_time' | 'exit_time' | 'entry_price' | 'exit_price' | 'net_inr' | 'status' | 'strategy'> & {
+  trades: (Pick<MomentumTrade, '_id' | 'symbol' | 'side' | 'entry_time' | 'exit_time' | 'entry_price' | 'exit_price' | 'net_inr' | 'status' | 'strategy'> & {
     net_usd?: number | null;
   })[];
   /** Extra per-name facts a market wants shown (the US screen's price and float). */

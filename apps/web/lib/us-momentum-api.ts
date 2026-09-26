@@ -34,6 +34,10 @@ async function get<T>(path: string): Promise<T> {
 export interface USMomentumTrade {
   _id: string;
   symbol: string;
+  /** Trade direction — unrelated to `US_CRITERIA`'s Demand/Supply `side`. */
+  side?: 'long' | 'short';
+  /** Shorts only: whether borrowable shares were confirmed. Always false in paper. */
+  locate_verified?: boolean;
   strategy?: string;
   status: 'open' | 'closed';
   setup: string;

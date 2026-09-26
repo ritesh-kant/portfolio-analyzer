@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
+import { orderVerbs } from '../lib/momentum-side';
 import { GateChecklist } from './momentum-gate-checklist';
 import { type ChartLocale, MomentumTradeChart, NSE_LOCALE } from './momentum-trade-chart';
 import {
@@ -401,8 +402,8 @@ function NameDetail({
             const net = t.net_inr ?? t.net_usd;
             return (
               <p key={t._id} className="mt-1 text-sm">
-                {strategyLabel(t.strategy)} · Buy {money(t.entry_price)} at {at(t.entry_time)}
-                {t.exit_price != null ? ` → Sell ${money(t.exit_price)} at ${at(t.exit_time)}` : ' · Open'}
+                {strategyLabel(t.strategy)} · {orderVerbs(t).open} {money(t.entry_price)} at {at(t.entry_time)}
+                {t.exit_price != null ? ` → ${orderVerbs(t).close} ${money(t.exit_price)} at ${at(t.exit_time)}` : ' · Open'}
                 {net != null && (
                   <span className={`ml-2 font-semibold ${pnlClass(net)}`}>
                     {net >= 0 ? '+' : ''}

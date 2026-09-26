@@ -26,6 +26,7 @@ import {
 } from 'lightweight-charts';
 
 import type { MomentumTrade } from '../lib/momentum-api';
+import { orderVerbs, sideOf } from '../lib/momentum-side';
 import { containingBarIndex, fiveMinuteBars } from '../lib/momentum-bars';
 import { type Point, points, sessionBars, tradeLevels } from '../lib/momentum-session';
 
@@ -650,14 +651,26 @@ export function MomentumTradeChart({
           opacity: level.faint ? 0.7 : 1,
         });
       }
-      addLine(trade.entry_price, TV.buy, LineStyle.Dotted);
-      labels.push({ key: 'BUY', price: trade.entry_price, text: `BUY ${fmt(trade.entry_price)}`, color: TV.buy, opacity: 1 });
+      // A short opens with a sale (down arrow above the bar) and closes with a
+      // buy-back (up arrow below it) — the long's markers, swapped.
+      const verbs = orderVerbs(trade);
+      const short = sideOf(trade) === 'short';
+      const openColor = short ? TV.sell : TV.buy;
+      const closeColor = short ? TV.buy : TV.sell;
+      addLine(trade.entry_price, openColor, LineStyle.Dotted);
+      labels.push({ key: 'OPEN', price: trade.entry_price, text: `${verbs.open.toUpperCase()} ${fmt(trade.entry_price)}`, color: openColor, opacity: 1 });
       if (trade.exit_price != null) {
-        addLine(trade.exit_price, TV.sell, LineStyle.Dotted);
-        labels.push({ key: 'SELL', price: trade.exit_price, text: `SELL ${fmt(trade.exit_price)}`, color: TV.sell, opacity: 1 });
+        addLine(trade.exit_price, closeColor, LineStyle.Dotted);
+        labels.push({ key: 'CLOSE', price: trade.exit_price, text: `${verbs.close.toUpperCase()} ${fmt(trade.exit_price)}`, color: closeColor, opacity: 1 });
       }
-      if (entryIndex >= 0) tradeMarkers.push({ time: times[entryIndex]!, position: 'belowBar', shape: 'arrowUp', color: TV.up, text: 'Buy' });
-      if (exitIndex >= 0) tradeMarkers.push({ time: times[exitIndex]!, position: 'aboveBar', shape: 'arrowDown', color: TV.down, text: 'Sell' });
+      if (entryIndex >= 0)
+        tradeMarkers.push(short
+          ? { time: times[entryIndex]!, position: 'aboveBar', shape: 'arrowDown', color: TV.down, text: verbs.open }
+          : { time: times[entryIndex]!, position: 'belowBar', shape: 'arrowUp', color: TV.up, text: verbs.open });
+      if (exitIndex >= 0)
+        tradeMarkers.push(short
+          ? { time: times[exitIndex]!, position: 'belowBar', shape: 'arrowUp', color: TV.up, text: verbs.close }
+          : { time: times[exitIndex]!, position: 'aboveBar', shape: 'arrowDown', color: TV.down, text: verbs.close });
     }
     markers.setMarkers(tradeMarkers);
 

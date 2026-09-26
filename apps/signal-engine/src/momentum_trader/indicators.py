@@ -8,11 +8,34 @@ Bars are *closed* bars. The last row is the most recently completed bar.
 
 from __future__ import annotations
 
+import math
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 import pandas as pd
 
 REQUIRED_COLS = ("open", "high", "low", "close", "volume")
+
+# The short side (short_side.py) runs this package on a REFLECTED tape,
+# p' = 2K - p. Every indicator here is linear in price, so the reflection is
+# exact for them. The round-number grid is not: it only means something on real
+# prices. ₹300 reflected about K = 312.40 is ₹324.80, a price nobody has an
+# order resting at. While a reflection is active `round_levels_above` answers in
+# real prices - the next marks BELOW the real price, where a short's buyers
+# rest - and maps them back. Unset, which every long path is, nothing changes.
+_REFLECT_K: ContextVar[float | None] = ContextVar("momentum_reflect_k", default=None)
+
+
+@contextmanager
+def reflected(k: float) -> Iterator[None]:
+    """Mark the enclosed engine calls as running on the tape p' = 2k - p."""
+    token = _REFLECT_K.set(k)
+    try:
+        yield
+    finally:
+        _REFLECT_K.reset(token)
 
 
 def validate_bars(bars: pd.DataFrame) -> None:
@@ -92,19 +115,36 @@ def round_levels_above(price: float) -> tuple[float, float]:
         < ₹1000  : ₹10 / ₹50
         else     : ₹50 / ₹100
     Returns (next_minor, next_major) strictly above `price`.
+
+    Inside `reflected(k)` the grid is the REAL one: the marks strictly below
+    the real price 2k - price, reflected back so the caller still receives
+    "the next levels above" in its own frame.
     """
-    if price < 100:
-        minor, major = 5.0, 10.0
-    elif price < 1000:
-        minor, major = 10.0, 50.0
-    else:
-        minor, major = 50.0, 100.0
+    k = _REFLECT_K.get()
+    if k is not None:
+        real = round(2.0 * k - price, 6)
+        minor, major = _round_steps(real)
+
+        def _below(step: float) -> float:
+            return 2.0 * k - float((math.ceil(real / step) - 1) * step)
+
+        return _below(minor), _below(major)
+
+    minor, major = _round_steps(price)
 
     def _next(step: float) -> float:
         n = (price // step + 1) * step
         return float(n)
 
     return _next(minor), _next(major)
+
+
+def _round_steps(price: float) -> tuple[float, float]:
+    if price < 100:
+        return 5.0, 10.0
+    if price < 1000:
+        return 10.0, 50.0
+    return 50.0, 100.0
 
 
 @dataclass(frozen=True)

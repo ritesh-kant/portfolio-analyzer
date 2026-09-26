@@ -31,6 +31,16 @@ Two rules that exist to stop FAKE trades
   exactly like the NSE quote path. Polling can MISS a fill (a spike through the
   trigger that reverses between polls); it cannot invent one.
 
+Short side (MT_US_ENABLE_SHORTS, default off)
+---------------------------------------------
+A second screen on the same feed finds LOSERS (down >= MT_US_SHORT_DAY_CHG_MIN,
+default 4%) and each is stepped through a `short_side.ShortBook` - the same
+engine on the reflected tape. Positions, the day's guardrails and the position
+cap are shared with the long side, and a symbol never holds both. Two US-only
+rules: SEC Rule 201 (SSR) refuses a short entry once the stock has traded 10%
+below the prior close (or carried SSR from yesterday), and every paper short
+ASSUMES a locate (`locate_verified: False` on the position).
+
 Same strategy, different market
 -------------------------------
 The engine config is DERIVED from the NSE `_strategy_config` for `MT_STRATEGY`
@@ -80,6 +90,7 @@ from .engine import (
 )
 from .exits import MODE_FIXED
 from .market import US
+from .short_side import ShortBook, ShortEvents, ssr_carried_from
 from .us_ledger import USPaperLedger
 from .us_scanner import Feed, USScanner, session_times
 from .us_screener import USScreenRow
@@ -160,6 +171,17 @@ class Watch:
 
 
 @dataclass
+class ShortWatch:
+    """A stock the LOSERS screen has found today (short side)."""
+
+    book: ShortBook
+    discovered_at: pd.Timestamp
+    last_bar: pd.Timestamp | None
+    has_profile: bool
+    first_passed_at: pd.Timestamp | None = None
+
+
+@dataclass
 class CycleReport:
     at: pd.Timestamp
     screened: int
@@ -180,6 +202,7 @@ class USSession:
         max_positions: int = 10,
         discipline: DayDiscipline | None = None,
         notify: Callable[[str], None] = lambda _t: None,
+        short_scanner: USScanner | None = None,
     ) -> None:
         if cfg.market is not US:
             raise ValueError("USSession needs an EngineConfig with market=US")
@@ -207,13 +230,41 @@ class USSession:
         self.attention_count = 0
         self.candidate_count = 0
         self.rejection_reasons: list[str] = []
+        # Short side: its own screen, its own watch list, and its own engine
+        # config - identical to the long one except the attention floor, which
+        # is the losers screen's (the engine sees the reflected, i.e. positive,
+        # day change).
+        self.short_scanner = short_scanner
+        self.short_watch: dict[str, ShortWatch] = {}
+        self.short_rows: dict[str, USScreenRow] = {}
+        self.short_cfg = (dataclasses.replace(
+            cfg, attention_day_chg_min=short_scanner.cfg.day_chg_min_pct)
+            if short_scanner is not None else cfg)
 
     # ── helpers ─────────────────────────────────────────────────────────────
     def _open_count(self) -> int:
-        return sum(1 for w in self.watch.values() if w.state.position is not None)
+        longs = sum(1 for w in self.watch.values() if w.state.position is not None)
+        return longs + sum(1 for w in self.short_watch.values() if w.book.has_position)
+
+    def has_pending(self) -> bool:
+        return (any(w.state.pending is not None for w in self.watch.values())
+                or any(w.book.has_pending for w in self.short_watch.values()))
 
     def _sync_risk(self) -> None:
         self.cfg.risk_inr = self.discipline.risk_inr(self._full_risk)
+        self.short_cfg.risk_inr = self.cfg.risk_inr
+
+    def _short_block_reason(self, sym: str) -> str | None:
+        """Why an armed short may not proceed right now, or None."""
+        allowed, reason = self.discipline.can_trade()
+        if not allowed:
+            return f"halted:{reason}"
+        if self._open_count() >= self.max_positions:
+            return "max_positions"
+        w = self.watch.get(sym)
+        if w is not None and (w.state.position is not None or w.state.pending is not None):
+            return "opposite_side_open"
+        return None
 
     def _cancel_pending(self, st: DayState, when: pd.Timestamp, reason: str) -> None:
         pending = st.pending
@@ -259,6 +310,93 @@ class USSession:
             logger.warning("%s: no 1-minute history, so no volume profile — "
                            "it is watched but the engine cannot enter it", symbol)
         return w
+
+    def discover_short(self, symbol: str, now: pd.Timestamp) -> ShortWatch | None:
+        """Build a ShortBook the moment a stock first passes the losers screen."""
+        prev_close = self.feed.prev_close_of.get(symbol)
+        if not prev_close:
+            logger.warning("%s passed the short screen but has no previous close", symbol)
+            return None
+        hist = self.feed.history_1m(symbol, now)
+        profile = build_cum_volume_profile(hist, PROFILE_DAYS) if not hist.empty else None
+        if profile is not None and profile.empty:
+            profile = None
+        daily = self.feed.daily(symbol, now)
+        prev_day = None
+        carried = False
+        if not daily.empty:
+            prev_day = {"high": float(daily["high"].iloc[-1]),
+                        "low": float(daily["low"].iloc[-1]), "close": prev_close}
+            if len(daily) >= 2:
+                carried = ssr_carried_from(float(daily["low"].iloc[-1]),
+                                           float(daily["close"].iloc[-2]))
+        book = ShortBook(symbol, prev_close, profile, prev_day=prev_day,
+                         warmup_1m=_recent_sessions(hist, WARMUP_SESSIONS),
+                         ssr_rule=True, ssr_carried=carried)
+        bars = self.feed.bars_1m(symbol, now)
+        self.bars[symbol] = bars
+        w = ShortWatch(book=book, discovered_at=now, has_profile=profile is not None,
+                       last_bar=bars.index[-1] if not bars.empty else None)
+        self.short_watch[symbol] = w
+        return w
+
+    def _cycle_shorts(self, now: pd.Timestamp, report: CycleReport,
+                      entries: list[Position], closed: list[ClosedTrade]) -> ShortEvents:
+        """The short twin of the long loop in `cycle`."""
+        assert self.short_scanner is not None
+        events = ShortEvents()
+        open_syms = {s for s, w in self.short_watch.items() if w.book.has_position}
+        result = self.short_scanner.step(now, open_syms)
+        for row in result.summary.rows:
+            self.short_rows[row.symbol] = row
+        for sym in result.tradeable:
+            if sym not in self.short_watch and self.discover_short(sym, now) is not None:
+                report.discovered.append(sym)
+            if sym in self.short_watch:
+                sw = self.short_watch[sym]
+                sw.first_passed_at = sw.first_passed_at or now
+
+        def absorb(ev: ShortEvents) -> None:
+            events.attention.extend(ev.attention)
+            events.candidates.extend(ev.candidates)
+            events.rejections.extend(ev.rejections)
+            closed.extend(ev.closed)
+            if ev.opened is not None:
+                entries.append(ev.opened)
+
+        for sym, w in self.short_watch.items():
+            book = w.book
+            bars = self.feed.bars_1m(sym, now)
+            if not bars.empty:
+                self.bars[sym] = bars
+            may_arm = sym in result.tradeable
+            if book.has_pending and not may_arm:
+                rej = book.cancel_pending(now, result.blocked.get(sym, "left_screen"))
+                if rej is not None:
+                    events.rejections.append(rej)
+            if w.last_bar is not None:
+                new = bars[bars.index > w.last_bar]
+            else:
+                new = bars[bars.index > w.discovered_at - pd.Timedelta(seconds=60)]
+            for ts in new.index:
+                w.last_bar = ts
+                if not book.has_position and not book.has_pending and not may_arm:
+                    continue
+                window = bars.loc[:ts]
+                if book.pending_expired(now):
+                    absorb(book.fill_quote(now, float(window["close"].iloc[-1]),
+                                           self.short_cfg, window))
+                had_pending = book.has_pending
+                absorb(book.step(window, self.short_cfg, lambda _s, _t: (0, ""),
+                                 allow_replay_fill=False))
+                if not had_pending and book.has_pending:
+                    book.stamp_decision(now, self.short_cfg.attention_pending_minutes)
+                    blocked = self._short_block_reason(sym)
+                    if blocked is not None:
+                        rej = book.cancel_pending(now, blocked)
+                        if rej is not None:
+                            events.rejections.append(rej)
+        return events
 
     # ── one minute ──────────────────────────────────────────────────────────
     def cycle(self, now: pd.Timestamp) -> CycleReport:
@@ -314,12 +452,18 @@ class USSession:
                     self._guard(st, now)
                     if st.pending is not None and self._open_count() >= self.max_positions:
                         self._cancel_pending(st, now, "max_positions")
+                    sw = self.short_watch.get(sym)
+                    if st.pending is not None and sw is not None and (
+                            sw.book.has_position or sw.book.has_pending):
+                        self._cancel_pending(st, now, "opposite_side_open")
             if st.position is not None and had_pos is None:
                 entries.append(st.position)
             closed.extend(st.closed[n_x:])
 
+        short_events = (self._cycle_shorts(now, report, entries, closed)
+                        if self.short_scanner is not None else None)
         closed.extend(self._eod_sweep(now))
-        self._record(entries, closed, report)
+        self._record(entries, closed, report, short_events)
         self._write_watchlist(now)
         return report
 
@@ -341,8 +485,29 @@ class USSession:
             pos = fill_pending_quote(st, now, price, self.cfg, self.bars.get(sym, pd.DataFrame()))
             if pos is not None and had_pos is None:
                 opened.append(pos)
+        short_events = ShortEvents()
+        for sym, sw in self.short_watch.items():
+            book = sw.book
+            if not book.has_pending or self.short_scanner is None:
+                continue
+            if self.short_scanner.halts.blocks_entry(sym, now) is not None:
+                continue
+            blocked = self._short_block_reason(sym)
+            if blocked is not None:
+                rej = book.cancel_pending(now, blocked)
+                if rej is not None:
+                    short_events.rejections.append(rej)
+                continue
+            price = self.feed.last_price(sym, now)
+            if price is None:
+                continue
+            ev = book.fill_quote(now, price, self.short_cfg,
+                                 self.bars.get(sym, pd.DataFrame()))
+            short_events.rejections.extend(ev.rejections)
+            if ev.opened is not None:
+                opened.append(ev.opened)
         report = CycleReport(now, 0, 0)
-        self._record(opened, [], report)
+        self._record(opened, [], report, short_events)
         return report.opened
 
     def _guard(self, st: DayState, when: pd.Timestamp) -> bool:
@@ -369,11 +534,23 @@ class USSession:
                 logger.warning("eod_sweep closed %s at %.2f — it stopped printing before "
                                "the close", sym, trade.exit)
                 swept.append(trade)
+        for sym, sw in self.short_watch.items():
+            if not sw.book.has_position:
+                continue
+            bars = self.bars.get(sym, pd.DataFrame())
+            if bars.empty:
+                logger.error("eod_sweep: SHORT %s open with no price to mark — "
+                             "reconcile by hand", sym)
+                continue
+            short_trade = sw.book.force_close(now, float(bars["close"].iloc[-1]), self.short_cfg)
+            if short_trade is not None:
+                logger.warning("eod_sweep covered short %s at %.2f", sym, short_trade.exit)
+                swept.append(short_trade)
         return swept
 
     # ── output ──────────────────────────────────────────────────────────────
     def _record(self, entries: list[Position], closed: list[ClosedTrade],
-                report: CycleReport) -> None:
+                report: CycleReport, short_events: ShortEvents | None = None) -> None:
         for t in sorted(closed, key=lambda x: x.exit_time):
             if self.discipline.cfg.enabled:
                 was = self.discipline.halted
@@ -382,11 +559,17 @@ class USSession:
                 if self.discipline.halted and not was:
                     self.notify(f"🛑 HALTED <b>{self.discipline.halted_reason}</b>")
         for sym in report.discovered:
-            row = self.rows.get(sym)
+            # A name the LOSERS screen found is in short_watch, not watch; the
+            # long screen may still hold a (rejected) row for it.
+            short = sym not in self.watch and sym in self.short_watch
+            row = self.short_rows.get(sym) if short else self.rows.get(sym)
             if row is not None:
+                can_enter = (self.short_watch[sym].has_profile if short
+                             else self.watch[sym].has_profile)
                 self.notify(watchlist_message(
                     sym, price=row.price, day_chg_pct=row.day_chg_pct, rvol=row.rvol,
-                    float_shares=row.float_shares, can_enter=self.watch[sym].has_profile))
+                    float_shares=row.float_shares, can_enter=can_enter,
+                    side="short" if short else "long"))
         for w in self.watch.values():
             st = w.state
             for ev in st.attention_events:
@@ -402,16 +585,33 @@ class USSession:
             st.attention_events.clear()
             st.candidates.clear()
             st.rejections.clear()
+        if short_events is not None:
+            # Short books return their events instead of accumulating them on a
+            # state, so there is nothing to clear afterwards.
+            for ev in short_events.attention:
+                self.ledger.attention(ev)
+                self.notify(attention_message(ev))
+            for c in short_events.candidates:
+                self.ledger.candidate(c)
+            for r in short_events.rejections:
+                self.ledger.rejected(r)
+            self.attention_count += len(short_events.attention)
+            self.candidate_count += len(short_events.candidates)
+            self.rejection_reasons.extend(r.reason for r in short_events.rejections)
         for p in entries:
             sym = p.cand.symbol
-            self.ledger.opened(p, self.rows.get(sym), self.feed.exchange_of.get(sym, ""),
+            row = self.short_rows.get(sym) if p.cand.side == "short" else self.rows.get(sym)
+            self.ledger.opened(p, row, self.feed.exchange_of.get(sym, ""),
                                self.feed.quote_source.get(sym, ""))
             report.opened.append(sym)
             self.notify(entry_message(p, fixed_exit=self.cfg.exit_mode == MODE_FIXED, cur="$"))
         for t in closed:
             sym = t.cand.symbol
+            halts = (self.short_scanner.halts
+                     if t.side == "short" and self.short_scanner is not None
+                     else self.scanner.halts)
             self.ledger.closed(t, self.bars.get(sym),
-                               held_through_halt=sym in self.scanner.halts.held_through_halt)
+                               held_through_halt=sym in halts.held_through_halt)
             self.closed_trades.append(t)
             report.closed.append(sym)
             self.notify(exit_message(t, cur="$"))
@@ -424,7 +624,8 @@ class USSession:
         if doc is None:
             return
         for sym, bars in self.bars.items():
-            if sym in self.watch and not bars.empty and self._bars_saved.get(sym) != bars.index[-1]:
+            watched = sym in self.watch or sym in self.short_watch
+            if watched and not bars.empty and self._bars_saved.get(sym) != bars.index[-1]:
                 self.ledger.watch_bars(doc["date"], sym, bars)
                 self._bars_saved[sym] = bars.index[-1]
         names = []
@@ -452,6 +653,21 @@ class USSession:
             open_positions=self._open_count(), closed_today=len(self.closed_trades),
             net_usd_today=round(sum(t.net_inr for t in self.closed_trades), 2),
         )
+        if self.short_scanner is not None:
+            # The losers screen, kept apart so the long funnel's counts above
+            # keep meaning what they always meant.
+            doc["short"] = {
+                "day_chg_max_pct": -self.short_scanner.cfg.day_chg_min_pct,
+                "considered": len(self.short_rows), "passed": len(self.short_watch),
+                "names": [{
+                    "symbol": sym, "side": "short", "passed": sym in self.short_watch,
+                    "reason": row.reason, "price": row.price,
+                    "day_chg_pct": row.day_chg_pct, "rvol": row.rvol,
+                    "float_shares": row.float_shares,
+                    "ssr_carried": (self.short_watch[sym].book.ssr_carried
+                                    if sym in self.short_watch else None),
+                } for sym, row in self.short_rows.items()],
+            }
         self.ledger.watchlist(doc)
 
     def summary(self) -> str:
@@ -515,12 +731,18 @@ def run(settings: Settings, *, once: bool = False, dry_run: bool = False,
     feed = YahooFeed(cache_dir=_cache_dir(settings), cfg=ucfg,
                      block_delayed=settings.mt_us_block_delayed_quotes)
     cfg = build_engine_config(settings, today, ucfg)
+    short_scanner = None
+    if settings.mt_us_enable_shorts:
+        short_ucfg = USUniverseConfig(side="short",
+                                      day_chg_min_pct=settings.mt_us_short_day_chg_min)
+        short_scanner = USScanner(feed, short_ucfg, US,
+                                  snapshot_fn=lambda t: feed.snapshot(t, short_ucfg))
     session = USSession(
         feed, cfg, USPaperLedger(db, strategy=f"us_{settings.mt_strategy}"),
         ucfg=ucfg, max_positions=settings.mt_us_max_positions,
         discipline=DayDiscipline(DisciplineConfig(
             enabled=settings.mt_discipline, giveback_halt=settings.mt_giveback_halt)),
-        notify=tg,
+        notify=tg, short_scanner=short_scanner,
     )
     session._sync_risk()
 
@@ -569,7 +791,7 @@ def run(settings: Settings, *, once: bool = False, dry_run: bool = False,
                 return 0
         next_bar = now.floor("1min") + pd.Timedelta(seconds=60 + feed.settle_seconds + 2)
         while (t := clock()) < next_bar:
-            if any(w.state.pending is not None for w in session.watch.values()):
+            if session.has_pending():
                 try:
                     session.poll_pending(t)
                 except Exception:  # noqa: BLE001

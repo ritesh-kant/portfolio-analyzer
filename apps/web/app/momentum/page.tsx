@@ -11,6 +11,7 @@ import {
   type TradeConfidence,
 } from '../../lib/momentum-confidence';
 import { fetchMomentumTrades, type MomentumTrade } from '../../lib/momentum-api';
+import { orderVerbs } from '../../lib/momentum-side';
 
 const IST = 'Asia/Kolkata';
 const money = (value: number | null | undefined) =>
@@ -103,10 +104,10 @@ function TradeRow({
             )}
           </div>
           <p className="mt-1 text-xs text-ink/55">
-            {strategyLabel(trade.strategy)} · Buy {money(trade.entry_price)} at{' '}
+            {strategyLabel(trade.strategy)} · {orderVerbs(trade).open} {money(trade.entry_price)} at{' '}
             {at(trade.entry_time)}
             {trade.exit_price != null
-              ? ` → Sell ${money(trade.exit_price)} at ${at(trade.exit_time)}`
+              ? ` → ${orderVerbs(trade).close} ${money(trade.exit_price)} at ${at(trade.exit_time)}`
               : ' · Open'}
           </p>
         </div>

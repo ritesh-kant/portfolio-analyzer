@@ -77,6 +77,11 @@ class USPaperLedger:
             "risk_usd": risk, "notional_usd": p.plan.notional_inr,
             "cost_usd_modelled": cost,
             "cost_over_risk": cost / risk if risk > 0 else None,
+            # A US short needs borrowable shares (a locate). No free feed says
+            # which names have them, so every paper short ASSUMES one; this
+            # flag stays False until a broker check is wired. Filter on it
+            # before reading any short result as tradeable.
+            **({"locate_verified": False} if p.cand.side == "short" else {}),
             "float_shares": row.float_shares if row else None,
             "screen_flags": dict(row.flags) if row else {},
             "screen_complete": bool(row.screen_complete) if row else False,
