@@ -27,7 +27,7 @@ from typing import Any
 import pandas as pd
 
 from .engine import AttentionEvent, Candidate, ClosedTrade, Position, Rejection
-from .ledger import _cand_doc, _structural_doc, chart_bars_doc
+from .ledger import _cand_doc, _structural_doc, chart_bars_doc, strategy_label
 from .market import US, MarketProfile
 from .us_screener import USScreenRow
 
@@ -73,7 +73,8 @@ class USPaperLedger:
         doc = {
             **_cand_doc(p.cand),
             "market": self._p.code, "currency": self._p.currency_code,
-            "status": "open", "paper": True, "strategy": self._strategy,
+            "status": "open", "paper": True,
+            "strategy": strategy_label(self._strategy, p.cand.side),
             "entry_time": p.entry_time.to_pydatetime(),
             "entry_price": p.plan.entry, "stop": p.plan.stop, "target": p.plan.target,
             "qty": p.plan.qty,
@@ -107,7 +108,8 @@ class USPaperLedger:
         bounded by the plan, so the forward log must be readable without it."""
         self._write(
             self._p.positions_collection, "update_one",
-            _position_filter(t.cand.symbol, t.entry_time, self._strategy),
+            _position_filter(t.cand.symbol, t.entry_time,
+                             strategy_label(self._strategy, t.side)),
             {"$set": {
                 "status": "closed",
                 "exit_time": t.exit_time.to_pydatetime(),
@@ -139,7 +141,8 @@ class USPaperLedger:
 
     def _event(self, kind: str, doc: dict[str, Any]) -> None:
         self._write(self._p.candidates_collection, "insert_one",
-                    {**doc, "kind": kind, "market": self._p.code, "strategy": self._strategy})
+                    {**doc, "kind": kind, "market": self._p.code,
+                     "strategy": strategy_label(self._strategy, str(doc.get("side", "long")))})
 
     # ── the watched names' candles ──────────────────────────────────────────
     def watch_bars(self, session_date: str, symbol: str, bars: pd.DataFrame) -> None:

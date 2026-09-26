@@ -3,9 +3,10 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
+import { SideBadge } from '../../../components/momentum-side-badge';
 import { MomentumTradeChart, US_LOCALE } from '../../../components/momentum-trade-chart';
 import type { MomentumTrade } from '../../../lib/momentum-api';
-import { orderVerbs } from '../../../lib/momentum-side';
+import { orderVerbs, sideOf } from '../../../lib/momentum-side';
 import {
   CRITERION_FLAG,
   US_CRITERIA,
@@ -201,6 +202,55 @@ function Funnel({ session }: { session: USWatchlistSession }) {
   );
 }
 
+/** The short side's losers screen: who passed, and why the rest did not. */
+function ShortFunnel({ session }: { session: USWatchlistSession }) {
+  const short = session.short;
+  if (!short) return null;
+  const passed = short.names.filter((name) => name.passed);
+  return (
+    <section className="rounded-xl border border-rose-200 bg-rose-50/40 p-4 shadow-card">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-display text-lg">Short screen (losers) · {dateLabel(session.date)}</h2>
+        <p className="text-xs text-ink/55">
+          {short.considered} considered → {short.passed} passed · down at least {Math.abs(short.day_chg_max_pct)}%
+        </p>
+      </div>
+      <p className="mt-1 text-xs text-ink/60">
+        Not 10% like the long side: once a stock is 10% below yesterday&apos;s close, SEC Rule 201 forbids selling it
+        short on the way down, so those entries are refused. Every paper short also assumes borrowable shares that no
+        free feed can confirm.
+      </p>
+      {passed.length > 0 && (
+        <div className="mt-3 overflow-x-auto border-t border-black/5 pt-3">
+          <table className="w-full text-left text-xs tabular-nums">
+            <thead>
+              <tr className="text-ink/55">
+                {['Symbol', 'Price', 'Day change', 'RVOL', 'Float', 'SSR from yesterday'].map((label) => (
+                  <th key={label} className="p-1 font-semibold">
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {passed.map((name) => (
+                <tr key={name.symbol} className="border-t border-black/5">
+                  <td className="p-1 font-display font-semibold">{name.symbol}</td>
+                  <td className="p-1">{money(name.price)}</td>
+                  <td className="p-1 text-rose-600">{name.day_chg_pct.toFixed(1)}%</td>
+                  <td className="p-1">{name.rvol === null ? '—' : `${name.rvol.toFixed(1)}×`}</td>
+                  <td className="p-1">{shares(name.float_shares)}</td>
+                  <td className="p-1">{name.ssr_carried ? 'yes — blocked' : 'no'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function TradeRow({ trade, active, onClick }: { trade: USMomentumTrade; active: boolean; onClick: () => void }) {
   const net = trade.net_usd;
   return (
@@ -212,6 +262,7 @@ function TradeRow({ trade, active, onClick }: { trade: USMomentumTrade; active: 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="shrink-0 font-display font-semibold">{trade.symbol}</span>
+            <SideBadge trade={trade} />
             <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink/60">
               {trade.setup.replaceAll('_', ' ')}
             </span>
@@ -239,6 +290,7 @@ function TradeRow({ trade, active, onClick }: { trade: USMomentumTrade; active: 
 
 function TradeDetail({ trade, onBack }: { trade: USMomentumTrade; onBack: () => void }) {
   const costOverRisk = trade.cost_over_risk;
+  const short = sideOf(trade) === 'short';
   return (
     <section className="space-y-4">
       <button
@@ -267,12 +319,13 @@ function TradeDetail({ trade, onBack }: { trade: USMomentumTrade; onBack: () => 
       <div className="rounded-xl border border-black/10 bg-panel p-4 shadow-card">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="font-display text-2xl">
-              {trade.symbol}{' '}
+            <h2 className="flex flex-wrap items-center gap-2 font-display text-2xl">
+              {trade.symbol} <SideBadge trade={trade} />
               <span className="text-base font-medium text-ink/55">· {trade.setup.replaceAll('_', ' ')}</span>
             </h2>
             <p className="mt-1 text-sm text-ink/60">
-              Entry {money(trade.entry_price)} at {at(trade.entry_time)} · Stop {money(trade.stop)}
+              {short ? 'Short sale' : 'Entry'} {money(trade.entry_price)} at {at(trade.entry_time)} · Stop{' '}
+              {money(trade.stop)}
               {trade.target ? ` · Target ${money(trade.target)}` : ''}
             </p>
           </div>
@@ -290,6 +343,28 @@ function TradeDetail({ trade, onBack }: { trade: USMomentumTrade; onBack: () => 
           {trade.exchange && <span className="rounded-full bg-black/5 px-2.5 py-1">{trade.exchange}</span>}
         </div>
       </div>
+
+      {short && (
+        <section className="rounded-xl border border-rose-200 bg-rose-50/40 p-4 text-sm">
+          <h3 className="font-display text-lg">Short-sale rules on this trade</h3>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-ink/70">
+            <li>
+              Sold short at {money(trade.entry_price)}; covered by buying back
+              {trade.exit_price !== undefined ? ` at ${money(trade.exit_price)}` : ' — still open'}. The stop{' '}
+              {money(trade.stop)} sits above the sale, the target {money(trade.target ?? undefined)} below.
+            </li>
+            <li>
+              Borrow (locate):{' '}
+              <strong>{trade.locate_verified ? 'confirmed' : 'NOT verified'}</strong>. A real short needs borrowable
+              shares; this paper trade assumed them. Low-float names are often hard to borrow.
+            </li>
+            <li>
+              SEC Rule 201: the entry was allowed because the stock had not yet traded 10% below yesterday&apos;s close
+              (after that, breakdown shorts are refused).
+            </li>
+          </ul>
+        </section>
+      )}
 
       {/* The number that decides whether a US setup is worth taking at all. */}
       {costOverRisk !== undefined && (
@@ -330,7 +405,7 @@ function TradeDetail({ trade, onBack }: { trade: USMomentumTrade; onBack: () => 
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="metric-chip">
-          <p className="text-xs text-ink/55">Exit</p>
+          <p className="text-xs text-ink/55">{short ? 'Cover (buy back)' : 'Exit'}</p>
           <p className="mt-1 font-semibold">
             {trade.exit_price === undefined
               ? 'Still open'
@@ -340,7 +415,7 @@ function TradeDetail({ trade, onBack }: { trade: USMomentumTrade; onBack: () => 
         <div className="metric-chip">
           <p className="text-xs text-ink/55">Position</p>
           <p className="mt-1 font-semibold">
-            {trade.qty} shares · {money(trade.notional_usd)}
+            {trade.qty} shares{short ? ' short' : ''} · {money(trade.notional_usd)}
           </p>
         </div>
         <div className="metric-chip">
@@ -425,6 +500,7 @@ export default function USMomentumPage() {
 
       {!loading && !error && <ScreenStatus session={latest} />}
       {!loading && !error && latest && <Funnel session={latest} />}
+      {!loading && !error && latest && <ShortFunnel session={latest} />}
 
       {loading && <div className="metric-chip py-12 text-center text-sm text-ink/55">Loading US momentum data…</div>}
       {error && <div className="metric-chip border-rose-200 py-6 text-rose-700">{error}</div>}

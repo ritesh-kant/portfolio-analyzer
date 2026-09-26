@@ -203,3 +203,62 @@ def test_shorts_off_leaves_the_us_session_long_only() -> None:
     sess = USSession(FakeFeed(day, hist), us_cfg(), USPaperLedger(db, "us_test"))
     _run(sess, "09:31", "10:29")
     assert sess.short_scanner is None and not db[US.positions_collection].inserted
+
+
+# ── the deployed NSE arm (warrior_strict, live-quote fills) ──────────────────
+
+def test_warrior_strict_short_fills_from_a_live_quote_through_the_scanner() -> None:
+    """The deployed config end to end: the guide-shaped day of
+    test_warrior_strict_arm, reflected, stepped bar by bar through the scanner,
+    and filled only by a quote on the quote-thread path (`_tick_short`)."""
+    from src.momentum_trader.engine import build_cum_volume_profile
+
+    from .test_warrior_strict_arm import _guide_shaped_day, _prior_sessions, _strict_cfg
+
+    hist = _prior_sessions()
+    prev = float(hist["close"].iloc[-1])
+    r = Reflection(prev)
+    day = r.bars(_guide_shaped_day(prev))                  # the loser twin of the guide day
+    s = _nse_scanner(day)
+    s.cfg = _strict_cfg()
+    assert s.cfg.fill_mode == "future_trigger"
+    last = hist.iloc[-375:]
+    s.shorts = {KEY: ShortBook(
+        "TEST", prev, build_cum_volume_profile(hist, 20), warmup_1m=r.bars(hist),
+        prev_day={"high": r.px(float(last["low"].min())), "low": r.px(float(last["high"].max())),
+                  "close": prev},
+    )}
+    book = s.shorts[KEY]
+    for i, ts in enumerate(day.index):
+        s._process_shorts(ts + pd.Timedelta(seconds=62), {KEY: day.iloc[: i + 1]})
+        if book.has_pending and i + 1 < len(day):
+            nxt = day.iloc[i + 1]
+            for px in (float(nxt["open"]), float(nxt["low"])):      # prints in the next minute
+                when = ts + pd.Timedelta(seconds=75)
+                s._tick_short(KEY, book, int(when.value // 1_000_000), px)
+        if s._tick_entries:
+            break
+    assert s._tick_entries, (
+        f"the deployed short never filled. Short rejections: {[x.reason for x in book.rejections]}")
+    p = s._tick_entries[0]
+    assert p.cand.side == "short" and p.plan.stop > p.plan.entry > p.plan.target
+    assert p.cand.day_chg_pct < 0
+
+
+def test_short_rows_are_stored_under_their_own_strategy_label() -> None:
+    from src.momentum_trader.ledger import PaperLedger
+
+    from .test_us_session import FakeDB as DB
+
+    day = _falling(TARGET_HIT)
+    opened, closed, _ = _drive(_nse_scanner(day), day)
+    db = DB()
+    ledger = PaperLedger(db, None, False, "warrior_strict")
+    ledger.candidate(opened[0].cand)
+    ledger.opened(opened[0])
+    ledger.closed(closed[0])
+    doc = db["mt_positions"].inserted[0]
+    assert doc["strategy"] == "warrior_strict_short" and doc["side"] == "short"
+    flt = db["mt_positions"].updates[0][0]
+    assert flt["strategy"] == "warrior_strict_short"          # the close finds the same row
+    assert db["mt_candidates"].inserted[0]["strategy"] == "warrior_strict_short"

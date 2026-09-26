@@ -11,7 +11,8 @@ import {
   type TradeConfidence,
 } from '../../lib/momentum-confidence';
 import { fetchMomentumTrades, type MomentumTrade } from '../../lib/momentum-api';
-import { orderVerbs } from '../../lib/momentum-side';
+import { SideBadge } from '../../components/momentum-side-badge';
+import { orderVerbs, sideOf } from '../../lib/momentum-side';
 
 const IST = 'Asia/Kolkata';
 const money = (value: number | null | undefined) =>
@@ -40,7 +41,11 @@ const strategyLabel = (value: string | undefined) =>
     attention_1m: 'Attention control',
     attention_1m_resistance_state: 'Resistance-state',
     attention_1m_false_break_reclaim: 'False-break reclaim',
+    attention_1m_merged: 'Merged arm',
+    warrior_strict: 'Warrior strict',
+    warrior_strict_short: 'Warrior strict · short',
   })[value ?? ''] ?? 'Earlier paper run';
+
 
 function pnlClass(value: number | null | undefined) {
   return value == null ? 'text-ink/55' : value >= 0 ? 'text-emerald-700' : 'text-rose-600';
@@ -90,6 +95,7 @@ function TradeRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="shrink-0 font-display font-semibold">{trade.symbol}</span>
+            <SideBadge trade={trade} />
             <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink/60">
               {trade.setup.replaceAll('_', ' ')}
             </span>
@@ -193,18 +199,29 @@ function TradeConfidenceCard({ trade }: { trade: MomentumTrade }) {
 }
 
 function EntryReason({ trade }: { trade: MomentumTrade }) {
+  // A short passed the mirror image of every check below: EMA 9 under EMA 20,
+  // a red candle closing near its low, a break DOWN through the trigger.
+  const short = sideOf(trade) === 'short';
   const attention = trade.setup === 'attention_1m_confirmation';
   const reclaim = trade.setup === 'attention_false_break_reclaim';
   const volumeRatio = trade.setup_meta?.volume_ratio;
   const promotion = trade.entry_evidence?.promotion;
   const trend = trade.entry_evidence?.trend;
   const confirmation = trade.entry_evidence?.confirmation;
+  const trendRule = short
+    ? 'EMA 9 below EMA 20 and the completed 5m close below VWAP'
+    : 'EMA 9 above EMA 20 and the completed 5m close above VWAP';
   const trendDetail = trend
-    ? `5m candle at ${at(trend.bar_start)}: EMA 9 ${money(trend.ema9)}, EMA 20 ${money(trend.ema20)}, close ${money(trend.close)}, VWAP ${money(trend.vwap)}.`
-    : 'This strategy requires EMA 9 above EMA 20 and the completed 5m close above VWAP. The measured indicator snapshot was not stored for this trade.';
+    ? `5m candle at ${at(trend.bar_start)}: EMA 9 ${money(trend.ema9)}, EMA 20 ${money(trend.ema20)}, close ${money(trend.close)}, VWAP ${money(trend.vwap)}. Required: ${trendRule}.`
+    : `This strategy requires ${trendRule}. The measured indicator snapshot was not stored for this trade.`;
+  // close_position is always measured up from the candle's low. A long needs it
+  // high; a short needs it low (a close near the low).
   const confirmationDetail = confirmation
-    ? `1m candle at ${at(confirmation.bar_start)}: open ${money(confirmation.open)}, close ${money(confirmation.close)}; close position ${(confirmation.close_position * 100).toFixed(1)}% (minimum ${(confirmation.minimum_close_position * 100).toFixed(0)}%); volume ${confirmation.volume_ratio.toFixed(2)}× (minimum ${confirmation.minimum_volume_ratio}×).`
-    : `This strategy requires a green candle closing in its upper 40% with at least 2.5× recent 1m volume. ${typeof volumeRatio === 'number' ? `Stored volume ratio: ${volumeRatio.toFixed(2)}×.` : 'Volume ratio unavailable.'} The full confirmation snapshot was not stored.`;
+    ? short
+      ? `1m candle at ${at(confirmation.bar_start)}: open ${money(confirmation.open)}, close ${money(confirmation.close)}; close ${(confirmation.close_position * 100).toFixed(1)}% up from the low (maximum ${((1 - confirmation.minimum_close_position) * 100).toFixed(0)}%); volume ${confirmation.volume_ratio.toFixed(2)}× (minimum ${confirmation.minimum_volume_ratio}×).`
+      : `1m candle at ${at(confirmation.bar_start)}: open ${money(confirmation.open)}, close ${money(confirmation.close)}; close position ${(confirmation.close_position * 100).toFixed(1)}% (minimum ${(confirmation.minimum_close_position * 100).toFixed(0)}%); volume ${confirmation.volume_ratio.toFixed(2)}× (minimum ${confirmation.minimum_volume_ratio}×).`
+    : `This strategy requires a ${short ? 'red candle closing in its lower 40%' : 'green candle closing in its upper 40%'} with at least 2.5× recent 1m volume. ${typeof volumeRatio === 'number' ? `Stored volume ratio: ${volumeRatio.toFixed(2)}×.` : 'Volume ratio unavailable.'} The full confirmation snapshot was not stored.`;
+  const triggerLabel = short ? 'Breakdown trigger' : 'Breakout trigger';
   const gates = reclaim
     ? [
         {
@@ -220,8 +237,8 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
           detail: confirmationDetail,
         },
         {
-          label: 'New buy-stop',
-          detail: `A later quote traded through the reclaim candle high at ${money(trade.trigger_px ?? trade.entry_price)}; the stop was rebuilt from the reclaim structure.`,
+          label: short ? 'New sell-stop' : 'New buy-stop',
+          detail: `A later quote traded through the reclaim candle ${short ? 'low' : 'high'} at ${money(trade.trigger_px ?? trade.entry_price)}; the stop was rebuilt from the reclaim structure.`,
         },
       ]
     : attention
@@ -229,7 +246,7 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
           {
             label: 'Attention watchlist',
             detail: promotion?.observed_at
-              ? `Promoted at ${at(promotion.observed_at)}: day change ${promotion.day_chg_pct.toFixed(2)}% (minimum ${promotion.minimum_day_chg_pct}%) and RVOL ${promotion.rvol.toFixed(2)}× (minimum ${promotion.minimum_rvol}×). Reason: ${promotion.reason.replaceAll('_', ' ')}.`
+              ? `Promoted at ${at(promotion.observed_at)}: day change ${promotion.day_chg_pct.toFixed(2)}% (${short ? `at least −${promotion.minimum_day_chg_pct}%` : `minimum ${promotion.minimum_day_chg_pct}%`}) and RVOL ${promotion.rvol.toFixed(2)}× (minimum ${promotion.minimum_rvol}×). Reason: ${promotion.reason.replaceAll('_', ' ')}.`
               : `Promotion-time evidence was not stored in this trade. Signal-time day change ${trade.day_chg_pct?.toFixed(2) ?? '—'}% and RVOL ${trade.rvol?.toFixed(2) ?? '—'}× cannot verify the earlier promotion.`,
           },
           {
@@ -241,8 +258,8 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
             detail: confirmationDetail,
           },
           {
-            label: 'Breakout trigger',
-            detail: `Recorded trigger ${money(trade.trigger_px ?? trade.entry_price)}; paper fill ${money(trade.entry_price)} at ${at(trade.entry_time)}.${trade.level != null ? ` Defended breakout level: ${money(trade.level)}.` : ''}`,
+            label: triggerLabel,
+            detail: `Recorded trigger ${money(trade.trigger_px ?? trade.entry_price)}; paper ${short ? 'short sale' : 'fill'} ${money(trade.entry_price)} at ${at(trade.entry_time)}.${trade.level != null ? ` ${short ? 'Broken support level' : 'Defended breakout level'}: ${money(trade.level)}.` : ''}`,
           },
         ]
       : [
@@ -255,8 +272,8 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
             detail: `Day change was ${trade.day_chg_pct?.toFixed(2) ?? '—'}% and RVOL was ${trade.rvol?.toFixed(2) ?? '—'}× at signal time.`,
           },
           {
-            label: 'Breakout trigger',
-            detail: `The recorded trigger was ${money(trade.trigger_px ?? trade.entry_price)} and the paper fill was ${money(trade.entry_price)}.`,
+            label: triggerLabel,
+            detail: `The recorded trigger was ${money(trade.trigger_px ?? trade.entry_price)} and the paper ${short ? 'short sale' : 'fill'} was ${money(trade.entry_price)}.`,
           },
         ];
   const strictPatterns = trade.pattern_matches
@@ -266,7 +283,9 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
     <section className="rounded-xl border border-accent/15 bg-accent/[0.045] p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h3 className="font-display text-lg">Why the scanner entered</h3>
+          <h3 className="font-display text-lg">
+            {short ? 'Why the scanner sold short' : 'Why the scanner entered'}
+          </h3>
           <p className="text-xs text-ink/60">
             Recorded measurements and strategy requirements. Missing historical evidence is
             identified explicitly.
@@ -291,9 +310,11 @@ function EntryReason({ trade }: { trade: MomentumTrade }) {
         ))}
       </ol>
       <div className="mt-3 border-t border-accent/15 pt-3 text-sm">
-        <strong>Risk plan:</strong> entry {money(trade.entry_price)}, invalidation stop{' '}
-        {money(trade.stop)}, {trade.target ? `target ${money(trade.target)}, ` : ''}
-        {trade.qty} shares.{' '}
+        <strong>Risk plan:</strong> {short ? 'short sale' : 'entry'} {money(trade.entry_price)},
+        invalidation stop {money(trade.stop)}
+        {short ? ' (above — a buy-stop to cover)' : ''},{' '}
+        {trade.target ? `target ${money(trade.target)}${short ? ' (below)' : ''}, ` : ''}
+        {trade.qty} shares{short ? ' sold short' : ''}.{' '}
         {strictPatterns
           ? `Recorded formations: ${strictPatterns}. Formation alone does not confirm a trade.`
           : trade.candle_tags?.length
@@ -441,15 +462,15 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
       <div className="rounded-xl border border-black/10 bg-panel p-4 shadow-card">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="font-display text-2xl">
-              {trade.symbol}{' '}
+            <h2 className="flex flex-wrap items-center gap-2 font-display text-2xl">
+              {trade.symbol} <SideBadge trade={trade} />
               <span className="text-base font-medium text-ink/55">
                 · {trade.setup.replaceAll('_', ' ')}
               </span>
             </h2>
             <p className="mt-1 text-sm text-ink/60">
-              {strategyLabel(trade.strategy)} · Entry {money(trade.entry_price)} at{' '}
-              {at(trade.entry_time)} · Stop {money(trade.stop)}
+              {strategyLabel(trade.strategy)} · {sideOf(trade) === 'short' ? 'Short sale' : 'Entry'}{' '}
+              {money(trade.entry_price)} at {at(trade.entry_time)} · Stop {money(trade.stop)}
               {trade.target ? ` · Target ${money(trade.target)}` : ''}
             </p>
           </div>
@@ -516,7 +537,7 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
       {/* Metrics row */}
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="metric-chip">
-          <p className="text-xs text-ink/55">Exit</p>
+          <p className="text-xs text-ink/55">{sideOf(trade) === 'short' ? 'Cover (buy back)' : 'Exit'}</p>
           <p className="mt-1 font-semibold">
             {trade.exit_price == null
               ? 'Still open'
@@ -526,7 +547,7 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
         <div className="metric-chip">
           <p className="text-xs text-ink/55">Position</p>
           <p className="mt-1 font-semibold">
-            {trade.qty} shares · {money(trade.notional_inr)}
+            {trade.qty} shares{sideOf(trade) === 'short' ? ' short' : ''} · {money(trade.notional_inr)}
           </p>
         </div>
         <div className="metric-chip">

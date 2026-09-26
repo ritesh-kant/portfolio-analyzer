@@ -224,6 +224,7 @@ export const fetchAnalyticsTrades = (source: string) =>
 export interface WatchlistFlag {
   time: string;
   strategy?: string;
+  side?: 'long' | 'short';
   reason: string;
   day_chg_pct: number;
   rvol: number;
@@ -238,6 +239,8 @@ export interface WatchlistName {
   max_day_chg_pct: number;
   max_rvol: number;
   strategies: string[];
+  /** Which screen flagged it. A name on both screens appears twice. Absent = long. */
+  side?: 'long' | 'short';
   flags: WatchlistFlag[];
   /** Paper trades opened on this name in the same session, if any. US rows
    * carry `net_usd` instead of `net_inr`. */

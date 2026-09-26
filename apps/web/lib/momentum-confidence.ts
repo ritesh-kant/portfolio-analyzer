@@ -70,6 +70,11 @@ function confidenceBand(score: number | null): ConfidenceBand {
 /**
  * Scores only facts present at the trade decision. Realized performance and
  * post-entry context are intentionally excluded.
+ *
+ * Direction-aware: a short earns the same points for the mirror-image facts —
+ * a DOWN day, EMA 9 under EMA 20 and a close under VWAP, a negative MACD, a
+ * confirmation candle closing near its LOW, room DOWN to the next support, and
+ * resistance just ABOVE to lean the stop on. Long scores are unchanged.
  */
 export function calculateTradeConfidence(trade: MomentumTrade): TradeConfidence {
   const trend = trade.entry_evidence?.trend;
@@ -86,6 +91,29 @@ export function calculateTradeConfidence(trade: MomentumTrade): TradeConfidence 
     trend && [trend.ema9, trend.ema20, trend.close, trend.vwap].every(finiteNumber);
   // Distances in the trade's favour: a short's stop is above, its target below.
   const dir = direction(trade);
+  const short = dir === -1;
+  const dayMove = finiteNumber(trade.day_chg_pct) ? dir * trade.day_chg_pct : null;
+  const trendOk = trendAligned
+    ? short
+      ? trend.ema9 < trend.ema20 && trend.close < trend.vwap
+      : trend.ema9 > trend.ema20 && trend.close > trend.vwap
+    : false;
+  // Share of the candle's range the close sits away from the trade's side:
+  // from the low for a long, from the high for a short (stored close_position
+  // is always measured from the low, in real prices).
+  const closeQuality =
+    confirmation && finiteNumber(confirmation.close_position)
+      ? short
+        ? 1 - confirmation.close_position
+        : confirmation.close_position
+      : null;
+  // Room to run toward the target, and structure behind the stop.
+  const roomKey = short ? 'support_drop_pct' : 'resist_head_pct';
+  const backstopKey = short ? 'resist_head_pct' : 'support_drop_pct';
+  const room = trade[roomKey];
+  const backstop = trade[backstopKey];
+  const towardTarget = short ? 'support below' : 'resistance above';
+  const behindStop = short ? 'resistance above' : 'support below';
   const riskPerShare =
     finiteNumber(trade.entry_price) && finiteNumber(trade.stop)
       ? dir * (trade.entry_price - trade.stop)
@@ -100,11 +128,9 @@ export function calculateTradeConfidence(trade: MomentumTrade): TradeConfidence 
       'day-change',
       'Day-change momentum',
       10,
+      dayMove !== null ? thresholdPoints(dayMove, [1.5, 4, 8], [3, 7, 10]) : null,
       finiteNumber(trade.day_chg_pct)
-        ? thresholdPoints(trade.day_chg_pct, [1.5, 4, 8], [3, 7, 10])
-        : null,
-      finiteNumber(trade.day_chg_pct)
-        ? `${trade.day_chg_pct.toFixed(2)}% at signal time`
+        ? `${trade.day_chg_pct.toFixed(2)}% at signal time${short ? ' (down day — short)' : ''}`
         : 'Day change was not recorded for this trade',
     ),
     factor(
@@ -120,35 +146,35 @@ export function calculateTradeConfidence(trade: MomentumTrade): TradeConfidence 
       'trend-alignment',
       '5-minute trend alignment',
       12,
-      trendAligned ? (trend.ema9 > trend.ema20 && trend.close > trend.vwap ? 12 : 0) : null,
+      trendAligned ? (trendOk ? 12 : 0) : null,
       trendAligned
-        ? `EMA 9 ${trend.ema9 > trend.ema20 ? 'above' : 'not above'} EMA 20; close ${trend.close > trend.vwap ? 'above' : 'not above'} VWAP`
+        ? short
+          ? `EMA 9 ${trend.ema9 < trend.ema20 ? 'below' : 'not below'} EMA 20; close ${trend.close < trend.vwap ? 'below' : 'not below'} VWAP`
+          : `EMA 9 ${trend.ema9 > trend.ema20 ? 'above' : 'not above'} EMA 20; close ${trend.close > trend.vwap ? 'above' : 'not above'} VWAP`
         : '5-minute EMA and VWAP evidence was not recorded',
     ),
     factor(
       'macd',
       '5-minute MACD momentum',
       8,
-      finiteNumber(trade.macd_hist) ? (trade.macd_hist > 0 ? 8 : 0) : null,
+      finiteNumber(trade.macd_hist) ? (dir * trade.macd_hist > 0 ? 8 : 0) : null,
       finiteNumber(trade.macd_hist)
-        ? `MACD histogram ${trade.macd_hist > 0 ? 'positive' : 'not positive'}`
+        ? short
+          ? `MACD histogram ${trade.macd_hist < 0 ? 'negative' : 'not negative'}`
+          : `MACD histogram ${trade.macd_hist > 0 ? 'positive' : 'not positive'}`
         : '5-minute MACD histogram was not recorded',
     ),
     factor(
       'confirmation-close',
       'Confirmation close quality',
       8,
-      confirmation &&
-        finiteNumber(confirmation.close_position) &&
-        finiteNumber(confirmation.minimum_close_position)
-        ? thresholdPoints(
-            confirmation.close_position,
-            [confirmation.minimum_close_position, 0.8, 0.9],
-            [4, 6, 8],
-          )
+      closeQuality !== null && confirmation && finiteNumber(confirmation.minimum_close_position)
+        ? thresholdPoints(closeQuality, [confirmation.minimum_close_position, 0.8, 0.9], [4, 6, 8])
         : null,
       confirmation && finiteNumber(confirmation.close_position)
-        ? `Closed in the ${(confirmation.close_position * 100).toFixed(0)}% of its range`
+        ? short
+          ? `Closed ${(confirmation.close_position * 100).toFixed(0)}% up from its low (near the low is strong for a short)`
+          : `Closed in the ${(confirmation.close_position * 100).toFixed(0)}% of its range`
         : 'One-minute close-position evidence was not recorded',
     ),
     factor(
@@ -212,45 +238,45 @@ export function calculateTradeConfidence(trade: MomentumTrade): TradeConfidence 
     ),
     factor(
       'resistance-headroom',
-      'Structural resistance headroom',
+      short ? 'Structural room down to support' : 'Structural resistance headroom',
       10,
-      hasOwn(trade, 'resist_head_pct')
-        ? trade.resist_head_pct === null
+      hasOwn(trade, roomKey)
+        ? room === null
           ? 10
-          : finiteNumber(trade.resist_head_pct)
-            ? thresholdPoints(trade.resist_head_pct, [1, 1.5, 2], [4, 7, 10])
+          : finiteNumber(room)
+            ? thresholdPoints(room, [1, 1.5, 2], [4, 7, 10])
             : null
         : null,
-      !hasOwn(trade, 'resist_head_pct')
-        ? 'Resistance-headroom evidence was not recorded'
-        : trade.resist_head_pct === null
-          ? 'No resistance was derived above the trigger'
-          : finiteNumber(trade.resist_head_pct)
-            ? `${trade.resist_head_pct.toFixed(2)}% to the nearest 5-minute resistance above the trigger`
-            : 'Resistance-headroom evidence was not recorded',
+      !hasOwn(trade, roomKey)
+        ? 'Headroom evidence was not recorded'
+        : room === null
+          ? `No ${towardTarget} the trigger was derived`
+          : finiteNumber(room)
+            ? `${room.toFixed(2)}% to the nearest 5-minute ${towardTarget} the trigger`
+            : 'Headroom evidence was not recorded',
     ),
     factor(
       'support-proximity',
-      'Structural support proximity',
+      short ? 'Structural resistance proximity' : 'Structural support proximity',
       5,
-      hasOwn(trade, 'support_drop_pct')
-        ? trade.support_drop_pct === null
+      hasOwn(trade, backstopKey)
+        ? backstop === null
           ? 0
-          : finiteNumber(trade.support_drop_pct)
-            ? trade.support_drop_pct <= 1
+          : finiteNumber(backstop)
+            ? backstop <= 1
               ? 5
-              : trade.support_drop_pct <= 2
+              : backstop <= 2
                 ? 3
                 : 0
             : null
         : null,
-      !hasOwn(trade, 'support_drop_pct')
-        ? 'Support-location evidence was not recorded'
-        : trade.support_drop_pct === null
-          ? 'No support was derived below the trigger'
-          : finiteNumber(trade.support_drop_pct)
-            ? `${trade.support_drop_pct.toFixed(2)}% to the nearest 5-minute support below the trigger`
-            : 'Support-location evidence was not recorded',
+      !hasOwn(trade, backstopKey)
+        ? 'Stop-side structure evidence was not recorded'
+        : backstop === null
+          ? `No ${behindStop} the trigger was derived`
+          : finiteNumber(backstop)
+            ? `${backstop.toFixed(2)}% to the nearest 5-minute ${behindStop} the trigger`
+            : 'Stop-side structure evidence was not recorded',
     ),
   ];
 

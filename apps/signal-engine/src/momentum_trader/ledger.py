@@ -68,6 +68,13 @@ def _structural_doc(resistance: Level | None, support: Level | None) -> dict[str
     }
 
 
+def strategy_label(strategy: str, side: str) -> str:
+    """The `strategy` a row is stored under. Shorts get their own label so a
+    long arm's forward sample (read by strategy) never silently counts them;
+    `side` is stored as well."""
+    return f"{strategy}_short" if side == "short" else strategy
+
+
 def _cand_doc(c: Candidate) -> dict[str, Any]:
     d = asdict(c)
     d["setup"] = c.setup.name
@@ -106,7 +113,8 @@ class PaperLedger:
     def candidate(self, c: Candidate) -> None:
         if self._db is not None:
             try:
-                self._db["mt_candidates"].insert_one({**_cand_doc(c), "strategy": self._strategy})
+                doc = {**_cand_doc(c), "strategy": strategy_label(self._strategy, c.side)}
+                self._db["mt_candidates"].insert_one(doc)
             except Exception:  # noqa: BLE001
                 logger.exception("mt_candidates insert failed")
 
@@ -115,7 +123,7 @@ class PaperLedger:
             return
         try:
             self._db["mt_attention"].insert_one({
-                "strategy": self._strategy,
+                "strategy": strategy_label(self._strategy, event.side),
                 "symbol": event.symbol,
                 "time": event.time.to_pydatetime(),
                 "side": event.side,
@@ -133,7 +141,7 @@ class PaperLedger:
             return
         try:
             self._db["mt_rejections"].insert_one({
-                "strategy": self._strategy,
+                "strategy": strategy_label(self._strategy, rejection.side),
                 "symbol": rejection.symbol,
                 "time": rejection.time.to_pydatetime(),
                 "reason": rejection.reason,
@@ -149,7 +157,7 @@ class PaperLedger:
     def opened(self, p: Position) -> str | None:
         doc = {
             **_cand_doc(p.cand), "status": "open", "entry_time": p.entry_time.to_pydatetime(),
-            "strategy": self._strategy,
+            "strategy": strategy_label(self._strategy, p.cand.side),
             "entry_price": p.plan.entry, "stop": p.plan.stop, "target": p.plan.target,
             "qty": p.plan.qty, "risk_inr": p.plan.risk_inr, "notional_inr": p.plan.notional_inr,
             "paper": True, "float_filter_applied": self._ff,
@@ -179,7 +187,8 @@ class PaperLedger:
             try:
                 self._db["mt_positions"].update_one(
                     {"symbol": t.cand.symbol, "status": "open",
-                     "entry_time": t.entry_time.to_pydatetime(), "strategy": self._strategy},
+                     "entry_time": t.entry_time.to_pydatetime(),
+                     "strategy": strategy_label(self._strategy, t.side)},
                     {"$set": {
                         "status": "closed", "exit_time": t.exit_time.to_pydatetime(),
                         "exit_price": t.exit, "exit_reason": t.exit_reason,

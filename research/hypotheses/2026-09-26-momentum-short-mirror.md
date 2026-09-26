@@ -201,3 +201,20 @@ the long path was verified byte-identical against `origin/main` (244 + 34
 long trades, 379 + 46 candidates, every field equal), and it is OFF in both
 live arms (`MT_ENABLE_SHORTS=false`, `MT_US_ENABLE_SHORTS=false`). Turning it
 on for paper collects forward data; nothing above says it will make money.
+
+## Amendment 2026-09-26 — paper shorts switched on (operator decision)
+
+The operator asked for the short side to run in paper trading on both arms
+after the KILL above. Wired in `infrastructure/ecs-scanner.yml`:
+`MT_ENABLE_SHORTS=true` (NSE task) and `MT_US_ENABLE_SHORTS=true`,
+`MT_US_SHORT_DAY_CHG_MIN=4` (US task). It takes effect on the first deploy
+after merge to main.
+
+- Rules = the deployed `warrior_strict` arm, mirrored. Its 2024 replay took 20
+  short trades (≈2/month) and 37 over the trailing year; expect that pace.
+- Short rows are stored as strategy `warrior_strict_short` /
+  `us_warrior_strict_short` with `side: "short"`, so the long arm's forward
+  sample (read by strategy) is not diluted.
+- This is forward DATA COLLECTION, not a re-opened hypothesis. The verdict
+  above stands; no forward result may be reported as reversing it unless a
+  new file is registered first with its own criteria and n.

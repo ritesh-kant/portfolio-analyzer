@@ -685,9 +685,15 @@ class USSession:
                     "float_shares": row.float_shares,
                     "ssr_carried": (self.short_watch[sym].book.ssr_carried
                                     if sym in self.short_watch else None),
+                    "observed_at": row.observed_at,
+                    "first_passed_at": self._short_first_passed(sym),
                 } for sym, row in self.short_rows.items()],
             }
         self.ledger.watchlist(doc)
+
+    def _short_first_passed(self, sym: str) -> str | None:
+        w = self.short_watch.get(sym)
+        return w.first_passed_at.isoformat() if w and w.first_passed_at else None
 
     def summary(self) -> str:
         net = sum(t.net_inr for t in self.closed_trades)

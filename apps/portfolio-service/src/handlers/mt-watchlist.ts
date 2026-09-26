@@ -47,11 +47,12 @@ async function gateLog(
   const [hits, armed] = await Promise.all([
     db
       .collection(rejections.collection)
-      .aggregate<{ _id: { date: string; symbol: string; reason: string }; count: number; first: Date; last: Date }>([
+      .aggregate<{ _id: { date: string; symbol: string; side: string; reason: string }; count: number; first: Date; last: Date }>([
         { $match: rejections.match },
         {
           $group: {
-            _id: { date: day, symbol: '$symbol', reason: '$reason' },
+            // Rows written before shorts existed have no side: they were longs.
+            _id: { date: day, symbol: '$symbol', side: { $ifNull: ['$side', 'long'] }, reason: '$reason' },
             count: { $sum: 1 },
             first: { $min: '$time' },
             last: { $max: '$time' },
@@ -61,20 +62,21 @@ async function gateLog(
       .toArray(),
     db
       .collection(candidates.collection)
-      .aggregate<{ _id: { date: string; symbol: string }; count: number }>([
+      .aggregate<{ _id: { date: string; symbol: string; side: string }; count: number }>([
         { $match: candidates.match },
-        { $group: { _id: { date: day, symbol: '$symbol' }, count: { $sum: 1 } } },
+        { $group: { _id: { date: day, symbol: '$symbol', side: { $ifNull: ['$side', 'long'] } }, count: { $sum: 1 } } },
       ])
       .toArray(),
   ]);
   const gates = new Map<string, GateHit[]>();
   for (const h of hits) {
-    const key = `${h._id.date}:${h._id.symbol}`;
+    const key = `${h._id.date}:${h._id.symbol}:${h._id.side}`;
     const list = gates.get(key) ?? [];
     list.push({ reason: String(h._id.reason), count: h.count, first: h.first.toISOString(), last: h.last.toISOString() });
     gates.set(key, list);
   }
-  return { gates, armed: new Map(armed.map((a) => [`${a._id.date}:${a._id.symbol}`, a.count])) };
+  // Keyed date:symbol:side, so a name's long and short refusals never mix.
+  return { gates, armed: new Map(armed.map((a) => [`${a._id.date}:${a._id.symbol}:${a._id.side}`, a.count])) };
 }
 
 /**
@@ -114,7 +116,7 @@ export const handler = requireAuth(async (event) => {
         { time: { $gte: from, $lt: to } },
         {
           projection: {
-            _id: 0, strategy: 1, symbol: 1, time: 1, day_chg_pct: 1, rvol: 1, reason: 1,
+            _id: 0, strategy: 1, side: 1, symbol: 1, time: 1, day_chg_pct: 1, rvol: 1, reason: 1,
             candle_tags: 1, 'evidence.pattern_matches': 1,
           },
         },
@@ -134,6 +136,7 @@ export const handler = requireAuth(async (event) => {
   type Flag = {
     time: string;
     strategy?: string;
+    side?: string;
     reason: string;
     day_chg_pct: number;
     rvol: number;
@@ -147,6 +150,8 @@ export const handler = requireAuth(async (event) => {
     max_day_chg_pct: number;
     max_rvol: number;
     strategies: string[];
+    /** Which side's screen flagged it. A name on both gets two entries. */
+    side: 'long' | 'short';
     flags: Flag[];
     trades: Record<string, unknown>[];
     gates: GateHit[];
@@ -159,36 +164,42 @@ export const handler = requireAuth(async (event) => {
     const names = sessions.get(date);
     if (!names) continue;
     const symbol = String(doc.symbol);
-    const name = names.get(symbol) ?? {
+    const side = doc.side === 'short' ? ('short' as const) : ('long' as const);
+    const nameKey = `${symbol}:${side}`;
+    const name = names.get(nameKey) ?? {
       symbol,
       first_seen: time.toISOString(),
       last_seen: time.toISOString(),
-      max_day_chg_pct: -Infinity,
+      max_day_chg_pct: 0,
       max_rvol: -Infinity,
       strategies: [],
+      side,
       flags: [],
       trades: [],
-      gates: log.gates.get(`${date}:${symbol}`) ?? [],
-      armed: log.armed.get(`${date}:${symbol}`) ?? 0,
+      gates: log.gates.get(`${date}:${symbol}:${side}`) ?? [],
+      armed: log.armed.get(`${date}:${symbol}:${side}`) ?? 0,
     };
     name.last_seen = time.toISOString();
-    name.max_day_chg_pct = Math.max(name.max_day_chg_pct, Number(doc.day_chg_pct ?? -Infinity));
+    // The biggest move either way, sign kept: a short-side name reads -6.2%.
+    const chg = Number(doc.day_chg_pct);
+    if (Number.isFinite(chg) && Math.abs(chg) > Math.abs(name.max_day_chg_pct)) name.max_day_chg_pct = chg;
     name.max_rvol = Math.max(name.max_rvol, Number(doc.rvol ?? -Infinity));
     if (doc.strategy && !name.strategies.includes(doc.strategy)) name.strategies.push(doc.strategy);
     name.flags.push({
       time: time.toISOString(),
       strategy: doc.strategy,
+      side,
       reason: String(doc.reason ?? ''),
       day_chg_pct: Number(doc.day_chg_pct),
       rvol: Number(doc.rvol),
       candle_tags: doc.candle_tags ?? [],
       pattern_matches: doc.evidence?.pattern_matches ?? [],
     });
-    names.set(symbol, name);
+    names.set(nameKey, name);
   }
   for (const p of positions) {
     const names = sessions.get(istDate((p.entry_time as Date).getTime()));
-    const name = names?.get(String(p.symbol));
+    const name = names?.get(`${String(p.symbol)}:${p.side === 'short' ? 'short' : 'long'}`);
     if (name) name.trades.push({ ...p, _id: String(p._id) });
   }
 
@@ -667,7 +678,7 @@ export const usHandler = requireAuth(async (event) => {
 
   const docs = await db
     .collection('mt_us_watchlist')
-    .find({ market: 'US' }, { projection: { date: 1, names: 1, considered: 1, missing_criteria: 1 } })
+    .find({ market: 'US' }, { projection: { date: 1, names: 1, short: 1, considered: 1, missing_criteria: 1 } })
     .sort({ date: -1 })
     .limit(days)
     .toArray();
@@ -682,7 +693,7 @@ export const usHandler = requireAuth(async (event) => {
       .collection('mt_us_candidates')
       .find(
         { kind: 'attention', time: { $gte: from, $lt: to } },
-        { projection: { _id: 0, symbol: 1, time: 1, reason: 1, day_chg_pct: 1, rvol: 1, candle_tags: 1, 'evidence.pattern_matches': 1, strategy: 1 } },
+        { projection: { _id: 0, symbol: 1, side: 1, time: 1, reason: 1, day_chg_pct: 1, rvol: 1, candle_tags: 1, 'evidence.pattern_matches': 1, strategy: 1 } },
       )
       .sort({ time: 1 })
       .toArray(),
@@ -707,16 +718,26 @@ export const usHandler = requireAuth(async (event) => {
     type USName = {
       symbol: string; passed: boolean; reason: string; price: number; day_chg_pct: number;
       rvol: number | null; float_shares: number | null; observed_at?: string;
-      first_seen?: string; first_passed_at?: string | null;
+      first_seen?: string; first_passed_at?: string | null; side?: 'long' | 'short';
     };
-    const watched = ((doc.names ?? []) as USName[]).filter((n) => n.passed);
+    // Long screen survivors, then the short (losers) screen's, each tagged.
+    const watched = [
+      ...((doc.names ?? []) as USName[]).filter((n) => n.passed).map((n) => ({ ...n, side: 'long' as const })),
+      ...((doc.short?.names ?? []) as USName[]).filter((n) => n.passed).map((n) => ({ ...n, side: 'short' as const })),
+    ];
     const names = watched.map((n) => {
       const firstPassed = n.first_passed_at ?? n.first_seen ?? n.observed_at ?? `${date}T09:30:00-04:00`;
-      const promotions = attention.filter((a) => a.symbol === n.symbol && etDate(a.time as Date) === date);
+      const promotions = attention.filter(
+        (a) =>
+          a.symbol === n.symbol &&
+          etDate(a.time as Date) === date &&
+          (a.side === 'short' ? 'short' : 'long') === n.side,
+      );
       const flags = [
         {
           time: new Date(firstPassed).toISOString(),
-          reason: 'passed_screen',
+          side: n.side,
+          reason: n.side === 'short' ? 'passed_short_screen' : 'passed_screen',
           day_chg_pct: Number(n.day_chg_pct),
           rvol: n.rvol == null ? Number.NaN : Number(n.rvol),
           candle_tags: [] as string[],
@@ -725,6 +746,7 @@ export const usHandler = requireAuth(async (event) => {
         ...promotions.map((a) => ({
           time: (a.time as Date).toISOString(),
           strategy: a.strategy,
+          side: n.side,
           reason: String(a.reason ?? 'attention'),
           day_chg_pct: Number(a.day_chg_pct),
           rvol: Number(a.rvol),
@@ -737,15 +759,24 @@ export const usHandler = requireAuth(async (event) => {
         symbol: n.symbol,
         first_seen: flags[0]!.time,
         last_seen: flags[flags.length - 1]!.time,
-        max_day_chg_pct: Math.max(...numbers('day_chg_pct'), Number(n.day_chg_pct)),
+        // Biggest move either way, sign kept (a short-side name reads negative).
+        max_day_chg_pct: [...numbers('day_chg_pct'), Number(n.day_chg_pct)]
+          .filter(Number.isFinite)
+          .reduce((best, v) => (Math.abs(v) > Math.abs(best) ? v : best), 0),
         max_rvol: Math.max(...numbers('rvol'), 0),
         strategies: [...new Set(promotions.map((a) => a.strategy).filter(Boolean))],
+        side: n.side,
         flags,
         trades: positions
-          .filter((p) => p.symbol === n.symbol && etDate(p.entry_time as Date) === date)
+          .filter(
+            (p) =>
+              p.symbol === n.symbol &&
+              etDate(p.entry_time as Date) === date &&
+              (p.side === 'short' ? 'short' : 'long') === n.side,
+          )
           .map((p) => ({ ...p, _id: String(p._id) })),
-        gates: log.gates.get(`${date}:${n.symbol}`) ?? [],
-        armed: log.armed.get(`${date}:${n.symbol}`) ?? 0,
+        gates: log.gates.get(`${date}:${n.symbol}:${n.side}`) ?? [],
+        armed: log.armed.get(`${date}:${n.symbol}:${n.side}`) ?? 0,
         details: [
           { label: 'Price', value: `$${Number(n.price).toFixed(2)}` },
           { label: 'Float', value: n.float_shares == null ? 'unknown' : `${(n.float_shares / 1e6).toFixed(1)}M shares` },
