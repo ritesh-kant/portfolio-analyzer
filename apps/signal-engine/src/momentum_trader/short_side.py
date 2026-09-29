@@ -123,6 +123,8 @@ def _flip_target_source(source: str) -> str:
     head, sep, kind = source.partition(":")
     if head == "structural_resistance":
         return f"structural_support{sep}{_flip_kind(kind)}"
+    if head == "fixed_2r+checkpoint":
+        return f"{head}{sep}{_flip_kind(kind)}"
     return source
 
 
@@ -601,7 +603,11 @@ class ShortBook:
         )
         return Position(cand=cand, entry_time=pos.entry_time, plan=plan,
                         highest=r.px(pos.highest), exit_state=real_es,
-                        target_source=_flip_target_source(pos.target_source))
+                        target_source=_flip_target_source(pos.target_source),
+                        checkpoint=r.opt(pos.checkpoint),
+                        checkpoint_stop=r.opt(pos.checkpoint_stop),
+                        checkpoint_armed=pos.checkpoint_armed,
+                        checkpoint_applied=pos.checkpoint_applied)
 
     def _convert_closed(self, n_before: int, cfg: EngineConfig) -> list[ClosedTrade]:
         out: list[ClosedTrade] = []
@@ -634,6 +640,7 @@ class ShortBook:
             qty=qty, gross_inr=gross, costs_inr=costs, net_inr=net,
             target=r.px(t.target) if t.target else 0.0,
             target_source=_flip_target_source(t.target_source),
+            checkpoint=r.opt(t.checkpoint), checkpoint_hit=t.checkpoint_hit,
             structural_support=r.opt(t.structural_resistance),
             structural_support_kind=_flip_kind(t.structural_resistance_kind),
             structural_resistance=r.opt(t.structural_support),

@@ -20,8 +20,9 @@ var LWC = window.LightweightCharts;
 var DEFAULT_ZOOM = { "1m": 8, "5m": 2 };
 var MIN_BARS = 15, CHART_H = 600;
 var WEAK = DATA.weak_strength == null ? 0 : DATA.weak_strength;
-var cards = [], tf = "5m";
+var cards = [], tf = "5m", levelMode = "key";
 if (DATA.default_tf) tf = DATA.default_tf;
+if (DATA.default_levels) levelMode = DATA.default_levels;
 var COL = {
   up: "#2dd4bf", dn: "#fb7185", ema9: "#fbbf24", ema20: "#a78bfa", ema200: "#94a3b8",
   vwap: "#60a5fa", res: "#f472b6", sup: "#38bdf8", buy: "#4ade80", sell: "#f87171",
@@ -222,27 +223,61 @@ function createChart(c) {
   var panes = chart.panes();
   panes[0].setStretchFactor(3.4); panes[1].setStretchFactor(1.1); panes[2].setStretchFactor(0.9);
 
-  /* the trade's own prices + every level, fixed at entry (they do not depend on the timeframe) */
+  c.markers = LWC.createSeriesMarkers(s.candles, []);
+  c.chart = chart;
+  c.s = s;
+  c.lines = [];
+  drawLines(c);
+  chart.subscribeCrosshairMove(function (p) { showLegend(c, p && p.time != null ? c.byTime[p.time] : null); });
+  chart.timeScale().subscribeVisibleLogicalRangeChange(function () { updateZoomLabel(c); });
+}
+
+/* The key support / resistance are the two levels the ENGINE bracketed the
+   trade with at the entry bar (bt17's structural_support / _resistance), so
+   they are what the stop and target were read against. They are drawn thick and
+   named in full; every other level is context. `levelMode` "key" keeps the
+   context faint and unlabelled so the four prices that matter - support,
+   resistance, BUY, SELL - read at a glance; "all" labels every level. */
+function isKey(tr, L) {
+  var k = L.side === "resistance" ? tr.key_resistance : tr.key_support;
+  return !!k && Math.abs(k.price - L.price) < 0.005;
+}
+function drawLines(c) {
+  var tr = c.tr, s = c.s;
+  c.lines.forEach(function (pl) { s.candles.removePriceLine(pl); });
+  c.lines = [];
   var line = function (price, color, style, width, title, label) {
-    s.candles.createPriceLine({ price: price, color: color, lineStyle: style, lineWidth: width,
-                                axisLabelVisible: label !== false, title: title });
+    c.lines.push(s.candles.createPriceLine({ price: price, color: color, lineStyle: style,
+      lineWidth: width, axisLabelVisible: label !== false, title: title }));
   };
+  // a report built without key levels keeps every label, as before
+  var mode = tr.key_support || tr.key_resistance ? levelMode : "all";
   tr.levels.forEach(function (L) {
+    if (isKey(tr, L)) return;
     var col = L.side === "resistance" ? COL.res : COL.sup;
+    // a level a report marks `emphasis` (e.g. BT52's checkpoint) is always
+    // drawn and labelled, whatever the Levels selector says
+    if (L.emphasis) {
+      line(L.price, L.color || col, LWC.LineStyle.LargeDashed, 2, L.label || nice(L.kind));
+      return;
+    }
+    if (mode === "key") {
+      if (!L.structural) return;
+      line(L.price, alpha(col, 0.28), LWC.LineStyle.Solid, 1, "", false);
+      return;
+    }
     line(L.price, alpha(col, L.structural ? 0.75 : 0.45),
          L.structural ? LWC.LineStyle.Solid : LWC.LineStyle.SparseDotted, 1,
          shortKind(L.kind) + (L.structural ? "" : " ?"), L.structural);
   });
+  if (tr.key_resistance) line(tr.key_resistance.price, COL.res, LWC.LineStyle.Solid, 3,
+                              "RESISTANCE · " + shortKind(tr.key_resistance.kind));
+  if (tr.key_support) line(tr.key_support.price, COL.sup, LWC.LineStyle.Solid, 3,
+                           "SUPPORT · " + shortKind(tr.key_support.kind));
   line(tr.stop, COL.stop, LWC.LineStyle.Dashed, 2, "Stop");
   line(tr.target, COL.target, LWC.LineStyle.Dashed, 2, targetLabel(tr));
-  line(tr.entry, COL.buy, LWC.LineStyle.Dotted, 1, "BUY");
-  line(tr.exit, COL.sell, LWC.LineStyle.Dotted, 1, "SELL");
-
-  c.markers = LWC.createSeriesMarkers(s.candles, []);
-  c.chart = chart;
-  c.s = s;
-  chart.subscribeCrosshairMove(function (p) { showLegend(c, p && p.time != null ? c.byTime[p.time] : null); });
-  chart.timeScale().subscribeVisibleLogicalRangeChange(function () { updateZoomLabel(c); });
+  line(tr.entry, COL.buy, LWC.LineStyle.Solid, 2, "BUY");
+  line(tr.exit, COL.sell, LWC.LineStyle.Solid, 2, "SELL");
 }
 
 /* load the current timeframe's bars into an existing chart */
@@ -278,10 +313,10 @@ function setSeries(c) {
 
   /* BUY / SELL arrows and the formations seen on THIS timeframe */
   var mk = [
-    { time: T[eIdx], position: "belowBar", shape: "arrowUp", color: COL.buy, size: 1.4,
-      text: "BUY " + tr.entry.toFixed(2) },
-    { time: T[xIdx], position: "aboveBar", shape: "arrowDown", color: COL.sell, size: 1.4,
-      text: "SELL " + tr.exit.toFixed(2) + " · " + nice(tr.exit_reason) }
+    { time: T[eIdx], position: "belowBar", shape: "arrowUp", color: COL.buy, size: 2,
+      text: "BUY " + tr.entry.toFixed(2) + " @ " + tr.entry_time },
+    { time: T[xIdx], position: "aboveBar", shape: "arrowDown", color: COL.sell, size: 2,
+      text: "SELL " + tr.exit.toFixed(2) + " @ " + tr.exit_time + " · " + nice(tr.exit_reason) }
   ];
   (tr.patterns || []).forEach(function (m) {
     if (m.timeframe !== tf) return;
@@ -474,6 +509,7 @@ function buildCards() {
       + " (" + nice(tr.exit_reason) + ")"
       + " · qty <b>" + tr.qty + "</b>"
       + " · day <b>" + tr.day_chg_pct.toFixed(1) + "%</b>";
+    keyStrip(left, tr);
     var kpi = h("div", { class: "kpi" }, head);
     kpi.innerHTML = "<b class='" + cls(tr.gross_pct) + "'>" + pct(tr.gross_pct) + "</b>"
       + "gross · net " + inr(tr.net_real_inr) + " @ real"
@@ -513,6 +549,25 @@ function buildCards() {
   });
 }
 
+/* the four prices a reader looks for first, as coloured pills under the title */
+function keyStrip(parent, tr) {
+  var strip = h("div", { class: "keys" }, parent);
+  var pill = function (cl, label, price, extra) {
+    var p = h("span", { class: "key " + cl }, strip);
+    h("b", {}, p, label);
+    h("span", {}, p, " " + price.toFixed(2) + (extra ? " · " + extra : ""));
+  };
+  var dist = function (px) { return pct(100 * (px - tr.entry) / tr.entry) + " vs buy"; };
+  if (tr.key_support) pill("sup", "SUPPORT", tr.key_support.price,
+                           nice(tr.key_support.kind) + " · " + dist(tr.key_support.price));
+  else h("span", { class: "key none" }, strip, "no support below entry");
+  pill("buy", "BUY", tr.entry, tr.entry_time);
+  pill("sell", "SELL", tr.exit, tr.exit_time + " · " + nice(tr.exit_reason));
+  if (tr.key_resistance) pill("res", "RESISTANCE", tr.key_resistance.price,
+                              nice(tr.key_resistance.kind) + " · " + dist(tr.key_resistance.price));
+  else h("span", { class: "key none" }, strip, "no resistance above entry");
+}
+
 /* every level on the chart, nearest the entry first, with its distance in R
    (1R = entry − stop, the trade's own risk unit) */
 function levelTable(sec, tr) {
@@ -531,9 +586,11 @@ function levelTable(sec, tr) {
   });
   var tb = h("tbody", {}, t);
   rows.forEach(function (L) {
-    var r = h("tr", {}, tb), dist = L.price - tr.entry;
+    var key = isKey(tr, L);
+    var r = h("tr", key ? { class: "keyrow" } : {}, tb), dist = L.price - tr.entry;
     h("td", { class: "num" }, r, L.price.toFixed(2));
-    h("td", { class: L.side === "resistance" ? "res" : "sup" }, r, L.side);
+    h("td", { class: L.side === "resistance" ? "res" : "sup" }, r,
+      key ? "KEY " + L.side : L.side);
     h("td", {}, r, nice(L.kind));
     h("td", {}, r, L.touches ? String(L.touches) : "–");
     h("td", {}, r, L.structural ? "yes" : "no");
@@ -590,7 +647,8 @@ function init() {
   var leg = document.getElementById("legend");
   [["up candle", COL.up], ["down candle", COL.dn], ["EMA9 / MACD", COL.ema9],
    ["EMA20 / signal", COL.ema20], ["EMA200", COL.ema200], ["VWAP (dashed)", COL.vwap],
-   ["resistance", COL.res], ["support", COL.sup], ["BUY / entry ▲", COL.buy],
+   ["RESISTANCE (thick) · other resistance (thin)", COL.res],
+   ["SUPPORT (thick) · other support (thin)", COL.sup], ["BUY / entry ▲", COL.buy],
    ["SELL / exit ▼", COL.sell], ["Stop (dashed)", COL.stop], ["Target (dashed)", COL.target],
    ["vol avg, 20 prior bars", alpha(COL.volAvg, 0.7)], ["● formation", COL.pattern],
    ["holding period", alpha(COL.up, 0.35)]].forEach(function (p) {
@@ -602,7 +660,10 @@ function init() {
     "Charts by TradingView Lightweight Charts. Drag to pan · drag the price or time axis to "
     + "stretch it (then dragging the chart pans vertically too) · double-click an axis to reset it · "
     + "ctrl+scroll or trackpad pinch to zoom around the pointer · click a chart then +/− zoom, "
-    + "0 reset, ←/→ pan, ↑/↓ price. A dotted level marked ? is a single unconfirmed pivot; solid "
+    + "0 reset, ←/→ pan, ↑/↓ price. The THICK support and resistance are the two levels the "
+    + "engine bracketed the trade with at the entry bar (the ones its stop and target were "
+    + "read against); the 'Levels' selector shows or hides the labels of every other level. "
+    + "A dotted level marked ? is a single unconfirmed pivot; solid "
     + "ones are structural. A faint formation dot sits on a candle under " + WEAK + "× the recent "
     + "average range — the label is right, the candle is not worth acting on.");
   var syms = {}, exits = {};
@@ -610,6 +671,14 @@ function init() {
   Object.keys(syms).sort().forEach(function (s) { h("option", { value: s }, document.getElementById("f-sym"), s); });
   Object.keys(exits).sort().forEach(function (s) { h("option", { value: s }, document.getElementById("f-exit"), nice(s)); });
   ["f-sym", "f-exit", "f-out"].forEach(function (id) { document.getElementById(id).onchange = render; });
+  var lvSel = document.getElementById("f-lv");
+  if (lvSel) {
+    lvSel.value = levelMode;
+    lvSel.onchange = function () {
+      levelMode = this.value;
+      cards.forEach(function (c) { if (c.chart) drawLines(c); });
+    };
+  }
   var tfSel = document.getElementById("f-tf");
   tfSel.value = tf;
   tfSel.onchange = function () { tf = this.value; render(); };

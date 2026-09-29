@@ -28,7 +28,7 @@ import pandas as pd
 
 from src.news_trader.trailing_sl import calc_costs
 
-from . import exits, location, quality
+from . import exits, location, quality, us_risk
 from .candles import PATTERN_RULES_VERSION, candle_tags, completed_pattern_matches
 from .indicators import (
     atr,
@@ -42,12 +42,12 @@ from .indicators import (
 from .levels import (
     NEAR_PCT,
     Level,
+    buffered_target,
     derive_levels,
     nearest_structural_resistance,
     resistance_target,
     session_resistance_levels,
 )
-from . import us_risk
 from .market import NSE, MarketProfile
 from .pullback import pullback_ordinal
 from .risk import DEFAULT_RR, TradePlan, plan_trade
@@ -283,6 +283,13 @@ class EngineConfig:
     # every earlier run exactly; `warrior_strict` turns both on.
     session_level_sessions: int = 0
     target_buffer_pct: float = 0.0
+    # BT52 (research/hypotheses/2026-09-27-resistance-checkpoint-stop.md).
+    # Instead of SELLING at the resistance-capped target, keep the 2R target
+    # and treat the capped price as a checkpoint: once a bar's high reaches it,
+    # the stop is lifted to `checkpoint_stop_buffer_pct` under it from the NEXT
+    # bar. False = the BT50 cap, which every earlier run and live use.
+    resistance_checkpoint_stop: bool = False
+    checkpoint_stop_buffer_pct: float = 0.15
 
     # ── the Warrior transcript's stated entry checklist (all default OFF) ────
     # Each maps to one line of the guide and each REFUSES trades, so turning any
@@ -448,6 +455,12 @@ class EngineConfig:
             # would be silently ignored.
             raise ValueError("session levels and the target buffer need "
                              "use_structural_exit_levels")
+        if self.resistance_checkpoint_stop and not self.use_structural_exit_levels:
+            # The checkpoint IS the structural target cap, moved from a sell
+            # order to a stop lift; with no cap there is nothing to move.
+            raise ValueError("resistance_checkpoint_stop needs use_structural_exit_levels")
+        if not 0.0 <= self.checkpoint_stop_buffer_pct < 5.0:
+            raise ValueError("checkpoint_stop_buffer_pct must be in [0, 5)")
         if self.use_structural_exit_levels and self.allow_false_break_reentry:
             raise ValueError(
                 "use_structural_exit_levels replaces false-break exits and cannot "
@@ -607,6 +620,13 @@ class Position:
     add_qty: int = 0
     add_entry: float = 0.0
     add_time: pd.Timestamp | None = None
+    # BT52 checkpoint: the price the BT50 cap would have sold at, and the stop
+    # it lifts to once reached. Armed on the bar whose high reaches it, applied
+    # on the next one (a bar may not both justify a stop and fill it).
+    checkpoint: float | None = None
+    checkpoint_stop: float | None = None
+    checkpoint_armed: bool = False
+    checkpoint_applied: bool = False
 
 
 @dataclass
@@ -623,6 +643,8 @@ class ClosedTrade:
     net_inr: float
     target: float = 0.0
     target_source: str = "fixed_2r"
+    checkpoint: float | None = None
+    checkpoint_hit: bool = False
     structural_support: float | None = None
     structural_support_kind: str = ""
     structural_resistance: float | None = None
@@ -765,6 +787,7 @@ def _exit(state: DayState, when: pd.Timestamp, px: float, reason: str, cfg: Engi
         cand=pos.cand, entry_time=pos.entry_time, entry=entry, exit_time=when, exit=px,
         exit_reason=reason, qty=qty, gross_inr=gross, costs_inr=costs, net_inr=gross - costs,
         target=pos.plan.target, target_source=pos.target_source,
+        checkpoint=pos.checkpoint, checkpoint_hit=pos.checkpoint_armed,
         structural_support=(pos.exit_state.structural_support.price
                             if pos.exit_state.structural_support is not None else None),
         structural_support_kind=(pos.exit_state.structural_support.kind
@@ -1601,6 +1624,8 @@ def _open_position(state: DayState, cand: Candidate, when: pd.Timestamp, fill: f
         add_shelves=cfg.volume_shelf_levels,
     )
     target_source = "fixed_2r" if ec.has_target else "disabled"
+    checkpoint: float | None = None
+    checkpoint_stop: float | None = None
     if cfg.use_structural_exit_levels:
         # Today's levels plus earlier sessions' highs. With no session levels
         # and a zero buffer this picks exactly the level initial_state froze.
@@ -1609,11 +1634,16 @@ def _open_position(state: DayState, cand: Candidate, when: pd.Timestamp, fill: f
         exit_state.structural_resistance = pick[0] if pick is not None else None
         if ec.has_target and pick is not None and pick[1] < plan.target:
             level, capped = pick
-            plan = replace(plan, target=capped, reward_inr=(capped - fill) * plan.qty)
-            target_source = f"structural_resistance:{level.kind}"
+            if cfg.resistance_checkpoint_stop:
+                checkpoint = capped
+                checkpoint_stop = buffered_target(capped, cfg.checkpoint_stop_buffer_pct)
+                target_source = f"fixed_2r+checkpoint:{level.kind}"
+            else:
+                plan = replace(plan, target=capped, reward_inr=(capped - fill) * plan.qty)
+                target_source = f"structural_resistance:{level.kind}"
     state.position = Position(
         cand=cand, entry_time=when, plan=plan, highest=fill, exit_state=exit_state,
-        target_source=target_source,
+        target_source=target_source, checkpoint=checkpoint, checkpoint_stop=checkpoint_stop,
     )
     state.traded_today = True
 
@@ -1840,8 +1870,15 @@ def step(
         # A breakeven lift armed by an EARLIER bar binds here, before this
         # bar's low is tested — same ordering the cost stop above uses.
         exits.apply_pending_breakeven(es, ec)
+        # BT52: a checkpoint reached by an EARLIER bar lifts the stop here.
+        if pos.checkpoint_armed and not pos.checkpoint_applied:
+            assert pos.checkpoint_stop is not None
+            es.trail = max(es.trail, pos.checkpoint_stop)
+            pos.checkpoint_applied = True
         pos.highest = max(pos.highest, float(bar["high"]))
         exits.update_high(es, float(bar["high"]), ec)
+        if pos.checkpoint is not None and float(bar["high"]) >= pos.checkpoint:
+            pos.checkpoint_armed = True
         if (cfg.cost_aware_breakeven and not pos.cost_stop_applied
                 and es.r_multiple(es.highest) >= 1.0):
             pos.cost_stop_armed = True
@@ -1858,7 +1895,12 @@ def step(
         # stops and the fixed target fill intraday, so they are checked every minute
         sig = exits.check_stop(es, bar) or exits.check_target(bar, pos.plan.target, ec)
         if sig is not None:
-            _exit(state, now, sig.price, sig.reason, cfg)
+            exit_reason = sig.reason
+            if (exit_reason == "trail_stop" and pos.checkpoint_applied
+                    and pos.checkpoint_stop is not None
+                    and abs(es.stop - pos.checkpoint_stop) < 1e-9):
+                exit_reason = "checkpoint_stop"
+            _exit(state, now, sig.price, exit_reason, cfg)
             return
 
         # Pattern failure is assessed only after executable stop/target orders.

@@ -195,6 +195,11 @@ def _strategy_config(settings: Settings) -> EngineConfig:
             # too. research/hypotheses/2026-09-25-session-resistance-target.md
             session_level_sessions=SESSION_LEVEL_SESSIONS,
             target_buffer_pct=TARGET_BUFFER_PCT,
+            # Operator decision 2026-09-29: keep the 2R target and turn the cap
+            # above into a stop-lift checkpoint instead of a sell. BT52 was a
+            # 3/5 KILL (+₹9.9/trade, p=0.08, positive 4/4 years) and shipped
+            # ON anyway. research/hypotheses/2026-09-27-resistance-checkpoint-stop.md
+            resistance_checkpoint_stop=True,
         )
     raise ValueError(
         f"unknown MT_STRATEGY {settings.mt_strategy!r}; expected "

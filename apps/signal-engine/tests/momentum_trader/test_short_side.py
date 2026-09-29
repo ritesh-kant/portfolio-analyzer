@@ -191,6 +191,8 @@ def test_exit_levels_sit_on_the_correct_side_of_a_short() -> None:
     r = Reflection(PREV_CLOSE)
     assert st.structural_resistance == pytest.approx(r.opt(lt.structural_support))
     assert st.structural_support == pytest.approx(r.opt(lt.structural_resistance))
+    assert st.checkpoint == (None if lt.checkpoint is None else pytest.approx(r.opt(lt.checkpoint)))
+    assert st.checkpoint_hit == lt.checkpoint_hit
     if st.structural_resistance is not None:
         assert st.structural_resistance > st.entry
     if st.structural_support is not None:
@@ -198,6 +200,8 @@ def test_exit_levels_sit_on_the_correct_side_of_a_short() -> None:
     assert short_side._flip_kind("pivot_low") == "pivot_high"
     assert short_side._flip_target_source("structural_resistance:pivot_high") == \
         "structural_support:pivot_low"
+    assert short_side._flip_target_source("fixed_2r+checkpoint:session_high") == \
+        "fixed_2r+checkpoint:session_low"
     assert short_side._REASON_FLIP["support_break"] == "resistance_break"
 
 

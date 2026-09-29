@@ -104,6 +104,45 @@ def scan_patterns(bars: pd.DataFrame, timeframe: str) -> list[dict]:
     return list(seen.values())
 
 
+def _num(x: object) -> bool:
+    try:
+        return x is not None and pd.notna(x) and float(x) > 0  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+
+
+def _target_label(row: pd.Series) -> str:
+    src = str(row.get("target_source") or "")
+    if not _num(row.get("target")) or src in ("", "nan", "fixed_2r"):
+        return "Target 2R"
+    return "Target (capped under resistance)"
+
+
+def _key_level(row: pd.Series, side: str, entry: float, lv: list[dict]) -> dict | None:
+    """The support or resistance the engine bracketed the trade with.
+
+    bt17 writes `structural_support` / `structural_resistance` as the engine
+    resolved them AT THE ENTRY BAR — the levels its stop and target were read
+    against — so they are drawn as the trade's key levels. Older CSVs without
+    the columns fall back to the nearest structural level on that side of the
+    entry among the as-of-entry levels. The key level is added to `lv` when the
+    as-of-entry set does not already hold it, so the level table lists it.
+    """
+    price, kind = row.get(f"structural_{side}"), row.get(f"structural_{side}_kind")
+    if _num(price):
+        key = {"price": round(float(price), 2), "kind": str(kind) if pd.notna(kind) else side}
+    else:
+        pool = [x for x in lv if x["structural"] and x["side"] == side]
+        if not pool:
+            return None
+        near = min(pool, key=lambda x: abs(x["price"] - entry))
+        key = {"price": near["price"], "kind": near["kind"]}
+    if not any(abs(x["price"] - key["price"]) < 0.005 and x["side"] == side for x in lv):
+        lv.append({"price": key["price"], "kind": key["kind"], "touches": 0, "strength": 0.0,
+                   "structural": True, "side": side})
+    return key
+
+
 def build_day(row: pd.Series) -> dict | None:
     """One trade → everything its chart needs.
 
@@ -151,6 +190,9 @@ def build_day(row: pd.Series) -> dict | None:
                    "strength": round(float(x.strength), 2), "structural": is_structural(x),
                    "side": "resistance" if x.price > entry else "support"})
 
+    key_support = _key_level(row, "support", entry, lv)
+    key_resistance = _key_level(row, "resistance", entry, lv)
+
     gross_pct = float(row["gross_pct"])
     qty = int(row["qty"])
     notional = max(entry * qty, 1e-9)
@@ -162,8 +204,12 @@ def build_day(row: pd.Series) -> dict | None:
         "symbol": str(row["symbol"]), "date": str(day.date()), "setup": str(row["setup"]),
         "entry_time": entry_at.strftime("%H:%M"), "exit_time": exit_at.strftime("%H:%M"),
         "trigger": float(row["trigger"]), "entry": entry, "stop": stop,
-        # the engine writes no target in trend modes; show where 2R would have been
-        "target": round(entry + DEFAULT_RR * (entry - stop), 2),
+        # the engine writes no target in trend modes; show where 2R would have
+        # been. Arms with a fixed target (warrior_strict) write the one they used.
+        "target": (round(float(row["target"]), 2) if _num(row.get("target"))
+                   else round(entry + DEFAULT_RR * (entry - stop), 2)),
+        "target_label": _target_label(row),
+        "key_support": key_support, "key_resistance": key_resistance,
         "exit": float(row["exit"]), "exit_reason": str(row["exit_reason"]),
         "qty": qty, "day_chg_pct": round(float(row["day_chg_pct"]), 2),
         "rvol": round(float(row["rvol"]), 2), "rvol_5m": rvol_5m,
@@ -246,6 +292,10 @@ def build_html(title: str, sub: str, data: dict) -> str:
         <label>Timeframe <select id="f-tf">
           <option value="5m">5-minute (what the engine decides on)</option>
           <option value="1m">1-minute</option>
+        </select></label>
+        <label>Levels <select id="f-lv">
+          <option value="key">key support / resistance only</option>
+          <option value="all">every level, labelled</option>
         </select></label>
       </div>
       <div class="legend" id="legend"></div>
