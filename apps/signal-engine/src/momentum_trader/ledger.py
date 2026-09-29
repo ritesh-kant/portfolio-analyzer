@@ -159,6 +159,10 @@ class PaperLedger:
             **_cand_doc(p.cand), "status": "open", "entry_time": p.entry_time.to_pydatetime(),
             "strategy": strategy_label(self._strategy, p.cand.side),
             "entry_price": p.plan.entry, "stop": p.plan.stop, "target": p.plan.target,
+            "target_source": p.target_source,
+            # BT52: where the old resistance cap would have sold, and the stop
+            # it lifts to once reached. None when 2R is already below the cap.
+            "checkpoint": p.checkpoint, "checkpoint_stop": p.checkpoint_stop,
             "qty": p.plan.qty, "risk_inr": p.plan.risk_inr, "notional_inr": p.plan.notional_inr,
             "paper": True, "float_filter_applied": self._ff,
             # The two levels the exit rules hold for the life of the trade, in
@@ -192,6 +196,7 @@ class PaperLedger:
                     {"$set": {
                         "status": "closed", "exit_time": t.exit_time.to_pydatetime(),
                         "exit_price": t.exit, "exit_reason": t.exit_reason,
+                        "checkpoint": t.checkpoint, "checkpoint_hit": t.checkpoint_hit,
                         "gross_inr": t.gross_inr, "costs_inr": t.costs_inr, "net_inr": t.net_inr,
                         # Same entry-time levels as `opened` wrote; repeated
                         # here because a scanner restart can close a position it

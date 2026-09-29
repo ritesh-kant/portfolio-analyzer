@@ -80,6 +80,8 @@ def test_an_open_position_records_the_levels_its_exit_rules_hold() -> None:
             entry=trade.entry, hard_stop=trade.cand.setup.stop,
             bars_tf=pd.DataFrame(), with_levels=False,
         ),
+        "target_source": "fixed_2r+checkpoint:pivot_high",
+        "checkpoint": 390.95, "checkpoint_stop": 390.35,
     })()
     position.exit_state.structural_resistance = Level(391.55, "pivot_high", 2, 0.0, 2.0)
     position.exit_state.structural_support = Level(378.25, "prev_day", 1, 0.0, 1.5)
@@ -91,6 +93,7 @@ def test_an_open_position_records_the_levels_its_exit_rules_hold() -> None:
     assert doc["structural_resistance_kind"] == "pivot_high"
     assert doc["structural_support"] == 378.25
     assert doc["structural_support_kind"] == "prev_day"
+    assert doc["checkpoint"] == 390.95 and doc["checkpoint_stop"] == 390.35
     # and the location metrics still travel with their own anchor
     assert doc["level_anchor_px"] == trade.cand.setup.trigger
 

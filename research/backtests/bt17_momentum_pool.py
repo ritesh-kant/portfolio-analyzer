@@ -239,6 +239,7 @@ def _trade_row(t: ClosedTrade) -> dict:
         "trigger_time": c.time.strftime("%H:%M"), "entry_time": t.entry_time.strftime("%H:%M"),
         "trigger": c.setup.trigger, "entry": t.entry, "stop": c.setup.stop,
         "target": t.target, "target_source": t.target_source,
+        "checkpoint": t.checkpoint, "checkpoint_hit": int(t.checkpoint_hit),
         "structural_support": t.structural_support,
         "structural_support_kind": t.structural_support_kind,
         "structural_resistance": t.structural_resistance,
@@ -512,6 +513,16 @@ def main() -> int:
     ap.add_argument("--target-buffer-pct", type=float, default=None,
                     help="capped target sits this %% under its level (BT50). "
                          f"Default {TARGET_BUFFER_PCT} with --warrior-strict, else 0")
+    ap.add_argument("--checkpoint-stop", action="store_true",
+                    help="BT52: keep the 2R target uncapped; the resistance-capped "
+                         "price becomes a checkpoint that lifts the stop 0.15%% under "
+                         "it from the bar after it is reached. Default ON with "
+                         "--warrior-strict since 2026-09-29 "
+                         "(research/hypotheses/2026-09-27-resistance-checkpoint-stop.md)")
+    ap.add_argument("--no-checkpoint-stop", action="store_true",
+                    help="with --warrior-strict: SELL at the resistance-capped target "
+                         "(the BT50 rule, live until 2026-09-29) instead of the "
+                         "checkpoint stop")
     ap.add_argument("--side", default="long", choices=list(SIDES),
                     help="long = buy gainers (every run before 2026-09-26); short = sell "
                          "losers short on the reflected tape (short_side.py)")
@@ -576,13 +587,18 @@ def main() -> int:
                       vol_baseline_min_bars=VOL_BASELINE_MIN_BARS,
                       use_fixed_target=True,
                       session_level_sessions=SESSION_LEVEL_SESSIONS,
-                      target_buffer_pct=TARGET_BUFFER_PCT)
+                      target_buffer_pct=TARGET_BUFFER_PCT,
+                      resistance_checkpoint_stop=True)
     # Explicit flags win over the warrior_strict mirror, so `0` replays the
     # pre-BT50 control.
     if a.session_levels is not None:
         cfg_kw["session_level_sessions"] = a.session_levels
     if a.target_buffer_pct is not None:
         cfg_kw["target_buffer_pct"] = a.target_buffer_pct
+    if a.checkpoint_stop:
+        cfg_kw["resistance_checkpoint_stop"] = True
+    if a.no_checkpoint_stop:
+        cfg_kw["resistance_checkpoint_stop"] = False
     if a.live_fill:
         if "--fill-mode" not in sys.argv:
             a.fill_mode = "resting_sized"
