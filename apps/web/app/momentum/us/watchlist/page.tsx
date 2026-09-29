@@ -1,6 +1,8 @@
 'use client';
 
-import { US_LOCALE } from '../../../../components/momentum-trade-chart';
+import { useMemo, useState } from 'react';
+
+import { US_LOCALE, US_LOCALE_IST } from '../../../../components/momentum-trade-chart';
 import { MomentumWatchlist, type WatchlistMarket } from '../../../../components/momentum-watchlist';
 import { fetchUSWatchlistBars, fetchUSWatchlistDays } from '../../../../lib/us-momentum-api';
 
@@ -10,7 +12,7 @@ const US_WATCHLIST: WatchlistMarket = {
   open: '09:30',
   title: 'US momentum watchlist',
   intro:
-    'Every name that passed the US screen, day by day, with the 1-minute bars the session traded on and a 5-minute view. Times are New York time; money is in dollars.',
+    'Every name that passed the US screen, day by day, with the 1-minute bars the session traded on and a 5-minute view. Times are New York time (or India time with the toggle); money is in dollars.',
   links: [
     { href: '/momentum/us', label: '← US momentum' },
     { href: '/momentum/watchlist', label: 'NSE watchlist →' },
@@ -27,5 +29,20 @@ const US_WATCHLIST: WatchlistMarket = {
 };
 
 export default function USMomentumWatchlistPage() {
-  return <MomentumWatchlist market={US_WATCHLIST} />;
+  const [ist, setIst] = useState(false);
+  // 09:30 ET is 19:00 IST while US daylight saving is in effect (until early November), 20:00 after.
+  const market = useMemo<WatchlistMarket>(
+    () => (ist ? { ...US_WATCHLIST, locale: US_LOCALE_IST, open: '19:00' } : US_WATCHLIST),
+    [ist],
+  );
+  return (
+    <>
+      <div className="mx-auto flex max-w-6xl justify-end px-4 pt-4">
+        <button type="button" onClick={() => setIst((v) => !v)} className="metric-chip px-3 py-1 text-xs">
+          Times in {ist ? 'IST' : 'ET'} · show {ist ? 'ET' : 'IST'}
+        </button>
+      </div>
+      <MomentumWatchlist market={market} />
+    </>
+  );
 }
