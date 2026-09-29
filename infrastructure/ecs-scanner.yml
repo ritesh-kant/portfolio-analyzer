@@ -339,6 +339,10 @@ Resources:
               ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/TELEGRAM_BOT_TOKEN
             - Name: TELEGRAM_CHAT_ID
               ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/TELEGRAM_CHAT_ID
+            # EDGAR refuses requests without a contact user-agent; used only
+            # for the review-only news_context annotation on US positions.
+            - Name: SEC_USER_AGENT
+              ValueFrom: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio-analyzer/${Stage}/SEC_USER_AGENT
           LogConfiguration:
             LogDriver: awslogs
             Options:

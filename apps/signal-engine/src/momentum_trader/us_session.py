@@ -58,6 +58,7 @@ import argparse
 import dataclasses
 import logging
 import os
+import threading
 import time as _time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -96,6 +97,7 @@ from .market import US
 from .short_side import ShortBook, ShortEvents, ssr_carried_from
 from .us_ledger import USPaperLedger
 from .us_scanner import Feed, USScanner, session_times
+from .us_news_context import recent_news
 from .us_screener import USScreenRow
 from .us_universe import USUniverseConfig
 
@@ -565,6 +567,14 @@ class USSession:
         return swept
 
     # ── output ──────────────────────────────────────────────────────────────
+    def _attach_news_context(self, doc_id: str, symbol: str, at: datetime) -> None:
+        """Best-effort EDGAR annotation for review - off the decision path,
+        never allowed to raise into the session loop."""
+        try:
+            self.ledger.set_news_context(doc_id, recent_news(symbol, at))
+        except Exception:  # noqa: BLE001
+            logger.exception("news_context attach failed for %s", symbol)
+
     def _record(self, entries: list[Position], closed: list[ClosedTrade],
                 report: CycleReport, short_events: ShortEvents | None = None) -> None:
         for t in sorted(closed, key=lambda x: x.exit_time):
@@ -617,8 +627,14 @@ class USSession:
         for p in entries:
             sym = p.cand.symbol
             row = self.short_rows.get(sym) if p.cand.side == "short" else self.rows.get(sym)
-            self.ledger.opened(p, row, self.feed.exchange_of.get(sym, ""),
-                               self.feed.quote_source.get(sym, ""))
+            doc_id = self.ledger.opened(p, row, self.feed.exchange_of.get(sym, ""),
+                                        self.feed.quote_source.get(sym, ""))
+            if doc_id is not None:
+                threading.Thread(
+                    target=self._attach_news_context,
+                    args=(doc_id, sym, p.entry_time.to_pydatetime()),
+                    daemon=True, name=f"us-news-context-{sym}",
+                ).start()
             report.opened.append(sym)
             self.notify(entry_message(p, fixed_exit=self.cfg.exit_mode == MODE_FIXED, cur="$"))
         for t in closed:
