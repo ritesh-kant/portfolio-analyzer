@@ -1,4 +1,4 @@
-import type { EntryEvidence, MomentumBar, PatternMatch, WatchlistSession } from './momentum-api';
+import type { EntryEvidence, MomentumBar, NewsContextItem, PatternMatch, WatchlistSession } from './momentum-api';
 
 const BASE = process.env.NEXT_PUBLIC_PORTFOLIO_API_BASE ?? 'http://localhost:3001';
 
@@ -60,6 +60,8 @@ export interface USMomentumTrade {
   /** Modelled round-trip cost over the dollars at risk. See us_risk.py — this
    * is what sets the win rate the trade needs to break even. */
   cost_over_risk?: number;
+  /** SEC EDGAR filings before entry - review-only, never read by the engine. */
+  news_context?: NewsContextItem[];
   day_chg_pct?: number;
   rvol?: number;
   float_shares?: number | null;

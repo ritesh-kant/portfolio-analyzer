@@ -136,6 +136,8 @@ export interface NewsContextItem {
   source: string;
   publisher?: string;
   tier?: string;
+  /** US EDGAR items only: 'offering' = new shares (dilution). */
+  kind?: 'news' | 'offering' | 'filing';
   url?: string | null;
   /** Filing summary or feed description, headline stripped. */
   text?: string | null;

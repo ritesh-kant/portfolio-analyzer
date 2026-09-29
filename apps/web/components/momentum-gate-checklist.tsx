@@ -65,7 +65,7 @@ const screen: Record<Market, Stage> = {
       { label: 'Price $1–20', detail: 'Criterion 4.' },
       { label: 'Up ≥ 10% on the day', detail: 'Criterion 2.' },
       { label: 'Relative volume ≥ 5× (full-day average)', detail: 'Criterion 1.' },
-      { label: 'News catalyst — not required', detail: 'Criterion 3 is OFF: no US news feed is wired in.' },
+      { label: 'News catalyst — not required', detail: 'Criterion 3 is OFF: news never gates an entry. SEC filings are recorded on each trade for review only.' },
       { label: 'Real-time quote (not "delayed")', detail: 'Yahoo quotes labelled delayed are dropped.' },
     ],
   },

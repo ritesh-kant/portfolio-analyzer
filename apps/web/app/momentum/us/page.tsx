@@ -266,6 +266,14 @@ function TradeRow({ trade, active, onClick }: { trade: USMomentumTrade; active: 
             <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink/60">
               {trade.setup.replaceAll('_', ' ')}
             </span>
+            {trade.news_context && trade.news_context.length > 0 && (
+              <span
+                title={`${trade.news_context.length} SEC filing(s) before entry`}
+                className="shrink-0 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-700"
+              >
+                📰 {trade.news_context.length}
+              </span>
+            )}
             {trade.screen_complete === false && (
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
                 partial screen
@@ -285,6 +293,48 @@ function TradeRow({ trade, active, onClick }: { trade: USMomentumTrade; active: 
         </div>
       </div>
     </button>
+  );
+}
+
+/** SEC EDGAR filings from the previous trading day to entry. Descriptive only:
+ * gathered off the decision path and never read by the scanner. Absent on
+ * trades opened before this was wired up. */
+function FilingsContext({ trade }: { trade: USMomentumTrade }) {
+  const items = trade.news_context;
+  if (!items || items.length === 0) return null;
+  const filedAt = (value: string) =>
+    new Date(value).toLocaleString('en-US', {
+      timeZone: ET, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+  return (
+    <section className="rounded-xl border border-black/10 bg-panel p-4 shadow-card">
+      <h3 className="font-display text-lg">Filings before entry</h3>
+      <p className="text-xs text-ink/55">
+        {trade.symbol}&apos;s own SEC EDGAR filings from the previous trading day to entry (Eastern time) — for context
+        only, not a signal input.
+      </p>
+      <ul className="mt-3 space-y-2">
+        {items.map((item, i) => (
+          <li key={`${item.published_at}-${i}`} className="rounded-lg bg-black/[0.03] p-2.5 text-sm">
+            {item.url ? (
+              <a href={item.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+                {item.headline}
+              </a>
+            ) : (
+              <p className="font-medium">{item.headline}</p>
+            )}
+            <p className="mt-0.5 text-xs text-ink/55">
+              {filedAt(item.published_at)} · {item.publisher ?? item.source}
+              {item.kind === 'offering' && (
+                <span className="ml-1.5 rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
+                  new shares
+                </span>
+              )}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -367,6 +417,8 @@ function TradeDetail({ trade, onBack }: { trade: USMomentumTrade; onBack: () => 
           </ul>
         </section>
       )}
+
+      <FilingsContext trade={trade} />
 
       {/* The number that decides whether a US setup is worth taking at all. */}
       {costOverRisk !== undefined && (
