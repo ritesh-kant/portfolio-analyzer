@@ -104,6 +104,9 @@ export const US_LOCALE: ChartLocale = {
   timeZone: 'America/New_York',
 };
 
+/** US prices in dollars, clock in India time — for reading a US session from India. */
+export const US_LOCALE_IST: ChartLocale = { ...US_LOCALE, timeZone: 'Asia/Kolkata' };
+
 const formatter = (locale: ChartLocale) => (value: number) =>
   `${locale.symbol}${value.toLocaleString(locale.numberLocale, { maximumFractionDigits: 2 })}`;
 
