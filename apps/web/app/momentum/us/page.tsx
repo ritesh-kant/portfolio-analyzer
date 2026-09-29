@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { SideBadge } from '../../../components/momentum-side-badge';
-import { MomentumTradeChart, US_LOCALE } from '../../../components/momentum-trade-chart';
+import { MomentumTradeChart, US_LOCALE, US_LOCALE_IST } from '../../../components/momentum-trade-chart';
 import type { MomentumTrade } from '../../../lib/momentum-api';
 import { orderVerbs, sideOf } from '../../../lib/momentum-side';
 import {
@@ -289,6 +289,8 @@ function TradeRow({ trade, active, onClick }: { trade: USMomentumTrade; active: 
 }
 
 function TradeDetail({ trade, onBack }: { trade: USMomentumTrade; onBack: () => void }) {
+  const [chartInIST, setChartInIST] = useState(false);
+  const chartLocale = chartInIST ? US_LOCALE_IST : US_LOCALE;
   const costOverRisk = trade.cost_over_risk;
   const short = sideOf(trade) === 'short';
   return (
@@ -386,16 +388,27 @@ function TradeDetail({ trade, onBack }: { trade: USMomentumTrade; onBack: () => 
 
       {trade.chart?.bars?.length ? (
         <div className="space-y-3">
-          <div>
-            <h3 className="font-display text-lg">{trade.symbol} · 1-minute execution chart</h3>
-            <p className="text-xs text-ink/55">Eastern time. Precise candles and fills at the execution timeframe.</p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="font-display text-lg">{trade.symbol} · 1-minute execution chart</h3>
+              <p className="text-xs text-ink/55">
+                {chartInIST ? 'India time (IST).' : 'Eastern time.'} Precise candles and fills at the execution timeframe.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setChartInIST((v) => !v)}
+              className="metric-chip shrink-0 px-3 py-1 text-xs"
+            >
+              Show {chartInIST ? 'ET' : 'IST'}
+            </button>
           </div>
-          <MomentumTradeChart trade={trade as unknown as MomentumTrade} interval="1m" locale={US_LOCALE} />
+          <MomentumTradeChart trade={trade as unknown as MomentumTrade} interval="1m" locale={chartLocale} />
           <div>
             <h3 className="font-display text-lg">{trade.symbol} · 5-minute decision chart</h3>
             <p className="text-xs text-ink/55">The scanner&apos;s EMA, VWAP, and MACD decision timeframe.</p>
           </div>
-          <MomentumTradeChart trade={trade as unknown as MomentumTrade} interval="5m" locale={US_LOCALE} />
+          <MomentumTradeChart trade={trade as unknown as MomentumTrade} interval="5m" locale={chartLocale} />
         </div>
       ) : (
         <p className="metric-chip py-6 text-center text-sm text-ink/55">
