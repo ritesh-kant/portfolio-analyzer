@@ -97,6 +97,14 @@ class USPaperLedger:
         result = self._write(self._p.positions_collection, "insert_one", doc)
         return str(result.inserted_id) if result is not None else None
 
+    def set_news_context(self, doc_id: str, items: list[dict[str, Any]]) -> None:
+        """Review-only annotation written after the entry; never read back by
+        the engine (see us_news_context.py)."""
+        from bson import ObjectId
+
+        self._write(self._p.positions_collection, "update_one",
+                    {"_id": ObjectId(doc_id)}, {"$set": {"news_context": items}})
+
     def closed(
         self,
         t: ClosedTrade,
