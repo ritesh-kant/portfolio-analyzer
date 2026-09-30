@@ -166,7 +166,7 @@ def test_pullback_ordinal_gate_is_inert_when_unset():
 
 def test_peak_hours_tightens_the_cutoff_and_never_extends_it():
     assert EngineConfig().entry_deadline == time(14, 30)
-    assert EngineConfig(peak_hours_only=True).entry_deadline == time(11, 0)
+    assert EngineConfig(peak_hours_only=True).entry_deadline == time(14, 0)
     # A peak_hours_end LATER than the standing cutoff must not buy extra hours.
     late = EngineConfig(peak_hours_only=True, peak_hours_end=time(15, 0))
     assert late.entry_deadline == time(14, 30)

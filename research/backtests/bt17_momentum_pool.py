@@ -40,6 +40,7 @@ import multiprocessing as mp
 import sys
 import time
 from datetime import date, timedelta
+from datetime import time as dt_time
 from pathlib import Path
 
 import numpy as np
@@ -523,6 +524,11 @@ def main() -> int:
                     help="with --warrior-strict: SELL at the resistance-capped target "
                          "(the BT50 rule, live until 2026-09-29) instead of the "
                          "checkpoint stop")
+    ap.add_argument("--peak-hours-end", default=None, metavar="HH:MM",
+                    help="with --warrior-strict: latest bar-start that may open a position "
+                         "(default 14:00 = live MT_PEAK_HOURS_END since 2026-09-30; 11:00 replays "
+                         "the rule before that date; 14:30 = the ordinary cutoff) "
+                         "(research/hypotheses/2026-09-30-peak-hours-cutoff.md)")
     ap.add_argument("--side", default="long", choices=list(SIDES),
                     help="long = buy gainers (every run before 2026-09-26); short = sell "
                          "losers short on the reflected tape (short_side.py)")
@@ -599,6 +605,9 @@ def main() -> int:
         cfg_kw["resistance_checkpoint_stop"] = True
     if a.no_checkpoint_stop:
         cfg_kw["resistance_checkpoint_stop"] = False
+    if a.peak_hours_end is not None:
+        hh, mm = a.peak_hours_end.split(":")
+        cfg_kw["peak_hours_end"] = dt_time(int(hh), int(mm))
     if a.live_fill:
         if "--fill-mode" not in sys.argv:
             a.fill_mode = "resting_sized"

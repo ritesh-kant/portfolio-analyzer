@@ -192,7 +192,9 @@ class Settings(BaseSettings):
     # after the US open and is mostly pre-market, which NSE does not have; this
     # is the first 105 minutes of the NSE session, its morning volume peak.
     # Chosen from session-volume shape, never from returns — hence configurable.
-    mt_peak_hours_end: str = "11:00"
+    # 14:00 since 2026-09-30 by operator decision, over BT53's KILL (see
+    # engine.PEAK_HOURS_END).
+    mt_peak_hours_end: str = "14:00"
     # warrior_strict's "MACD open" check: the fraction the 1-min histogram may
     # shrink vs the previous bar and still pass (must stay positive). 0 = the
     # frozen 2026-09-15 rule — kept at 0 by operator decision 2026-09-23 after

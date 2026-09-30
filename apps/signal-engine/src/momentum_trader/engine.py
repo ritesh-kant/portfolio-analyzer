@@ -145,7 +145,14 @@ ONE_MIN_EMA_SLOW = 20
 # closest honest analogue of "trade while volume, momentum and liquidity are
 # highest; avoid low-volume midday". It is configurable (`MT_PEAK_HOURS_END`)
 # precisely because it was chosen from session-volume shape, not from returns.
-PEAK_HOURS_END = time(11, 0)
+#
+# 2026-09-30, operator decision: moved to 14:00. BT53 replayed the cap removed
+# (research/hypotheses/2026-09-30-peak-hours-cutoff.md) and KILLED it 1/4 — the
+# 271 extra 11:00–14:30 entries lost ₹85/trade at real costs, about the same as
+# the morning ones (₹89) — and the operator chose the longer window anyway.
+# `bt17 --peak-hours-end 11:00` replays the old rule; gate reports on
+# warrior_strict must split at 2026-09-30.
+PEAK_HOURS_END = time(14, 0)
 # "Focus strictly on the first and second pullbacks of a trend; third and fourth
 # pullbacks carry significantly higher risk."
 GUIDE_PULLBACK_ORDINALS = (1, 2)
