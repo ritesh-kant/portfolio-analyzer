@@ -37,7 +37,7 @@ interface Stage {
   implied?: boolean;
 }
 
-const cutoff: Record<Market, string> = { NSE: '11:00', US: '15:10' };
+const cutoff: Record<Market, string> = { NSE: '14:00', US: '15:10' };
 
 const screen: Record<Market, Stage> = {
   NSE: {
@@ -246,7 +246,7 @@ const stages = (market: Market, side: Side = 'long'): Stage[] => [
       {
         label: `Before the ${cutoff[market]} entry cutoff`,
         detail: market === 'NSE'
-          ? 'warrior_strict only enters in the morning peak (09:15–11:00 IST). After that nothing is evaluated or logged.'
+          ? 'warrior_strict enters 09:15–14:00 IST (11:00 until 2026-09-30). After that nothing is evaluated or logged.'
           : 'Entries 09:30–15:10 ET (13:00 cutoff on early-close days).',
         reasons: ['entry_cutoff'],
       },
