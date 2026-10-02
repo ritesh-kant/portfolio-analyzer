@@ -28,7 +28,7 @@ import {
 import type { MomentumTrade } from '../lib/momentum-api';
 import { orderVerbs, sideOf } from '../lib/momentum-side';
 import { containingBarIndex, fiveMinuteBars } from '../lib/momentum-bars';
-import { type Point, points, sessionBars, tradeLevels } from '../lib/momentum-session';
+import { type Point, type TradeLevel, points, sessionBars, tradeLevels } from '../lib/momentum-session';
 
 // Mirrors candles.STRENGTH_WEAK_BELOW: a formation whose confirming candle
 // spans less than this multiple of the recent average range is drawn faint.
@@ -280,17 +280,18 @@ export function MomentumTradeChart({
   interval,
   locale = NSE_LOCALE,
   watchMarkers,
+  watchLevels,
 }: {
   trade: MomentumTrade;
   interval: '1m' | '5m';
   /** Defaults to NSE so every existing call site is unchanged. */
   locale?: ChartLocale;
   /**
-   * Watchlist mode. The name was only watched, never traded, so the fill,
-   * stop, target and level lines are meaningless and are not drawn; each
-   * marker is drawn as a vertical line on the candle it falls in instead.
+   * Watchlist mode. No fill, stop or target is drawn. Markers sit on their
+   * candles, and optional chart-only reference levels are drawn separately.
    */
   watchMarkers?: WatchMarker[];
+  watchLevels?: TradeLevel[];
 }) {
   const watching = watchMarkers !== undefined;
   const fmt = useMemo(() => formatter(locale), [locale]);
@@ -300,7 +301,7 @@ export function MomentumTradeChart({
     return interval === '5m' ? points(fiveMinuteBars(raw)) : points(raw);
   }, [interval, trade.chart?.bars, trade.entry_time]);
   const defaultZoom = interval === '5m' ? DEFAULT_ZOOM_5M : DEFAULT_ZOOM_1M;
-  const levels = useMemo(() => (watching ? [] : tradeLevels(trade)), [trade, watching]);
+  const levels = useMemo(() => (watching ? watchLevels ?? [] : tradeLevels(trade)), [trade, watching, watchLevels]);
 
   const [hover, setHover] = useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -374,8 +375,7 @@ export function MomentumTradeChart({
       borderVisible: false,
       priceLineVisible: false,
       priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
-      // Keep the fill, stop and exit on screen however far the view is panned
-      // — a trade chart whose stop is off the top edge hides the risk it took.
+      // Keep trade prices and watch reference levels on screen when panned.
       autoscaleInfoProvider: (original: () => AutoscaleInfo | null) => {
         const base = original();
         const extra = sceneRef.current.anchorPrices;
@@ -638,22 +638,23 @@ export function MomentumTradeChart({
     if (!watching) {
       addLine(trade.stop, TV.stop, LineStyle.Dashed, 'Stop');
       if (trade.target) addLine(trade.target, TV.target, LineStyle.Dashed, 'Target');
-      // Levels within 0.3% of the fill are noise against the BUY/SELL lines —
-      // merge them into the trade lines instead of stacking near-duplicate
-      // labels (SELL ₹456.1 vs Resistance ₹456.1 · pivot high).
-      for (const level of levels) {
-        if (Math.abs(level.price - trade.entry_price) / trade.entry_price <= 0.003) continue;
-        if (trade.exit_price != null && Math.abs(level.price - trade.exit_price) / trade.exit_price <= 0.003) continue;
-        const color = level.side === 'resistance' ? TV.resistance : TV.support;
-        addLine(level.price, color, level.faint ? LineStyle.Dashed : LineStyle.Solid, '', !level.faint);
-        labels.push({
-          key: level.label,
-          price: level.price,
-          text: `${level.label} ${fmt(level.price)}${level.kind ? ` · ${level.kind.replaceAll('_', ' ')}` : ''}`,
-          color,
-          opacity: level.faint ? 0.7 : 1,
-        });
-      }
+    }
+    // On a trade, levels within 0.3% of BUY/SELL are merged into those lines.
+    // A watched name has no fill, so its reference levels remain visible.
+    for (const level of levels) {
+      if (!watching && Math.abs(level.price - trade.entry_price) / trade.entry_price <= 0.003) continue;
+      if (!watching && trade.exit_price != null && Math.abs(level.price - trade.exit_price) / trade.exit_price <= 0.003) continue;
+      const color = level.side === 'resistance' ? TV.resistance : TV.support;
+      addLine(level.price, color, level.faint ? LineStyle.Dashed : LineStyle.Solid, '', !level.faint);
+      labels.push({
+        key: level.label,
+        price: level.price,
+        text: `${level.label} ${fmt(level.price)}${level.kind ? ` · ${level.kind.replaceAll('_', ' ')}` : ''}`,
+        color,
+        opacity: level.faint ? 0.7 : 1,
+      });
+    }
+    if (!watching) {
       // A short opens with a sale (down arrow above the bar) and closes with a
       // buy-back (up arrow below it) — the long's markers, swapped.
       const verbs = orderVerbs(trade);
@@ -700,7 +701,7 @@ export function MomentumTradeChart({
       return index >= 0 ? [{ time: times[index]!, label: marker.label, news: marker.kind === 'news' }] : [];
     });
     const anchorPrices = watching
-      ? []
+      ? levels.map((level) => level.price)
       : [trade.entry_price, trade.stop, ...(trade.exit_price != null ? [trade.exit_price] : [])].filter(Number.isFinite);
     sceneRef.current = { patterns, labels, watch, anchorPrices, data: allData };
     for (const overlay of handles.overlays) overlay.redraw();
@@ -823,7 +824,7 @@ export function MomentumTradeChart({
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-[#2a2e39] px-3 py-1.5 text-xs text-[#b2b5be]">
         <span className="text-amber-200">▱ completed pattern</span>
-        {levels.length > 0 && <><span style={{ color: TV.resistance }}>— resistance</span><span style={{ color: TV.support }}>— support</span><span className="text-slate-500">dashed = recorded only, gates nothing</span></>}
+        {levels.length > 0 && <><span style={{ color: TV.resistance }}>— resistance</span><span style={{ color: TV.support }}>— support</span><span className="text-slate-500">{watching ? 'dashed = reference at latest flag, not a trade level' : 'dashed = recorded only, gates nothing'}</span></>}
         {watching
           ? <><span className="text-amber-300">┆ 👀 flagged by scanner</span>{watchMarkers?.some((m) => m.kind === 'news') && <span className="text-sky-300">┆ 📰 headline published</span>}</>
           : <><span style={{ color: TV.stop }}>- - stop</span><span style={{ color: TV.target }}>- - target</span></>}

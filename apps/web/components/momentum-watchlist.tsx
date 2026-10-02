@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 import { orderVerbs } from '../lib/momentum-side';
+import { watchlistLevels } from '../lib/momentum-watchlist-levels';
 import { SideBadge } from './momentum-side-badge';
 import { GateChecklist } from './momentum-gate-checklist';
 import { type ChartLocale, MomentumTradeChart, NSE_LOCALE } from './momentum-trade-chart';
@@ -326,6 +327,9 @@ function NameDetail({
   }, [date, name.symbol, market]);
 
   const record = useMemo(() => (bars ? asChartRecord(date, name, bars) : null), [bars, date, name]);
+  const levels = useMemo(() => bars
+    ? watchlistLevels(bars, name.last_seen, market.code)
+    : [], [bars, name.last_seen, market.code]);
   const markers = useMemo(
     () => [
       ...name.flags.map((flag) => ({
@@ -450,14 +454,14 @@ function NameDetail({
               flagged the name; blue dotted lines mark company filings published during market hours.
             </p>
           </div>
-          <MomentumTradeChart trade={record} interval="1m" watchMarkers={markers} locale={market.locale} />
+          <MomentumTradeChart trade={record} interval="1m" watchMarkers={markers} watchLevels={levels} locale={market.locale} />
           <div>
             <h3 className="font-display text-lg">{name.symbol} · 5-minute chart</h3>
             <p className="text-xs text-ink/55">
               The same session resampled to the scanner&apos;s 5-minute decision timeframe.
             </p>
           </div>
-          <MomentumTradeChart trade={record} interval="5m" watchMarkers={markers} locale={market.locale} />
+          <MomentumTradeChart trade={record} interval="5m" watchMarkers={markers} watchLevels={levels} locale={market.locale} />
         </div>
       )}
 
