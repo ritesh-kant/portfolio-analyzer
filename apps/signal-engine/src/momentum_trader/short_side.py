@@ -200,6 +200,8 @@ def _real_evidence(doc: Any, r: Reflection) -> Any:
                 out[key] = r.px(float(val))
             elif key in _SIGNED_KEYS and num:
                 out[key] = -float(val)
+            elif key == "level_kind" and isinstance(val, str):
+                out[key] = _flip_kind(val)
             elif key == "close_position" and num:
                 out[key] = 1.0 - float(val)
             else:

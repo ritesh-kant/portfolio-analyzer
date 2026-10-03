@@ -1,0 +1,14 @@
+{
+  "removed_trades": 65,
+  "removed_winners": 20,
+  "removed_losers": 45,
+  "removed_net": -6963.578040000034,
+  "added_trades": 3,
+  "added_winners": 0,
+  "added_losers": 3,
+  "added_net": -455.0100000000015,
+  "common_trade_net_change": 0.0,
+  "total_improvement": 6508.568040000031,
+  "vwap_increment_with_resistance": -306.1999999999989,
+  "resistance_increment_with_vwap": 6982.828040000037
+}

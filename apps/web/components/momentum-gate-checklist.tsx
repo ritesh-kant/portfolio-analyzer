@@ -220,6 +220,11 @@ const stages = (market: Market, side: Side = 'long'): Stage[] => [
         detail: 'A fill more than 1% past the plan is cancelled.',
         reasons: ['chased'],
       },
+      {
+        label: byside(side, 'Room to resistance at the buy price ≥ 1R', 'Room to support at the short-sale price ≥ 1R'),
+        detail: 'Rechecked before filling using the actual price and stop distance; less room cancels the order.',
+        reasons: ['fill_resistance_headroom'],
+      },
       ...(side === 'short' && market === 'US'
         ? [{
             label: 'Not under the short-sale restriction (SEC Rule 201)',

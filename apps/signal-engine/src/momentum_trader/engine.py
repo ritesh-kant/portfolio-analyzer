@@ -272,7 +272,8 @@ class EngineConfig:
     require_rising_price_volume: bool = False
     # The resistance-state arm never enters with <1R of room to a structural
     # ceiling.  A later high-volume close through that ceiling creates a fresh
-    # confirmation instead.
+    # confirmation instead. Rechecked at fill using the actual entry price
+    # and its stop distance, so a later quote cannot spend that headroom.
     require_resistance_breakout: bool = False
     # Historical-replay-only retry. Production strategy selection never enables
     # it because structural support now replaces false-break exits.
@@ -1425,6 +1426,27 @@ def _headroom_from(bars_1m: pd.DataFrame, setup: Setup) -> float:
     return max(setup.trigger, float(bars_1m["close"].iloc[-1]))
 
 
+def _attention_resistance_levels(
+    bars_1m: pd.DataFrame,
+    prev_day: dict[str, float] | None,
+    v2: bool,
+    shelves: bool,
+) -> list[Level]:
+    """Structural-level inputs shared by the signal and fill checks.
+
+    Callers supply only completed bars available at their decision time.
+    """
+    shelf_atr = (float(atr(bars_1m).iloc[-1]) if shelves and len(bars_1m) >= 15 else None)
+    levels = derive_levels(bars_1m, prev_day, add_shelves=shelves, atr=shelf_atr)
+    if not v2:
+        # Keep the signal's multi-timeframe ceiling set at fill too. V2
+        # intentionally uses only one-minute levels.
+        bars_5m = resample_5m(bars_1m)
+        if not bars_5m.empty:
+            levels += derive_levels(bars_5m, prev_day, add_shelves=shelves, atr=None)
+    return levels
+
+
 def _resistance_aware_attention_confirmation(
     bars_1m: pd.DataFrame,
     min_volume_ratio: float,
@@ -1450,20 +1472,7 @@ def _resistance_aware_attention_confirmation(
     prior = bars_1m.iloc[:-1]
     if prior.empty:
         return setup, reason
-    shelf_atr = (float(atr(prior).iloc[-1]) if shelves and len(prior) >= 15 else None)
-    levels_before_confirmation = derive_levels(prior, prev_day,
-                                               add_shelves=shelves, atr=shelf_atr)
-    if not v2:
-        # A one-minute pivot can sit immediately below a still-unbroken
-        # five-minute ceiling.  Entry and charting must use the same
-        # multi-timeframe view, or a local breakout can arm a trade directly
-        # into the resistance shown to the operator.  Measured on 805
-        # confirmations this changes the binding level 7.3% of the time, so v2
-        # drops it and keeps the level set on one timeframe.
-        prior_5m = resample_5m(prior)
-        if not prior_5m.empty:
-            levels_before_confirmation += derive_levels(
-                prior_5m, prev_day, add_shelves=shelves, atr=None)
+    levels_before_confirmation = _attention_resistance_levels(prior, prev_day, v2, shelves)
 
     # What counts as a ceiling for the headroom test. A round number is a
     # property of the price grid, not of supply, yet it is the binding level in
@@ -1660,6 +1669,7 @@ def _reject_pending(
     when: pd.Timestamp,
     reason: str,
     observed_price: float | None = None,
+    evidence: dict[str, object] | None = None,
 ) -> None:
     pending = state.pending
     if pending is None:
@@ -1671,8 +1681,51 @@ def _reject_pending(
         setup=pending.cand.setup.name,
         trigger=pending.cand.setup.trigger,
         observed_price=observed_price,
+        evidence=dict(evidence or {}),
     ))
     state.pending = None
+
+
+def _fill_resistance_evidence(
+    state: DayState,
+    cand: Candidate,
+    fill: float,
+    cfg: EngineConfig,
+    completed_bars: pd.DataFrame,
+) -> dict[str, object] | None:
+    """Refuse a fill with less than 1R left to an unconfirmed ceiling.
+
+    A quote jumping through a level does not confirm its breakout. Only a
+    completed close can move the resistance search past it. Distances use the
+    price actually paid, rather than the earlier setup trigger.
+    """
+    if not cfg.require_resistance_breakout or completed_bars.empty:
+        return None
+    levels = _attention_resistance_levels(
+        completed_bars, state.prev_day, cfg.resistance_veto_v2, cfg.volume_shelf_levels,
+    )
+    if cfg.resistance_veto_v2:
+        levels = [level for level in levels if level.kind != "round"]
+    resistance = nearest_structural_resistance(
+        # A close exactly on the level has not confirmed a break above it.
+        levels, math.nextafter(_headroom_from(completed_bars, cand.setup), -math.inf),
+    )
+    if resistance is None:
+        return None
+    headroom = resistance.price - fill
+    initial_risk = fill - cand.setup.stop
+    if headroom + 1e-9 >= initial_risk:
+        return None
+    return {
+        "price": fill,
+        "stop": cand.setup.stop,
+        "level": resistance.price,
+        "level_kind": resistance.kind,
+        "headroom": headroom,
+        "initial_risk": initial_risk,
+        "headroom_r": headroom / initial_risk if initial_risk > 0.0 else None,
+        "minimum_headroom_r": 1.0,
+    }
 
 
 def _plan_entry(
@@ -1741,6 +1794,11 @@ def fill_pending_quote(
         _reject_pending(state, when, refusal, price)
         return None
     cand = pending.cand
+    completed = bars_1m[bars_1m.index + pd.Timedelta(minutes=1) <= when]
+    evidence = _fill_resistance_evidence(state, cand, price, cfg, completed)
+    if evidence is not None:
+        _reject_pending(state, when, "fill_resistance_headroom", price, evidence)
+        return None
     state.pending = None
     _open_position(state, cand, when, price, plan, cfg, bars_1m, full_5m)
     return state.position
@@ -1827,13 +1885,16 @@ def step(
         if plan is None:
             _reject_pending(state, now, refusal, fill)
             return
+        evidence = _fill_resistance_evidence(state, cand, fill, cfg, bars_1m.iloc[:-1])
+        if evidence is not None:
+            _reject_pending(state, now, "fill_resistance_headroom", fill, evidence)
+            return
         state.pending = None
         _open_position(state, cand, now, fill, plan, cfg, bars_1m, full_5m)
         return
 
     if state.pending is not None:
         cand = state.pending.cand
-        state.pending = None
         next_open = float(bar["open"])
         # Both entry gates — the chase guard and the stop-sanity band — are judged
         # on the next-bar open in EVERY fill mode, so the arms take exactly the
@@ -1844,7 +1905,12 @@ def step(
             cfg, fill, cand.setup.stop, gate_entry=next_open,
         )[0]
         if plan is not None:
+            evidence = _fill_resistance_evidence(state, cand, fill, cfg, bars_1m.iloc[:-1])
+            if evidence is not None:
+                _reject_pending(state, now, "fill_resistance_headroom", fill, evidence)
+                return
             _open_position(state, cand, now, fill, plan, cfg, bars_1m, full_5m)
+        state.pending = None
 
     # 2. manage an open position on this bar
     pos = state.position
