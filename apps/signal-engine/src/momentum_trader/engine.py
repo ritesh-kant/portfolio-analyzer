@@ -291,6 +291,9 @@ class EngineConfig:
     # every earlier run exactly; `warrior_strict` turns both on.
     session_level_sessions: int = 0
     target_buffer_pct: float = 0.0
+    # BT55: the 1R headroom test (signal and fill) also reads the earlier
+    # sessions' levels above. Off reproduces every earlier run exactly.
+    session_levels_veto: bool = False
     # BT52 (research/hypotheses/2026-09-27-resistance-checkpoint-stop.md).
     # Instead of SELLING at the resistance-capped target, keep the 2R target
     # and treat the capped price as a checkpoint: once a bar's high reaches it,
@@ -456,6 +459,11 @@ class EngineConfig:
         if self.session_level_sessions < 0 or not 0.0 <= self.target_buffer_pct < 5.0:
             raise ValueError("session_level_sessions must be >= 0 and "
                              "target_buffer_pct in [0, 5)")
+        if self.session_levels_veto and not (
+            self.session_level_sessions and self.require_resistance_breakout
+        ):
+            raise ValueError("session_levels_veto needs session_level_sessions "
+                             "and require_resistance_breakout")
         if (self.session_level_sessions or self.target_buffer_pct) and not (
             self.use_structural_exit_levels
         ):
@@ -1455,6 +1463,7 @@ def _resistance_aware_attention_confirmation(
     guide: GuideGates | None = None,
     shelves: bool = False,
     require_rising_price_volume: bool = False,
+    extra_levels: list[Level] | None = None,
 ) -> tuple[Setup | None, str]:
     """Apply the unchanged 1-minute confirmation to structural resistance.
 
@@ -1472,7 +1481,9 @@ def _resistance_aware_attention_confirmation(
     prior = bars_1m.iloc[:-1]
     if prior.empty:
         return setup, reason
-    levels_before_confirmation = _attention_resistance_levels(prior, prev_day, v2, shelves)
+    levels_before_confirmation = (
+        _attention_resistance_levels(prior, prev_day, v2, shelves) + list(extra_levels or [])
+    )
 
     # What counts as a ceiling for the headroom test. A round number is a
     # property of the price grid, not of supply, yet it is the binding level in
@@ -1704,6 +1715,8 @@ def _fill_resistance_evidence(
     levels = _attention_resistance_levels(
         completed_bars, state.prev_day, cfg.resistance_veto_v2, cfg.volume_shelf_levels,
     )
+    if cfg.session_levels_veto:
+        levels = levels + state.session_levels
     if cfg.resistance_veto_v2:
         levels = [level for level in levels if level.kind != "round"]
     resistance = nearest_structural_resistance(
@@ -2088,6 +2101,7 @@ def step(
                 bars_1m, cfg.attention_confirm_vol_ratio, state.prev_day,
                 cfg.resistance_veto_v2, guide, cfg.volume_shelf_levels,
                 cfg.require_rising_price_volume,
+                extra_levels=state.session_levels if cfg.session_levels_veto else None,
             )
         else:
             setup, confirmation_reason = _attention_confirmation(

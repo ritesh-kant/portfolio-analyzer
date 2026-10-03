@@ -511,6 +511,9 @@ def main() -> int:
     ap.add_argument("--session-levels", type=int, default=None,
                     help="earlier sessions whose highs cap the fixed target (BT50). "
                          f"Default {SESSION_LEVEL_SESSIONS} with --warrior-strict, else 0")
+    ap.add_argument("--session-levels-veto", action="store_true",
+                    help="the 1R headroom veto (signal + fill) also reads the earlier "
+                         "sessions' highs/pivots (BT55). Needs --warrior-strict. Default OFF")
     ap.add_argument("--target-buffer-pct", type=float, default=None,
                     help="capped target sits this %% under its level (BT50). "
                          f"Default {TARGET_BUFFER_PCT} with --warrior-strict, else 0")
@@ -601,6 +604,8 @@ def main() -> int:
         cfg_kw["session_level_sessions"] = a.session_levels
     if a.target_buffer_pct is not None:
         cfg_kw["target_buffer_pct"] = a.target_buffer_pct
+    if a.session_levels_veto:
+        cfg_kw["session_levels_veto"] = True
     if a.checkpoint_stop:
         cfg_kw["resistance_checkpoint_stop"] = True
     if a.no_checkpoint_stop:

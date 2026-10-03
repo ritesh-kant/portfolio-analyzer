@@ -56,5 +56,10 @@
     "bt8_trades_momentum",
     "bt9_trades"
   ],
-  "_legacy_not_chartable_note": "Trade-named CSVs the dashboard cannot chart: news/daily-bar studies (BT7-BT15, BT35 daily) have no intraday entry/exit times, three are empty, BT35's older outputs lack exit_reason. Known, so --unlabelled only flags NEW ones."
+  "_legacy_not_chartable_note": "Trade-named CSVs the dashboard cannot chart: news/daily-bar studies (BT7-BT15, BT35 daily) have no intraday entry/exit times, three are empty, BT35's older outputs lack exit_reason. Known, so --unlabelled only flags NEW ones.",
+  "bt17_trades_bt55_session_veto_2026_*": {
+    "bt": "BT55",
+    "title": "Session-levels veto · {rest}",
+    "hypothesis": "research/hypotheses/2026-10-03-session-levels-entry-veto.md"
+  }
 }
