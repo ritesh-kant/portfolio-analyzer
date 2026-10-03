@@ -7,4 +7,7 @@ export default {
   "packages/analytics-core/**/*.{ts,tsx}": () => "pnpm --filter @portfolio-analyzer/analytics-core typecheck",
   "packages/broker-sdk/**/*.{ts,tsx}": () => "pnpm --filter @portfolio-analyzer/broker-sdk typecheck",
   "packages/tax-core/**/*.{ts,tsx}": () => "pnpm --filter @portfolio-analyzer/tax-core typecheck",
+  // backtest-dashboard conventions: registry format + the agent instruction files (stdlib python, no venv)
+  "{research/backtests/dashboard_runs.json,AGENTS.md,CLAUDE.md,GEMINI.md,.clinerules,.github/copilot-instructions.md,.cursor/rules/*.mdc}":
+    () => "python3 research/backtests/check_dashboard_registry.py",
 };

@@ -25,6 +25,7 @@ pnpm bt:serve                            # http://localhost:8899/bt49_us_watchli
 Other dates: `bt49_us_watchlist_audit.py --date YYYY-MM-DD` then
 `bt49_us_watchlist_report.py --input research/backtests/bt49_us_watchlist_YYYY-MM-DD.json`.
 Yahoo keeps 1-minute bars for ~30 days, so run it within a month of the session.
+Older sessions need `ibkr_us_history.py` (see `README-ibkr-us-history.md`).
 
 Descriptive, one session at a time — never a basis on its own for changing a rule.
 

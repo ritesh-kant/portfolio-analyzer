@@ -17,3 +17,7 @@ apps/data/
 
 # momentum-trader Upstox candle cache (GBs)
 .cache_upstox/
+.cache_ibkr_us/
+
+# backtest dashboard: per-trade chart cache + run statistics (rebuilt on demand)
+research/backtests/.dashboard_cache/

@@ -488,9 +488,39 @@ var observer = "IntersectionObserver" in window ? new IntersectionObserver(funct
   });
 }, { rootMargin: "900px 0px" }) : null;
 
+/* Lazy reports (a dashboard run with thousands of trades) ship each trade
+   WITHOUT its bars/levels/formations; they are fetched from DATA.detail_url the
+   first time a card needs its chart, then merged into the trade. */
+function loadDetail(c) {
+  if (c.loading || c.failed) return;
+  c.loading = true;
+  c.host.innerHTML = "";
+  h("div", { class: "loading" }, c.host, "Building chart for " + c.tr.symbol + " " + c.tr.date + "…");
+  fetch(DATA.detail_url + c.i).then(function (r) {
+    return r.ok ? r.json() : r.json().then(function (j) { throw new Error(j.error || r.statusText); });
+  }).then(function (d) {
+    Object.assign(c.tr, d);
+    c.host.innerHTML = "";
+    c.loading = false;
+    hydrate(c);
+    ensureChart(c);
+  }).catch(function (e) {
+    c.loading = false; c.failed = true;
+    c.host.innerHTML = "";
+    h("div", { class: "loading" }, c.host, "No chart for this trade: " + e.message);
+  });
+}
 function ensureChart(c) {
+  if (DATA.lazy && !c.tr.bars) { loadDetail(c); return; }
   if (!c.chart) createChart(c);
   if (c.tf !== tf) setSeries(c);
+}
+/* key-level pills and the level table need the detail, so they fill in once it is there */
+function hydrate(c) {
+  if (c.hydrated || !c.tr.levels) return;
+  c.hydrated = true;
+  keyStrip(c.keysHost, c.tr);
+  levelTable(c.lvHost, c.tr);
 }
 
 function buildCards() {
@@ -509,7 +539,7 @@ function buildCards() {
       + " (" + nice(tr.exit_reason) + ")"
       + " · qty <b>" + tr.qty + "</b>"
       + " · day <b>" + tr.day_chg_pct.toFixed(1) + "%</b>";
-    keyStrip(left, tr);
+    var keysHost = h("div", {}, left);
     var kpi = h("div", { class: "kpi" }, head);
     kpi.innerHTML = "<b class='" + cls(tr.gross_pct) + "'>" + pct(tr.gross_pct) + "</b>"
       + "gross · net " + inr(tr.net_real_inr) + " @ real"
@@ -521,7 +551,7 @@ function buildCards() {
     var c = { sec: sec, tr: tr, i: i, zlabel: zlabel, chart: null, tf: null };
     function mk(txt, title, fn) {
       var b = h("button", { type: "button", title: title }, grp, txt);
-      b.onclick = function () { ensureChart(c); fn(); };
+      b.onclick = function () { ensureChart(c); if (c.chart) fn(); };
       return b;
     }
     mk("←", "Earlier candles", function () { panBy(c, -1); });
@@ -542,7 +572,9 @@ function buildCards() {
     c.host.style.height = CHART_H + "px";
     c.legend = h("div", { class: "chart-legend" }, wrap);
     c.readout = h("div", { class: "readout" }, sec);
-    levelTable(sec, tr);
+    c.keysHost = keysHost;
+    c.lvHost = h("div", {}, sec);
+    hydrate(c);
     cards.push(c);
     wire(c);
     if (observer) observer.observe(sec); else ensureChart(c);
@@ -599,6 +631,163 @@ function levelTable(sec, tr) {
   });
 }
 
+/* ---------- group by ----------
+   "Target hit" = the trade's EXIT was the target fill (exit_reason "target").
+   Every other exit - stop, trailing/checkpoint stop, EMA9/MACD/volume exits,
+   support break, time - means the target was not what closed the trade. */
+var WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+var GROUPS = {
+  exit_reason: { label: "Exit reason", of: function (t) { return nice(t.exit_reason); } },
+  target_hit: { label: "Target hit", fixed: ["Target hit", "Target not hit"],
+                of: function (t) { return t.exit_reason === "target" ? "Target hit" : "Target not hit"; } },
+  outcome: { label: "Outcome (net @ real costs)", fixed: ["Winner", "Loser"],
+             of: function (t) { return t.net_real_inr > 0 ? "Winner" : "Loser"; } },
+  symbol: { label: "Symbol", of: function (t) { return t.symbol; } },
+  setup: { label: "Setup", of: function (t) { return nice(t.setup); } },
+  month: { label: "Month", byKey: true, of: function (t) { return t.date.slice(0, 7); } },
+  weekday: { label: "Weekday", byKey: true,
+             of: function (t) { return WEEKDAYS[(new Date(t.date + "T00:00:00Z").getUTCDay() + 6) % 7]; },
+             order: WEEKDAYS },
+  entry_hour: { label: "Entry hour", byKey: true, of: function (t) { return t.entry_time.slice(0, 2) + ":00"; } }
+};
+var groupKey = DATA.default_group && GROUPS[DATA.default_group] ? DATA.default_group : "";
+var openGroups = {};   // "<groupKey>:<name>" -> true, so a re-render keeps what the reader opened
+/* A group of 1,800 trades would lay out 1,800 cards when opened. Show PAGE at a
+   time; "Show more" reveals the next PAGE. `shown[gid]` survives a re-render. */
+var PAGE = 20, PAGE_ABOVE = 60, shown = {};   // groups up to PAGE_ABOVE trades show in full
+function first(list) { return list.length <= PAGE_ABOVE ? Infinity : PAGE; }
+function showUpTo(list, gid, n) {
+  shown[gid] = Math.max(shown[gid] || first(list), n);
+  list.forEach(function (c, i) { c.gi = i; c.gid = gid; c.list = list; c.sec.style.display = i < shown[gid] || c.pinned ? "" : "none"; });
+}
+function pager(list, gid, parent) {
+  showUpTo(list, gid, shown[gid] || first(list));
+  if (list.length <= PAGE_ABOVE) return;
+  var bar = h("div", { class: "more" }, parent);
+  var btn = h("button", { type: "button" }, bar);
+  var label = function () {
+    var rest = list.length - shown[gid];
+    btn.textContent = rest > 0 ? "Show " + Math.min(PAGE, rest) + " more · " + rest + " of " + list.length + " not shown" : "";
+    bar.style.display = rest > 0 ? "" : "none";
+  };
+  bar.refresh = label;
+  list.bar = bar;
+  btn.onclick = function () { showUpTo(list, gid, shown[gid] + PAGE); label(); };
+  label();
+}
+/* a trade picked from the table must be on screen: open its group, and reveal just that card */
+function reveal(c) {
+  if (c.group && c.group.classList.contains("collapsed")) {
+    c.group.classList.remove("collapsed");
+    openGroups[groupKey + ":" + c.group.querySelector(".gname").textContent] = true;
+  }
+  if (c.list && c.gi >= (shown[c.gid] || first(c.list))) {
+    c.pinned = true;   // just this one: not every card between the page and it
+    c.sec.style.display = "";
+  }
+}
+function median(a) {
+  if (!a.length) return 0;
+  var b = a.slice().sort(function (x, y) { return x - y; }), m = b.length >> 1;
+  return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2;
+}
+function mean(a, f) { return a.length ? a.reduce(function (x, c) { return x + f(c.tr); }, 0) / a.length : 0; }
+function stats(list) {
+  var n = list.length;
+  return {
+    med: median(list.map(function (c) { return c.tr.net_real_inr; })),
+    n: n, gross: mean(list, function (t) { return t.gross_pct; }),
+    net: mean(list, function (t) { return t.net_real_pct; }),
+    win: n ? 100 * list.filter(function (c) { return c.tr.net_real_inr > 0; }).length / n : 0,
+    inr: list.reduce(function (x, c) { return x + c.tr.net_real_inr; }, 0)
+  };
+}
+function groupList(keep) {
+  var def = GROUPS[groupKey], by = {};
+  keep.forEach(function (c) { (by[def.of(c.tr)] = by[def.of(c.tr)] || []).push(c); });
+  var names = Object.keys(by);
+  names.sort(function (a, b) {
+    var o = def.fixed || def.order;
+    if (o) return (o.indexOf(a) < 0 ? 99 : o.indexOf(a)) - (o.indexOf(b) < 0 ? 99 : o.indexOf(b));
+    return def.byKey ? (a > b ? 1 : a < b ? -1 : 0) : by[b].length - by[a].length;
+  });
+  return names.map(function (nm) {
+    by[nm].sort(function (a, b) {
+      return a.tr.date + a.tr.entry_time > b.tr.date + b.tr.entry_time ? 1 : -1;
+    });
+    return { name: nm, cards: by[nm], st: stats(by[nm]) };
+  });
+}
+function statSpans(parent, st, total) {
+  var sp = function (html) { h("span", { class: "gstat" }, parent).innerHTML = html; };
+  sp("<b>" + st.n + "</b> trades" + (total ? " (" + (100 * st.n / total).toFixed(1) + "%)" : ""));
+  sp("gross <b class='" + cls(st.gross) + "'>" + pct(st.gross) + "</b>/trade");
+  sp("net @ real <b class='" + cls(st.net) + "'>" + pct(st.net) + "</b>/trade");
+  sp("win <b>" + st.win.toFixed(0) + "%</b>");
+  sp("median <b class='" + cls(st.med) + "'>" + inr(st.med) + "</b>/trade");
+  sp("net <b class='" + cls(st.inr) + "'>" + inr(st.inr) + "</b>");
+}
+/* put the cards back under #charts in their original order, then (if grouping)
+   gather the visible ones under one collapsible header per group */
+function layoutGroups(keep) {
+  var host = document.getElementById("charts"), sum = document.getElementById("gsum");
+  cards.forEach(function (c) { host.appendChild(c.sec); c.group = null; c.pinned = false; });
+  Array.prototype.slice.call(host.querySelectorAll(".group, .more")).forEach(function (g) { g.remove(); });
+  sum.innerHTML = "";
+  var btns = document.getElementById("grp-btns");
+  if (btns) btns.style.display = groupKey ? "" : "none";
+  if (!groupKey) { pager(keep, "flat", host); return; }
+  var groups = groupList(keep), total = keep.length;
+  var panel = h("div", { class: "panel" }, sum);
+  h("h3", {}, panel, "By " + GROUPS[groupKey].label.toLowerCase() + " ").appendChild(
+    h("span", {}, null, "— " + groups.length + " groups · click a row to open it"));
+  var maxN = Math.max.apply(null, groups.map(function (g) { return g.st.n; }).concat([1]));
+  var t = h("table", {}, h("div", { class: "scroll" }, panel));
+  var hr = h("tr", {}, h("thead", {}, t));
+  ["group", "trades", "", "gross/trade", "net @ real/trade", "win %", "median ₹/trade", "net ₹"].forEach(function (x, i) {
+    h("th", { class: i ? "num" : "" }, hr, x);
+  });
+  var tb = h("tbody", {}, t);
+  groups.forEach(function (g) {
+    var gid = groupKey + ":" + g.name;
+    var wrapG = h("div", { class: "group" + (openGroups[gid] ? "" : " collapsed") }, host);
+    var toggle = function (collapsed) {
+      wrapG.classList.toggle("collapsed", collapsed);
+      openGroups[gid] = !collapsed;
+    };
+    var head = h("div", { class: "group-head" }, wrapG);
+    h("span", { class: "gname" }, head, g.name);
+    statSpans(head, g.st, total);
+    var body = h("div", { class: "group-body" }, wrapG);
+    g.cards.forEach(function (c) { body.appendChild(c.sec); c.group = wrapG; });
+    pager(g.cards, gid, body);
+    head.onclick = function () { toggle(!wrapG.classList.contains("collapsed")); };
+    var row = h("tr", { class: "gr-row" }, tb);
+    h("td", { class: "gr-name" }, row, g.name);
+    h("td", { class: "num" }, row, String(g.st.n));
+    var bar = h("td", { class: "num" }, row);
+    h("span", { class: "gr-bar", style: "width:" + Math.max(2, 70 * g.st.n / maxN) + "px" }, bar);
+    h("td", { class: "num " + cls(g.st.gross) }, row, pct(g.st.gross));
+    h("td", { class: "num " + cls(g.st.net) }, row, pct(g.st.net));
+    h("td", { class: "num" }, row, g.st.win.toFixed(0) + "%");
+    h("td", { class: "num " + cls(g.st.med) }, row, inr(g.st.med));
+    h("td", { class: "num " + cls(g.st.inr) }, row, inr(g.st.inr));
+    row.onclick = function () {
+      toggle(false);
+      wrapG.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+  });
+  var all = h("tr", { class: "gr-total" }, tb), st = stats(keep);
+  h("td", { class: "gr-name" }, all, "All");
+  h("td", { class: "num" }, all, String(st.n));
+  h("td", {}, all);
+  h("td", { class: "num " + cls(st.gross) }, all, pct(st.gross));
+  h("td", { class: "num " + cls(st.net) }, all, pct(st.net));
+  h("td", { class: "num" }, all, st.win.toFixed(0) + "%");
+  h("td", { class: "num " + cls(st.med) }, all, inr(st.med));
+  h("td", { class: "num " + cls(st.inr) }, all, inr(st.inr));
+}
+
 /* ---------- table ---------- */
 var sortKey = "date", sortDir = 1;
 function visible() {
@@ -616,8 +805,8 @@ function visible() {
 function render() {
   var keep = visible();
   cards.forEach(function (c) { c.sec.style.display = "none"; });
+  layoutGroups(keep);   // also decides which of the kept cards are on this page
   keep.forEach(function (c) {
-    c.sec.style.display = "";
     if (c.chart && c.tf !== tf) setSeries(c);
   });
   var tb = document.querySelector("#det tbody");
@@ -634,6 +823,7 @@ function render() {
     h("td", { class: "num " + cls(c.tr.gross_pct) }, row, pct(c.tr.gross_pct));
     h("td", { class: "num " + cls(c.tr.net_real_inr) }, row, inr(c.tr.net_real_inr));
     row.onclick = function () {
+      reveal(c);
       ensureChart(c);
       c.sec.scrollIntoView({ behavior: "smooth", block: "center" });
       c.sec.classList.add("flash");
@@ -657,15 +847,8 @@ function init() {
     h("span", {}, sp, p[0]);
   });
   h("p", { class: "hint" }, leg.parentNode,
-    "Charts by TradingView Lightweight Charts. Drag to pan · drag the price or time axis to "
-    + "stretch it (then dragging the chart pans vertically too) · double-click an axis to reset it · "
-    + "ctrl+scroll or trackpad pinch to zoom around the pointer · click a chart then +/− zoom, "
-    + "0 reset, ←/→ pan, ↑/↓ price. The THICK support and resistance are the two levels the "
-    + "engine bracketed the trade with at the entry bar (the ones its stop and target were "
-    + "read against); the 'Levels' selector shows or hides the labels of every other level. "
-    + "A dotted level marked ? is a single unconfirmed pivot; solid "
-    + "ones are structural. A faint formation dot sits on a candle under " + WEAK + "× the recent "
-    + "average range — the label is right, the candle is not worth acting on.");
+    "Charts by TradingView Lightweight Charts."
+  );
   var syms = {}, exits = {};
   DATA.trades.forEach(function (t) { syms[t.symbol] = 1; exits[t.exit_reason] = 1; });
   Object.keys(syms).sort().forEach(function (s) { h("option", { value: s }, document.getElementById("f-sym"), s); });
@@ -678,6 +861,23 @@ function init() {
       levelMode = this.value;
       cards.forEach(function (c) { if (c.chart) drawLines(c); });
     };
+  }
+  var grpSel = document.getElementById("f-grp");
+  if (grpSel) {
+    h("option", { value: "" }, grpSel, "none (flat list)");
+    Object.keys(GROUPS).forEach(function (k) { h("option", { value: k }, grpSel, GROUPS[k].label); });
+    grpSel.value = groupKey;
+    grpSel.onchange = function () { groupKey = this.value; render(); };
+    var setAll = function (collapsed) {
+      Array.prototype.forEach.call(document.querySelectorAll(".group"), function (g) {
+        g.classList.toggle("collapsed", collapsed);
+        var nm = g.querySelector(".gname").textContent;
+        openGroups[groupKey + ":" + nm] = !collapsed;
+      });
+    };
+    var gb = document.getElementById("grp-btns");
+    h("button", { type: "button" }, gb, "Expand all").onclick = function () { setAll(false); };
+    h("button", { type: "button" }, gb, "Collapse all").onclick = function () { setAll(true); };
   }
   var tfSel = document.getElementById("f-tf");
   tfSel.value = tf;

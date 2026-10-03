@@ -1,0 +1,60 @@
+{
+  "_readme": "Names the backtest runs the dashboard lists. Key = CSV stem (bt17_trades_<tag>) or a glob. Value = {bt, title, hypothesis}. {rest} in a title = what a * matched. Wins over the built-in RULES in bt_dashboard.py. Check with: pnpm bt:check",
+  "bt17_trades_live_*": {
+    "bt": "Live rule",
+    "title": "warrior_strict live rule · {rest}"
+  },
+  "bt17_trades_ytd2026_sig5m": {
+    "bt": "Live rule",
+    "title": "Five-minute signal exits · 2026 YTD"
+  },
+  "_legacy_unlabelled": [
+    "bt17_trades_fib2223",
+    "bt17_trades_fibzone2223",
+    "bt17_trades_fibzonenaive2223",
+    "bt17_trades_par8",
+    "bt17_trades_smoke2022",
+    "bt17_trades_probe",
+    "bt17_trades_smoke23",
+    "bt17_trades_nt23_a",
+    "bt17_trades_nt23_b",
+    "bt17_trades_smoke_ctl",
+    "bt17_trades_smoke_r15",
+    "bt17_trades_att2024",
+    "bt17_trades_att_smoke",
+    "bt17_trades_nt24_a",
+    "bt17_trades_nt24_b",
+    "bt17_trades_smoke_shelf_on",
+    "bt17_trades_ws2024",
+    "bt17_trades_ws_smoke2",
+    "bt17_trades_audit_merged_0915_0921",
+    "bt17_trades_s18_coststop",
+    "bt17_trades_s18_fixed",
+    "bt17_trades_s18_gate",
+    "bt17_trades_s18_with",
+    "bt17_trades_s18_without",
+    "bt17_trades_audit_warrior_0922"
+  ],
+  "_legacy_unlabelled_note": "Pre-dashboard scratch/smoke/probe runs whose purpose is not recorded anywhere. Listed under 'BT17 · <tag>', acknowledged so --unlabelled only flags NEW runs. Move one to a real entry above once you know what it was.",
+  "_legacy_not_chartable": [
+    "bt10_trades_limit",
+    "bt12_trades_dev",
+    "bt14_trades_dev",
+    "bt15_trades_dev",
+    "bt17_trades_iks_audit_long",
+    "bt17_trades_iks_audit_short",
+    "bt17_trades_ws_smoke",
+    "bt35_daily_trades",
+    "bt35_trades_2022_23",
+    "bt35_trades_attention",
+    "bt35_trades_v2",
+    "bt35_trades_warrior",
+    "bt50_changed_trades",
+    "bt7_trades_anti",
+    "bt7_trades_short",
+    "bt8_trades_fade",
+    "bt8_trades_momentum",
+    "bt9_trades"
+  ],
+  "_legacy_not_chartable_note": "Trade-named CSVs the dashboard cannot chart: news/daily-bar studies (BT7-BT15, BT35 daily) have no intraday entry/exit times, three are empty, BT35's older outputs lack exit_reason. Known, so --unlabelled only flags NEW ones."
+}

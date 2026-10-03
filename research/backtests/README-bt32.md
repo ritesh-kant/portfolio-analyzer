@@ -1,8 +1,14 @@
 # BT32 — backtest a handful of symbols and look at every trade
 
+> **Viewing a run:** the standing way is the backtest dashboard (`pnpm bt:dashboard`, see
+> `README-dashboard.md` and `AGENTS.md`). The standalone-HTML commands below are the older path
+> and write to fixed filenames.
+
 Two steps: run the engine over some symbols, then draw what it did. Both read
-the parquet bar cache in `research/backtests/.cache_upstox/1m/`, so a run over
-already-cached symbols needs no network and no Upstox token.
+the parquet bar cache in `research/backtests/.cache_upstox/1m/`. The 1-minute bars come
+from that cache, but **`pnpm bt` still calls the Upstox daily-candle API once per symbol**
+(eligibility and prior-day context), so it needs a valid `UPSTOX_ACCESS_TOKEN` in `.env`
+(Upstox tokens are short-lived). `pnpm bt:report` reads only the cache.
 
 ## The one-liner
 
@@ -22,14 +28,15 @@ which the desktop app's `file://` preview refuses — hence the tiny server.)
 
 ## Running it yourself
 
-`pnpm bt` is bt17, `pnpm bt:report` is bt32. Pass flags after `--`:
+`pnpm bt` is bt17, `pnpm bt:report` is bt32. Pass flags straight after the script name (pnpm 9 forwards a literal `--` to the script,
+which argparse rejects):
 
 ```bash
-pnpm bt -- --attention --multi-entry \
+pnpm bt --attention --multi-entry \
           --start 2024-01-01 --end 2024-12-31 \
           --symbols TITAN,TATASTEEL,IDFCFIRSTB --tag mytest
 
-pnpm bt:report -- --trades research/backtests/bt17_trades_mytest.csv \
+pnpm bt:report --trades research/backtests/bt17_trades_mytest.csv \
                   --output research/backtests/mytest.html
 ```
 

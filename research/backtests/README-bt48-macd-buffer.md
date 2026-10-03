@@ -11,7 +11,7 @@ apps/signal-engine/.venv/bin/python research/backtests/bt17_momentum_pool.py \
   --warrior-strict --live-fill --multi-entry --cached-year 2026 \
   --start 2026-01-01 --end 2026-09-22 --macd-open-tolerance 0.05 --tag macdtol_0p05_1y26
 # 2. report (defaults: strict=macdtol_0, buffered=macdtol_0p05, tolerance=0.05)
-pnpm bt:macdbuffer -- --buffered macdtol_0p10 --tolerance 0.10
+pnpm bt:macdbuffer --buffered macdtol_0p10 --tolerance 0.10
 pnpm bt:serve   # http://localhost:8899/bt48_macd_buffer_report.html
 ```
 

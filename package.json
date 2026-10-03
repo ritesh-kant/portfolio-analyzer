@@ -12,6 +12,7 @@
     "prepare": "husky",
     "bt:setup": "cd apps/signal-engine && uv sync --all-extras",
     "bt": "apps/signal-engine/.venv/bin/python research/backtests/bt17_momentum_pool.py",
+    "bt:ibkr": "apps/signal-engine/.venv/bin/python research/backtests/ibkr_us_history.py",
     "bt:report": "apps/signal-engine/.venv/bin/python research/backtests/bt32_strategy_report.py",
     "bt:coststop": "apps/signal-engine/.venv/bin/python research/backtests/bt45_cost_stop_report.py",
     "bt:breakeven": "apps/signal-engine/.venv/bin/python research/backtests/bt46_breakeven_at_1p5r.py",
@@ -21,6 +22,8 @@
     "bt:bt50": "apps/signal-engine/.venv/bin/python research/backtests/bt50_session_target_report.py --control research/backtests/bt17_trades_bt50_25_ctl.csv research/backtests/bt17_trades_bt50_26_ctl.csv --experiment research/backtests/bt17_trades_bt50_25_new.csv research/backtests/bt17_trades_bt50_26_new.csv && apps/signal-engine/.venv/bin/python research/backtests/bt50_changed_trades_report.py",
     "bt:ytd2026": "apps/signal-engine/.venv/bin/python research/backtests/bt17_momentum_pool.py --cached-year 2026 --start 2026-01-01 --end 2026-09-25 --warrior-strict --multi-entry --tag ytd2026 && apps/signal-engine/.venv/bin/python research/backtests/bt32_strategy_report.py --trades research/backtests/bt17_trades_ytd2026.csv --output research/backtests/ytd2026_warrior_strict_report.html --max-charts 0 --title \"2026 YTD — warrior_strict backtest, trade by trade\"",
     "bt:bt52": "apps/signal-engine/.venv/bin/python research/backtests/bt17_momentum_pool.py --cached-year 2026 --start 2026-01-01 --end 2026-09-25 --warrior-strict --multi-entry --checkpoint-stop --tag ytd2026_checkpoint && apps/signal-engine/.venv/bin/python research/backtests/bt52_checkpoint_stop_report.py",
+    "bt:dashboard": "apps/signal-engine/.venv/bin/python research/backtests/bt_dashboard.py",
+    "bt:check": "python3 research/backtests/check_dashboard_registry.py && apps/signal-engine/.venv/bin/python research/backtests/bt_dashboard.py --unlabelled",
     "bt:serve": "python3 -m http.server 8899 --directory research/backtests",
     "bt:import": "apps/signal-engine/.venv/bin/python research/backtests/import_trades_to_mongo.py"
   },

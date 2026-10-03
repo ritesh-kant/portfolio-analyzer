@@ -33,8 +33,8 @@ Flags: `--years 2023,2024`, `--saved N`, `--cut N`, `--output`, `--title`.
 It needs `bt17_trades_cs{23,24}_{base,cost}.csv`, produced by:
 
 ```bash
-pnpm bt -- --attention --cached-year 2023 --start 2023-01-01 --end 2023-12-31 --jobs 3 --tag cs23_base
-pnpm bt -- --attention --cached-year 2023 --start 2023-01-01 --end 2023-12-31 --jobs 3 --cost-aware-breakeven --tag cs23_cost
+pnpm bt --attention --cached-year 2023 --start 2023-01-01 --end 2023-12-31 --jobs 3 --tag cs23_base
+pnpm bt --attention --cached-year 2023 --start 2023-01-01 --end 2023-12-31 --jobs 3 --cost-aware-breakeven --tag cs23_cost
 ```
 
 (and the same pair for 2024). Each pair takes roughly 45 minutes on cached bars.

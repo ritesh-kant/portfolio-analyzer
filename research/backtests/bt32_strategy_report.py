@@ -143,8 +143,50 @@ def _key_level(row: pd.Series, side: str, entry: float, lv: list[dict]) -> dict 
     return key
 
 
-def build_day(row: pd.Series) -> dict | None:
-    """One trade → everything its chart needs.
+def summary_fields(row: pd.Series) -> dict:
+    """Everything about a trade that comes from the CSV row alone (no bar cache).
+
+    Cheap, so a dashboard can list thousands of trades and group/filter them
+    without touching a single parquet file. The heavy half — bars, levels,
+    formations — is `build_detail`.
+    """
+    day = pd.Timestamp(row["date"])
+    clock = lambda col: pd.Timestamp(f"{day.date()} {row[col]}").strftime("%H:%M")  # noqa: E731
+    entry, stop = float(row["entry"]), float(row["stop"])
+    gross_pct = float(row["gross_pct"])
+    qty = int(row["qty"])
+    notional = max(entry * qty, 1e-9)
+    real_costs = calc_costs(entry, float(row["exit"]), qty, direction="long")["total"]
+
+    def opt(col: str, default: float = 0.0) -> float:
+        v = row.get(col)
+        return float(v) if v is not None and pd.notna(v) else default
+
+    return {
+        "symbol": str(row["symbol"]), "date": str(day.date()),
+        "setup": str(row.get("setup") or "n/a"),
+        "entry_time": clock("entry_time"), "exit_time": clock("exit_time"),
+        "trigger": opt("trigger", entry), "entry": entry, "stop": stop,
+        # the engine writes no target in trend modes; show where 2R would have
+        # been. Arms with a fixed target (warrior_strict) write the one they used.
+        "target": (round(float(row["target"]), 2) if _num(row.get("target"))
+                   else round(entry + DEFAULT_RR * (entry - stop), 2)),
+        "target_label": _target_label(row),
+        "exit": float(row["exit"]), "exit_reason": str(row["exit_reason"]),
+        "qty": qty, "day_chg_pct": round(opt("day_chg_pct"), 2),
+        "rvol": round(opt("rvol"), 2),
+        "gross_pct": round(gross_pct, 3),
+        "gross_inr": round(float(row["gross_inr"]), 2),
+        "net_stress_inr": round(float(row["net_inr"]), 2),
+        "net_stress_pct": round(float(row["net_pct"]), 3),
+        "real_cost_inr": round(real_costs, 2),
+        "net_real_inr": round(float(row["gross_inr"]) - real_costs, 2),
+        "net_real_pct": round(gross_pct - 100.0 * real_costs / notional, 3),
+    }
+
+
+def build_detail(row: pd.Series) -> dict | None:
+    """The expensive half of a trade: raw bars, as-of-entry levels, formations.
 
     Only RAW 1-minute bars are shipped. The 5-minute resample and every
     indicator (EMA9/20, VWAP, MACD) are computed in the browser, exactly as the
@@ -161,7 +203,6 @@ def build_day(row: pd.Series) -> dict | None:
 
     tz = tf5.index.tz
     entry_at = pd.Timestamp(f"{day.date()} {row['entry_time']}", tz=tz)
-    exit_at = pd.Timestamp(f"{day.date()} {row['exit_time']}", tz=tz)
     # searchsorted on bar STARTS: the bar containing a timestamp is the last one
     # that started at or before it.
     entry_i5 = max(0, int(tf5.index.searchsorted(entry_at, side="right")) - 1)
@@ -177,7 +218,7 @@ def build_day(row: pd.Series) -> dict | None:
             last = before[bdates == bdates.max()]
             prev_day = {"high": float(last["high"].max()), "low": float(last["low"].min()),
                         "close": float(last["close"].iloc[-1])}
-    entry, stop = float(row["entry"]), float(row["stop"])
+    entry = float(row["entry"])
     levels = derive_levels(tf5.iloc[: entry_i5 + 1], prev_day)
     seen: set[tuple[float, str]] = set()
     lv = []
@@ -193,33 +234,12 @@ def build_day(row: pd.Series) -> dict | None:
     key_support = _key_level(row, "support", entry, lv)
     key_resistance = _key_level(row, "resistance", entry, lv)
 
-    gross_pct = float(row["gross_pct"])
-    qty = int(row["qty"])
-    notional = max(entry * qty, 1e-9)
-    real_costs = calc_costs(entry, float(row["exit"]), qty, direction="long")["total"]
     vr5 = volume_ratio(tf5)
     rvol_5m = (None if entry_i5 >= len(vr5) or pd.isna(vr5.iloc[entry_i5])
                else round(float(vr5.iloc[entry_i5]), 2))
     return {
-        "symbol": str(row["symbol"]), "date": str(day.date()), "setup": str(row["setup"]),
-        "entry_time": entry_at.strftime("%H:%M"), "exit_time": exit_at.strftime("%H:%M"),
-        "trigger": float(row["trigger"]), "entry": entry, "stop": stop,
-        # the engine writes no target in trend modes; show where 2R would have
-        # been. Arms with a fixed target (warrior_strict) write the one they used.
-        "target": (round(float(row["target"]), 2) if _num(row.get("target"))
-                   else round(entry + DEFAULT_RR * (entry - stop), 2)),
-        "target_label": _target_label(row),
+        "rvol_5m": rvol_5m,
         "key_support": key_support, "key_resistance": key_resistance,
-        "exit": float(row["exit"]), "exit_reason": str(row["exit_reason"]),
-        "qty": qty, "day_chg_pct": round(float(row["day_chg_pct"]), 2),
-        "rvol": round(float(row["rvol"]), 2), "rvol_5m": rvol_5m,
-        "gross_pct": round(gross_pct, 3),
-        "gross_inr": round(float(row["gross_inr"]), 2),
-        "net_stress_inr": round(float(row["net_inr"]), 2),
-        "net_stress_pct": round(float(row["net_pct"]), 3),
-        "real_cost_inr": round(real_costs, 2),
-        "net_real_inr": round(float(row["gross_inr"]) - real_costs, 2),
-        "net_real_pct": round(gross_pct - 100.0 * real_costs / notional, 3),
         "levels": lv,
         "patterns": scan_patterns(tf5, "5m") + scan_patterns(bars_1m, "1m"),
         "bars": [
@@ -228,6 +248,14 @@ def build_day(row: pd.Series) -> dict | None:
             for ts, r in bars_1m.iterrows()
         ],
     }
+
+
+def build_day(row: pd.Series) -> dict | None:
+    """One trade → everything its chart needs (summary + detail in one dict)."""
+    detail = build_detail(row)
+    if detail is None:
+        return None
+    return {**summary_fields(row), **detail}
 
 
 def summarise(rows: list[dict]) -> dict:
@@ -252,7 +280,10 @@ def summarise(rows: list[dict]) -> dict:
 
 def build_html(title: str, sub: str, data: dict) -> str:
     """The self-contained page. `data` may carry `default_tf` ("1m" or "5m",
-    default "5m") and per-trade `target_label` (default "Target 2R")."""
+    default "5m"), `default_group` (a Group-by key, e.g. "exit_reason"), per-trade
+    `target_label` (default "Target 2R"), `back` ({"href","text"}: a link above
+    the title) and `lazy` + `detail_url` (trades ship without bars; each chart
+    fetches `detail_url + <index>` when its card nears the viewport)."""
     css = (ASSETS / "report.css").read_text()
     js = (ASSETS / "report.js").read_text()
     lib = CHART_LIB.read_text()
@@ -274,17 +305,24 @@ def build_html(title: str, sub: str, data: dict) -> str:
         chip("win% @ real costs", f'{s["win_real"]:.1f}%'),
         chip("net ₹ @ real", f'{s["net_real_inr"]:,.0f}', tone(s["net_real_inr"])),
     ])
+    back = data.get("back")
+    back_html = (f'<a class="back" href="{html.escape(back["href"])}">'
+                 f'{html.escape(back["text"])}</a>' if back else "")
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title><style>{css}</style></head><body>
 <header>
+  {back_html}
   <h1>{html.escape(title)}</h1>
   <p>{sub}</p>
 </header>
 <div class="stats">{chips}</div>
 <div class="wrap">
-  <div id="charts"></div>
+  <div class="main">
+    <div id="gsum"></div>
+    <div id="charts"></div>
+  </div>
   <div class="side">
     <div class="panel">
       <h3>Chart</h3>
@@ -308,6 +346,10 @@ def build_html(title: str, sub: str, data: dict) -> str:
         <label>Outcome <select id="f-out">
           <option value="">all</option><option value="win">gross win</option>
           <option value="loss">gross loss</option></select></label>
+      </div>
+      <div class="filters grp">
+        <label>Group by <select id="f-grp"></select></label>
+        <span class="btns" id="grp-btns"></span>
       </div>
       <p class="hint">Click any row to jump to its chart.</p>
       <div class="scroll"><table id="det"><thead><tr>
