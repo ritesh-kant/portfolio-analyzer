@@ -56,3 +56,12 @@ Run 2026-10-03, 2026-01-01..09-29, real-cost net (itemised MIS):
 The arm took a strict SUBSET: 94 identical trades, 39 removed (29.3%), **0 replacement entries**, so paired delta on common trades is exactly 0. The 39 removed averaged −₹88.4 (sum −₹3,447) vs −₹57.3 for the kept.
 Criteria: (1) +₹9.1/trade PASS; (2) median −102.3 vs −103.0 PASS by ₹0.7; (3) paired p undefined (identical trades) - removed vs kept Welch test below; (4) drop-top-5 arm −₹101.0 vs control −₹98.9 **FAIL**; (5) 29% removed PASS.
 **KILLED on criterion 4**: the mean gain is entirely the removed trades being a bit worse than average, and it vanishes when the top 5 winners are dropped. Still loses ₹57/trade; no edge. Code kept, flag OFF.
+
+## 6. Operator decision (2026-10-03): SHIPPED ON for warrior_strict despite the KILL
+
+The criteria above stand and the result is still a KILL (criterion 4; net −₹57/trade, no
+edge). The operator chose to make the veto part of the live rule anyway, as with BT52/BT53.
+`scanner._strategy_config(warrior_strict)` sets `session_levels_veto=True`; bt17
+`--warrior-strict` now defaults to it (`--no-session-levels-veto` replays the old rule).
+Pre-2026-10-03 backtest CSVs are without the veto. Not deployed by this change: deploy is
+a push to main plus a Fargate smoke test.

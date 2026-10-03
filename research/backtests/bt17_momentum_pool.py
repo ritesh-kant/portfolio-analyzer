@@ -513,7 +513,11 @@ def main() -> int:
                          f"Default {SESSION_LEVEL_SESSIONS} with --warrior-strict, else 0")
     ap.add_argument("--session-levels-veto", action="store_true",
                     help="the 1R headroom veto (signal + fill) also reads the earlier "
-                         "sessions' highs/pivots (BT55). Needs --warrior-strict. Default OFF")
+                         "sessions' highs/pivots (BT55). Default ON with --warrior-strict since "
+                         "2026-10-03 (live rule); this flag only matters for other arms")
+    ap.add_argument("--no-session-levels-veto", action="store_true",
+                    help="with --warrior-strict: replay the rule as it was before 2026-10-03 "
+                         "(no earlier-sessions levels in the headroom veto)")
     ap.add_argument("--target-buffer-pct", type=float, default=None,
                     help="capped target sits this %% under its level (BT50). "
                          f"Default {TARGET_BUFFER_PCT} with --warrior-strict, else 0")
@@ -597,7 +601,8 @@ def main() -> int:
                       use_fixed_target=True,
                       session_level_sessions=SESSION_LEVEL_SESSIONS,
                       target_buffer_pct=TARGET_BUFFER_PCT,
-                      resistance_checkpoint_stop=True)
+                      resistance_checkpoint_stop=True,
+                      session_levels_veto=True)
     # Explicit flags win over the warrior_strict mirror, so `0` replays the
     # pre-BT50 control.
     if a.session_levels is not None:
@@ -606,6 +611,8 @@ def main() -> int:
         cfg_kw["target_buffer_pct"] = a.target_buffer_pct
     if a.session_levels_veto:
         cfg_kw["session_levels_veto"] = True
+    if a.no_session_levels_veto:
+        cfg_kw["session_levels_veto"] = False
     if a.checkpoint_stop:
         cfg_kw["resistance_checkpoint_stop"] = True
     if a.no_checkpoint_stop:

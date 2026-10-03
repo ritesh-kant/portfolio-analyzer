@@ -2,11 +2,11 @@
   "_readme": "Names the backtest runs the dashboard lists. Key = CSV stem (bt17_trades_<tag>) or a glob. Value = {bt, title, hypothesis}. {rest} in a title = what a * matched. Wins over the built-in RULES in bt_dashboard.py. Check with: pnpm bt:check",
   "bt17_trades_live_*": {
     "bt": "Live rule",
-    "title": "warrior_strict live rule · {rest}"
+    "title": "warrior_strict live rule \u00b7 {rest}"
   },
   "bt17_trades_ytd2026_sig5m": {
     "bt": "Live rule",
-    "title": "Five-minute signal exits · 2026 YTD"
+    "title": "Five-minute signal exits \u00b7 2026 YTD"
   },
   "_legacy_unlabelled": [
     "bt17_trades_fib2223",
@@ -35,7 +35,7 @@
     "bt17_trades_s18_without",
     "bt17_trades_audit_warrior_0922"
   ],
-  "_legacy_unlabelled_note": "Pre-dashboard scratch/smoke/probe runs whose purpose is not recorded anywhere. Listed under 'BT17 · <tag>', acknowledged so --unlabelled only flags NEW runs. Move one to a real entry above once you know what it was.",
+  "_legacy_unlabelled_note": "Pre-dashboard scratch/smoke/probe runs whose purpose is not recorded anywhere. Listed under 'BT17 \u00b7 <tag>', acknowledged so --unlabelled only flags NEW runs. Move one to a real entry above once you know what it was.",
   "_legacy_not_chartable": [
     "bt10_trades_limit",
     "bt12_trades_dev",
@@ -59,7 +59,12 @@
   "_legacy_not_chartable_note": "Trade-named CSVs the dashboard cannot chart: news/daily-bar studies (BT7-BT15, BT35 daily) have no intraday entry/exit times, three are empty, BT35's older outputs lack exit_reason. Known, so --unlabelled only flags NEW ones.",
   "bt17_trades_bt55_session_veto_2026_*": {
     "bt": "BT55",
-    "title": "Session-levels veto · {rest}",
+    "title": "Session-levels veto \u00b7 {rest}",
     "hypothesis": "research/hypotheses/2026-10-03-session-levels-entry-veto.md"
+  },
+  "bt56_trades_us_20260924_1002_*": {
+    "bt": "BT56",
+    "title": "IBKR US watchlist VWAP and resistance \u00b7 {rest}",
+    "hypothesis": "research/hypotheses/2026-10-03-ibkr-us-vwap-resistance.md"
   }
 }

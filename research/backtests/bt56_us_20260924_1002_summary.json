@@ -1,0 +1,1448 @@
+{
+  "dates": "2026-09-24..2026-10-02",
+  "currency": "USD",
+  "registered": "research/hypotheses/2026-10-03-ibkr-us-vwap-resistance.md",
+  "symbols_requested": 84,
+  "symbol_days_covered": 93,
+  "metrics": {
+    "before": {
+      "trades": 0,
+      "total_net_usd": 0.0,
+      "mean_net_usd": null,
+      "median_net_usd": null,
+      "win_pct": null,
+      "drop_top_5_net_usd": 0.0
+    },
+    "resistance_only": {
+      "trades": 0,
+      "total_net_usd": 0.0,
+      "mean_net_usd": null,
+      "median_net_usd": null,
+      "win_pct": null,
+      "drop_top_5_net_usd": 0.0
+    },
+    "vwap_only": {
+      "trades": 0,
+      "total_net_usd": 0.0,
+      "mean_net_usd": null,
+      "median_net_usd": null,
+      "win_pct": null,
+      "drop_top_5_net_usd": 0.0
+    },
+    "both": {
+      "trades": 0,
+      "total_net_usd": 0.0,
+      "mean_net_usd": null,
+      "median_net_usd": null,
+      "win_pct": null,
+      "drop_top_5_net_usd": 0.0
+    }
+  },
+  "coverage": [
+    {
+      "symbol": "AMPX-WT",
+      "status": "missing_or_ambiguous_cache",
+      "days": 0
+    },
+    {
+      "symbol": "AIIR",
+      "status": "ok",
+      "days": 1,
+      "bars": 9539,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "ANTA",
+      "status": "ok",
+      "days": 1,
+      "bars": 9472,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "AVX",
+      "status": "ok",
+      "days": 1,
+      "bars": 9353,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_weak_close": 11,
+        "attention_red_or_flat": 154,
+        "attention_low_1m_volume": 24,
+        "attention_no_micro_pullback": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "BCTXL",
+      "status": "missing_or_ambiguous_cache",
+      "days": 0
+    },
+    {
+      "symbol": "BESS-WT",
+      "status": "missing_or_ambiguous_cache",
+      "days": 0
+    },
+    {
+      "symbol": "BIRD",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 18,
+        "attention_red_or_flat": 44,
+        "pullback_not_allowed": 1,
+        "attention_weak_close": 6,
+        "attention_no_micro_pullback": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "AMOD",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_removed:below_vwap": 2,
+        "attention_low_1m_volume": 1,
+        "attention_red_or_flat": 3
+      },
+      "missing": []
+    },
+    {
+      "symbol": "AIXI",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 4,
+        "attention_weak_close": 1,
+        "attention_low_1m_volume": 1,
+        "attention_removed:below_vwap": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "BTLN",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 13,
+        "attention_low_1m_volume": 2,
+        "attention_no_micro_pullback": 1,
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "BKYI",
+      "status": "ok",
+      "days": 1,
+      "bars": 11136,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 4,
+        "attention_weak_close": 1,
+        "attention_red_or_flat": 7,
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "CHWM",
+      "status": "ok",
+      "days": 0,
+      "bars": 655,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": [
+        "2026-10-01"
+      ]
+    },
+    {
+      "symbol": "BNKK",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 68,
+        "attention_low_1m_volume": 18,
+        "attention_removed:below_vwap": 9,
+        "attention_weak_close": 5,
+        "attention_no_micro_pullback": 7,
+        "pullback_not_allowed": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "CHGA",
+      "status": "ok",
+      "days": 1,
+      "bars": 73308,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_weak_close": 5,
+        "attention_red_or_flat": 21,
+        "attention_low_1m_volume": 9,
+        "attention_no_micro_pullback": 1,
+        "attention_removed:below_vwap": 3
+      },
+      "missing": []
+    },
+    {
+      "symbol": "APUS",
+      "status": "ok",
+      "days": 2,
+      "bars": 11278,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 2,
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "CTNT",
+      "status": "ok",
+      "days": 1,
+      "bars": 72941,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 2,
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "CLRO",
+      "status": "ok",
+      "days": 1,
+      "bars": 60305,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "CUPR",
+      "status": "ok",
+      "days": 1,
+      "bars": 73329,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "DTST",
+      "status": "ok",
+      "days": 1,
+      "bars": 72325,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 111,
+        "attention_no_micro_pullback": 8,
+        "attention_low_1m_volume": 6
+      },
+      "missing": []
+    },
+    {
+      "symbol": "CMCT",
+      "status": "ok",
+      "days": 1,
+      "bars": 72922,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 3,
+        "attention_weak_close": 1,
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "CNET",
+      "status": "ok",
+      "days": 1,
+      "bars": 66522,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "CYCU",
+      "status": "ok",
+      "days": 1,
+      "bars": 73710,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 11,
+        "attention_low_1m_volume": 4,
+        "attention_weak_close": 2,
+        "attention_removed:below_vwap": 3
+      },
+      "missing": []
+    },
+    {
+      "symbol": "EGG",
+      "status": "ok",
+      "days": 1,
+      "bars": 64939,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 31,
+        "attention_no_micro_pullback": 1,
+        "attention_weak_close": 5,
+        "attention_low_1m_volume": 11,
+        "attention_removed:below_vwap": 3
+      },
+      "missing": []
+    },
+    {
+      "symbol": "ELPW",
+      "status": "ok",
+      "days": 1,
+      "bars": 73710,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "EJH",
+      "status": "ok",
+      "days": 1,
+      "bars": 71907,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 16,
+        "attention_weak_close": 2,
+        "attention_removed:below_vwap": 5,
+        "attention_red_or_flat": 67,
+        "attention_no_micro_pullback": 6,
+        "pullback_not_allowed": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "DXST",
+      "status": "ok",
+      "days": 1,
+      "bars": 73692,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "GLND",
+      "status": "ok",
+      "days": 2,
+      "bars": 73433,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 81,
+        "attention_red_or_flat": 124,
+        "attention_weak_close": 30,
+        "attention_no_micro_pullback": 5,
+        "attention_removed:ema_down": 1,
+        "attention_removed:below_vwap": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "FFAI",
+      "status": "ok",
+      "days": 1,
+      "bars": 73710,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 34,
+        "attention_low_1m_volume": 15,
+        "attention_no_micro_pullback": 4,
+        "attention_weak_close": 6,
+        "attention_removed:below_vwap": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "GCTK",
+      "status": "ok",
+      "days": 1,
+      "bars": 73688,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "GRML",
+      "status": "ok",
+      "days": 1,
+      "bars": 73320,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 37,
+        "attention_low_1m_volume": 24,
+        "attention_weak_close": 14,
+        "attention_removed:ema_down": 1,
+        "attention_no_micro_pullback": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "HTLM",
+      "status": "ok",
+      "days": 1,
+      "bars": 51541,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "GOW",
+      "status": "ok",
+      "days": 2,
+      "bars": 48307,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 220,
+        "attention_removed:below_vwap": 8,
+        "attention_no_micro_pullback": 13,
+        "attention_weak_close": 36,
+        "attention_low_1m_volume": 55,
+        "attention_removed:ema_down": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "ICU",
+      "status": "ok",
+      "days": 1,
+      "bars": 73668,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 46,
+        "attention_weak_close": 2,
+        "attention_no_micro_pullback": 3,
+        "attention_low_1m_volume": 7
+      },
+      "missing": []
+    },
+    {
+      "symbol": "IFBD",
+      "status": "ok",
+      "days": 2,
+      "bars": 59874,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "HCWB",
+      "status": "ok",
+      "days": 1,
+      "bars": 73707,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "KCAC-WT",
+      "status": "missing_or_ambiguous_cache",
+      "days": 0
+    },
+    {
+      "symbol": "GYGY",
+      "status": "ok",
+      "days": 1,
+      "bars": 17806,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 6,
+        "attention_removed:below_vwap": 3
+      },
+      "missing": []
+    },
+    {
+      "symbol": "KRSP-WT",
+      "status": "missing_or_ambiguous_cache",
+      "days": 0
+    },
+    {
+      "symbol": "LABT",
+      "status": "ok",
+      "days": 1,
+      "bars": 44020,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "JAGX",
+      "status": "ok",
+      "days": 1,
+      "bars": 73695,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 2,
+        "attention_red_or_flat": 13,
+        "attention_weak_close": 1,
+        "attention_removed:below_vwap": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "LINK",
+      "status": "ok",
+      "days": 1,
+      "bars": 11134,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "KMRK",
+      "status": "ok",
+      "days": 1,
+      "bars": 69647,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_no_micro_pullback": 1,
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "LPA",
+      "status": "ok",
+      "days": 1,
+      "bars": 11253,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 3,
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "LGHL",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 6,
+        "attention_weak_close": 1,
+        "attention_removed:below_vwap": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "INLF",
+      "status": "ok",
+      "days": 1,
+      "bars": 72055,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "LONA",
+      "status": "ok",
+      "days": 2,
+      "bars": 10881,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 16,
+        "attention_low_1m_volume": 8,
+        "attention_removed:below_vwap": 2,
+        "attention_weak_close": 6,
+        "attention_no_micro_pullback": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "MEDS",
+      "status": "ok",
+      "days": 2,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 53,
+        "attention_weak_close": 15,
+        "attention_low_1m_volume": 18,
+        "attention_removed:below_vwap": 6,
+        "attention_no_micro_pullback": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "NCI",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "NCT",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "MSGY",
+      "status": "ok",
+      "days": 3,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_weak_close": 40,
+        "attention_low_1m_volume": 80,
+        "attention_no_micro_pullback": 9,
+        "attention_red_or_flat": 203,
+        "attention_removed:ema_down": 1,
+        "attention_removed:below_vwap": 3,
+        "attention_macd_not_open": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "NAMM",
+      "status": "ok",
+      "days": 2,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 136,
+        "attention_weak_close": 36,
+        "attention_low_1m_volume": 88,
+        "attention_no_micro_pullback": 11,
+        "attention_removed:below_vwap": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "NTRB",
+      "status": "ok",
+      "days": 1,
+      "bars": 11269,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_no_micro_pullback": 4,
+        "attention_red_or_flat": 49,
+        "attention_low_1m_volume": 7,
+        "attention_weak_close": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "NAMI",
+      "status": "ok",
+      "days": 1,
+      "bars": 11299,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 12,
+        "attention_removed:below_vwap": 3,
+        "attention_weak_close": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "NHTC",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 95,
+        "attention_low_1m_volume": 11,
+        "attention_weak_close": 3,
+        "attention_no_micro_pullback": 4,
+        "attention_removed:below_vwap": 1,
+        "attention_removed:ema_down": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "NTWK",
+      "status": "ok",
+      "days": 1,
+      "bars": 10649,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 120,
+        "attention_low_1m_volume": 4,
+        "attention_no_micro_pullback": 3,
+        "attention_weak_close": 1,
+        "attention_removed:ema_down": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "PLUT",
+      "status": "ok",
+      "days": 3,
+      "bars": 3214,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": [],
+      "short_profiles": [
+        "2026-09-29",
+        "2026-09-30",
+        "2026-10-01"
+      ]
+    },
+    {
+      "symbol": "PFSA",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "PMAX",
+      "status": "ok",
+      "days": 1,
+      "bars": 11245,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "SCYX",
+      "status": "ok",
+      "days": 1,
+      "bars": 11308,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 4,
+        "attention_no_micro_pullback": 1,
+        "attention_red_or_flat": 13,
+        "attention_weak_close": 2,
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "NXL",
+      "status": "ok",
+      "days": 2,
+      "bars": 11085,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 20,
+        "attention_weak_close": 4,
+        "attention_removed:below_vwap": 3,
+        "attention_low_1m_volume": 5
+      },
+      "missing": []
+    },
+    {
+      "symbol": "SPHL",
+      "status": "ok",
+      "days": 1,
+      "bars": 10380,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 10,
+        "attention_red_or_flat": 23,
+        "attention_weak_close": 1,
+        "attention_no_micro_pullback": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "SOTK",
+      "status": "ok",
+      "days": 1,
+      "bars": 11308,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_weak_close": 1,
+        "attention_red_or_flat": 20,
+        "attention_no_micro_pullback": 1,
+        "attention_low_1m_volume": 3,
+        "attention_removed:below_vwap": 3
+      },
+      "missing": []
+    },
+    {
+      "symbol": "SGRX",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_weak_close": 5,
+        "attention_red_or_flat": 6,
+        "attention_removed:below_vwap": 3
+      },
+      "missing": []
+    },
+    {
+      "symbol": "ONCO",
+      "status": "ok",
+      "days": 2,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 40,
+        "attention_low_1m_volume": 10,
+        "attention_no_micro_pullback": 4,
+        "attention_weak_close": 8,
+        "attention_removed:below_vwap": 5
+      },
+      "missing": []
+    },
+    {
+      "symbol": "SSM",
+      "status": "ok",
+      "days": 2,
+      "bars": 11287,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 70,
+        "attention_red_or_flat": 128,
+        "attention_weak_close": 32,
+        "attention_removed:below_vwap": 2,
+        "attention_no_micro_pullback": 7,
+        "attention_heavy_pullback_volume": 1,
+        "attention_removed:ema_down": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "STAK",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 10,
+        "attention_low_1m_volume": 3,
+        "attention_removed:below_vwap": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "TNMG",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 28,
+        "attention_low_1m_volume": 15,
+        "attention_weak_close": 4,
+        "attention_no_micro_pullback": 1,
+        "attention_removed:below_vwap": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "TDIC",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 10,
+        "attention_low_1m_volume": 3,
+        "attention_no_micro_pullback": 1,
+        "attention_weak_close": 1,
+        "attention_removed:below_vwap": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "TURB",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "SSTI",
+      "status": "ok",
+      "days": 1,
+      "bars": 11156,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "TGE",
+      "status": "ok",
+      "days": 1,
+      "bars": 10824,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 10,
+        "attention_red_or_flat": 33,
+        "attention_weak_close": 8,
+        "attention_removed:below_vwap": 5
+      },
+      "missing": []
+    },
+    {
+      "symbol": "TNON",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 3,
+        "attention_red_or_flat": 7,
+        "attention_removed:below_vwap": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "VSME",
+      "status": "ok",
+      "days": 1,
+      "bars": 11160,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 1,
+        "attention_red_or_flat": 3,
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "VBIO",
+      "status": "ok",
+      "days": 2,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 36,
+        "attention_low_1m_volume": 17,
+        "attention_no_micro_pullback": 8,
+        "attention_heavy_pullback_volume": 1,
+        "attention_weak_close": 6,
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "VEEA",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 8,
+        "attention_weak_close": 3,
+        "attention_red_or_flat": 15,
+        "attention_removed:below_vwap": 3
+      },
+      "missing": []
+    },
+    {
+      "symbol": "WHLR",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "WW",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "WETO",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 6,
+        "attention_low_1m_volume": 2,
+        "attention_weak_close": 3,
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    },
+    {
+      "symbol": "WFCF",
+      "status": "ok",
+      "days": 2,
+      "bars": 7113,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 20,
+        "attention_low_1m_volume": 10,
+        "attention_removed:below_vwap": 2,
+        "attention_weak_close": 3
+      },
+      "missing": []
+    },
+    {
+      "symbol": "WBUY",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 16,
+        "attention_weak_close": 3,
+        "attention_removed:below_vwap": 2,
+        "attention_low_1m_volume": 8
+      },
+      "missing": []
+    },
+    {
+      "symbol": "ZZZTT",
+      "status": "missing_or_ambiguous_cache",
+      "days": 0
+    },
+    {
+      "symbol": "YMT",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 5,
+        "attention_low_1m_volume": 2,
+        "attention_removed:below_vwap": 2
+      },
+      "missing": []
+    },
+    {
+      "symbol": "YMAT",
+      "status": "ok",
+      "days": 1,
+      "bars": 11309,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {},
+      "missing": []
+    },
+    {
+      "symbol": "ZNB",
+      "status": "ok",
+      "days": 1,
+      "bars": 11310,
+      "rejections": {
+        "before": 0,
+        "resistance_only": 0,
+        "vwap_only": 0,
+        "both": 0
+      },
+      "rejection_reasons": {
+        "attention_removed:below_vwap": 1
+      },
+      "missing": []
+    }
+  ]
+}

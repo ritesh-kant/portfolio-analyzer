@@ -17,7 +17,8 @@ Settings mirror the live Fargate task: `--warrior-strict --multi-entry`
 (MT_ONE_TRADE_PER_DAY=false, MT_MACD_OPEN_TOLERANCE=0). Since 2026-09-29/30 `--warrior-strict`
 also defaults to the checkpoint stop (BT52) and the 14:00 entry cutoff (BT53); before that it
 was the BT50 session-capped target and an 11:00 cutoff, so an older `ytd2026` file is not
-comparable with a fresh run unless you pass `--no-checkpoint-stop --peak-hours-end 11:00`. Fill = the arm's default `future_trigger` replay; add `--live-fill`
+comparable with a fresh run unless you pass `--no-checkpoint-stop --peak-hours-end 11:00`. Since
+2026-10-03 it also defaults to the BT55 session-levels veto (`--no-session-levels-veto` turns it off). Fill = the arm's default `future_trigger` replay; add `--live-fill`
 for the resting-buy-stop model (tag `ytd2026_livefill`).
 
 Each card now leads with four pills — **SUPPORT**, **BUY**, **SELL**,

@@ -153,7 +153,7 @@ def fetch_symbol(ib, symbol: str, settings: Settings, cache: Path) -> dict:
     from ib_async import Stock
 
     contracts = ib.qualifyContracts(Stock(symbol, "SMART", "USD"))
-    if len(contracts) != 1 or contracts[0].secType != "STK":
+    if len(contracts) != 1 or contracts[0] is None or contracts[0].secType != "STK":
         raise ValueError(f"{symbol}: IBKR did not resolve one US stock contract")
     contract = contracts[0]
     # One file per contract per start year, so a download for another year

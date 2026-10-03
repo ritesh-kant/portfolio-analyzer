@@ -88,3 +88,14 @@ def test_warrior_strict_turns_the_checkpoint_on_and_other_arms_do_not() -> None:
 def test_checkpoint_needs_the_structural_cap() -> None:
     with pytest.raises(ValueError, match="resistance_checkpoint_stop"):
         engine.EngineConfig(use_structural_exit_levels=False, resistance_checkpoint_stop=True)
+
+
+def test_warrior_strict_turns_the_session_levels_veto_on_and_other_arms_do_not() -> None:
+    """BT55 shipped ON for the live rule by operator decision 2026-10-03."""
+    from src.config import Settings
+    from src.momentum_trader.scanner import STRATEGY_WARRIOR_STRICT, _strategy_config
+
+    strict = _strategy_config(Settings(mt_strategy=STRATEGY_WARRIOR_STRICT))
+    assert strict.session_levels_veto
+    merged = _strategy_config(Settings(mt_strategy="attention_1m_merged"))
+    assert merged.session_levels_veto is False

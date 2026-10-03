@@ -794,16 +794,31 @@ function visible() {
   var sym = document.getElementById("f-sym").value;
   var ex = document.getElementById("f-exit").value;
   var out = document.getElementById("f-out").value;
+  var monEl = document.getElementById("f-mon"), mon = monEl ? monEl.value : "";
   return cards.filter(function (c) {
     if (sym && c.tr.symbol !== sym) return false;
+    if (mon && c.tr.date.slice(0, 7) !== mon) return false;
     if (ex && c.tr.exit_reason !== ex) return false;
     if (out === "win" && c.tr.gross_pct <= 0) return false;
     if (out === "loss" && c.tr.gross_pct > 0) return false;
     return true;
   });
 }
+/* "Showing 21 of 133 trades" under the filters, so a filter's effect is never a guess */
+function showCount(keep) {
+  var el = document.getElementById("f-count");
+  if (!el) return;
+  var st = stats(keep), all = cards.length;
+  el.innerHTML = "Showing <b>" + keep.length + "</b> of " + all + " trades"
+    + (keep.length ? " · net <b class='" + cls(st.inr) + "'>" + inr(st.inr) + "</b> @ real"
+      + " · median <b class='" + cls(st.med) + "'>" + inr(st.med) + "</b>/trade · win <b>" + st.win.toFixed(0) + "%</b>"
+      : " — no trade matches these filters");
+}
+var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function monthName(ym) { return MONTHS[+ym.slice(5, 7) - 1] + " " + ym.slice(0, 4); }
 function render() {
   var keep = visible();
+  showCount(keep);
   cards.forEach(function (c) { c.sec.style.display = "none"; });
   layoutGroups(keep);   // also decides which of the kept cards are on this page
   keep.forEach(function (c) {
@@ -849,11 +864,40 @@ function init() {
   h("p", { class: "hint" }, leg.parentNode,
     "Charts by TradingView Lightweight Charts."
   );
-  var syms = {}, exits = {};
-  DATA.trades.forEach(function (t) { syms[t.symbol] = 1; exits[t.exit_reason] = 1; });
-  Object.keys(syms).sort().forEach(function (s) { h("option", { value: s }, document.getElementById("f-sym"), s); });
-  Object.keys(exits).sort().forEach(function (s) { h("option", { value: s }, document.getElementById("f-exit"), nice(s)); });
-  ["f-sym", "f-exit", "f-out"].forEach(function (id) { document.getElementById(id).onchange = render; });
+  // A server started before the Month filter existed serves the old template: add the
+  // Month select and the count line here so the page works without a restart.
+  if (!document.getElementById("f-mon")) {
+    var exLabel = document.getElementById("f-exit").parentNode;
+    var monLabel = h("label", {}, null, "Month ");
+    h("select", { id: "f-mon" }, monLabel).appendChild(h("option", { value: "" }, null, "all"));
+    exLabel.parentNode.insertBefore(monLabel, exLabel.nextSibling);
+  }
+  if (!document.getElementById("f-count")) {
+    var fl = document.getElementById("f-exit").parentNode.parentNode;
+    fl.parentNode.insertBefore(h("div", { class: "fcount", id: "f-count" }), fl.nextSibling);
+  }
+  // dropdown labels carry the trade count: "stop (27)", "Jan 2026 (21)"
+  var syms = {}, exits = {}, months = {};
+  DATA.trades.forEach(function (t) {
+    syms[t.symbol] = (syms[t.symbol] || 0) + 1;
+    exits[t.exit_reason] = (exits[t.exit_reason] || 0) + 1;
+    var m = t.date.slice(0, 7);
+    months[m] = (months[m] || 0) + 1;
+  });
+  Object.keys(syms).sort().forEach(function (s) {
+    h("option", { value: s }, document.getElementById("f-sym"), s + " (" + syms[s] + ")");
+  });
+  Object.keys(exits).sort().forEach(function (s) {
+    h("option", { value: s }, document.getElementById("f-exit"), nice(s) + " (" + exits[s] + ")");
+  });
+  var monSel = document.getElementById("f-mon");
+  if (monSel) Object.keys(months).sort().forEach(function (m) {
+    h("option", { value: m }, monSel, monthName(m) + " (" + months[m] + ")");
+  });
+  ["f-sym", "f-exit", "f-out", "f-mon"].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.onchange = render;
+  });
   var lvSel = document.getElementById("f-lv");
   if (lvSel) {
     lvSel.value = levelMode;

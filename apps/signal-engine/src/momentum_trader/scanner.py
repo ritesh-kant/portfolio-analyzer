@@ -200,6 +200,12 @@ def _strategy_config(settings: Settings) -> EngineConfig:
             # 3/5 KILL (+₹9.9/trade, p=0.08, positive 4/4 years) and shipped
             # ON anyway. research/hypotheses/2026-09-27-resistance-checkpoint-stop.md
             resistance_checkpoint_stop=True,
+            # Operator decision 2026-10-03: the 1R headroom test (signal and fill)
+            # also reads earlier sessions' highs. BT55 was a KILL (criterion 4:
+            # the +0.100% vs +0.078% gross gain vanishes without the top 5 winners;
+            # net still −₹57/trade) and shipped ON anyway.
+            # research/hypotheses/2026-10-03-session-levels-entry-veto.md
+            session_levels_veto=True,
         )
     raise ValueError(
         f"unknown MT_STRATEGY {settings.mt_strategy!r}; expected "

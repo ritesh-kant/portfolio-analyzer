@@ -343,10 +343,12 @@ def build_html(title: str, sub: str, data: dict) -> str:
       <div class="filters">
         <label>Symbol <select id="f-sym"><option value="">all</option></select></label>
         <label>Exit <select id="f-exit"><option value="">all</option></select></label>
+        <label>Month <select id="f-mon"><option value="">all</option></select></label>
         <label>Outcome <select id="f-out">
           <option value="">all</option><option value="win">gross win</option>
           <option value="loss">gross loss</option></select></label>
       </div>
+      <div class="fcount" id="f-count"></div>
       <div class="filters grp">
         <label>Group by <select id="f-grp"></select></label>
         <span class="btns" id="grp-btns"></span>

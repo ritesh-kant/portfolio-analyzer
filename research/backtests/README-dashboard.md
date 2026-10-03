@@ -34,7 +34,10 @@ are pre-built and have no Group by.
 **A run (`/run/<csv-stem>`)** — the BT32 report: headline chips, one card per
 trade with price (candles, EMA9/20/200, VWAP, support/resistance, BUY / SELL /
 stop / target, formations), MACD and volume panes, the full chart controls, a
-filter + sortable trade table in the side panel.
+filter + sortable trade table in the side panel. **Filters** (symbol, exit reason, month,
+outcome) combine; each dropdown option shows its trade count ("Mar 2026 (13)") and a line
+under them reads "Showing 13 of 133 trades · net ₹ · median ₹/trade · win %" for whatever
+is filtered. Group by then splits that filtered set.
 
 **Group by** (side panel, or `?group=exit_reason` / `?group=target_hit` in the URL):
 

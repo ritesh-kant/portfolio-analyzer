@@ -88,8 +88,10 @@ manual: `research/backtests/README-dashboard.md`.
           --warrior-strict --multi-entry --tag live_2026_<YYYYMMDD>
   ```
   `--warrior-strict` defaults to today's live configuration (checkpoint stop on since
-  2026-09-29, 14:00 entry cutoff since 2026-09-30), so these are the same flags the existing
-  2026 YTD numbers use. Add `--live-fill` only if asked (resting-buy-stop fills: more
+  2026-09-29, 14:00 entry cutoff since 2026-09-30, BT55 session-levels veto since 2026-10-03),
+  so a fresh run is the CURRENT live rule. Runs made before 2026-10-03 (e.g.
+  `bt17_trades_ytd2026.csv`, `live_2026_20261003*`) were without the veto; add
+  `--no-session-levels-veto` to reproduce them. Add `--live-fill` only if asked (resting-buy-stop fills: more
   faithful to live, different numbers). Say in the reply that you **assumed the live rule**.
   It is **descriptive only**. If the prompt names a change to test ("with the 5-minute
   exits"), that is a hypothesis test: step 1.
