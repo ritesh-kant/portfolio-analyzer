@@ -23,7 +23,7 @@ show P&L" → open **<http://localhost:8898/lab>** (served by the same `pnpm bt:
 **base trade** (bullish candlestick pattern + structural support stop + resistance target on momentum
 stocks), entry and exit indicators as checkboxes, and saves **every Apply with the exact indicators and
 parameters** (`research/backtests/lab_runs/<id>/run.json`, trial counter in `ledger.jsonl`). Command line:
-`pnpm bt:lab apply --years 2026 --with above_vwap,ema9_exit`. Manual: `research/backtests/README-lab.md`.
+`pnpm bt:lab apply --years 2026 --with above_vwap,ema9_exit` (add `--market US` for the US tape, from the IBKR cache). Manual: `research/backtests/README-lab.md`.
 A new indicator is one `Plugin(...)` in `research/backtests/btlab/plugins.py`; do **not** fork the engine or
 write another standalone report. Lab runs are **exploratory** and take no BT number; anything intended to be
 believed or shipped still goes through a pre-registered hypothesis (step 1 below).

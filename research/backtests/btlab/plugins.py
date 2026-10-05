@@ -157,7 +157,7 @@ ENTRY: tuple[Plugin, ...] = (
            history="BT23 volatility-scaled entry: KILLED.",
            entry=lambda df, p: (df["atr_pct"] >= p["lo"]) & (df["atr_pct"] <= p["hi"])),
     Plugin("away_from_round", "entry", "Away from round numbers",
-           "The decision price is not sitting on a ₹0.50 round number.",
+           "The decision price is not sitting on a 0.50 round number.",
            (Param("min_pct", "Distance ≥ %", 0.15, "float", 0, 1, 0.05),),
            history="BT24 entry location.",
            entry=lambda df, p: df["dist_round_pct"] >= p["min_pct"]),

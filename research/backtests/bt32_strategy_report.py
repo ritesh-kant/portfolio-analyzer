@@ -61,6 +61,12 @@ if not CACHE.is_dir():
         pass
 # US runs (CSV `currency` == "USD") read the IBKR cache, named <SYMBOL>_<conId>_<year>.parquet.
 CACHE_US = ROOT / "research" / "backtests" / ".cache_ibkr_us" / "1m"
+if not CACHE_US.is_dir():
+    try:
+        from btlab.paths import ibkr_us_1m_dir
+        CACHE_US = ibkr_us_1m_dir()
+    except Exception:  # noqa: BLE001
+        pass
 ASSETS = Path(__file__).resolve().parent / "bt32_assets"
 # TradingView Lightweight Charts v5.2.1, copied from apps/web's pnpm install
 # (sha256 e21cc5ca…98cf). Its licence is LIGHTWEIGHT-CHARTS-LICENSE.txt beside it;

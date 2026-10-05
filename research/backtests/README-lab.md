@@ -28,6 +28,29 @@ are never mixed with new ones.
 "Structural" is the repo's own word (`levels.is_structural`): previous-day levels, opening range, round numbers,
 volume shelves, prior-session highs, and pivots touched at least twice.
 
+## US market
+
+The **Market** switch at the top of step 1 flips the whole lab between NSE and US (NYSE/Nasdaq). Saved runs,
+base data, the trial counter and the form settings are kept per market, and a run from one market never mixes
+into the other. Everything not listed here is shared: the pattern detector, the structural levels, the 33
+indicators and the exit replay.
+
+| | NSE | US |
+| --- | --- | --- |
+| Bars | Upstox 1-minute cache (`.cache_upstox/`) | IBKR 1-minute cache (`.cache_ibkr_us/`, from `ibkr_us_history.py`), regular session, New York clock |
+| Momentum band (default) | +4…+8 %, RVOL ≥ 3 | +10…+50 %, RVOL ≥ 3 (the US arm's own 10 % floor; editable) |
+| Price / liquidity | ₹60–2,000, 20-day turnover ₹3–50 cr | $1–20 (the Warrior band), 20-day average traded value ≥ $0.3M |
+| Tick | ₹0.05 | $0.01 (also used for the stop and the buffered target) |
+| Last bar | 15:14 IST, entry cutoff 14:30 | 15:59 ET, entry cutoff 15:00 |
+| Costs | itemised MIS model | the engine's IBKR model with a spread/impact cost (`us_costs`), priced at one level as bt32 does |
+| Default risk / cap | ₹500 / ₹50,000 | $50 / $5,000 |
+
+Limits: no float or news data exists for history, so those two screens of the Warrior guide are not applied, and the
+cache holds only the late-September 2026 watchlist names (survivorship-biased, 78 symbols, 2026 only). Treat US
+numbers as plumbing validation until a broader universe is downloaded. CSV column names still say `_inr`; the
+`currency` column (`USD`) is what makes the candle-chart report draw dollars. CLI: `pnpm bt:lab build --market US --years 2026`,
+`pnpm bt:lab apply --market US --years 2026 --with above_vwap`.
+
 ## Using it
 
 1. **Data window** – tick years. A year marked ○ needs a one-time build of its base data; Apply does it for you.

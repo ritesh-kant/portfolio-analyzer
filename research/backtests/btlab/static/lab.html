@@ -20,6 +20,9 @@
   <aside id="setup">
     <section class="card" id="sec-window">
       <h2><span class="n">1</span> Data window</h2>
+      <div class="sub" style="margin:0 0 6px">Market</div>
+      <div id="mkt" class="chips"></div>
+      <div class="sub" style="margin:10px 0 6px">Years</div>
       <div id="years" class="chips"></div>
       <p class="hint" id="years-hint"></p>
     </section>
@@ -33,8 +36,8 @@
           <label>Day change ≤ % <input type="number" id="b-chg-max" step="0.5" min="1"></label>
           <label>RVOL ≥ <input type="number" id="b-rvol" step="0.5" min="0"></label>
           <label>Max entries / stock / day (0 = no limit) <input type="number" id="b-maxtr" step="1" min="0" max="20" title="0 = no limit"></label>
-          <label>Risk per trade ₹ <input type="number" id="b-risk" step="50" min="50"></label>
-          <label>Max position ₹ <input type="number" id="b-notional" step="5000" min="5000"></label>
+          <label>Risk per trade <span class="g">₹</span> <input type="number" id="b-risk" step="50" min="50"></label>
+          <label>Max position <span class="g">₹</span> <input type="number" id="b-notional" step="5000" min="5000"></label>
         </div>
         <div class="presets">Presets:
           <button type="button" data-preset="strict">Strict 4–8% · RVOL 3</button>
@@ -83,9 +86,9 @@
       <div class="scroll"><table id="history"><thead><tr>
         <th><input type="checkbox" id="h-all" title="select all shown"></th><th></th><th data-k="created_at">when</th><th data-k="name">applied</th>
         <th data-k="years">years</th><th data-k="n" class="num">trades</th>
-        <th data-k="win" class="num">win %</th><th data-k="mean" class="num">₹/trade</th>
-        <th data-k="median" class="num">median</th><th data-k="net" class="num">net ₹</th>
-        <th data-k="delta" class="num">Δ ₹/trade vs base</th><th></th></tr></thead><tbody></tbody></table></div>
+        <th data-k="win" class="num">win %</th><th data-k="mean" class="num"><span class="g">₹</span>/trade</th>
+        <th data-k="median" class="num">median</th><th data-k="net" class="num">net <span class="g">₹</span></th>
+        <th data-k="delta" class="num">Δ <span class="g">₹</span>/trade vs base</th><th></th></tr></thead><tbody></tbody></table></div>
     </section>
   </main>
 </div>

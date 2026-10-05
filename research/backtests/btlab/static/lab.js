@@ -3,7 +3,9 @@
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const inr = (x, d = 0) => (x == null ? "–" : (x < 0 ? "−" : "") + "₹" + Math.abs(x).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d }));
+let GLYPH = "₹";                      // currency of the market being shown (₹ NSE, $ US)
+const G = () => GLYPH;
+const inr = (x, d = 0) => (x == null ? "–" : (x < 0 ? "−" : "") + GLYPH + Math.abs(x).toLocaleString(GLYPH === "$" ? "en-US" : "en-IN", { maximumFractionDigits: d, minimumFractionDigits: d }));
 const sgn = (x, f) => (x == null ? "–" : (x > 0 ? "+" : x < 0 ? "−" : "") + f(Math.abs(x)));
 const pct = (x, d = 2) => (x == null ? "–" : x.toFixed(d) + "%");
 const tone = (x) => (x > 0 ? "pos" : x < 0 ? "neg" : "dim");
@@ -16,10 +18,15 @@ function saveScanOpen(open) {
   try { localStorage.setItem(SCAN_KEY, open ? "1" : "0"); } catch { /* private mode */ }
 }
 
-const PRESETS = { strict: { day_chg_min: 4, day_chg_max: 8, rvol_min: 3 }, wide: { day_chg_min: 3, day_chg_max: 15, rvol_min: 2 } };
+const MARKET_DEFAULTS = {
+  NSE: { glyph: "₹", risk: 500, notional: 50000, presets: { strict: { day_chg_min: 4, day_chg_max: 8, rvol_min: 3 }, wide: { day_chg_min: 3, day_chg_max: 15, rvol_min: 2 } } },
+  US: { glyph: "$", risk: 50, notional: 5000, presets: { strict: { day_chg_min: 10, day_chg_max: 50, rvol_min: 3 }, wide: { day_chg_min: 5, day_chg_max: 100, rvol_min: 2 } } },
+};
+const presets = () => MARKET_DEFAULTS[S.market].presets;
 const S = {
+  market: "NSE", byMarket: {},
   meta: null, plugins: [], runs: [], sel: {}, years: new Set(), patterns: new Set(),
-  base: { ...PRESETS.strict }, risk: 500, notional: 50000, maxTrades: 0,
+  base: { ...MARKET_DEFAULTS.NSE.presets.strict }, risk: 500, notional: 50000, maxTrades: 0,
   current: null, compare: new Set(), shown: [], sort: { k: "created_at", dir: -1 }, busy: false,
   scanOpen: scanWantOpen(),
 };
@@ -41,19 +48,54 @@ function banner(msg, kind = "", progress = null) {
 }
 
 /* ---------------------------------------------------------------- state persistence */
+function stash() {
+  S.byMarket[S.market] = { years: [...S.years], base: S.base, risk: S.risk, notional: S.notional, maxTrades: S.maxTrades };
+}
 function save() {
+  stash();
   try {
-    localStorage.setItem(SEL_KEY, JSON.stringify({ years: [...S.years], base: S.base, patterns: [...S.patterns], sel: S.sel, risk: S.risk, notional: S.notional, maxTrades: S.maxTrades }));
+    localStorage.setItem(SEL_KEY, JSON.stringify({ market: S.market, byMarket: S.byMarket, patterns: [...S.patterns], sel: S.sel }));
   } catch { /* private mode */ }
+}
+function useMarket(m) {
+  // the form values this market last had, or its own defaults
+  S.market = m; GLYPH = MARKET_DEFAULTS[m].glyph;
+  const d = S.byMarket[m] || {};
+  S.years = new Set(d.years || []); S.base = { ...MARKET_DEFAULTS[m].presets.strict, ...(d.base || {}) };
+  S.risk = d.risk ?? MARKET_DEFAULTS[m].risk; S.notional = d.notional ?? MARKET_DEFAULTS[m].notional; S.maxTrades = d.maxTrades ?? 0;
 }
 function restore() {
   try {
     const o = JSON.parse(localStorage.getItem(SEL_KEY) || "null");
     if (!o) return;
-    S.years = new Set(o.years || []); S.base = { ...S.base, ...(o.base || {}) };
     S.patterns = new Set(o.patterns || []); S.sel = o.sel || {};
-    S.risk = o.risk ?? S.risk; S.notional = o.notional ?? S.notional; 
+    S.byMarket = o.byMarket || { NSE: { years: o.years, base: o.base, risk: o.risk, notional: o.notional } };   // v1 had NSE only
+    useMarket(MARKET_DEFAULTS[o.market] ? o.market : "NSE");
   } catch { /* ignore */ }
+}
+function paintGlyph() {
+  document.querySelectorAll(".g").forEach((e) => { e.textContent = GLYPH; });
+  $("#mkt").innerHTML = S.meta.markets.map((m) => `<span class="chip ${m.id === S.market ? "on" : ""}" data-m="${m.id}" title="${esc(m.label)}">${esc(m.id)} <small>${esc(m.glyph)}</small></span>`).join("");
+  document.querySelectorAll("[data-preset]").forEach((b) => {
+    const p = presets()[b.dataset.preset];
+    b.textContent = `${b.dataset.preset === "strict" ? "Strict" : "Wider"} ${p.day_chg_min}–${p.day_chg_max}% · RVOL ${p.rvol_min}`;
+  });
+}
+
+async function switchMarket(m) {
+  if (m === S.market || S.busy) return;
+  save(); useMarket(m);
+  const r = await api(`/api/lab/meta?market=${m}`);
+  if (!r.ok) { banner("Could not load the " + m + " data: " + (r.data?.error || r.status), "err"); return; }
+  S.meta = r.data;
+  const have = new Set(r.data.years.map((y) => y.year));
+  S.years = new Set([...S.years].filter((y) => have.has(y)));
+  if (!S.years.size && r.data.years.length) S.years.add(r.data.years[r.data.years.length - 1].year);
+  S.current = null; S.compare.clear(); S.shown = [];
+  $("#result-card").className = "card empty"; $("#result-card").innerHTML = "Pick years, tick indicators and press Apply."; $("#scan-card").hidden = true;
+  renderBase(); renderYears(); renderPatterns(); renderPlugins(); paintGlyph(); save();
+  await loadRuns(); metaSoon();
+  if (S.runs.length) showRun(S.runs[0].id, false);
 }
 
 /* ---------------------------------------------------------------- left column */
@@ -120,8 +162,9 @@ function renderBase() {
 }
 
 function readBase() {
-  S.base = { day_chg_min: +$("#b-chg-min").value || 4, day_chg_max: +$("#b-chg-max").value || 8, rvol_min: +$("#b-rvol").value || 0 };
-  S.maxTrades = Math.max(0, +$("#b-maxtr").value || 0); S.risk = +$("#b-risk").value || 500; S.notional = +$("#b-notional").value || 50000;
+  const pz = presets().strict;
+  S.base = { day_chg_min: +$("#b-chg-min").value || pz.day_chg_min, day_chg_max: +$("#b-chg-max").value || pz.day_chg_max, rvol_min: +$("#b-rvol").value || 0 };
+  S.maxTrades = Math.max(0, +$("#b-maxtr").value || 0); S.risk = +$("#b-risk").value || MARKET_DEFAULTS[S.market].risk; S.notional = +$("#b-notional").value || MARKET_DEFAULTS[S.market].notional;
   save();
 }
 
@@ -129,7 +172,7 @@ let metaTimer = null;
 function metaSoon() {
   clearTimeout(metaTimer);
   metaTimer = setTimeout(async () => {
-    const r = await api("/api/lab/meta", "POST", { base: S.base, years: [S.meta.years[0].year] });
+    const r = await api("/api/lab/meta", "POST", { market: S.market, base: S.base, years: S.meta.years.slice(0, 1).map((y) => y.year) });
     if (r.ok) { S.meta.years = r.data.years; S.meta.base_rule_text = r.data.base_rule_text; renderYears(); $("#base-text").innerHTML = S.meta.base_rule_text.map((t) => `<li>${esc(t)}</li>`).join(""); }
   }, 350);
 }
@@ -150,8 +193,9 @@ function wireLeft() {
   $("#base-settings").addEventListener("input", () => { readBase(); metaSoon(); });
   $("#base-settings").addEventListener("click", (e) => {
     const b = e.target.closest("[data-preset]"); if (!b) return;
-    S.base = { ...PRESETS[b.dataset.preset] }; renderBase(); save(); metaSoon();
+    S.base = { ...presets()[b.dataset.preset] }; renderBase(); save(); metaSoon();
   });
+  $("#mkt").addEventListener("click", (e) => { const c = e.target.closest("[data-m]"); if (c) switchMarket(c.dataset.m); });
   for (const g of ["entry", "exit"]) {
     const root = $(`#${g}-list`);
     root.addEventListener("change", (e) => {
@@ -178,7 +222,7 @@ function wireLeft() {
 /* ---------------------------------------------------------------- apply */
 function payload(plugins = null) {
   return {
-    years: [...S.years].sort(), base: S.base, patterns: [...S.patterns],
+    market: S.market, years: [...S.years].sort(), base: S.base, patterns: [...S.patterns],
     risk_inr: S.risk, max_notional_inr: S.notional, max_trades: S.maxTrades,
     plugins: plugins ?? Object.entries(S.sel).map(([id, params]) => ({ id, params })),
   };
@@ -186,11 +230,11 @@ function payload(plugins = null) {
 
 async function ensureBuilt() {
   const rule = { base: S.base, years: [...S.years] };
-  let r = await api("/api/lab/meta", "POST", { base: S.base, years: [S.meta.years[0].year] });
+  let r = await api("/api/lab/meta", "POST", { market: S.market, base: S.base, years: S.meta.years.slice(0, 1).map((y) => y.year) });
   if (r.ok) S.meta.years = r.data.years;
   const need = S.meta.years.filter((y) => S.years.has(y.year) && !y.built).map((y) => y.year);
   if (!need.length) return true;
-  const job = await api("/api/lab/build", "POST", { base: S.base, years: need });
+  const job = await api("/api/lab/build", "POST", { market: S.market, base: S.base, years: need });
   if (!job.ok) { banner(job.data?.error || "could not start the build", "err"); return false; }
   for (;;) {
     await new Promise((res) => setTimeout(res, 1200));
@@ -201,7 +245,7 @@ async function ensureBuilt() {
     if (j.state === "error") { banner("Build failed: " + j.error, "err"); return false; }
     if (j.state === "done") break;
   }
-  r = await api("/api/lab/meta", "POST", { base: S.base, years: [S.meta.years[0].year] });
+  r = await api("/api/lab/meta", "POST", { market: S.market, base: S.base, years: S.meta.years.slice(0, 1).map((y) => y.year) });
   if (r.ok) { S.meta.years = r.data.years; renderYears(); }
   banner("");
   return true;
@@ -250,16 +294,16 @@ function curveSvg(runC, baseC) {
     ${line(baseC, "#8fa1bb", 1.4)}${line(runC, "#fbbf24", 2)}
     <text x="2" y="12">${inr(hi)}</text><text x="2" y="${H - 6}">${inr(lo)}</text>
     <text x="${W - 150}" y="${H - 2}">trades in order →</text></svg>
-    <div class="legend"><span><b style="background:#fbbf24"></b>this run</span>${baseC ? `<span><b style="background:#8fa1bb"></b>base trade</span>` : ""}<span>cumulative net ₹ at real costs</span></div>`;
+    <div class="legend"><span><b style="background:#fbbf24"></b>this run</span>${baseC ? `<span><b style="background:#8fa1bb"></b>base trade</span>` : ""}<span>cumulative net ${G()} at real costs</span></div>`;
 }
 
 function kpiRows(m, b) {
   const rows = [
     ["Trades", "n", (x) => x.toLocaleString(), null],
-    ["Net ₹ (real costs)", "net_real_inr", (x) => inr(x), 1],
-    ["₹ per trade (mean)", "mean_inr", (x) => inr(x, 1), 1],
-    ["₹ per trade (median)", "median_inr", (x) => inr(x, 1), 1],
-    ["₹ per trade without the 5 best", "mean_ex_top5_inr", (x) => inr(x, 1), 1],
+    [`Net ${G()} (real costs)`, "net_real_inr", (x) => inr(x), 1],
+    [`${G()} per trade (mean)`, "mean_inr", (x) => inr(x, 1), 1],
+    [`${G()} per trade (median)`, "median_inr", (x) => inr(x, 1), 1],
+    [`${G()} per trade without the 5 best`, "mean_ex_top5_inr", (x) => inr(x, 1), 1],
     ["Win rate", "win_pct", (x) => x.toFixed(1) + "%", 1],
     ["Profit factor", "profit_factor", (x) => x.toFixed(2), 1],
     ["Gross % per trade (before costs)", "gross_pct_mean", (x) => x.toFixed(3) + "%", 1],
@@ -287,7 +331,7 @@ function verdict(rec) {
     lines.push(`The base trade took <b>${m.n}</b> trades and ${m.mean_inr >= 0 ? "made" : "lost"} <b class="${tone(m.mean_inr)}">${inr(Math.abs(m.mean_inr), 1)}</b> per trade after real costs (median ${inr(m.median_inr, 1)}). This is the line every indicator has to beat.`);
   } else {
     const d = m.mean_inr - b.mean_inr;
-    lines.push(`Versus the base trade, ₹ per trade moved <b class="${tone(d)}">${sgn(d, (x) => inr(x, 1).replace("₹", "₹"))}</b> (${inr(m.mean_inr, 1)} vs ${inr(b.mean_inr, 1)}) on ${m.n} trades (base ${b.n}).`);
+    lines.push(`Versus the base trade, ${G()} per trade moved <b class="${tone(d)}">${sgn(d, (x) => inr(x, 1))}</b> (${inr(m.mean_inr, 1)} vs ${inr(b.mean_inr, 1)}) on ${m.n} trades (base ${b.n}).`);
     if (vs.paired) lines.push(`On the ${vs.paired.n} trades both took, the exits changed the result by ${inr(vs.paired.mean_change_inr, 1)} per trade (${vs.paired.changed} trades changed, approx. p = ${vs.paired.p}).`);
     if (vs.removed && vs.overlap && vs.overlap.same > 0) {
       const keptMean = (b.net_real_inr - vs.removed.net_real_inr) / (b.n - vs.removed.n);
@@ -325,7 +369,7 @@ function renderResult(rec) {
       <div>${curveSvg(m.curve, b?.curve)}
         <h3 style="font-size:13px;margin:14px 0 4px">How the trades ended</h3>${exitBar(m.exit_mix, m.n)}
         <h3 style="font-size:13px;margin:14px 0 4px">By year</h3>
-        <table><thead><tr><th>Year</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">₹/trade</th><th class="num">Net ₹</th></tr></thead><tbody>
+        <table><thead><tr><th>Year</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">${G()}/trade</th><th class="num">Net ${G()}</th></tr></thead><tbody>
         ${m.by_year.map((y) => `<tr><td>${y.year}</td><td class="num">${y.n}</td><td class="num">${y.win_pct}%</td><td class="num ${tone(y.mean_inr)}">${inr(y.mean_inr, 1)}</td><td class="num ${tone(y.net_real_inr)}">${inr(y.net_real_inr)}</td></tr>`).join("")}
         </tbody></table></div></div>` : ""}
     <div class="btns" style="justify-content:flex-start;margin-top:12px">
@@ -338,7 +382,7 @@ function renderResult(rec) {
 
 /* ---------------------------------------------------------------- history */
 async function loadRuns() {
-  const r = await api("/api/lab/runs"); if (r.ok) { S.runs = r.data; renderHistory(); }
+  const r = await api("/api/lab/runs"); if (r.ok) { S.runs = r.data.filter((x) => (x.config.base.market || "NSE") === S.market); renderHistory(); }
 }
 
 function rowDelta(r) {
@@ -398,10 +442,10 @@ function loadSettings(rec) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-async function showRun(id) {
+async function showRun(id, scroll = true) {
   const r = await api(`/api/lab/run/${id}`); if (!r.ok) return;
   const rec = r.data; rec.base = rec.base_id ? (await api(`/api/lab/run/${rec.base_id}`)).data : null;
-  S.current = rec; renderResult(rec); renderHistory(); $("#result-card").scrollIntoView({ behavior: "smooth", block: "start" });
+  S.current = rec; renderResult(rec); renderHistory(); if (scroll) $("#result-card").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function wireRight() {
@@ -455,7 +499,7 @@ function wireRight() {
 function renderCompare() {
   const runs = [...S.compare].map((id) => S.runs.find((r) => r.id === id)).filter(Boolean);
   const card = $("#compare-card"); card.hidden = false;
-  const rows = [["Trades", "n", (x) => x], ["Win rate", "win_pct", (x) => x + "%"], ["₹/trade mean", "mean_inr", (x) => inr(x, 1)], ["₹/trade median", "median_inr", (x) => inr(x, 1)], ["₹/trade ex top 5", "mean_ex_top5_inr", (x) => inr(x, 1)], ["Net ₹ (real)", "net_real_inr", (x) => inr(x)], ["Profit factor", "profit_factor", (x) => x], ["Worst drawdown", "max_drawdown_inr", (x) => inr(x)], ["Net % / trade", "net_real_pct_mean", (x) => x + "%"], ["Return on capital deployed", "return_on_deployed_pct", (x) => x + "%"]];
+  const rows = [["Trades", "n", (x) => x], ["Win rate", "win_pct", (x) => x + "%"], [`${G()}/trade mean`, "mean_inr", (x) => inr(x, 1)], [`${G()}/trade median`, "median_inr", (x) => inr(x, 1)], [`${G()}/trade ex top 5`, "mean_ex_top5_inr", (x) => inr(x, 1)], [`Net ${G()} (real)`, "net_real_inr", (x) => inr(x)], ["Profit factor", "profit_factor", (x) => x], ["Worst drawdown", "max_drawdown_inr", (x) => inr(x)], ["Net % / trade", "net_real_pct_mean", (x) => x + "%"], ["Return on capital deployed", "return_on_deployed_pct", (x) => x + "%"]];
   const cols = runs.map((_, i) => `hsl(${(40 + i * 137.5) % 360} 85% 62%)`);
   const W = 560, H = 160, P = 28;
   const all = runs.flatMap((r) => r.metrics.curve || []).concat([0]);
@@ -499,8 +543,8 @@ function renderScan(base, out, running) {
   const sorted = [...out].sort((a, b) => (b.d ?? -1e9) - (a.d ?? -1e9));
   const card = $("#scan-card");
   card.innerHTML = `<h2 style="cursor:pointer" id="scan-head">${S.scanOpen ? "▾" : "▸"} Each indicator alone vs the base trade <small>${running ? "running…" : "done"} · base: ${bm.n} trades, ${inr(bm.mean_inr, 1)} per trade · click to ${S.scanOpen ? "collapse" : "expand"}</small></h2>
-    ${S.scanOpen ? `<p class="hint">Sorted by the change in ₹ per trade (default settings of each indicator). Click a row to see the full result. With this many tests, expect a few to look good by chance — check the sample size and the median before believing one.</p>
-    <div class="scroll"><table><thead><tr><th>Indicator</th><th>type</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">₹/trade</th><th class="num">Median</th><th class="num">Δ ₹/trade</th></tr></thead><tbody>
+    ${S.scanOpen ? `<p class="hint">Sorted by the change in ${G()} per trade (default settings of each indicator). Click a row to see the full result. With this many tests, expect a few to look good by chance — check the sample size and the median before believing one.</p>
+    <div class="scroll"><table><thead><tr><th>Indicator</th><th>type</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">${G()}/trade</th><th class="num">Median</th><th class="num">Δ ${G()}/trade</th></tr></thead><tbody>
     ${sorted.map(({ p, rec, d }) => `<tr data-act="show" data-id="${rec.id}" style="cursor:pointer"><td>${esc(p.name)}</td><td class="${p.group === "entry" ? "" : ""}"><span class="tag ${p.group}">${p.group}</span></td>
       <td class="num">${rec.metrics.n}</td><td class="num">${rec.metrics.n ? rec.metrics.win_pct + "%" : "–"}</td>
       <td class="num ${tone(rec.metrics.mean_inr)}">${rec.metrics.n ? inr(rec.metrics.mean_inr, 1) : "–"}</td>
@@ -514,6 +558,8 @@ function renderScan(base, out, running) {
   restore();
   const r = await api("/api/lab/meta");
   if (!r.ok) { banner("Could not load the lab: " + (r.data?.error || r.status), "err"); return; }
+  const first = S.market;
+  if (first !== "NSE") { const r2 = await api(`/api/lab/meta?market=${first}`); if (r2.ok) r.data = r2.data; }
   S.meta = r.data; S.plugins = r.data.plugins;
   if (!S.patterns.size) S.patterns = new Set(r.data.patterns);
   S.patterns = new Set([...S.patterns].filter((p) => r.data.patterns.includes(p)));
@@ -521,7 +567,7 @@ function renderScan(base, out, running) {
   const have = new Set(r.data.years.map((y) => y.year));
   S.years = new Set([...S.years].filter((y) => have.has(y)));
   if (!S.years.size && r.data.years.length) S.years.add(r.data.years[r.data.years.length - 1].year);
-  renderBase(); renderYears(); renderPatterns(); renderPlugins(); wireLeft(); wireRight();
+  renderBase(); renderYears(); renderPatterns(); renderPlugins(); wireLeft(); wireRight(); paintGlyph();
   await loadRuns(); metaSoon();
   if (S.runs.length) { const last = S.runs[0]; const full = (await api(`/api/lab/run/${last.id}`)).data; full.base = full.base_id ? (await api(`/api/lab/run/${full.base_id}`)).data : null; S.current = full; renderResult(full); }
 })();

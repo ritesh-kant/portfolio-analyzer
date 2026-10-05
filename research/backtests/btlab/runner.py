@@ -13,13 +13,10 @@ trades the base run never took.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
-
-from src.momentum_trader.levels import TICK
-from src.news_trader.trailing_sl import calc_costs
 
 from . import base as base_mod
 from . import plugins as P
@@ -67,7 +64,8 @@ def run(cfg: RunConfig, cands: pd.DataFrame, days: dict) -> pd.DataFrame:
     if cands.empty:
         return pd.DataFrame()
     selected = P.normalise(cfg.plugins)
-    ecfg = P.exit_cfg(selected)
+    mk = cfg.rule.mk
+    ecfg = replace(P.exit_cfg(selected), market=mk.id)
     df = cands[cands["pattern"].isin(cfg.patterns)]
     df = df[P.entry_mask(df, selected)]
     rows: list[dict] = []
@@ -82,7 +80,7 @@ def run(cfg: RunConfig, cands: pd.DataFrame, days: dict) -> pd.DataFrame:
                 continue
             stop, stop_source = c.stop, "support"
             if ecfg.stop_mode == "pattern_low":
-                alt = base_mod.tick_down(c.invalidation - TICK)
+                alt = base_mod.tick_down(c.invalidation - mk.tick, mk.tick)
                 if base_mod.stop_ok(c.fill, alt):
                     stop, stop_source = alt, "pattern_low"
             qty = plan_qty(c.fill, stop, cfg.risk_inr, cfg.max_notional_inr)
@@ -99,7 +97,7 @@ def run(cfg: RunConfig, cands: pd.DataFrame, days: dict) -> pd.DataFrame:
 def _trade_row(c, ex, qty: int, stop: float, stop_source: str, ecfg, cfg: RunConfig) -> dict:
     entry, px = float(c.fill), float(ex.price)
     gross = (px - entry) * qty
-    costs = calc_costs(entry, px, qty, direction="long")["total"]
+    costs = cfg.rule.mk.costs(entry, px, qty)
     stress = (entry + px) * qty * STRESS_SLIP
     notional = entry * qty
     risk = (entry - stop) * qty
@@ -114,6 +112,7 @@ def _trade_row(c, ex, qty: int, stop: float, stop_source: str, ecfg, cfg: RunCon
         target, source = float("nan"), "none"
     return {
         "date": c.date, "year": int(str(c.date)[:4]), "symbol": c.symbol, "side": "long",
+        "currency": cfg.rule.mk.currency,
         "setup": c.pattern, "trigger_time": _hhmm(c.decision_min), "entry_time": _hhmm(c.fill_min),
         "trigger": c.trigger, "entry": entry, "stop": stop,
         "target": round(float(target), 2) if target == target else "",
