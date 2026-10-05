@@ -242,7 +242,7 @@ Resources:
       Name: !Sub mt-scanner-start-${Stage}
       Description: Start the scanner at 09:05 IST Mon-Fri (03:35 UTC). NSE holidays exit early in-process.
       ScheduleExpression: cron(35 3 ? * MON-FRI *)
-      State: ENABLED
+      State: DISABLED
       Targets:
         - Id: scanner
           Arn: !GetAtt Cluster.Arn
@@ -391,7 +391,7 @@ Resources:
       ScheduleExpressionTimezone: America/New_York
       FlexibleTimeWindow:
         Mode: 'OFF'
-      State: ENABLED
+      State: DISABLED
       Target:
         Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt UsSchedulerRole.Arn
