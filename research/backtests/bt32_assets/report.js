@@ -150,6 +150,7 @@ function shortKind(kind) {
 /* Autoscale covers the candles, the trade's own prices, and only the levels
    close to the action - a distant level would squash the candles; it stays
    off-screen, which is the honest way to say "not near". */
+var VZOOM_TRIM = 0.12;
 function autoscaleFor(tr) {
   return function (base) {
     var r = base();
@@ -163,7 +164,13 @@ function autoscaleFor(tr) {
       }
     });
     var pad = Math.max((hi - lo) * 0.04, hi * 0.0005);
-    return { priceRange: { minValue: lo - pad, maxValue: hi + pad }, margins: r.margins };
+    lo -= pad; hi += pad;
+    // default vertical zoom: trim ~12% off each end, never past the trade's own prices
+    var tLo = Math.min(tr.entry, tr.stop, tr.target, tr.exit) - pad;
+    var tHi = Math.max(tr.entry, tr.stop, tr.target, tr.exit) + pad;
+    var trim = (hi - lo) * VZOOM_TRIM;
+    lo = Math.min(lo + trim, tLo); hi = Math.max(hi - trim, tHi);
+    return { priceRange: { minValue: lo, maxValue: hi }, margins: r.margins };
   };
 }
 
@@ -847,8 +854,56 @@ function render() {
   });
 }
 
+/* ---------- PDF export ----------
+   Prints every trade card currently on screen (current filters / group / "show more"
+   pages). Charts are canvases, so each is built first, the layout is pinned to a
+   fixed page width so they resize to it, then the browser print dialog opens
+   ("Save as PDF"). */
+function exportPdf() {
+  var msg = document.getElementById("export-msg"), btn = document.getElementById("export-pdf");
+  var list = cards.filter(function (c) { return c.sec.style.display !== "none"; });
+  if (!list.length) { msg.textContent = "nothing to export"; return; }
+  if (list.length > 60 && !confirm(list.length + " trades will be exported (one page each). Continue?")) return;
+  btn.disabled = true;
+  var collapsed = Array.prototype.slice.call(document.querySelectorAll(".group.collapsed"));
+  collapsed.forEach(function (g) { g.classList.remove("collapsed"); });
+  var details = Array.prototype.slice.call(document.querySelectorAll("details.levels"));
+  var wasOpen = details.map(function (d) { return d.open; });
+  details.forEach(function (d) { d.open = true; });
+  document.body.classList.add("printing");
+  list.forEach(function (c) { c.sec.classList.add("p-card"); });
+  var t0 = Date.now();
+  (function wait() {
+    var pending = list.filter(function (c) { return !c.failed && !(c.chart && c.tf === tf); });
+    // a few at a time: each lazy chart is built server-side, and 100 at once get dropped
+    var busy = pending.filter(function (c) { return c.loading; }).length;
+    pending.filter(function (c) { return !c.loading; }).slice(0, Math.max(0, 4 - busy))
+      .forEach(function (c) { ensureChart(c); });
+    var left = pending.length;
+    msg.textContent = left ? "building charts… " + (list.length - left) + "/" + list.length : "";
+    if (left && Date.now() - t0 < 120000) { setTimeout(wait, 250); return; }
+    // let autoSize re-measure at print width, then reset each view and print
+    setTimeout(function () {
+      list.forEach(function (c) { if (c.chart) resetView(c); });
+      setTimeout(function () {
+        var done = function () {
+          window.removeEventListener("afterprint", done);
+          document.body.classList.remove("printing");
+          list.forEach(function (c) { c.sec.classList.remove("p-card"); });
+          collapsed.forEach(function (g) { g.classList.add("collapsed"); });
+          details.forEach(function (d, i) { d.open = wasOpen[i]; });
+          btn.disabled = false;
+        };
+        window.addEventListener("afterprint", done);
+        window.print();
+      }, 500);
+    }, 500);
+  })();
+}
+
 function init() {
   buildCards();
+  document.getElementById("export-pdf").onclick = exportPdf;
   var leg = document.getElementById("legend");
   [["up candle", COL.up], ["down candle", COL.dn], ["EMA9 / MACD", COL.ema9],
    ["EMA20 / signal", COL.ema20], ["EMA200", COL.ema200], ["VWAP (dashed)", COL.vwap],

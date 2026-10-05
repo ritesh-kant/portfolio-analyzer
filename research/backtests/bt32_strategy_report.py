@@ -326,6 +326,7 @@ def build_html(title: str, sub: str, data: dict) -> str:
   <div class="side">
     <div class="panel">
       <h3>Chart</h3>
+      <div class="hint"><button type="button" id="export-pdf" title="Opens the print dialog: choose 'Save as PDF'. Exports every trade card currently shown, with charts, indicators and level tables.">⬇ Export PDF</button> <span id="export-msg"></span></div>
       <div class="filters">
         <label>Timeframe <select id="f-tf">
           <option value="5m">5-minute (what the engine decides on)</option>
