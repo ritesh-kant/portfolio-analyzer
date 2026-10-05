@@ -181,3 +181,21 @@ a.back:hover { color: var(--ink); }
   border-radius: 6px; font-size: 11.5px; color: var(--dim); }
 .fcount b { color: var(--ink); font-weight: 600; }
 .fcount b.pos { color: var(--up); } .fcount b.neg { color: var(--dn); }
+
+/* ---------- PDF export (see exportPdf in report.js) ---------- */
+@page { size: A4 landscape; margin: 8mm; }
+body.printing .wrap, body.printing header, body.printing .stats { width: 1060px; }
+body.printing .wrap { display: block; padding: 6px 0; }
+body.printing .main { width: 1060px; }
+body.printing .side, body.printing .toolbar, body.printing .more,
+body.printing .back, body.printing .card:not(.p-card) { display: none !important; }
+body.printing .card.p-card { display: block !important; }
+body.printing .card .chart { height: 400px !important; }
+@media print {
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  html, body { background: var(--bg); }
+  body:not(.printing) .side { display: none; }
+  .card.p-card { break-before: page; margin: 0; }
+  .card.p-card:first-of-type { break-before: auto; }
+  .group.collapsed .group-body { display: block; }
+}
