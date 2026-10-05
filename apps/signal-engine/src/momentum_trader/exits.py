@@ -108,7 +108,8 @@ class ExitConfig:
                  breakeven_at_r: float | None = None,
                  legacy_same_bar_breakeven: bool = False,
                  no_trailing_stops: bool = False,
-                 no_trend_exits: bool = False) -> ExitConfig:
+                 no_trend_exits: bool = False,
+                 no_ema9_exit: bool = False) -> ExitConfig:
         if mode == MODE_FIXED:
             if breakeven_at_r is not None:
                 # fixed_2r deliberately has NO breakeven lock (see below).
@@ -128,19 +129,19 @@ class ExitConfig:
             cfg = cls(mode=mode, arm_at_r=float("inf"), breakeven_at_r=float("inf"),
                       use_swing_trail=False, use_ema_fast_break=False,
                       use_ema_slow_break=False)
-            return _strip(cfg, no_trailing_stops, no_trend_exits)
+            return _strip(cfg, no_trailing_stops, no_trend_exits, no_ema9_exit)
         be = BREAKEVEN_AT_R if breakeven_at_r is None else breakeven_at_r
         if mode == MODE_TREND_MIN:
             cfg = cls(mode=mode, breakeven_at_r=be,
                       legacy_same_bar_breakeven=legacy_same_bar_breakeven,
                       use_fixed_target=use_fixed_target)
-            return _strip(cfg, no_trailing_stops, no_trend_exits)
+            return _strip(cfg, no_trailing_stops, no_trend_exits, no_ema9_exit)
         if mode == MODE_TREND_FULL:
             cfg = cls(mode=mode, breakeven_at_r=be,
                       legacy_same_bar_breakeven=legacy_same_bar_breakeven,
                       use_macd_fade=True, use_resistance_reject=True,
                       use_volume_climax=True, use_fixed_target=use_fixed_target)
-            return _strip(cfg, no_trailing_stops, no_trend_exits)
+            return _strip(cfg, no_trailing_stops, no_trend_exits, no_ema9_exit)
         if mode == MODE_TREND_RESISTANCE_STATE:
             cfg = cls(mode=mode, breakeven_at_r=be,
                       legacy_same_bar_breakeven=legacy_same_bar_breakeven,
@@ -148,7 +149,7 @@ class ExitConfig:
                       use_volume_climax=True, structural_resistance_only=True,
                       resistance_requires_failed_break=True,
                       use_fixed_target=use_fixed_target)
-            return _strip(cfg, no_trailing_stops, no_trend_exits)
+            return _strip(cfg, no_trailing_stops, no_trend_exits, no_ema9_exit)
         raise ValueError(f"unknown exit mode {mode!r}; expected one of {MODES}")
 
 
@@ -178,13 +179,15 @@ class ExitState:
         return (price - self.entry) / risk if risk > 0 else 0.0
 
 
-def _strip(cfg: ExitConfig, no_trailing_stops: bool, no_trend_exits: bool) -> ExitConfig:
+def _strip(cfg: ExitConfig, no_trailing_stops: bool, no_trend_exits: bool,
+           no_ema9_exit: bool = False) -> ExitConfig:
     """Research-only subtractions from a built exit config.
 
     `no_trailing_stops` removes every stop that MOVES after entry - the
     breakeven lift and the swing-low ratchet - leaving the hard stop written
-    down at entry. `no_trend_exits` removes the five indicator exits. Neither
-    touches the false-break exit (an entry-pattern failure, not a stop, and it
+    down at entry. `no_trend_exits` removes the five indicator exits.
+    `no_ema9_exit` (BT59) removes only the EMA9 break and leaves the other four.
+    None of them touch the false-break exit (an entry-pattern failure, not a stop, and it
     feeds the reclaim re-entry path) or the 15:15 close.
     """
     if no_trailing_stops:
@@ -193,6 +196,8 @@ def _strip(cfg: ExitConfig, no_trailing_stops: bool, no_trend_exits: bool) -> Ex
         cfg = replace(cfg, use_ema_fast_break=False, use_ema_slow_break=False,
                       use_macd_fade=False, use_resistance_reject=False,
                       use_volume_climax=False)
+    if no_ema9_exit:
+        cfg = replace(cfg, use_ema_fast_break=False)
     return cfg
 
 

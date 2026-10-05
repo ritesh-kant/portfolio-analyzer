@@ -37,7 +37,12 @@ function h(tag, attrs, parent, text) {
   return e;
 }
 function pct(x) { return (x >= 0 ? "+" : "") + x.toFixed(2) + "%"; }
-function inr(x) { return "₹" + Math.round(x).toLocaleString("en-IN"); }
+/* US runs (CSV currency USD) are shown in dollars with cents; NSE runs in whole rupees. */
+var US = !!(DATA.summary && DATA.summary.currency === "USD"), CURSYM = US ? "$" : "₹";
+function inr(x) {
+  return US ? (x < 0 ? "−$" : "$") + Math.abs(x).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            : "₹" + Math.round(x).toLocaleString("en-IN");
+}
 function cls(x) { return x > 0 ? "pos" : x < 0 ? "neg" : ""; }
 function nice(s) { return String(s).split("_").join(" "); }
 function fmtVol(v) {
@@ -550,7 +555,7 @@ function buildCards() {
     var kpi = h("div", { class: "kpi" }, head);
     kpi.innerHTML = "<b class='" + cls(tr.gross_pct) + "'>" + pct(tr.gross_pct) + "</b>"
       + "gross · net " + inr(tr.net_real_inr) + " @ real"
-      + "<br>" + inr(tr.net_stress_inr) + " @ stress";
+      + "<br>" + inr(tr.net_stress_inr) + (US ? " @ engine-booked" : " @ stress");
 
     var bar = h("div", { class: "toolbar" }, sec);
     var zlabel = h("span", { class: "zlabel" }, bar);
@@ -751,7 +756,7 @@ function layoutGroups(keep) {
   var maxN = Math.max.apply(null, groups.map(function (g) { return g.st.n; }).concat([1]));
   var t = h("table", {}, h("div", { class: "scroll" }, panel));
   var hr = h("tr", {}, h("thead", {}, t));
-  ["group", "trades", "", "gross/trade", "net @ real/trade", "win %", "median ₹/trade", "net ₹"].forEach(function (x, i) {
+  ["group", "trades", "", "gross/trade", "net @ real/trade", "win %", "median " + CURSYM + "/trade", "net " + CURSYM].forEach(function (x, i) {
     h("th", { class: i ? "num" : "" }, hr, x);
   });
   var tb = h("tbody", {}, t);

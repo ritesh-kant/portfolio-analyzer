@@ -66,5 +66,24 @@
     "bt": "BT56",
     "title": "IBKR US watchlist VWAP and resistance \u00b7 {rest}",
     "hypothesis": "research/hypotheses/2026-10-03-ibkr-us-vwap-resistance.md"
+  },
+  "bt57_trades_us_live_2026_*": {
+    "bt": "BT57",
+    "title": "US live rule, 2026 IBKR cache (descriptive) \u00b7 {rest}"
+  },
+  "bt17_trades_bt59_ema9_off_*": {
+    "bt": "BT59",
+    "title": "EMA9-break exit removed \u00b7 {rest}",
+    "hypothesis": "research/hypotheses/2026-10-04-no-ema9-exit.md"
+  },
+  "bt58_trades_bt58_floor*": {
+    "bt": "BT58",
+    "title": "US attention floor +5% vs +10% \u00b7 {rest}",
+    "hypothesis": "research/hypotheses/2026-10-04-us-attention-floor-5pct.md"
+  },
+  "bt17_trades_bt60_cap_*": {
+    "bt": "BT60",
+    "title": "Resistance-capped target vs checkpoint \u00b7 {rest}",
+    "hypothesis": "research/hypotheses/2026-10-05-revert-to-resistance-cap.md"
   }
 }

@@ -45,8 +45,10 @@ manual: `research/backtests/README-dashboard.md`.
      plus one) and must be **pre-registered before running**: write
      `research/hypotheses/YYYY-MM-DD-slug.md` with falsification criteria locked, and add a
      bullet at the **top** of the list in `research/hypotheses/INDEX.md`. Run a control and an
-     arm as two tagged runs (`bt<NN>_<what>_<window>_ctl` / `_new`). Never open the sealed 2025
-     hold-out unless the hypothesis file says the hold-out run is the one being done.
+     arm as two tagged runs (`bt<NN>_<what>_<window>_ctl` / `_new`). There is no sealed hold-out
+     any more (the operator retired the 2025 rule on 2026-10-04): every cached year, 2025
+     included, can be used. Say which window a result is on, and remember that no window is
+     independent of the tuning any more — the live paper record is the only untuned data.
 2. **Run it so it writes a trade CSV in `research/backtests/`.** For the strategy this is bt17:
    `pnpm bt --tag <tag> <flags>` → `research/backtests/bt17_trades_<tag>.csv` (flags:
    `research/backtests/README-bt32.md`). **Before running, check the file does not exist**

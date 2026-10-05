@@ -638,6 +638,17 @@ def test_no_trend_exits_removes_all_five_indicator_exits() -> None:
         assert getattr(cfg, f) is False, f
 
 
+def test_no_ema9_exit_removes_only_the_ema9_break() -> None:
+    base = engine.EngineConfig(exit_mode="trend_resistance_state").exit_cfg
+    cfg = engine.EngineConfig(exit_mode="trend_resistance_state", no_ema9_exit=True).exit_cfg
+    assert base.use_ema_fast_break is True
+    assert cfg.use_ema_fast_break is False
+    for f in ("use_ema_slow_break", "use_macd_fade", "use_resistance_reject",
+              "use_volume_climax", "use_swing_trail"):
+        assert getattr(cfg, f) == getattr(base, f), f
+    assert cfg.breakeven_at_r == base.breakeven_at_r
+
+
 def test_no_trailing_stops_refuses_meaningless_combinations() -> None:
     with pytest.raises(ValueError, match="breakeven_at_r is meaningless"):
         engine.EngineConfig(no_trailing_stops=True, breakeven_at_r=1.5)

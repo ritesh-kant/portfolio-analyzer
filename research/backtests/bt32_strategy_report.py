@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -47,9 +48,12 @@ from src.momentum_trader.engine import resample_5m  # noqa: E402
 from src.momentum_trader.indicators import volume_ratio  # noqa: E402
 from src.momentum_trader.levels import derive_levels, is_structural  # noqa: E402
 from src.momentum_trader.risk import DEFAULT_RR  # noqa: E402
+from src.momentum_trader import us_costs  # noqa: E402
 from src.news_trader.trailing_sl import calc_costs  # noqa: E402
 
 CACHE = ROOT / "research" / "backtests" / ".cache_upstox" / "1m"
+# US runs (CSV `currency` == "USD") read the IBKR cache, named <SYMBOL>_<conId>_<year>.parquet.
+CACHE_US = ROOT / "research" / "backtests" / ".cache_ibkr_us" / "1m"
 ASSETS = Path(__file__).resolve().parent / "bt32_assets"
 # TradingView Lightweight Charts v5.2.1, copied from apps/web's pnpm install
 # (sha256 e21cc5ca…98cf). Its licence is LIGHTWEIGHT-CHARTS-LICENSE.txt beside it;
@@ -63,7 +67,14 @@ CHART_LIB = ASSETS / "lightweight-charts.standalone.production.js"
 STRESS_SLIP_PCT = 0.80        # 40 bps/side, for labelling only
 
 
-def read_cache(symbol: str, year: int) -> pd.DataFrame:
+def is_us(row: pd.Series) -> bool:
+    return str(row.get("currency") or "").upper() == "USD"
+
+
+def read_cache(symbol: str, year: int, us: bool = False) -> pd.DataFrame:
+    if us:
+        files = sorted(CACHE_US.glob(f"{symbol}_*_{year}.parquet"))
+        return pd.read_parquet(files[0]).sort_index() if len(files) == 1 else pd.DataFrame()
     f = CACHE / f"{symbol}_{year}.parquet"
     return pd.read_parquet(f) if f.exists() else pd.DataFrame()
 
@@ -75,9 +86,9 @@ def session_mask(df: pd.DataFrame, day: pd.Timestamp) -> pd.Series:
     return pd.Series(df.index.tz_localize(None).normalize() == day.normalize(), index=df.index)
 
 
-def load_1m(symbol: str, day: pd.Timestamp) -> pd.DataFrame:
+def load_1m(symbol: str, day: pd.Timestamp, us: bool = False) -> pd.DataFrame:
     """Cached 1-minute bars for one session, plus nothing else."""
-    df = read_cache(symbol, day.year)
+    df = read_cache(symbol, day.year, us)
     return df if df.empty else df[session_mask(df, day)]
 
 
@@ -115,6 +126,11 @@ def _target_label(row: pd.Series) -> str:
     src = str(row.get("target_source") or "")
     if not _num(row.get("target")) or src in ("", "nan", "fixed_2r"):
         return "Target 2R"
+    head, _, kind = src.partition(":")
+    if head == "fixed_2r+checkpoint":
+        # Checkpoint mode (live since 09-29): the target stays at 2R; the capped
+        # resistance only lifts the stop once price reaches it.
+        return f"Target 2R (resistance {kind} = stop-lift checkpoint, not a cap)"
     return "Target (capped under resistance)"
 
 
@@ -156,7 +172,10 @@ def summary_fields(row: pd.Series) -> dict:
     gross_pct = float(row["gross_pct"])
     qty = int(row["qty"])
     notional = max(entry * qty, 1e-9)
-    real_costs = calc_costs(entry, float(row["exit"]), qty, direction="long")["total"]
+    us = is_us(row)
+    # US: IBKR per-share model (one level, the engine's own); NSE: itemised MIS.
+    real_costs = (us_costs.calc_costs(entry, qty).total if us else
+                  calc_costs(entry, float(row["exit"]), qty, direction="long")["total"])
 
     def opt(col: str, default: float = 0.0) -> float:
         v = row.get(col)
@@ -164,6 +183,7 @@ def summary_fields(row: pd.Series) -> dict:
 
     return {
         "symbol": str(row["symbol"]), "date": str(day.date()),
+        "currency": "USD" if us else "INR",
         "setup": str(row.get("setup") or "n/a"),
         "entry_time": clock("entry_time"), "exit_time": clock("exit_time"),
         "trigger": opt("trigger", entry), "entry": entry, "stop": stop,
@@ -194,7 +214,8 @@ def build_detail(row: pd.Series) -> dict | None:
     does not carry the same numbers twice.
     """
     day = pd.Timestamp(row["date"])
-    bars_1m = load_1m(str(row["symbol"]), day)
+    us = is_us(row)
+    bars_1m = load_1m(str(row["symbol"]), day, us)
     if bars_1m.empty or len(bars_1m) < 30:
         return None
     tf5 = resample_5m(bars_1m)
@@ -209,7 +230,7 @@ def build_detail(row: pd.Series) -> dict | None:
 
     # Levels exactly as the engine saw them: bars up to and including entry.
     prev_day = None
-    allb = read_cache(str(row["symbol"]), day.year)
+    allb = read_cache(str(row["symbol"]), day.year, us)
     if not allb.empty:
         dates = allb.index.tz_localize(None).normalize()
         before = allb[dates < day.normalize()]
@@ -233,6 +254,22 @@ def build_detail(row: pd.Series) -> dict | None:
 
     key_support = _key_level(row, "support", entry, lv)
     key_resistance = _key_level(row, "resistance", entry, lv)
+
+    # Checkpoint mode: the capped resistance price is not the target, it is the
+    # high that arms a stop lift to 0.15% under it (engine.checkpoint_stop_buffer_pct).
+    # Drawn always-on, whatever the Levels selector says.
+    tick = 0.01 if us else 0.05
+    cp = row.get("checkpoint")
+    if _num(cp):
+        cp = float(cp)
+        lv.append({"price": round(cp, 2), "kind": "checkpoint", "touches": 0,
+                   "strength": 0.0, "structural": True, "side": "resistance",
+                   "emphasis": True, "color": "#fbbf24",
+                   "label": "CHECKPOINT (arms stop lift)"})
+        lv.append({"price": round(math.floor(cp * 0.9985 / tick + 1e-9) * tick, 2),
+                   "kind": "checkpoint stop", "touches": 0, "strength": 0.0,
+                   "structural": True, "side": "support", "emphasis": True,
+                   "color": "#fb923c", "label": "checkpoint stop"})
 
     vr5 = volume_ratio(tf5)
     rvol_5m = (None if entry_i5 >= len(vr5) or pd.isna(vr5.iloc[entry_i5])
@@ -261,7 +298,9 @@ def build_day(row: pd.Series) -> dict | None:
 def summarise(rows: list[dict]) -> dict:
     tr = pd.DataFrame(rows)
     n = len(tr)
+    cur = sorted(set(tr["currency"])) if "currency" in tr else ["INR"]
     return {
+        "currency": cur[0] if len(cur) == 1 else "mixed",
         "n": n,
         "symbols": int(tr["symbol"].nunique()),
         "days": int(tr["date"].nunique()),
@@ -292,6 +331,8 @@ def build_html(title: str, sub: str, data: dict) -> str:
     def chip(label: str, value: str, tone: str = "") -> str:
         return f'<span class="chip {tone}"><b>{html.escape(value)}</b> {html.escape(label)}</span>'
 
+    us = s.get("currency") == "USD"
+    sym = "$" if us else "₹"
     tone = lambda x: "pos" if x > 0 else "neg" if x < 0 else ""  # noqa: E731
     chips = "".join([
         chip("trades", str(s["n"])), chip("symbols", str(s["symbols"])),
@@ -299,11 +340,11 @@ def build_html(title: str, sub: str, data: dict) -> str:
         chip("gross / trade", f'{s["gross_pct"]:+.3f}%', tone(s["gross_pct"])),
         chip(f'net / trade @ real costs ({s["real_cost_pct"]:.2f}%)',
              f'{s["net_real_pct"]:+.3f}%', tone(s["net_real_pct"])),
-        chip("net / trade @ bt17 stress", f'{s["net_stress_pct"]:+.3f}%',
-             tone(s["net_stress_pct"])),
+        chip("net / trade @ engine-booked USD costs" if us else "net / trade @ bt17 stress",
+             f'{s["net_stress_pct"]:+.3f}%', tone(s["net_stress_pct"])),
         chip("win% gross", f'{s["win_gross"]:.1f}%'),
         chip("win% @ real costs", f'{s["win_real"]:.1f}%'),
-        chip("net ₹ @ real", f'{s["net_real_inr"]:,.0f}', tone(s["net_real_inr"])),
+        chip(f'net {sym} @ real', f'{s["net_real_inr"]:,.0f}', tone(s["net_real_inr"])),
     ])
     back = data.get("back")
     back_html = (f'<a class="back" href="{html.escape(back["href"])}">'
@@ -359,7 +400,7 @@ def build_html(title: str, sub: str, data: dict) -> str:
         <th data-k="date">date</th><th data-k="symbol">symbol</th>
         <th data-k="entry_time">in</th><th data-k="exit_reason">exit</th>
         <th data-k="gross_pct" class="num">gross%</th>
-        <th data-k="net_real_inr" class="num">net ₹</th>
+        <th data-k="net_real_inr" class="num">net {sym}</th>
       </tr></thead><tbody></tbody></table></div>
     </div>
   </div>

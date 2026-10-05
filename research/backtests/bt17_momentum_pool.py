@@ -476,6 +476,9 @@ def main() -> int:
                     "fade, resistance reject, volume climax). With "
                     "--no-trailing-stops this leaves the initial stop, the "
                     "support-break exit and the 15:15 close")
+    ap.add_argument("--no-ema9-exit", action="store_true",
+                    help="remove ONLY the EMA9 break exit (BT59); the EMA20 break, MACD "
+                    "fade, resistance reject and volume climax stay on")
     ap.add_argument("--legacy-same-bar-breakeven", action="store_true",
                     help="REPRODUCTION ONLY: restore the pre-2026-09-20 breakeven "
                     "lift, where one minute could both justify the lift (its high) "
@@ -635,7 +638,8 @@ def main() -> int:
                        breakeven_at_r=a.breakeven_at_r,
                        legacy_same_bar_breakeven=a.legacy_same_bar_breakeven,
                        no_trailing_stops=a.no_trailing_stops,
-                       no_trend_exits=a.no_trend_exits, **cfg_kw)
+                       no_trend_exits=a.no_trend_exits,
+                       no_ema9_exit=a.no_ema9_exit, **cfg_kw)
     # Adding size on top of the original hard stop would double the rupee risk,
     # so the add-on always comes with the protective stop it was designed around.
     cfg.cost_aware_breakeven = a.cost_aware_breakeven or a.pyramid_add_1r

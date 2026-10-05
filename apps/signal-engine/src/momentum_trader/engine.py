@@ -362,6 +362,9 @@ class EngineConfig:
     # indicator exits. Neither touches the false-break exit or the 15:15 close.
     no_trailing_stops: bool = False
     no_trend_exits: bool = False
+    # BT59: remove only the EMA9 break (the other four indicator exits stay).
+    # Default OFF, so live and every earlier replay are unchanged.
+    no_ema9_exit: bool = False
     # Experimental management overlay: once a trade reaches 1R, lift its stop
     # to a price that covers round-trip costs and adds a small tick buffer.
     # Disabled by default so every existing strategy/replay remains unchanged.
@@ -494,6 +497,7 @@ class EngineConfig:
             legacy_same_bar_breakeven=self.legacy_same_bar_breakeven,
             no_trailing_stops=self.no_trailing_stops,
             no_trend_exits=self.no_trend_exits,
+            no_ema9_exit=self.no_ema9_exit,
         )
 
     @property

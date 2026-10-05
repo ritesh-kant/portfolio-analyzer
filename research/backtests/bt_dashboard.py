@@ -60,7 +60,7 @@ import bt32_strategy_report as bt32  # noqa: E402
 
 CACHE_DIR = HERE / ".dashboard_cache"
 INDEX_CACHE = CACHE_DIR / "index.json"
-CACHE_VERSION = 2   # bump when summary_fields / the stats below change shape
+CACHE_VERSION = 3   # bump when summary_fields / the stats below change shape
 REGISTRY = HERE / "dashboard_runs.json"
 
 REQUIRED = {"date", "symbol", "entry_time", "exit_time", "entry", "stop", "exit",
@@ -192,7 +192,14 @@ def bt_sort_key(bt: str) -> tuple[int, int, str]:
 # ---------------------------------------------------------------- discovery
 
 def _bar_files() -> set[str]:
-    return {p.name for p in bt32.CACHE.glob("*.parquet")} if bt32.CACHE.exists() else set()
+    names = {p.name for p in bt32.CACHE.glob("*.parquet")} if bt32.CACHE.exists() else set()
+    # US cache files are <SYMBOL>_<conId>_<year>.parquet; list them as <SYMBOL>_<year>.parquet
+    # so the same lookup answers for both markets.
+    if bt32.CACHE_US.exists():
+        for p in bt32.CACHE_US.glob("*.parquet"):
+            sym, _, year = p.stem.rsplit("_", 2)
+            names.add(f"{sym}_{year}.parquet")
+    return names
 
 
 def read_run(path: Path) -> pd.DataFrame | None:
@@ -225,7 +232,7 @@ def run_stats(path: Path, df: pd.DataFrame, rows: list[dict], bars: set[str]) ->
         "run": stem, "file": path.name, "bt": bt, "title": title,
         "labelled": labelled, "hypothesis": hypothesis,
         "start": min(r["date"] for r in rows), "end": max(r["date"] for r in rows),
-        "n": s["n"], "symbols": s["symbols"], "days": s["days"],
+        "currency": s["currency"], "n": s["n"], "symbols": s["symbols"], "days": s["days"],
         "gross_pct": s["gross_pct"], "net_real_pct": s["net_real_pct"],
         "net_stress_pct": s["net_stress_pct"], "win_real": s["win_real"],
         "net_real_inr": s["net_real_inr"], "gross_inr": s["gross_inr"],
@@ -457,7 +464,8 @@ var colCache = {}, ex = 0;
 function col(k){ if(REASON_COL[k]) return REASON_COL[k]; if(!colCache[k]) colCache[k]=EXTRA[ex++%EXTRA.length]; return colCache[k]; }
 function nice(s){ return String(s).split("_").join(" "); }
 function pct(x){ return (x>=0?"+":"")+x.toFixed(3)+"%"; }
-function inr(x){ return (x<0?"−":"")+"₹"+Math.abs(Math.round(x)).toLocaleString("en-IN"); }
+function inr(x, cur){ return cur==="USD" ? (x<0?"−":"")+"$"+Math.abs(x).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})
+  : (x<0?"−":"")+"₹"+Math.abs(Math.round(x)).toLocaleString("en-IN"); }
 function cls(x){ return x>0?"pos":x<0?"neg":""; }
 function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
 var sortKey = "mtime", sortDir = -1;   // newest run first
@@ -518,7 +526,7 @@ function render(){
         +"<td class='num "+cls(r.net_real_pct)+"'>"+pct(r.net_real_pct)+"</td>"
         +"<td class='num'>"+r.win_real.toFixed(1)+"%</td>"
         +"<td class='num' title='"+r.target_hit_n+" trades exited at the target'>"+r.target_hit_pct.toFixed(1)+"%</td>"
-        +"<td class='num "+cls(r.net_real_inr)+"'>"+inr(r.net_real_inr)+"</td><td>"+mixBar(r)+"</td></tr>";
+        +"<td class='num "+cls(r.net_real_inr)+"'>"+inr(r.net_real_inr, r.currency)+"</td><td>"+mixBar(r)+"</td></tr>";
     });
     return h+"</tbody></table>";
   }

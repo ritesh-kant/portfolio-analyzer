@@ -106,3 +106,7 @@ stress and the itemised real-cost model). A group's gross/net per trade is not
 evidence of an edge: "target hit" trades are winners by construction (the exit
 *is* the take-profit), so their average says nothing about whether the target
 was worth having — compare the groups' totals, not the labels.
+
+## US runs (CSV `currency` = `USD`)
+
+A trade CSV with a `currency` column of `USD` is charted from the IBKR cache (`.cache_ibkr_us/1m/<SYMBOL>_<conId>_<year>.parquet`, see `README-ibkr-us-history.md`) instead of the NSE Upstox cache. Costs come from `us_costs.calc_costs` (per-share IBKR model, which equals the engine-booked net), tick size is $0.01, and every money figure is shown in dollars with cents. The per-trade chart, Group by and filters are the shared NSE code; only bars, costs and currency differ. Mixed-currency runs are not supported.

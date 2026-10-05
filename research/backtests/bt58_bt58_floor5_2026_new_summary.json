@@ -1,0 +1,2881 @@
+{
+  "tag": "bt58_floor5_2026_new",
+  "attention_day_chg_min": 5.0,
+  "currency": "USD",
+  "descriptive": true,
+  "symbols": 78,
+  "symbol_days": 13949,
+  "metrics": {
+    "trades": 3,
+    "total_net_usd": -21.4,
+    "mean_net_usd": -7.13,
+    "median_net_usd": -55.32,
+    "win_pct": 33.33,
+    "drop_top_5_net_usd": 0.0
+  },
+  "coverage": [
+    {
+      "symbol": "AIIR",
+      "status": "ok",
+      "days": 92,
+      "bars": 32793,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 311,
+        "attention_no_micro_pullback": 4,
+        "attention_low_1m_volume": 11,
+        "attention_removed:ema_down": 2
+      },
+      "missing": [
+        "2026-05-18"
+      ],
+      "short_profiles": [
+        "2026-05-19",
+        "2026-05-20",
+        "2026-05-21",
+        "2026-05-22",
+        "2026-05-26",
+        "2026-05-27",
+        "2026-05-28",
+        "2026-05-29",
+        "2026-06-01",
+        "2026-06-02",
+        "2026-06-03",
+        "2026-06-04",
+        "2026-06-05",
+        "2026-06-08"
+      ]
+    },
+    {
+      "symbol": "ANTA",
+      "status": "ok",
+      "days": 180,
+      "bars": 55656,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 359,
+        "attention_removed:ema_down": 1,
+        "attention_weak_close": 1,
+        "attention_no_micro_pullback": 2,
+        "attention_low_1m_volume": 1,
+        "attention_removed:below_vwap": 1
+      },
+      "missing": [
+        "2026-01-02",
+        "2026-03-25",
+        "2026-05-04"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "AMOD",
+      "status": "ok",
+      "days": 188,
+      "bars": 72919,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 502,
+        "attention_removed:ema_down": 2,
+        "attention_low_1m_volume": 71,
+        "attention_weak_close": 13,
+        "attention_no_micro_pullback": 17,
+        "attention_removed:below_vwap": 15
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "APUS",
+      "status": "ok",
+      "days": 167,
+      "bars": 64753,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 592,
+        "attention_removed:below_vwap": 14,
+        "attention_low_1m_volume": 69,
+        "attention_weak_close": 22,
+        "attention_no_micro_pullback": 39,
+        "attention_removed:ema_down": 3,
+        "attention_wait_resistance_break": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "AVX",
+      "status": "ok",
+      "days": 188,
+      "bars": 73029,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 2066,
+        "attention_no_micro_pullback": 63,
+        "attention_low_1m_volume": 127,
+        "attention_removed:ema_down": 7,
+        "attention_weak_close": 32,
+        "attention_removed:below_vwap": 17
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "AIXI",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 315,
+        "attention_red_or_flat": 1033,
+        "attention_no_micro_pullback": 59,
+        "attention_removed:below_vwap": 26,
+        "attention_weak_close": 102,
+        "attention_heavy_pullback_volume": 1,
+        "attention_removed:ema_down": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "CHWM",
+      "status": "ok",
+      "days": 1,
+      "bars": 655,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {},
+      "missing": [
+        "2026-10-01"
+      ],
+      "short_profiles": [
+        "2026-10-02"
+      ]
+    },
+    {
+      "symbol": "BIRD",
+      "status": "ok",
+      "days": 188,
+      "bars": 73631,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1025,
+        "attention_removed:below_vwap": 28,
+        "attention_weak_close": 115,
+        "attention_no_micro_pullback": 45,
+        "attention_low_1m_volume": 260,
+        "attention_removed:ema_down": 2,
+        "pullback_not_allowed": 2
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "BKYI",
+      "status": "ok",
+      "days": 185,
+      "bars": 71453,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_weak_close": 21,
+        "attention_removed:below_vwap": 13,
+        "attention_red_or_flat": 654,
+        "attention_low_1m_volume": 47,
+        "attention_no_micro_pullback": 16,
+        "attention_removed:ema_down": 2
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "CLRO",
+      "status": "ok",
+      "days": 177,
+      "bars": 60305,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 415,
+        "attention_no_micro_pullback": 25,
+        "attention_removed:below_vwap": 9,
+        "attention_weak_close": 100,
+        "attention_low_1m_volume": 184,
+        "attention_removed:ema_down": 2
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23",
+        "2026-01-26"
+      ]
+    },
+    {
+      "symbol": "CHGA",
+      "status": "ok",
+      "days": 187,
+      "bars": 73308,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 837,
+        "attention_low_1m_volume": 189,
+        "attention_no_micro_pullback": 55,
+        "attention_removed:below_vwap": 21,
+        "attention_weak_close": 39,
+        "attention_removed:ema_down": 4
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "BTLN",
+      "status": "ok",
+      "days": 186,
+      "bars": 72702,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_weak_close": 24,
+        "attention_red_or_flat": 2106,
+        "attention_low_1m_volume": 108,
+        "attention_no_micro_pullback": 74,
+        "attention_removed:below_vwap": 21,
+        "attention_removed:ema_down": 7
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "BNKK",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 104,
+        "attention_no_micro_pullback": 49,
+        "attention_red_or_flat": 1927,
+        "attention_removed:below_vwap": 22,
+        "attention_weak_close": 23,
+        "attention_removed:ema_down": 7,
+        "pullback_not_allowed": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "CMCT",
+      "status": "ok",
+      "days": 188,
+      "bars": 72922,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 830,
+        "attention_low_1m_volume": 95,
+        "attention_weak_close": 34,
+        "attention_removed:below_vwap": 11,
+        "attention_no_micro_pullback": 21,
+        "attention_removed:ema_down": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "CNET",
+      "status": "ok",
+      "days": 187,
+      "bars": 66522,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 600,
+        "attention_low_1m_volume": 113,
+        "attention_removed:below_vwap": 14,
+        "attention_weak_close": 48,
+        "attention_no_micro_pullback": 36,
+        "cost_over_risk": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "DTST",
+      "status": "ok",
+      "days": 188,
+      "bars": 72325,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 897,
+        "attention_removed:ema_down": 2,
+        "attention_removed:below_vwap": 3,
+        "attention_low_1m_volume": 10,
+        "attention_no_micro_pullback": 14
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "CYCU",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1060,
+        "attention_low_1m_volume": 316,
+        "attention_removed:below_vwap": 24,
+        "attention_weak_close": 106,
+        "attention_no_micro_pullback": 82,
+        "attention_removed:ema_down": 3,
+        "attention_macd_not_open": 1,
+        "pullback_not_allowed": 1,
+        "attention_macd_not_positive": 1,
+        "attention_heavy_pullback_volume": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "CTNT",
+      "status": "ok",
+      "days": 188,
+      "bars": 72941,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_no_micro_pullback": 75,
+        "attention_weak_close": 89,
+        "attention_red_or_flat": 1505,
+        "attention_low_1m_volume": 221,
+        "attention_removed:below_vwap": 25,
+        "attention_removed:ema_down": 3
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "CUPR",
+      "status": "ok",
+      "days": 188,
+      "bars": 73329,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1517,
+        "attention_no_micro_pullback": 77,
+        "attention_removed:below_vwap": 20,
+        "attention_low_1m_volume": 166,
+        "attention_removed:ema_down": 2,
+        "attention_weak_close": 46,
+        "attention_wait_next_resistance_break": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "EGG",
+      "status": "ok",
+      "days": 182,
+      "bars": 64939,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 982,
+        "attention_no_micro_pullback": 27,
+        "attention_low_1m_volume": 40,
+        "attention_removed:ema_down": 2,
+        "attention_removed:below_vwap": 11,
+        "attention_weak_close": 10
+      },
+      "missing": [
+        "2026-01-02",
+        "2026-02-26",
+        "2026-03-10",
+        "2026-03-11"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "DXST",
+      "status": "ok",
+      "days": 188,
+      "bars": 73692,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_no_micro_pullback": 37,
+        "attention_red_or_flat": 665,
+        "attention_low_1m_volume": 288,
+        "attention_weak_close": 156,
+        "attention_removed:ema_down": 3,
+        "attention_removed:below_vwap": 29,
+        "attention_heavy_pullback_volume": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "EJH",
+      "status": "ok",
+      "days": 188,
+      "bars": 71907,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1051,
+        "attention_no_micro_pullback": 59,
+        "attention_removed:below_vwap": 18,
+        "attention_low_1m_volume": 88,
+        "attention_weak_close": 24,
+        "attention_removed:ema_down": 3,
+        "pullback_not_allowed": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "GOW",
+      "status": "ok",
+      "days": 160,
+      "bars": 48307,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 343,
+        "attention_no_micro_pullback": 14,
+        "attention_removed:ema_down": 2,
+        "attention_removed:below_vwap": 8,
+        "attention_weak_close": 36,
+        "attention_low_1m_volume": 55
+      },
+      "missing": [
+        "2026-01-02",
+        "2026-04-21",
+        "2026-05-29",
+        "2026-06-12",
+        "2026-06-16",
+        "2026-07-13",
+        "2026-07-22",
+        "2026-08-12"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "GCTK",
+      "status": "ok",
+      "days": 188,
+      "bars": 73688,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 622,
+        "attention_removed:below_vwap": 16,
+        "attention_low_1m_volume": 188,
+        "attention_no_micro_pullback": 40,
+        "attention_weak_close": 85,
+        "attention_removed:ema_down": 4,
+        "chased": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "FFAI",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1032,
+        "attention_weak_close": 172,
+        "attention_low_1m_volume": 490,
+        "attention_macd_not_positive": 1,
+        "attention_no_micro_pullback": 66,
+        "attention_removed:below_vwap": 37,
+        "pullback_not_allowed": 2,
+        "attention_removed:ema_down": 4,
+        "attention_heavy_pullback_volume": 3
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "GYGY",
+      "status": "ok",
+      "days": 45,
+      "bars": 17806,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 335,
+        "attention_low_1m_volume": 132,
+        "attention_no_micro_pullback": 14,
+        "attention_weak_close": 64,
+        "attention_removed:below_vwap": 13,
+        "chased": 1,
+        "attention_removed:ema_down": 2
+      },
+      "missing": [
+        "2026-07-30"
+      ],
+      "short_profiles": [
+        "2026-07-31",
+        "2026-08-03",
+        "2026-08-04",
+        "2026-08-05",
+        "2026-08-06",
+        "2026-08-07",
+        "2026-08-10",
+        "2026-08-11",
+        "2026-08-12",
+        "2026-08-13",
+        "2026-08-14",
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19"
+      ]
+    },
+    {
+      "symbol": "ELPW",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 178,
+        "attention_red_or_flat": 993,
+        "attention_no_micro_pullback": 49,
+        "attention_removed:ema_down": 3,
+        "attention_weak_close": 85,
+        "attention_removed:below_vwap": 41,
+        "attention_heavy_pullback_volume": 2,
+        "pullback_not_allowed": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "GLND",
+      "status": "ok",
+      "days": 188,
+      "bars": 73433,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 339,
+        "attention_weak_close": 124,
+        "attention_red_or_flat": 956,
+        "attention_removed:below_vwap": 25,
+        "attention_no_micro_pullback": 35,
+        "attention_macd_not_open": 1,
+        "pullback_not_allowed": 1,
+        "attention_removed:ema_down": 4,
+        "attention_heavy_pullback_volume": 2
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "GRML",
+      "status": "ok",
+      "days": 187,
+      "bars": 73320,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 997,
+        "attention_red_or_flat": 2600,
+        "attention_no_micro_pullback": 164,
+        "attention_weak_close": 340,
+        "attention_removed:below_vwap": 37,
+        "pullback_not_allowed": 3,
+        "attention_removed:ema_down": 10,
+        "attention_heavy_pullback_volume": 2,
+        "attention_macd_not_open": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "HTLM",
+      "status": "ok",
+      "days": 161,
+      "bars": 51541,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 213,
+        "attention_removed:ema_down": 2,
+        "attention_weak_close": 1,
+        "attention_removed:below_vwap": 2,
+        "attention_no_micro_pullback": 1
+      },
+      "missing": [
+        "2026-01-07",
+        "2026-01-09"
+      ],
+      "short_profiles": [
+        "2026-01-08",
+        "2026-01-12",
+        "2026-01-15",
+        "2026-01-21",
+        "2026-01-26",
+        "2026-01-29",
+        "2026-01-30",
+        "2026-02-04",
+        "2026-02-05",
+        "2026-02-06",
+        "2026-02-09",
+        "2026-02-10",
+        "2026-02-11"
+      ]
+    },
+    {
+      "symbol": "IFBD",
+      "status": "ok",
+      "days": 176,
+      "bars": 59874,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_no_micro_pullback": 8,
+        "attention_red_or_flat": 98,
+        "attention_low_1m_volume": 20,
+        "attention_weak_close": 4,
+        "attention_removed:below_vwap": 4
+      },
+      "missing": [
+        "2026-01-02",
+        "2026-03-12",
+        "2026-08-11",
+        "2026-09-11"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "ICU",
+      "status": "ok",
+      "days": 188,
+      "bars": 73668,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1936,
+        "attention_no_micro_pullback": 96,
+        "attention_low_1m_volume": 180,
+        "attention_weak_close": 49,
+        "attention_removed:below_vwap": 10,
+        "attention_removed:ema_down": 3,
+        "attention_heavy_pullback_volume": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "HCWB",
+      "status": "ok",
+      "days": 188,
+      "bars": 73707,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1154,
+        "attention_removed:below_vwap": 21,
+        "attention_removed:ema_down": 3,
+        "attention_no_micro_pullback": 51,
+        "attention_low_1m_volume": 276,
+        "attention_weak_close": 84
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "INLF",
+      "status": "ok",
+      "days": 188,
+      "bars": 72055,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_removed:below_vwap": 19,
+        "attention_red_or_flat": 288,
+        "attention_low_1m_volume": 61,
+        "attention_weak_close": 23,
+        "attention_no_micro_pullback": 11,
+        "attention_removed:ema_down": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "LABT",
+      "status": "ok",
+      "days": 112,
+      "bars": 44020,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 812,
+        "attention_weak_close": 31,
+        "attention_low_1m_volume": 99,
+        "attention_removed:below_vwap": 13,
+        "attention_no_micro_pullback": 48,
+        "attention_removed:ema_down": 1,
+        "stop_inside_tick": 1
+      },
+      "missing": [
+        "2026-04-23"
+      ],
+      "short_profiles": [
+        "2026-04-24",
+        "2026-04-27",
+        "2026-04-28",
+        "2026-04-29",
+        "2026-04-30",
+        "2026-05-01",
+        "2026-05-04",
+        "2026-05-05",
+        "2026-05-06",
+        "2026-05-07",
+        "2026-05-08",
+        "2026-05-11",
+        "2026-05-12",
+        "2026-05-13"
+      ]
+    },
+    {
+      "symbol": "JAGX",
+      "status": "ok",
+      "days": 188,
+      "bars": 73695,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1328,
+        "attention_removed:below_vwap": 24,
+        "attention_low_1m_volume": 152,
+        "attention_no_micro_pullback": 69,
+        "attention_weak_close": 51,
+        "attention_removed:ema_down": 4,
+        "attention_heavy_pullback_volume": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "KMRK",
+      "status": "ok",
+      "days": 187,
+      "bars": 69647,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1292,
+        "attention_removed:below_vwap": 13,
+        "attention_low_1m_volume": 58,
+        "attention_no_micro_pullback": 46,
+        "attention_weak_close": 13,
+        "attention_removed:ema_down": 2,
+        "attention_heavy_pullback_volume": 1
+      },
+      "missing": [
+        "2026-01-02",
+        "2026-09-17"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "LINK",
+      "status": "ok",
+      "days": 188,
+      "bars": 72891,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1164,
+        "attention_low_1m_volume": 10,
+        "attention_removed:below_vwap": 4,
+        "attention_weak_close": 4,
+        "attention_no_micro_pullback": 17,
+        "attention_removed:ema_down": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "LGHL",
+      "status": "ok",
+      "days": 188,
+      "bars": 73705,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 608,
+        "attention_removed:ema_down": 4,
+        "attention_removed:below_vwap": 23,
+        "attention_low_1m_volume": 95,
+        "attention_no_micro_pullback": 31,
+        "attention_weak_close": 31
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "LONA",
+      "status": "ok",
+      "days": 188,
+      "bars": 72141,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1340,
+        "attention_weak_close": 27,
+        "attention_no_micro_pullback": 64,
+        "attention_low_1m_volume": 62,
+        "attention_removed:below_vwap": 11,
+        "attention_removed:ema_down": 2
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "LPA",
+      "status": "ok",
+      "days": 188,
+      "bars": 72119,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1063,
+        "attention_low_1m_volume": 21,
+        "attention_no_micro_pullback": 16,
+        "attention_removed:below_vwap": 8,
+        "attention_removed:ema_down": 3,
+        "attention_weak_close": 4
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "MSGY",
+      "status": "ok",
+      "days": 188,
+      "bars": 73632,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1126,
+        "attention_removed:below_vwap": 34,
+        "attention_no_micro_pullback": 52,
+        "attention_low_1m_volume": 277,
+        "attention_weak_close": 105,
+        "attention_removed:ema_down": 3,
+        "attention_heavy_pullback_volume": 1,
+        "pending_expired": 1,
+        "attention_macd_not_open": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "NAMI",
+      "status": "ok",
+      "days": 187,
+      "bars": 70695,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 471,
+        "attention_no_micro_pullback": 22,
+        "attention_low_1m_volume": 121,
+        "attention_removed:below_vwap": 12,
+        "attention_removed:ema_down": 3,
+        "attention_weak_close": 31,
+        "attention_heavy_pullback_volume": 2
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "MEDS",
+      "status": "ok",
+      "days": 187,
+      "bars": 73261,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_no_micro_pullback": 82,
+        "attention_red_or_flat": 1475,
+        "attention_low_1m_volume": 363,
+        "attention_removed:below_vwap": 34,
+        "attention_weak_close": 151,
+        "attention_macd_not_open": 1,
+        "attention_removed:ema_down": 9,
+        "pullback_not_allowed": 1,
+        "attention_macd_not_positive": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "NAMM",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1389,
+        "attention_removed:below_vwap": 29,
+        "attention_low_1m_volume": 485,
+        "attention_weak_close": 155,
+        "attention_no_micro_pullback": 68,
+        "attention_heavy_pullback_volume": 2,
+        "attention_removed:ema_down": 3
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "NCI",
+      "status": "ok",
+      "days": 188,
+      "bars": 73563,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 713,
+        "attention_low_1m_volume": 78,
+        "attention_removed:below_vwap": 12,
+        "attention_no_micro_pullback": 31,
+        "attention_heavy_pullback_volume": 2,
+        "attention_weak_close": 34,
+        "attention_removed:ema_down": 2
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "NCT",
+      "status": "ok",
+      "days": 188,
+      "bars": 72982,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1747,
+        "attention_no_micro_pullback": 52,
+        "attention_removed:below_vwap": 20,
+        "attention_low_1m_volume": 210,
+        "attention_weak_close": 58,
+        "attention_removed:ema_down": 8
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "NHTC",
+      "status": "ok",
+      "days": 188,
+      "bars": 73650,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 655,
+        "attention_no_micro_pullback": 15,
+        "attention_low_1m_volume": 13,
+        "attention_removed:ema_down": 5,
+        "attention_removed:below_vwap": 2,
+        "attention_weak_close": 3
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "NTRB",
+      "status": "ok",
+      "days": 188,
+      "bars": 70942,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1187,
+        "attention_no_micro_pullback": 40,
+        "attention_weak_close": 8,
+        "attention_removed:below_vwap": 12,
+        "attention_removed:ema_down": 3,
+        "attention_low_1m_volume": 37
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "NTWK",
+      "status": "ok",
+      "days": 188,
+      "bars": 70507,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1101,
+        "attention_no_micro_pullback": 22,
+        "attention_low_1m_volume": 32,
+        "attention_removed:ema_down": 3,
+        "attention_removed:below_vwap": 6,
+        "attention_weak_close": 8
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "PLUT",
+      "status": "ok",
+      "days": 145,
+      "bars": 42559,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 139,
+        "attention_no_micro_pullback": 1
+      },
+      "missing": [
+        "2026-01-02",
+        "2026-03-26",
+        "2026-06-01",
+        "2026-06-02",
+        "2026-06-10",
+        "2026-06-11",
+        "2026-08-06",
+        "2026-08-07",
+        "2026-09-23"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "NXL",
+      "status": "ok",
+      "days": 188,
+      "bars": 73485,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1078,
+        "attention_low_1m_volume": 142,
+        "attention_removed:below_vwap": 21,
+        "attention_no_micro_pullback": 45,
+        "attention_weak_close": 37,
+        "attention_removed:ema_down": 2
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "ONCO",
+      "status": "ok",
+      "days": 188,
+      "bars": 73709,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 160,
+        "attention_red_or_flat": 682,
+        "attention_no_micro_pullback": 38,
+        "attention_removed:below_vwap": 24,
+        "attention_weak_close": 58,
+        "attention_removed:ema_down": 2
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "PFSA",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_no_micro_pullback": 42,
+        "attention_low_1m_volume": 181,
+        "attention_red_or_flat": 694,
+        "attention_weak_close": 58,
+        "attention_macd_not_positive": 1,
+        "attention_removed:below_vwap": 14,
+        "pullback_not_allowed": 1,
+        "attention_removed:ema_down": 2
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "SCYX",
+      "status": "ok",
+      "days": 188,
+      "bars": 73550,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1904,
+        "attention_no_micro_pullback": 62,
+        "attention_low_1m_volume": 261,
+        "attention_weak_close": 66,
+        "attention_removed:below_vwap": 16,
+        "attention_heavy_pullback_volume": 1,
+        "attention_removed:ema_down": 5
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "PMAX",
+      "status": "ok",
+      "days": 188,
+      "bars": 73178,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 952,
+        "attention_low_1m_volume": 259,
+        "attention_weak_close": 94,
+        "attention_no_micro_pullback": 64,
+        "attention_removed:below_vwap": 21,
+        "attention_removed:ema_down": 2
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "SOTK",
+      "status": "ok",
+      "days": 188,
+      "bars": 72322,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 955,
+        "attention_no_micro_pullback": 13,
+        "attention_removed:below_vwap": 8,
+        "attention_removed:ema_down": 3,
+        "attention_low_1m_volume": 22,
+        "attention_weak_close": 6
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "SGRX",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1241,
+        "attention_no_micro_pullback": 49,
+        "attention_low_1m_volume": 99,
+        "attention_weak_close": 28,
+        "attention_removed:below_vwap": 20,
+        "attention_removed:ema_down": 6
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "SPHL",
+      "status": "ok",
+      "days": 186,
+      "bars": 71206,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 547,
+        "attention_removed:ema_down": 3,
+        "attention_low_1m_volume": 110,
+        "attention_removed:below_vwap": 14,
+        "attention_no_micro_pullback": 18,
+        "attention_weak_close": 59
+      },
+      "missing": [
+        "2026-01-02",
+        "2026-09-10"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "SSM",
+      "status": "ok",
+      "days": 176,
+      "bars": 58588,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 669,
+        "attention_no_micro_pullback": 25,
+        "attention_removed:below_vwap": 12,
+        "attention_low_1m_volume": 107,
+        "attention_weak_close": 46,
+        "attention_heavy_pullback_volume": 2,
+        "attention_removed:ema_down": 1
+      },
+      "missing": [
+        "2026-01-02",
+        "2026-01-30",
+        "2026-04-29"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23",
+        "2026-01-26"
+      ]
+    },
+    {
+      "symbol": "SSTI",
+      "status": "ok",
+      "days": 188,
+      "bars": 73543,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1030,
+        "attention_low_1m_volume": 30,
+        "attention_no_micro_pullback": 30,
+        "attention_removed:below_vwap": 4,
+        "attention_weak_close": 6,
+        "attention_removed:ema_down": 5
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "STAK",
+      "status": "ok",
+      "days": 188,
+      "bars": 73553,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1059,
+        "attention_removed:below_vwap": 44,
+        "attention_weak_close": 181,
+        "attention_low_1m_volume": 420,
+        "attention_no_micro_pullback": 85,
+        "pullback_not_allowed": 2,
+        "attention_heavy_pullback_volume": 2,
+        "attention_removed:ema_down": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "TGE",
+      "status": "ok",
+      "days": 188,
+      "bars": 72631,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1355,
+        "attention_low_1m_volume": 109,
+        "attention_removed:ema_down": 7,
+        "attention_no_micro_pullback": 27,
+        "attention_removed:below_vwap": 14,
+        "attention_weak_close": 26
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "TDIC",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 532,
+        "attention_low_1m_volume": 226,
+        "attention_weak_close": 123,
+        "attention_removed:below_vwap": 23,
+        "attention_no_micro_pullback": 32,
+        "pullback_not_allowed": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "TNMG",
+      "status": "ok",
+      "days": 188,
+      "bars": 73208,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 792,
+        "attention_no_micro_pullback": 43,
+        "attention_low_1m_volume": 192,
+        "attention_weak_close": 79,
+        "attention_removed:below_vwap": 20,
+        "pullback_not_allowed": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "TNON",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 204,
+        "attention_weak_close": 101,
+        "attention_red_or_flat": 709,
+        "attention_removed:below_vwap": 21,
+        "attention_no_micro_pullback": 41,
+        "attention_removed:ema_down": 1,
+        "attention_heavy_pullback_volume": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "TURB",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1679,
+        "attention_low_1m_volume": 426,
+        "attention_no_micro_pullback": 104,
+        "attention_weak_close": 142,
+        "attention_removed:ema_down": 5,
+        "attention_removed:below_vwap": 32,
+        "attention_heavy_pullback_volume": 1,
+        "attention_wait_resistance_break": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "VBIO",
+      "status": "ok",
+      "days": 186,
+      "bars": 72776,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_heavy_pullback_volume": 5,
+        "attention_weak_close": 73,
+        "attention_red_or_flat": 1404,
+        "attention_removed:below_vwap": 32,
+        "attention_low_1m_volume": 255,
+        "attention_no_micro_pullback": 94,
+        "attention_removed:ema_down": 5
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "VEEA",
+      "status": "ok",
+      "days": 188,
+      "bars": 73626,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 1968,
+        "attention_low_1m_volume": 225,
+        "attention_no_micro_pullback": 72,
+        "attention_weak_close": 97,
+        "attention_removed:below_vwap": 30,
+        "attention_removed:ema_down": 4,
+        "attention_heavy_pullback_volume": 1,
+        "attention_wait_resistance_break": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "WFCF",
+      "status": "ok",
+      "days": 158,
+      "bars": 45303,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 213,
+        "attention_no_micro_pullback": 6,
+        "attention_weak_close": 4,
+        "attention_removed:below_vwap": 5,
+        "attention_removed:ema_down": 1,
+        "attention_low_1m_volume": 10
+      },
+      "missing": [
+        "2026-01-02",
+        "2026-02-04",
+        "2026-02-05",
+        "2026-02-06",
+        "2026-02-23",
+        "2026-04-29",
+        "2026-07-15",
+        "2026-07-21"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-23",
+        "2026-01-26",
+        "2026-01-27"
+      ]
+    },
+    {
+      "symbol": "WBUY",
+      "status": "ok",
+      "days": 188,
+      "bars": 72834,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 692,
+        "attention_no_micro_pullback": 38,
+        "attention_removed:below_vwap": 14,
+        "attention_low_1m_volume": 108,
+        "attention_weak_close": 28,
+        "attention_heavy_pullback_volume": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "VSME",
+      "status": "ok",
+      "days": 188,
+      "bars": 73283,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 890,
+        "attention_low_1m_volume": 238,
+        "attention_weak_close": 89,
+        "attention_no_micro_pullback": 56,
+        "attention_removed:below_vwap": 34,
+        "attention_removed:ema_down": 4,
+        "attention_heavy_pullback_volume": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "WETO",
+      "status": "ok",
+      "days": 188,
+      "bars": 72225,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 740,
+        "attention_removed:ema_down": 4,
+        "attention_removed:below_vwap": 28,
+        "attention_low_1m_volume": 178,
+        "attention_weak_close": 68,
+        "attention_no_micro_pullback": 22
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "WHLR",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_no_micro_pullback": 33,
+        "attention_red_or_flat": 737,
+        "attention_low_1m_volume": 84,
+        "attention_weak_close": 44,
+        "attention_removed:below_vwap": 30
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "WW",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 285,
+        "attention_red_or_flat": 2068,
+        "attention_no_micro_pullback": 107,
+        "attention_weak_close": 82,
+        "attention_removed:below_vwap": 31,
+        "attention_removed:ema_down": 6,
+        "attention_heavy_pullback_volume": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "YMT",
+      "status": "ok",
+      "days": 188,
+      "bars": 73410,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 639,
+        "attention_low_1m_volume": 98,
+        "attention_no_micro_pullback": 24,
+        "attention_weak_close": 34,
+        "attention_removed:below_vwap": 15,
+        "attention_removed:ema_down": 2
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "YMAT",
+      "status": "ok",
+      "days": 188,
+      "bars": 73495,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_red_or_flat": 503,
+        "attention_removed:below_vwap": 33,
+        "attention_low_1m_volume": 231,
+        "attention_weak_close": 72,
+        "attention_no_micro_pullback": 41,
+        "attention_heavy_pullback_volume": 1
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    },
+    {
+      "symbol": "ZNB",
+      "status": "ok",
+      "days": 188,
+      "bars": 73710,
+      "rejections": {
+        "before": 0
+      },
+      "rejection_reasons": {
+        "attention_low_1m_volume": 145,
+        "attention_red_or_flat": 1228,
+        "attention_weak_close": 39,
+        "attention_no_micro_pullback": 47,
+        "attention_removed:ema_down": 7,
+        "attention_removed:below_vwap": 18
+      },
+      "missing": [
+        "2026-01-02"
+      ],
+      "short_profiles": [
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-20",
+        "2026-01-21",
+        "2026-01-22",
+        "2026-01-23"
+      ]
+    }
+  ]
+}
