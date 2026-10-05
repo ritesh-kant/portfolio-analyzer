@@ -582,6 +582,8 @@ def index_page(runs: list[dict], statics: list[dict]) -> str:
 <title>Backtest dashboard</title><style>{INDEX_CSS}</style></head><body>
 <header>
   <h1>Backtest dashboard</h1>
+  <p><a href="/lab" style="color:var(--acc);font-weight:600">➜ Open the Lab</a> — pick indicators with
+  checkboxes, apply them to one fixed base trade, and keep every result.</p>
   <p>Every backtest run in <code>research/backtests/</code>, newest first. Click a run to open all of
   its trades, each on its own candle chart with EMA9/20/200, VWAP, MACD, volume, support/resistance
   and the BUY / SELL / stop / target lines — and use <b>Group by</b> there to split the trades by exit
@@ -636,7 +638,34 @@ def make_handler(runs: Runs):
         def json(self, status: int, obj: object) -> None:
             self.send(status, json.dumps(obj).encode(), "application/json")
 
+        def lab(self, method: str) -> bool:
+            """The lab (btlab/): indicator experiments on a fixed base trade, saved per run."""
+            u = urlparse(self.path)
+            path = unquote(u.path)
+            if not (path == "/lab" or path.startswith(("/lab/", "/api/lab/"))):
+                return False
+            try:
+                from btlab import server as lab_server
+            except Exception as e:  # keep the rest of the dashboard alive if the lab cannot load
+                self.json(500, {"error": f"lab unavailable: {e!r}"})
+                return True
+            return lab_server.handle(self, method, path, u.query)
+
+        def do_POST(self) -> None:  # noqa: N802
+            if not self.lab("POST"):
+                self.send(404, b"not found", "text/plain")
+
+        def do_PATCH(self) -> None:  # noqa: N802
+            if not self.lab("PATCH"):
+                self.send(404, b"not found", "text/plain")
+
+        def do_DELETE(self) -> None:  # noqa: N802
+            if not self.lab("DELETE"):
+                self.send(404, b"not found", "text/plain")
+
         def do_GET(self) -> None:  # noqa: N802
+            if self.lab("GET"):
+                return
             u = urlparse(self.path)
             path = unquote(u.path)
             q = parse_qs(u.query)

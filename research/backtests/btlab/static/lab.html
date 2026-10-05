@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backtest lab</title>
+<link rel="stylesheet" href="/lab/static/lab.css">
+</head><body>
+<header>
+  <div class="hrow">
+    <div>
+      <h1>Backtest lab</h1>
+      <p>One fixed <b>base trade</b> (a candlestick pattern, bounded by support and resistance, on momentum
+      stocks). Tick indicators, press <b>Apply</b>, and see what each one did to profit and loss.
+      Every result is saved with exactly what was applied.</p>
+    </div>
+    <nav><a href="/">← All backtests</a><a href="/api/lab/runs.csv">⬇ Export all runs (CSV)</a></nav>
+  </div>
+</header>
+<div id="banner" hidden></div>
+<div class="layout">
+  <aside id="setup">
+    <section class="card" id="sec-window">
+      <h2><span class="n">1</span> Data window</h2>
+      <div id="years" class="chips"></div>
+      <p class="hint" id="years-hint"></p>
+    </section>
+    <section class="card" id="sec-base">
+      <h2><span class="n">2</span> Base trade <small>fixed — every result is compared with it</small></h2>
+      <ul id="base-text" class="rule"></ul>
+      <details id="base-settings">
+        <summary>Base settings</summary>
+        <div class="grid2">
+          <label>Day change ≥ % <input type="number" id="b-chg-min" step="0.5" min="0.5"></label>
+          <label>Day change ≤ % <input type="number" id="b-chg-max" step="0.5" min="1"></label>
+          <label>RVOL ≥ <input type="number" id="b-rvol" step="0.5" min="0"></label>
+          <label>Max entries / stock / day (0 = no limit) <input type="number" id="b-maxtr" step="1" min="0" max="20" title="0 = no limit"></label>
+          <label>Risk per trade ₹ <input type="number" id="b-risk" step="50" min="50"></label>
+          <label>Max position ₹ <input type="number" id="b-notional" step="5000" min="5000"></label>
+        </div>
+        <div class="presets">Presets:
+          <button type="button" data-preset="strict">Strict 4–8% · RVOL 3</button>
+          <button type="button" data-preset="wide">Wider 3–15% · RVOL 2</button>
+        </div>
+        <p class="hint">Changing the momentum band rebuilds the base data (about 20 s per year).</p>
+        <div class="sub">Candlestick patterns that can trigger a trade</div>
+        <div id="patterns" class="chips small"></div>
+      </details>
+    </section>
+    <section class="card group-entry" id="sec-entry">
+      <h2><span class="n">3</span> Entry indicators <small>decide <b>which</b> base trades are taken</small></h2>
+      <div id="entry-list"></div>
+    </section>
+    <section class="card group-exit" id="sec-exit">
+      <h2><span class="n">4</span> Exit indicators <small>decide <b>how</b> a taken trade is closed</small></h2>
+      <div id="exit-list"></div>
+    </section>
+    <div class="actionbar" id="actionbar">
+      <div id="selsum">Nothing selected — Apply runs the plain base trade.</div>
+      <div class="btns">
+        <button type="button" id="btn-clear" class="ghost">Clear</button>
+        <button type="button" id="btn-scan" class="ghost" title="Runs every indicator on its own against the base">⚡ Test each alone</button>
+        <button type="button" id="btn-apply" class="primary">Apply ▶</button>
+      </div>
+    </div>
+  </aside>
+  <main id="results">
+    <section id="result-card" class="card empty">
+      <h2>Result</h2>
+      <p class="hint">Nothing applied yet. Press <b>Apply ▶</b> to run the base trade on its own, or tick some
+      indicators first. Past runs are listed below and are never lost.</p>
+    </section>
+    <section id="scan-card" class="card" hidden></section>
+    <section id="compare-card" class="card" hidden></section>
+    <section class="card" id="history-card">
+      <h2>Saved runs <small id="hist-count"></small></h2>
+      <div class="bar">
+        <input id="h-q" type="search" placeholder="Filter — indicator, year, note…">
+        <label><input type="checkbox" id="h-star"> ★ only</label>
+        <label>Show <select id="h-kind"><option value="">all runs</option><option value="base">base only</option>
+          <option value="entry">with entry indicators</option><option value="exit">with exit indicators</option></select></label>
+        <button type="button" id="btn-compare" class="ghost" disabled>Compare selected</button>
+        <button type="button" id="btn-del-sel" class="ghost" disabled>Delete selected</button>
+      </div>
+      <div class="scroll"><table id="history"><thead><tr>
+        <th><input type="checkbox" id="h-all" title="select all shown"></th><th></th><th data-k="created_at">when</th><th data-k="name">applied</th>
+        <th data-k="years">years</th><th data-k="n" class="num">trades</th>
+        <th data-k="win" class="num">win %</th><th data-k="mean" class="num">₹/trade</th>
+        <th data-k="median" class="num">median</th><th data-k="net" class="num">net ₹</th>
+        <th data-k="delta" class="num">Δ ₹/trade vs base</th><th></th></tr></thead><tbody></tbody></table></div>
+    </section>
+  </main>
+</div>
+<script src="/lab/static/lab.js"></script>
+</body></html>

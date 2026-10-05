@@ -52,6 +52,13 @@ from src.momentum_trader import us_costs  # noqa: E402
 from src.news_trader.trailing_sl import calc_costs  # noqa: E402
 
 CACHE = ROOT / "research" / "backtests" / ".cache_upstox" / "1m"
+if not CACHE.is_dir():
+    # a git worktree has no copy of the git-ignored bar cache: use the main checkout's
+    try:
+        from btlab.paths import upstox_1m_dir
+        CACHE = upstox_1m_dir()
+    except Exception:  # noqa: BLE001
+        pass
 # US runs (CSV `currency` == "USD") read the IBKR cache, named <SYMBOL>_<conId>_<year>.parquet.
 CACHE_US = ROOT / "research" / "backtests" / ".cache_ibkr_us" / "1m"
 ASSETS = Path(__file__).resolve().parent / "bt32_assets"
