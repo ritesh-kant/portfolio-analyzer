@@ -19,8 +19,8 @@ from . import base, plugins as P, service, store
 from .paths import cached_years
 
 
-def _years(s: str) -> list[int]:
-    return cached_years() if s == "all" else [int(y) for y in s.split(",")]
+def _years(s: str, market: str = "NSE") -> list[int]:
+    return cached_years(market) if s == "all" else [int(y) for y in s.split(",")]
 
 
 def main() -> int:
@@ -28,8 +28,10 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build", help="build the base candidate data for some years")
     b.add_argument("--years", default="all")
+    b.add_argument("--market", default="NSE", choices=["NSE", "US"])
     a = sub.add_parser("apply", help="apply indicators to the base trade and save the run")
     a.add_argument("--years", default="all")
+    a.add_argument("--market", default="NSE", choices=["NSE", "US"])
     a.add_argument("--with", dest="with_", default="", help="comma-separated indicator ids")
     a.add_argument("--name", default="")
     sub.add_parser("indicators", help="list the indicator ids")
@@ -47,15 +49,15 @@ def main() -> int:
                   f'₹/trade={m.get("mean_inr", 0):>8} median={m.get("median_inr", 0):>8}')
         return 0
     if args.cmd == "build":
-        rule = base.BaseRule()
-        for y in _years(args.years):
+        rule = base.BaseRule.for_market(args.market)
+        for y in _years(args.years, args.market):
             meta = base.build_year(y, rule, progress=lambda n, t, s: print(f"\r{y}: {n}/{t}", end="", flush=True))
             print(f'\r{y}: {meta["n_candidates"]} candidates on {meta["n_days"]} symbol-days '
                   f'in {meta["elapsed_s"]} s')
         return 0
     plugins = [{"id": i, "params": {}} for i in args.with_.split(",") if i]
     try:
-        rec = service.apply({"years": _years(args.years), "plugins": plugins}, name=args.name)
+        rec = service.apply({"market": args.market, "years": _years(args.years, args.market), "plugins": plugins}, name=args.name)
     except service.NeedBuild as nb:
         print(f"base data missing for {nb.years}: run `build --years {','.join(map(str, nb.years))}` first")
         return 1

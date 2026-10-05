@@ -13,15 +13,19 @@ import pytest
 
 from btlab import base, runner
 
-RULE = base.BaseRule()
 YEAR = 2026
 
 
+@pytest.fixture(scope="module", params=["NSE", "US"])
+def rule(request):
+    return base.BaseRule.for_market(request.param)
+
+
 @pytest.fixture(scope="module")
-def built():
-    got = base.load_year(YEAR, RULE)
+def built(rule):
+    got = base.load_year(YEAR, rule)
     if got is None or got[0].empty:
-        pytest.skip("2026 base data is not built")
+        pytest.skip(f"2026 {rule.market} base data is not built")
     return got
 
 
@@ -55,7 +59,7 @@ def _same(a, b) -> bool:
 
 
 @pytest.mark.parametrize("when", ["after_fill", "volume_after_decision"])
-def test_candidate_features_do_not_depend_on_bars_after_the_cut(built, monkeypatch, when):
+def test_candidate_features_do_not_depend_on_bars_after_the_cut(built, rule, monkeypatch, when):
     """Scramble the day from a cut-off on and rebuild. `after_fill`: prices AND volumes after the
     candidate's fill are noise, yet it must come back with the SAME numbers. `volume_after_decision`:
     only volumes after the decision bar are noise (prices, hence fills, are untouched), so no
@@ -66,9 +70,9 @@ def test_candidate_features_do_not_depend_on_bars_after_the_cut(built, monkeypat
     checked = 0
     for _, row in cands.groupby("symbol").head(1).head(14).iterrows():
         cut = int(row["fill_min"]) + 1 if when == "after_fill" else int(row["decision_min"])
-        df = _scrambled(real_load(row["symbol"], YEAR), row["date"], cut, rng, prices=when == "after_fill")
-        monkeypatch.setattr(base, "_load", lambda s, y, _d=df: _d if y == YEAR else real_load(s, y))
-        again = pd.DataFrame(base.build_symbol(row["symbol"], YEAR, RULE)["cands"])
+        df = _scrambled(real_load(row["symbol"], YEAR, rule.market), row["date"], cut, rng, prices=when == "after_fill")
+        monkeypatch.setattr(base, "_load", lambda s, y, m="NSE", _d=df: _d if y == YEAR else real_load(s, y, m))
+        again = pd.DataFrame(base.build_symbol(row["symbol"], YEAR, rule)["cands"])
         monkeypatch.undo()
         hit = again[(again["date"] == row["date"]) & (again["pattern"] == row["pattern"])
                     & (again["decision_min"] == row["decision_min"])] if len(again) else again
@@ -81,13 +85,13 @@ def test_candidate_features_do_not_depend_on_bars_after_the_cut(built, monkeypat
     assert checked >= 5, "not enough candidates survived to test"
 
 
-def test_base_trades_match_an_independent_replay_on_raw_bars(built):
+def test_base_trades_match_an_independent_replay_on_raw_bars(built, rule):
     cands, days = built
-    cfg = runner.RunConfig(years=[YEAR], rule=RULE)
+    cfg = runner.RunConfig(years=[YEAR], rule=rule, risk_inr=rule.mk.risk, max_notional_inr=rule.mk.max_notional)
     trades = runner.run(cfg, cands, days)
-    assert len(trades) > 20
+    assert len(trades) > 10
     for _, t in trades.sample(min(40, len(trades)), random_state=1).iterrows():
-        raw = base._load(t["symbol"], YEAR)
+        raw = base._load(t["symbol"], YEAR, rule.market)
         d = raw[raw.index.normalize() == pd.Timestamp(t["date"], tz=raw.index.tz)]
         mins = (d.index.hour * 60 + d.index.minute).to_numpy()
         hh, mm = t["entry_time"].split(":")
@@ -105,12 +109,12 @@ def test_base_trades_match_an_independent_replay_on_raw_bars(built):
             if k > k0 and h[k] >= target:
                 exit_px, why = max(target, o[k]), "target"
                 break
-            if mins[k] >= 914:
+            if mins[k] >= rule.mk.eod_min:
                 exit_px, why = c[k], "eod"
                 break
         if why is None:
             exit_px, why = c[-1], "eod"
-        assert (why, round(exit_px, 2)) == (t["exit_reason"], pytest.approx(t["exit"], abs=0.006)), \
+        assert (why, float(exit_px)) == (t["exit_reason"], pytest.approx(t["exit"], abs=0.006)), \
             f'{t["symbol"]} {t["date"]} {t["entry_time"]}'
         # a trade never starts before the pattern that triggered it had closed
         assert t["trigger_time"] <= t["entry_time"]

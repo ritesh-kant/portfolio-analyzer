@@ -1,7 +1,7 @@
 """Trade replay: one taken candidate -> one closed trade, on the day's 1-minute bars.
 
 The base trade only has three ways out: the support stop, the resistance target
-and the 15:14-bar close. Exit indicators add more (EMA/MACD/VWAP breaks, a
+and the last bar of the session (15:14 NSE, 15:59 US). Exit indicators add more (EMA/MACD/VWAP breaks, a
 swing-low trail, breakeven, a stale-trade timer) by editing an `ExitCfg`; this
 module is the only place that reads it.
 
@@ -26,9 +26,10 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from src.momentum_trader.exits import ARM_AT_R, CLIMAX_VOL_RATIO, RESIST_NEAR_PCT, SWING_BUFFER_PCT
-from src.momentum_trader.levels import PIVOT_K, TICK
+from src.momentum_trader.levels import PIVOT_K
 
-from .base import EOD_CLOSE_MIN, tick_down
+from . import markets
+from .base import tick_down
 
 CHECKPOINT_BUFFER_PCT = 0.15     # BT52: the lifted stop sits this far under the checkpoint
 CHECKPOINT_RR = 2.0              # BT52: the uncapped target stays at 2R
@@ -52,6 +53,7 @@ class ExitCfg:
     stale_minutes: int = 45
     stale_r: float = 0.5
     stop_mode: str = "support"               # support | pattern_low
+    market: str = "NSE"                      # clock, tick and cost model of the tape being replayed
     notes: list[str] = field(default_factory=list)
 
 
@@ -65,12 +67,13 @@ class Exit:
     mae_r: float
 
 
-def cost_breakeven(entry: float, qty: int) -> float:
+def cost_breakeven(entry: float, qty: int, market: str = "NSE") -> float:
     """Lowest sell price that covers the round-trip charges, rounded up a tick."""
-    from src.news_trader.trailing_sl import calc_costs
+    mk = markets.get(market)
+    TICK = mk.tick
 
     def net(px: float) -> float:
-        return (px - entry) * qty - calc_costs(entry, px, qty, direction="long")["total"]
+        return (px - entry) * qty - mk.costs(entry, px, qty)
 
     lo, hi = entry, entry + TICK
     while net(hi) < 0.0:
@@ -85,6 +88,8 @@ def simulate(arr: dict[str, np.ndarray], k0: int, entry: float, stop0: float, ta
              resistance: float, qty: int, cfg: ExitCfg) -> Exit:
     o, h, lo, c, mn = arr["m1_o"], arr["m1_h"], arr["m1_l"], arr["m1_c"], arr["m1_min"]
     n1 = len(c)
+    mk = markets.get(cfg.market)
+    eod, tick = mk.eod_min, mk.tick
     m5_min = arr["m5_min"]
     m5_idx = {int(v): i for i, v in enumerate(m5_min)}
     risk = entry - stop0
@@ -102,7 +107,7 @@ def simulate(arr: dict[str, np.ndarray], k0: int, entry: float, stop0: float, ta
 
     be_price = None
     if cfg.breakeven:
-        be_price = entry if cfg.breakeven_to == "entry" else cost_breakeven(entry, qty)
+        be_price = entry if cfg.breakeven_to == "entry" else cost_breakeven(entry, qty, cfg.market)
 
     hi_water, lo_water = entry, entry
     armed = be_done = cp_done = False
@@ -126,7 +131,7 @@ def simulate(arr: dict[str, np.ndarray], k0: int, entry: float, stop0: float, ta
             return done(k, px, stop_kind, m)
         lo_water = min(lo_water, float(lo[k]))
         if k == k0:
-            if m >= EOD_CLOSE_MIN:
+            if m >= eod:
                 return done(k, float(c[k]), "eod", m + 1)
             continue
         if h[k] >= target:
@@ -140,7 +145,7 @@ def simulate(arr: dict[str, np.ndarray], k0: int, entry: float, stop0: float, ta
             pending = (be_price, "breakeven_stop")
         if checkpoint is not None and not cp_done and h[k] >= checkpoint:
             cp_done = True
-            lift = tick_down(checkpoint * (1.0 - CHECKPOINT_BUFFER_PCT / 100.0))
+            lift = tick_down(checkpoint * (1.0 - CHECKPOINT_BUFFER_PCT / 100.0), tick)
             if lift > stop and (pending is None or lift > pending[0]):
                 pending = (lift, "checkpoint_stop")
         if r_hi >= ARM_AT_R:
@@ -170,14 +175,14 @@ def simulate(arr: dict[str, np.ndarray], k0: int, entry: float, stop0: float, ta
             if cfg.swing_trail:
                 p = _last_pivot_low(arr["m5_pivlow"], arr["m5_l"], j)
                 if p is not None:
-                    cand = tick_down(p * (1.0 - SWING_BUFFER_PCT / 100.0))
+                    cand = tick_down(p * (1.0 - SWING_BUFFER_PCT / 100.0), tick)
                     if cand < close5 and cand > trail:
                         trail = cand
                         if cand > stop and (pending is None or cand > pending[0]):
                             pending = (cand, "trail_stop")
         if cfg.stale_exit and m - entry_min >= cfg.stale_minutes and r_hi < cfg.stale_r:
             return done(k, float(c[k]), "stale", m + 1)
-        if m >= EOD_CLOSE_MIN:
+        if m >= eod:
             return done(k, float(c[k]), "eod", m + 1)
     return done(n1 - 1, float(c[n1 - 1]), "eod", int(mn[n1 - 1]) + 1)
 

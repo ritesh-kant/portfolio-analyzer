@@ -36,9 +36,10 @@ _lock = threading.RLock()
 
 def canonical_config(cfg: dict) -> dict:
     """The part of a request that determines the trades, in a stable shape."""
+    base = {k: v for k, v in cfg["base"].items() if not (k == "market" and v == "NSE")}   # NSE keys predate markets
     return {
         "years": sorted(int(y) for y in cfg["years"]),
-        "base": dict(sorted(cfg["base"].items())),
+        "base": dict(sorted(base.items())),
         "patterns": sorted(cfg["patterns"]),
         "risk_inr": float(cfg["risk_inr"]), "max_notional_inr": float(cfg["max_notional_inr"]),
         "max_trades": int(cfg["max_trades"]),
@@ -122,7 +123,7 @@ def save_run(cfg: dict, trades: pd.DataFrame, metrics: dict, vs_base: dict, base
         wkey = window_key(cfg)
         rec = {
             "id": run_id, "key": key, "window": wkey, "created_at": now.isoformat(timespec="seconds"),
-            "name": name or label_for(cfg["plugins"]), "notes": notes, "starred": False,
+            "name": name or (("US · " if cfg["base"].get("market") == "US" else "") + label_for(cfg["plugins"])), "notes": notes, "starred": False,
             "is_base": not cfg["plugins"], "base_id": base_id,
             "config": canonical_config(cfg), "git": git_info(),
             "metrics": metrics, "vs_base": vs_base,

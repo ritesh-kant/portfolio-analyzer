@@ -45,8 +45,7 @@ def _bt32():
 
 
 def _rule_from(body: dict) -> base_mod.BaseRule:
-    cfg = service.parse_request({**body, "years": body.get("years") or [service.cached_years()[-1]]})
-    return base_mod.BaseRule(**cfg["base"])
+    return base_mod.BaseRule(**service.parse_request(body)["base"])
 
 
 def describe_config(rec: dict) -> str:
@@ -55,8 +54,9 @@ def describe_config(rec: dict) -> str:
            + (" (" + ", ".join(f"{k}={v}" for k, v in x["params"].items()) + ")" if x["params"] else "")
            for x in c["plugins"]]
     b = c["base"]
-    return (f"years {', '.join(map(str, c['years']))} · momentum {b['day_chg_min']:g}–{b['day_chg_max']:g}% "
-            f"RVOL≥{b['rvol_min']:g} · {len(c['patterns'])} patterns · risk ₹{c['risk_inr']:g}/trade · "
+    g = "$" if b.get("market") == "US" else "₹"
+    return (f"{'US · ' if b.get('market') == 'US' else ''}years {', '.join(map(str, c['years']))} · momentum {b['day_chg_min']:g}–{b['day_chg_max']:g}% "
+            f"RVOL≥{b['rvol_min']:g} · {len(c['patterns'])} patterns · risk {g}{c['risk_inr']:g}/trade · "
             f"{c['max_trades'] or 'unlimited'}/day · indicators: " + ("; ".join(ind) if ind else "none (base trade)"))
 
 
@@ -145,7 +145,7 @@ def handle(h, method: str, path: str, query: str) -> bool:
                 f = STATIC / m.group(1)
                 return h.send(200, f.read_bytes(), _CT.get(f.suffix, "application/octet-stream")) or True
             if path == "/api/lab/meta":
-                return h.json(200, service.meta(base_mod.BaseRule())) or True
+                return h.json(200, service.meta(base_mod.BaseRule.for_market(q.get("market", ["NSE"])[0].upper()))) or True
             if path == "/api/lab/jobs":
                 return h.json(200, service.jobs()) or True
             if path == "/api/lab/runs":

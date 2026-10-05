@@ -17,7 +17,7 @@ import pandas as pd
 
 from . import LAB_VERSION
 from . import base as base_mod
-from . import metrics, plugins as P, runner, store
+from . import markets, metrics, plugins as P, runner, store
 from .paths import cached_symbols, cached_years
 
 
@@ -29,14 +29,19 @@ class NeedBuild(Exception):
 
 def parse_request(body: dict) -> dict:
     """Request -> canonical config dict (validated, defaults filled in)."""
-    avail = cached_years()
+    rule_in = body.get("base") or {}
+    market = str(body.get("market") or rule_in.get("market") or "NSE").upper()
+    if market not in markets.MARKETS:
+        raise P.PluginError(f"unknown market {market!r}")
+    mk = markets.get(market)
+    avail = cached_years(market)
     years = sorted({int(y) for y in body.get("years") or avail[-1:]})
     bad = [y for y in years if y not in avail]
     if bad or not years:
-        raise P.PluginError(f"no cached bars for {bad or 'any year'}")
-    rule_in = body.get("base") or {}
-    rule = base_mod.BaseRule(**{k: type(getattr(base_mod.BaseRule, k))(rule_in[k])
-                                for k in asdict(base_mod.BaseRule()) if k in rule_in})
+        raise P.PluginError(f"no cached {mk.id} bars for {bad or 'any year'}")
+    given = {k: type(getattr(base_mod.BaseRule, k))(rule_in[k])
+             for k in asdict(base_mod.BaseRule()) if k in rule_in and k != "market"}
+    rule = base_mod.BaseRule.for_market(market, **given)
     if not 0 < rule.day_chg_min <= rule.day_chg_max <= 100:
         raise P.PluginError("day change band must satisfy 0 < min <= max")
     patterns = body.get("patterns") or list(base_mod.BULLISH_PATTERNS)
@@ -45,8 +50,9 @@ def parse_request(body: dict) -> dict:
         raise P.PluginError(f"not a bullish pattern: {unknown}")
     return {
         "years": years, "base": asdict(rule), "patterns": sorted(patterns),
-        "risk_inr": min(max(float(body.get("risk_inr", 500)), 50.0), 50_000.0),
-        "max_notional_inr": min(max(float(body.get("max_notional_inr", 50_000)), 5_000.0), 5_000_000.0),
+        "risk_inr": min(max(float(body.get("risk_inr", mk.risk)), mk.risk / 10), mk.risk * 100),
+        "max_notional_inr": min(max(float(body.get("max_notional_inr", mk.max_notional)),
+                                    mk.max_notional / 10), mk.max_notional * 100),
         "max_trades": min(max(int(body.get("max_trades", 0)), 0), 20),
         "plugins": P.normalise(body.get("plugins") or []),
     }
@@ -136,7 +142,7 @@ def start_build(years: list[int], rule: base_mod.BaseRule) -> dict:
     def work() -> None:
         try:
             for y in years:
-                job["current_year"], job["done"], job["total"] = y, 0, len(cached_symbols(y))
+                job["current_year"], job["done"], job["total"] = y, 0, len(cached_symbols(y, rule.market))
 
                 def prog(n: int, t: int, s: str) -> None:
                     job["done"], job["total"] = n, t
@@ -157,15 +163,20 @@ def jobs() -> list[dict]:
 
 
 def meta(rule: base_mod.BaseRule) -> dict:
+    mk = rule.mk
+    eod = f"{mk.eod_min // 60:02d}:{mk.eod_min % 60:02d} " + ("ET" if mk.id == "US" else "IST")
     return {
         "lab_version": LAB_VERSION,
-        "years": [base_mod.year_status(y, rule) for y in cached_years()],
+        "market": {"id": mk.id, "glyph": mk.glyph, "currency": mk.currency, "risk": mk.risk,
+                   "max_notional": mk.max_notional},
+        "markets": [{"id": m.id, "label": m.label, "glyph": m.glyph} for m in markets.MARKETS.values()],
+        "years": [base_mod.year_status(y, rule) for y in cached_years(rule.market)],
         "plugins": P.catalog(),
         "patterns": list(base_mod.BULLISH_PATTERNS),
         "base": asdict(rule),
         "base_rule_text": [
             f"Momentum stocks: day change +{rule.day_chg_min:g}% to +{rule.day_chg_max:g}%, "
-            f"time-of-day RVOL ≥ {rule.rvol_min:g}, price ₹60–2,000, 20-day turnover ₹3–50 cr",
+            f"time-of-day RVOL ≥ {rule.rvol_min:g}, {mk.universe_text}",
             "Trigger: a bullish candlestick pattern completes on a 5-minute bar",
             f"Entry: buy-stop 1 tick over the pattern high, live {rule.fill_valid_minutes} min, "
             "cancelled if price trades under the pattern low first",
@@ -173,7 +184,7 @@ def meta(rule: base_mod.BaseRule) -> dict:
             "(a stop beyond 3% means no trade)",
             f"Target: nearest structural resistance, {rule.target_buffer_pct:g}% under it "
             "(earlier sessions' highs included)",
-            "Exit: stop · target · the bar starting 15:14, whichever comes first",
+            f"Exit: stop · target · the last bar of the session ({eod}), whichever comes first",
         ],
         "jobs": jobs(),
     }

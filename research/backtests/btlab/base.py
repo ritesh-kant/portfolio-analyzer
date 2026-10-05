@@ -44,9 +44,10 @@ import numpy as np
 import pandas as pd
 
 from . import LAB_VERSION
-from .paths import LAB_CACHE, cached_symbols, upstox_1m_dir
+from . import markets
+from .paths import LAB_CACHE, bar_file, cached_symbols
 
-from src.momentum_trader import quality, universe  # noqa: E402
+from src.momentum_trader import quality  # noqa: E402
 from src.momentum_trader.candles import PATTERN_RULES_VERSION, completed_pattern_matches  # noqa: E402
 from src.momentum_trader.engine import (  # noqa: E402
     build_cum_volume_profile,
@@ -64,16 +65,13 @@ from src.momentum_trader.indicators import (  # noqa: E402
 from src.momentum_trader.levels import (  # noqa: E402
     SESSION_LEVEL_SESSIONS,
     TARGET_BUFFER_PCT,
-    TICK,
     derive_levels,
     is_structural,
-    resistance_target,
     swing_pivot_positions,
 )
 from src.momentum_trader.pullback import pullback_ordinal  # noqa: E402
 from src.momentum_trader.risk import MAX_STOP_PCT, MIN_STOP_PCT  # noqa: E402
 
-EOD_CLOSE_MIN = 15 * 60 + 14          # the bar STARTING 15:14 is the last one; exit at its close
 MIN_PROFILE_DAYS = 10
 PROFILE_DAYS = 20
 WARM_SESSIONS = 5                      # prior sessions that warm up EMA200 / MACD
@@ -98,19 +96,48 @@ class BaseRule:
     session_level_sessions: int = SESSION_LEVEL_SESSIONS
     entry_cutoff_min: int = 14 * 60 + 30
     pattern_tf: str = "5m"
+    market: str = "NSE"
+
+    @classmethod
+    def for_market(cls, market: str, **given) -> "BaseRule":
+        """The market's own defaults (momentum band, entry cutoff), then whatever was given."""
+        mk = markets.get(market)
+        return cls(**{"day_chg_min": mk.day_chg[0], "day_chg_max": mk.day_chg[1],
+                      "entry_cutoff_min": mk.cutoff_min, **given, "market": market})
+
+    @property
+    def mk(self) -> markets.Market:
+        return markets.get(self.market)
 
     def key(self) -> str:
-        blob = json.dumps({**asdict(self), "v": LAB_VERSION,
-                           "patterns": PATTERN_RULES_VERSION}, sort_keys=True)
+        d = asdict(self)
+        if self.market == "NSE":
+            del d["market"]            # keeps every NSE cache and saved run valid
+        blob = json.dumps({**d, "v": LAB_VERSION, "patterns": PATTERN_RULES_VERSION}, sort_keys=True)
         return hashlib.sha1(blob.encode()).hexdigest()[:10]
 
 
-def tick_up(x: float) -> float:
-    return round(math.ceil(x / TICK - 1e-9) * TICK, 2)
+def tick_up(x: float, tick: float = 0.05) -> float:
+    return round(math.ceil(x / tick - 1e-9) * tick, 2)
 
 
-def tick_down(x: float) -> float:
-    return round(math.floor(x / TICK + 1e-9) * TICK, 2)
+def tick_down(x: float, tick: float = 0.05) -> float:
+    return round(math.floor(x / tick + 1e-9) * tick, 2)
+
+
+def resist_target(levels: list, fill: float, buffer_pct: float, tick: float):
+    """Nearest structural resistance whose buffered target is above the fill.
+
+    `levels.resistance_target` with the market's tick (that function floors to the NSE
+    Rs0.05 grid, which on a $5 stock would move the target by up to 1%).
+    """
+    picks = []
+    for x in levels:
+        if is_structural(x):
+            t = x.price if buffer_pct <= 0 else tick_down(x.price * (1.0 - buffer_pct / 100.0), tick)
+            if t > fill:
+                picks.append((x, t))
+    return min(picks, key=lambda p: (p[1], p[0].price)) if picks else None
 
 
 # ------------------------------------------------------------------ fill search
@@ -128,7 +155,7 @@ def find_fill(
     """
     last = min(len(h), start + rule.fill_valid_minutes)
     for k in range(start, last):
-        if mins[k] >= rule.entry_cutoff_min or mins[k] >= EOD_CLOSE_MIN:
+        if mins[k] >= rule.entry_cutoff_min or mins[k] >= rule.mk.eod_min:
             return "cutoff"
         if lo[k] < invalidation:
             return "invalidated"
@@ -150,7 +177,7 @@ def support_stop(levels: list, trigger: float, rule: BaseRule) -> tuple[object |
     below = sorted((x for x in levels if x.price < trigger and is_structural(x)),
                    key=lambda x: -x.price)
     for x in below:
-        stop = tick_down(x.price * (1.0 - rule.stop_buffer_pct / 100.0))
+        stop = tick_down(x.price * (1.0 - rule.stop_buffer_pct / 100.0), rule.mk.tick)
         if (trigger - stop) / trigger >= MIN_STOP_PCT:
             return x, stop
     return None, 0.0
@@ -165,18 +192,27 @@ def stop_ok(entry: float, stop: float) -> bool:
 
 # ------------------------------------------------------------------ one symbol
 
-def _load(sym: str, year: int) -> pd.DataFrame | None:
-    f = upstox_1m_dir() / f"{sym}_{year}.parquet"
-    return pd.read_parquet(f) if f.exists() else None
+def _load(sym: str, year: int, market: str = "NSE") -> pd.DataFrame | None:
+    f = bar_file(sym, year, market)
+    if f is None:
+        return None
+    df = pd.read_parquet(f)
+    if market == "US":
+        # regular session only, New York clock, no repeated timestamps
+        df = df.sort_index()
+        df.index = df.index.tz_convert("America/New_York")
+        df = df.between_time("09:30", "15:59")
+        df = df[~df.index.duplicated(keep="last")]
+    return df
 
 
-def _daily(df: pd.DataFrame) -> pd.DataFrame:
+def _daily(df: pd.DataFrame, unit: float = 1e7) -> pd.DataFrame:
     g = df.groupby(df.index.normalize())
     out = pd.DataFrame({
         "open": g["open"].first(), "high": g["high"].max(), "low": g["low"].min(),
         "close": g["close"].last(), "volume": g["volume"].sum(),
     })
-    out["turnover_cr"] = (df["close"] * df["volume"]).groupby(df.index.normalize()).sum() / 1e7
+    out["turnover_cr"] = (df["close"] * df["volume"]).groupby(df.index.normalize()).sum() / unit
     return out
 
 
@@ -214,13 +250,13 @@ def build_symbol(sym: str, year: int, rule: BaseRule) -> dict:
 
 
 def _build_symbol(sym: str, year: int, rule: BaseRule, out: dict) -> None:
-    cur = _load(sym, year)
+    cur = _load(sym, year, rule.market)
     if cur is None or cur.empty:
         return
-    prev = _load(sym, year - 1)
+    prev = _load(sym, year - 1, rule.market)
     df = pd.concat([prev.iloc[-45 * 375:], cur]) if prev is not None and not prev.empty else cur
     df = df[~df.index.duplicated(keep="last")].sort_index()
-    daily = _daily(df)
+    daily = _daily(df, rule.mk.liq_unit)
     days = list(daily.index)
     groups = {d: g for d, g in df.groupby(df.index.normalize())}
     fn: Counter = out["funnel"]
@@ -232,7 +268,7 @@ def _build_symbol(sym: str, year: int, rule: BaseRule, out: dict) -> None:
         if prev_close <= 0 or float(daily["high"].iloc[i]) / prev_close - 1.0 < rule.day_chg_min / 100.0:
             continue
         turnover = float((daily["turnover_cr"].iloc[max(0, i - 20):i]).mean())
-        if not universe.passes_dynamic(prev_close, turnover)[0]:
+        if not rule.mk.passes(prev_close, turnover)[0]:
             fn["days_universe_fail"] += 1
             continue
         day_bars = groups[d]
@@ -245,6 +281,7 @@ def _build_symbol(sym: str, year: int, rule: BaseRule, out: dict) -> None:
 def _scan_day(sym: str, d: pd.Timestamp, i: int, days: list, groups: dict, daily: pd.DataFrame,
               day_bars: pd.DataFrame, prev_close: float, rule: BaseRule, out: dict) -> None:
     fn: Counter = out["funnel"]
+    tick = rule.mk.tick
     hist = pd.concat([groups[x] for x in days[max(0, i - PROFILE_DAYS):i]])
     warm = pd.concat([groups[x] for x in days[max(0, i - WARM_SESSIONS):i]])
     profile = build_cum_volume_profile(hist, PROFILE_DAYS)
@@ -308,7 +345,7 @@ def _scan_day(sym: str, d: pd.Timestamp, i: int, days: list, groups: dict, daily
         dec_min = int(start5.hour * 60 + start5.minute) + 5
         for mt in matches:
             fn["patterns"] += 1
-            trigger = tick_up(float(mt.confirmation) + TICK)
+            trigger = tick_up(float(mt.confirmation) + tick, tick)
             sup, stop = support_stop(levels, trigger, rule)
             if sup is None:
                 fn["no_support"] += 1
@@ -316,7 +353,7 @@ def _scan_day(sym: str, d: pd.Timestamp, i: int, days: list, groups: dict, daily
             if not stop_ok(trigger, stop):
                 fn["stop_too_wide"] += 1
                 continue
-            tgt = resistance_target(levels, trigger, rule.target_buffer_pct)
+            tgt = resist_target(levels, trigger, rule.target_buffer_pct, tick)
             if tgt is None:
                 fn["no_resistance"] += 1
                 continue
@@ -389,7 +426,7 @@ def year_status(year: int, rule: BaseRule) -> dict:
         meta = json.loads(m.read_text())
         return {"year": year, "built": True, **{k: meta[k] for k in
                 ("built_at", "n_candidates", "n_days", "symbols", "elapsed_s") if k in meta}}
-    return {"year": year, "built": False, "symbols": len(cached_symbols(year))}
+    return {"year": year, "built": False, "symbols": len(cached_symbols(year, rule.market))}
 
 
 def build_year(year: int, rule: BaseRule, jobs: int | None = None,
@@ -397,7 +434,7 @@ def build_year(year: int, rule: BaseRule, jobs: int | None = None,
     """Build (or rebuild) the candidate table for one calendar year."""
     LAB_CACHE.mkdir(parents=True, exist_ok=True)
     jobs = jobs or max(2, (os.cpu_count() or 4) - 1)      # CPU-bound: processes, not threads (GIL)
-    syms = cached_symbols(year)
+    syms = cached_symbols(year, rule.market)
     t0 = _time.time()
     rows: list[dict] = []
     days: dict[str, dict] = {}
