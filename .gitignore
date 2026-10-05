@@ -21,3 +21,7 @@ apps/data/
 
 # backtest dashboard: per-trade chart cache + run statistics (rebuilt on demand)
 research/backtests/.dashboard_cache/
+
+# backtest lab: rebuildable candidate tables, and per-run trade CSVs (run.json IS tracked)
+research/backtests/.lab_cache/
+research/backtests/lab_runs/*/trades.csv
