@@ -79,6 +79,29 @@ def _rr(df: pd.DataFrame) -> pd.Series:
     return (df["target"] - df["fill"]) / (df["fill"] - df["stop"])
 
 
+def _above_vwap(df: pd.DataFrame, p: dict) -> pd.Series:
+    dist = (df["close5"] / df["vwap5"] - 1.0) * 100.0
+    return (dist >= p["min_pct"]) & (dist <= p["max_pct"])
+
+
+def _kind_ok(kind: pd.Series, want: str) -> pd.Series:
+    if want == "swing":
+        return kind.astype(str).str.startswith("pivot")
+    if want == "not_round":
+        return kind.astype(str) != "round"
+    return pd.Series(True, index=kind.index)
+
+
+def _support(df: pd.DataFrame, p: dict) -> pd.Series:
+    dist = (df["fill"] - df["support"]) / df["fill"] * 100.0
+    return (dist >= p["min_pct"]) & (dist <= p["max_pct"]) & _kind_ok(df["support_kind"], p["kind"])
+
+
+def _resistance(df: pd.DataFrame, p: dict) -> pd.Series:
+    dist = (df["resistance"] - df["fill"]) / df["fill"] * 100.0
+    return (dist >= p["min_pct"]) & (dist <= p["max_pct"]) & _kind_ok(df["resistance_kind"], p["kind"])
+
+
 ENTRY: tuple[Plugin, ...] = (
     Plugin("time_window", "entry", "Time of day",
            "Only take entries inside a clock window (decision after the start, fill before the end).",
@@ -92,9 +115,16 @@ ENTRY: tuple[Plugin, ...] = (
             Param("rvol_min", "RVOL ≥", 5.0, "float", 0, 50, 0.5)),
            entry=_momentum),
     Plugin("above_vwap", "entry", "Above VWAP",
-           "5-minute close at or above session VWAP: buyers are in control of the day.",
+           "5-minute close inside a band above session VWAP (from 0% up to the limit): buyers are in control, optionally not stretched too far.",
+           (Param("min_pct", "Above VWAP by ≥ %", 0.0, "float", -2, 20, 0.05),
+            Param("max_pct", "Above VWAP by ≤ %", 20.0, "float", 0, 50, 0.05)),
            history="Part of the F1 uptrend test (BT22, killed with the bundle).",
-           entry=lambda df, p: df["close5"] >= df["vwap5"]),
+           entry=_above_vwap),
+    Plugin("vwap_cross", "entry", "Just crossed above VWAP",
+           "The 5-minute close went from under VWAP to above it this many 5-minute bars before the pattern completed (0 = the pattern bar itself crossed) and has stayed above since. Stocks that opened above VWAP and never dipped under have no cross and are skipped.",
+           (Param("min_bars", "Crossed ≥ bars ago", 0, "int", 0, 80, 1),
+            Param("max_bars", "Crossed ≤ bars ago", 3, "int", 0, 80, 1)),
+           entry=lambda df, p: (df["vwap_cross_bars"] >= p["min_bars"]) & (df["vwap_cross_bars"] <= p["max_bars"])),
     Plugin("ema9_over_ema20", "entry", "EMA9 over EMA20",
            "Short-term trend up on the 5-minute chart (EMA9 above EMA20).",
            history="BT30 one-minute agreement / BT22 F1.",
@@ -161,6 +191,26 @@ ENTRY: tuple[Plugin, ...] = (
            (Param("min_pct", "Distance ≥ %", 0.15, "float", 0, 1, 0.05),),
            history="BT24 entry location.",
            entry=lambda df, p: df["dist_round_pct"] >= p["min_pct"]),
+    Plugin("news_reaction", "entry", "News + market reaction",
+           "Only take the trade if the stock had a MATERIAL NSE filing (results, order win, deal, rating, dividend, fund-raising, litigation…) in the look-back window AND the price has since moved up by at least the given % with the day's volume to match. Exchange queries about a move that already happened ('spurt in volume') never count. NSE only; needs the filings fetched once (the lab asks).",
+           (Param("lookback_h", "News within last (h)", 24, "float", 1, 72, 1),
+            Param("min_move_pct", "Price up since news ≥ %", 2.0, "float", 0, 30, 0.5),
+            Param("min_rvol", "RVOL ≥", 3.0, "float", 0, 50, 0.5),
+            Param("scope", "Counts as news", "material", "select", options=("material", "material+unclear"))),
+           history="news-trader (BT12) found no drift after news on a next-day basis; this asks the intraday question instead: news AND an on-the-tape reaction at the pattern.",
+           entry=lambda df, p: (df["news_move_pct"] >= p["min_move_pct"]) & (df["rvol"] >= p["min_rvol"])),
+    Plugin("support_rule", "entry", "Support rule",
+           "Only take trades whose structural support sits inside this distance below the fill; optionally a swing low, or anything but a round number.",
+           (Param("min_pct", "Distance ≥ %", 0.3, "float", 0, 10, 0.1),
+            Param("max_pct", "Distance ≤ %", 3.0, "float", 0.1, 10, 0.1),
+            Param("kind", "Kind", "any", "select", options=("any", "swing", "not_round"))),
+           entry=_support),
+    Plugin("resistance_rule", "entry", "Resistance rule",
+           "Only take trades with this much room to the structural resistance above the fill; optionally a swing high, or anything but a round number.",
+           (Param("min_pct", "Headroom ≥ %", 1.0, "float", 0, 20, 0.1),
+            Param("max_pct", "Headroom ≤ %", 10.0, "float", 0.1, 50, 0.1),
+            Param("kind", "Kind", "any", "select", options=("any", "swing", "not_round"))),
+           entry=_resistance),
 )
 
 
@@ -175,6 +225,7 @@ def _set(**fields: Any) -> Callable[[ExitCfg, dict], None]:
 
 def _target_rr(cfg: ExitCfg, p: dict) -> None:
     cfg.target_mode, cfg.target_rr = "rr", float(p["rr"])
+    cfg.stop_mult = float(p.get("stop_x", 1.0))
 
 
 def _breakeven(cfg: ExitCfg, p: dict) -> None:
@@ -187,8 +238,10 @@ def _stale(cfg: ExitCfg, p: dict) -> None:
 
 EXIT: tuple[Plugin, ...] = (
     Plugin("target_fixed_rr", "exit", "Fixed R target",
-           "Replace the resistance target with a fixed multiple of the risk.",
-           (Param("rr", "Target at R", 2.0, "float", 0.5, 10, 0.25),), exclusive="target",
+           "Replace the resistance target with a fixed multiple of the risk. Optionally scale the stop distance (R follows it).",
+           (Param("rr", "Target at R", 2.0, "float", 0.5, 10, 0.25),
+            Param("stop_x", "Stop distance × base (1 = unchanged)", 1.0, "float", 0.25, 5, 0.25)),
+           exclusive="target",
            history="BT17 fixed 2R: 25% reach it.", exit=_target_rr),
     Plugin("target_none", "exit", "No target (let it run)",
            "Remove the target: only the stop, the other exits and the 15:14 close end the trade.",
@@ -199,7 +252,7 @@ EXIT: tuple[Plugin, ...] = (
            exclusive="target", history="BT52: KILLED, then shipped live 2026-09-29.",
            exit=_set(target_mode="checkpoint")),
     Plugin("stop_pattern_low", "exit", "Stop at the pattern low",
-           "Stop one tick under the candlestick pattern's low instead of the support level.",
+           "Use a stop one tick under the pattern low when it is 0.3–3% below entry; otherwise keep the support stop (see stop_source in the trade CSV).",
            exclusive="stop", exit=_set(stop_mode="pattern_low")),
     Plugin("ema9_exit", "exit", "EMA9 break",
            "Sell at the close of a 5-minute bar that closes under its EMA9 (once up half a risk).",

@@ -39,3 +39,126 @@
 {"id": "20261005-154321-e261be", "key": "e261bee3b16d", "window": "c8794887f715", "at": "2026-10-05T15:43:21", "plugins": ["away_from_round", "daily_uptrend"]}
 {"id": "20261005-154413-edb4d8", "key": "edb4d848c115", "window": "c8794887f715", "at": "2026-10-05T15:44:13", "plugins": ["daily_uptrend", "rising_price_volume"]}
 {"id": "20261005-162324-9ddd29", "key": "9ddd29829339", "window": "cbd83dfcaddf", "at": "2026-10-05T16:23:24", "plugins": []}
+{"id": "20261005-221415-8a04d8", "key": "8a04d8db611d", "window": "ea51d29501f9", "at": "2026-10-05T22:14:15", "plugins": []}
+{"id": "20261005-221430-817f97", "key": "817f976b5576", "window": "ea51d29501f9", "at": "2026-10-05T22:14:30", "plugins": ["time_window"]}
+{"id": "20261005-221431-9e1cba", "key": "9e1cbab5b26d", "window": "ea51d29501f9", "at": "2026-10-05T22:14:31", "plugins": ["momentum_tighter"]}
+{"id": "20261005-221431-79b710", "key": "79b71040aff3", "window": "ea51d29501f9", "at": "2026-10-05T22:14:31", "plugins": ["above_vwap"]}
+{"id": "20261005-221431-89d3e1", "key": "89d3e1352dd5", "window": "ea51d29501f9", "at": "2026-10-05T22:14:31", "plugins": ["ema9_over_ema20"]}
+{"id": "20261005-221431-638236", "key": "6382362d5cf8", "window": "ea51d29501f9", "at": "2026-10-05T22:14:31", "plugins": ["close_over_ema9"]}
+{"id": "20261005-221431-a34ad0", "key": "a34ad0b4fe1f", "window": "ea51d29501f9", "at": "2026-10-05T22:14:31", "plugins": ["above_ema200"]}
+{"id": "20261005-221431-1773c5", "key": "1773c5c681fc", "window": "ea51d29501f9", "at": "2026-10-05T22:14:31", "plugins": ["macd5_positive"]}
+{"id": "20261005-221431-e160cf", "key": "e160cf20910f", "window": "ea51d29501f9", "at": "2026-10-05T22:14:31", "plugins": ["macd1_open"]}
+{"id": "20261005-221431-bd64f9", "key": "bd64f96bcca9", "window": "ea51d29501f9", "at": "2026-10-05T22:14:31", "plugins": ["volume_surge"]}
+{"id": "20261005-221431-1c35be", "key": "1c35be089b2c", "window": "ea51d29501f9", "at": "2026-10-05T22:14:31", "plugins": ["pattern_strength"]}
+{"id": "20261005-221431-c775f2", "key": "c775f2eaa41a", "window": "ea51d29501f9", "at": "2026-10-05T22:14:31", "plugins": ["min_reward_risk"]}
+{"id": "20261005-221431-62ceaa", "key": "62ceaaf4dbbe", "window": "ea51d29501f9", "at": "2026-10-05T22:14:31", "plugins": ["max_stop_distance"]}
+{"id": "20261005-221431-43f90f", "key": "43f90f663411", "window": "ea51d29501f9", "at": "2026-10-05T22:14:31", "plugins": ["pullback_ordinal"]}
+{"id": "20261005-221432-3b6a8d", "key": "3b6a8d6f05e7", "window": "ea51d29501f9", "at": "2026-10-05T22:14:32", "plugins": ["uptrend_f1"]}
+{"id": "20261005-221432-0fe11b", "key": "0fe11b9b731f", "window": "ea51d29501f9", "at": "2026-10-05T22:14:32", "plugins": ["chart_quality_f2"]}
+{"id": "20261005-221432-b20aea", "key": "b20aeaa1d474", "window": "ea51d29501f9", "at": "2026-10-05T22:14:32", "plugins": ["surge_f3"]}
+{"id": "20261005-221432-ebef98", "key": "ebef9856489a", "window": "ea51d29501f9", "at": "2026-10-05T22:14:32", "plugins": ["rising_price_volume"]}
+{"id": "20261005-221432-fabfbf", "key": "fabfbf85ce2e", "window": "ea51d29501f9", "at": "2026-10-05T22:14:32", "plugins": ["daily_uptrend"]}
+{"id": "20261005-221432-278b15", "key": "278b15afecf6", "window": "ea51d29501f9", "at": "2026-10-05T22:14:32", "plugins": ["atr_band"]}
+{"id": "20261005-221432-80f545", "key": "80f545e5673d", "window": "ea51d29501f9", "at": "2026-10-05T22:14:32", "plugins": ["away_from_round"]}
+{"id": "20261005-221432-b1fc38", "key": "b1fc38bebce9", "window": "ea51d29501f9", "at": "2026-10-05T22:14:32", "plugins": ["target_fixed_rr"]}
+{"id": "20261005-221432-cd96e1", "key": "cd96e1a3a79e", "window": "ea51d29501f9", "at": "2026-10-05T22:14:32", "plugins": ["target_none"]}
+{"id": "20261005-221432-9228d5", "key": "9228d54b35ab", "window": "ea51d29501f9", "at": "2026-10-05T22:14:32", "plugins": ["checkpoint_stop"]}
+{"id": "20261005-221432-899832", "key": "89983296cc0a", "window": "ea51d29501f9", "at": "2026-10-05T22:14:32", "plugins": ["stop_pattern_low"]}
+{"id": "20261005-221432-c6f77f", "key": "c6f77f6b0e69", "window": "ea51d29501f9", "at": "2026-10-05T22:14:32", "plugins": ["ema9_exit"]}
+{"id": "20261005-221433-fcc376", "key": "fcc376712bc6", "window": "ea51d29501f9", "at": "2026-10-05T22:14:33", "plugins": ["ema20_exit"]}
+{"id": "20261005-221433-c51399", "key": "c513991e3c71", "window": "ea51d29501f9", "at": "2026-10-05T22:14:33", "plugins": ["macd_fade_exit"]}
+{"id": "20261005-221433-26166a", "key": "26166aac4be7", "window": "ea51d29501f9", "at": "2026-10-05T22:14:33", "plugins": ["vwap_exit"]}
+{"id": "20261005-221433-217bca", "key": "217bca293023", "window": "ea51d29501f9", "at": "2026-10-05T22:14:33", "plugins": ["volume_climax_exit"]}
+{"id": "20261005-221433-18ebbf", "key": "18ebbfc6ebaa", "window": "ea51d29501f9", "at": "2026-10-05T22:14:33", "plugins": ["resistance_reject_exit"]}
+{"id": "20261005-221433-a3b894", "key": "a3b894301d79", "window": "ea51d29501f9", "at": "2026-10-05T22:14:33", "plugins": ["swing_trail"]}
+{"id": "20261005-221433-089856", "key": "0898560bded9", "window": "ea51d29501f9", "at": "2026-10-05T22:14:33", "plugins": ["breakeven"]}
+{"id": "20261005-221433-5a1fed", "key": "5a1fedd90abf", "window": "ea51d29501f9", "at": "2026-10-05T22:14:33", "plugins": ["stale_exit"]}
+{"id": "20261006-152049-2ba5c0", "key": "2ba5c0ba2a25", "window": "17af51baf9b8", "at": "2026-10-06T15:20:49", "plugins": []}
+{"id": "20261006-152713-6694f0", "key": "6694f0f4c902", "window": "568fb06b0d02", "at": "2026-10-06T15:27:13", "plugins": []}
+{"id": "20261006-154249-28ab86", "key": "28ab86551430", "window": "568fb06b0d02", "at": "2026-10-06T15:42:49", "plugins": ["resistance_rule", "support_rule"]}
+{"id": "20261006-154418-f9916d", "key": "f9916d3eff14", "window": "568fb06b0d02", "at": "2026-10-06T15:44:18", "plugins": ["resistance_rule", "support_rule"]}
+{"id": "20261006-154426-8d4c26", "key": "8d4c26c7d99b", "window": "568fb06b0d02", "at": "2026-10-06T15:44:26", "plugins": ["resistance_rule", "support_rule"]}
+{"id": "20261006-154433-d5b1b1", "key": "d5b1b185815d", "window": "568fb06b0d02", "at": "2026-10-06T15:44:33", "plugins": ["resistance_rule", "support_rule"]}
+{"id": "20261006-154442-908e16", "key": "908e16f183be", "window": "568fb06b0d02", "at": "2026-10-06T15:44:42", "plugins": ["resistance_rule", "support_rule"]}
+{"id": "20261006-154519-ed1d51", "key": "ed1d519e6784", "window": "568fb06b0d02", "at": "2026-10-06T15:45:19", "plugins": ["resistance_rule", "support_rule"]}
+{"id": "20261006-155019-620bde", "key": "620bde883aa8", "window": "568fb06b0d02", "at": "2026-10-06T15:50:19", "plugins": ["time_window"]}
+{"id": "20261006-155019-6b866b", "key": "6b866bdc1fe9", "window": "568fb06b0d02", "at": "2026-10-06T15:50:19", "plugins": ["momentum_tighter"]}
+{"id": "20261006-155020-f09f3d", "key": "f09f3d6d0b0a", "window": "568fb06b0d02", "at": "2026-10-06T15:50:20", "plugins": ["above_vwap"]}
+{"id": "20261006-155021-689212", "key": "6892128fc096", "window": "568fb06b0d02", "at": "2026-10-06T15:50:21", "plugins": ["ema9_over_ema20"]}
+{"id": "20261006-155021-4485e2", "key": "4485e256a056", "window": "568fb06b0d02", "at": "2026-10-06T15:50:21", "plugins": ["close_over_ema9"]}
+{"id": "20261006-155022-cafa1c", "key": "cafa1c1fbfc7", "window": "568fb06b0d02", "at": "2026-10-06T15:50:22", "plugins": ["above_ema200"]}
+{"id": "20261006-155022-4efea8", "key": "4efea8df9d79", "window": "568fb06b0d02", "at": "2026-10-06T15:50:22", "plugins": ["macd5_positive"]}
+{"id": "20261006-155023-336a3b", "key": "336a3b1dff9a", "window": "568fb06b0d02", "at": "2026-10-06T15:50:23", "plugins": ["macd1_open"]}
+{"id": "20261006-155023-174069", "key": "17406946d3dd", "window": "568fb06b0d02", "at": "2026-10-06T15:50:23", "plugins": ["volume_surge"]}
+{"id": "20261006-155024-89bc92", "key": "89bc92787980", "window": "568fb06b0d02", "at": "2026-10-06T15:50:24", "plugins": ["pattern_strength"]}
+{"id": "20261006-155024-751bfe", "key": "751bfe288852", "window": "568fb06b0d02", "at": "2026-10-06T15:50:24", "plugins": ["min_reward_risk"]}
+{"id": "20261006-155025-f135e1", "key": "f135e1906567", "window": "568fb06b0d02", "at": "2026-10-06T15:50:25", "plugins": ["max_stop_distance"]}
+{"id": "20261006-155025-1ebdfa", "key": "1ebdfa25b1eb", "window": "568fb06b0d02", "at": "2026-10-06T15:50:25", "plugins": ["pullback_ordinal"]}
+{"id": "20261006-155025-b292ed", "key": "b292ed4e38ea", "window": "568fb06b0d02", "at": "2026-10-06T15:50:25", "plugins": ["uptrend_f1"]}
+{"id": "20261006-155026-a17686", "key": "a176860f7389", "window": "568fb06b0d02", "at": "2026-10-06T15:50:26", "plugins": ["chart_quality_f2"]}
+{"id": "20261006-155026-3632ba", "key": "3632ba942e65", "window": "568fb06b0d02", "at": "2026-10-06T15:50:26", "plugins": ["surge_f3"]}
+{"id": "20261006-155027-4d810d", "key": "4d810de30600", "window": "568fb06b0d02", "at": "2026-10-06T15:50:27", "plugins": ["rising_price_volume"]}
+{"id": "20261006-155027-b80d83", "key": "b80d83d82019", "window": "568fb06b0d02", "at": "2026-10-06T15:50:27", "plugins": ["daily_uptrend"]}
+{"id": "20261006-155028-f9f2d3", "key": "f9f2d3ffbedc", "window": "568fb06b0d02", "at": "2026-10-06T15:50:28", "plugins": ["atr_band"]}
+{"id": "20261006-155028-61d3a7", "key": "61d3a7865cdd", "window": "568fb06b0d02", "at": "2026-10-06T15:50:28", "plugins": ["away_from_round"]}
+{"id": "20261006-155029-1a6bae", "key": "1a6baee48202", "window": "568fb06b0d02", "at": "2026-10-06T15:50:29", "plugins": ["support_rule"]}
+{"id": "20261006-155029-3e3718", "key": "3e3718656284", "window": "568fb06b0d02", "at": "2026-10-06T15:50:29", "plugins": ["resistance_rule"]}
+{"id": "20261006-155030-60d79e", "key": "60d79ebf2e33", "window": "568fb06b0d02", "at": "2026-10-06T15:50:30", "plugins": ["target_fixed_rr"]}
+{"id": "20261006-155032-58af1f", "key": "58af1f1e4e08", "window": "568fb06b0d02", "at": "2026-10-06T15:50:32", "plugins": ["target_none"]}
+{"id": "20261006-155033-6bd839", "key": "6bd839cc8b0a", "window": "568fb06b0d02", "at": "2026-10-06T15:50:33", "plugins": ["checkpoint_stop"]}
+{"id": "20261006-155033-4544f1", "key": "4544f1a3d880", "window": "568fb06b0d02", "at": "2026-10-06T15:50:33", "plugins": ["stop_pattern_low"]}
+{"id": "20261006-155034-d036e9", "key": "d036e92bb36d", "window": "568fb06b0d02", "at": "2026-10-06T15:50:34", "plugins": ["ema9_exit"]}
+{"id": "20261006-155035-aa70b5", "key": "aa70b5fcc54f", "window": "568fb06b0d02", "at": "2026-10-06T15:50:35", "plugins": ["ema20_exit"]}
+{"id": "20261006-155036-e4509c", "key": "e4509cb1e8a4", "window": "568fb06b0d02", "at": "2026-10-06T15:50:36", "plugins": ["macd_fade_exit"]}
+{"id": "20261006-155037-7be1be", "key": "7be1bef76a22", "window": "568fb06b0d02", "at": "2026-10-06T15:50:37", "plugins": ["vwap_exit"]}
+{"id": "20261006-155039-3f3fed", "key": "3f3fed3e01eb", "window": "568fb06b0d02", "at": "2026-10-06T15:50:39", "plugins": ["volume_climax_exit"]}
+{"id": "20261006-155040-0645e5", "key": "0645e55e8c3c", "window": "568fb06b0d02", "at": "2026-10-06T15:50:40", "plugins": ["resistance_reject_exit"]}
+{"id": "20261006-155041-23b64a", "key": "23b64a8d3737", "window": "568fb06b0d02", "at": "2026-10-06T15:50:41", "plugins": ["swing_trail"]}
+{"id": "20261006-155042-c23964", "key": "c239643c8da3", "window": "568fb06b0d02", "at": "2026-10-06T15:50:42", "plugins": ["breakeven"]}
+{"id": "20261006-155043-e57495", "key": "e574958e0d4e", "window": "568fb06b0d02", "at": "2026-10-06T15:50:43", "plugins": ["stale_exit"]}
+{"id": "20261006-155415-108e54", "key": "108e5407a898", "window": "568fb06b0d02", "at": "2026-10-06T15:54:15", "plugins": ["above_vwap", "resistance_rule", "support_rule"]}
+{"id": "20261006-160432-1f39f5", "key": "1f39f53f6795", "window": "568fb06b0d02", "at": "2026-10-06T16:04:32", "plugins": ["above_vwap", "resistance_rule", "support_rule"]}
+{"id": "20261006-160442-f299a3", "key": "f299a3a55945", "window": "568fb06b0d02", "at": "2026-10-06T16:04:42", "plugins": ["above_vwap", "resistance_rule", "support_rule"]}
+{"id": "20261006-160501-d79777", "key": "d797778115ad", "window": "568fb06b0d02", "at": "2026-10-06T16:05:01", "plugins": ["above_vwap", "resistance_rule", "support_rule"]}
+{"id": "20261006-160648-a20b61", "key": "a20b6134ecb7", "window": "568fb06b0d02", "at": "2026-10-06T16:06:48", "plugins": ["above_vwap", "resistance_rule", "target_none"]}
+{"id": "20261006-160704-4d6cbe", "key": "4d6cbead3e20", "window": "568fb06b0d02", "at": "2026-10-06T16:07:04", "plugins": ["above_vwap", "resistance_rule", "target_fixed_rr"]}
+{"id": "20261006-160731-eac35f", "key": "eac35fbc44c3", "window": "568fb06b0d02", "at": "2026-10-06T16:07:31", "plugins": ["above_vwap", "ema9_exit", "resistance_rule"]}
+{"id": "20261006-161536-15ee43", "key": "15ee43bd03ab", "window": "568fb06b0d02", "at": "2026-10-06T16:15:36", "plugins": ["above_vwap", "ema9_exit", "resistance_rule", "support_rule"]}
+{"id": "20261006-161553-3e5f5e", "key": "3e5f5ec13a55", "window": "568fb06b0d02", "at": "2026-10-06T16:15:53", "plugins": ["above_vwap", "ema9_exit", "resistance_rule", "support_rule"]}
+{"id": "20261006-161607-f9f13b", "key": "f9f13b6d8fbf", "window": "568fb06b0d02", "at": "2026-10-06T16:16:07", "plugins": ["above_vwap", "ema9_exit", "resistance_rule", "support_rule"]}
+{"id": "20261006-161645-ccb524", "key": "ccb52499f601", "window": "568fb06b0d02", "at": "2026-10-06T16:16:45", "plugins": ["above_vwap", "ema9_exit", "resistance_rule", "support_rule"]}
+{"id": "20261006-161735-fd302f", "key": "fd302f78543f", "window": "568fb06b0d02", "at": "2026-10-06T16:17:35", "plugins": ["above_vwap", "ema9_exit", "resistance_rule", "support_rule"]}
+{"id": "20261006-161806-d95f3d", "key": "d95f3d43ea5f", "window": "568fb06b0d02", "at": "2026-10-06T16:18:06", "plugins": ["above_vwap", "ema9_exit", "resistance_rule", "support_rule"]}
+{"id": "20261006-161822-be51d5", "key": "be51d5a7babb", "window": "568fb06b0d02", "at": "2026-10-06T16:18:22", "plugins": ["above_vwap", "ema9_exit", "resistance_rule", "support_rule"]}
+{"id": "20261006-161853-cf31de", "key": "cf31de1fecdd", "window": "568fb06b0d02", "at": "2026-10-06T16:18:53", "plugins": ["above_vwap", "away_from_round", "ema9_exit", "resistance_rule", "support_rule"]}
+{"id": "20261006-161926-6980b9", "key": "6980b9c0977c", "window": "568fb06b0d02", "at": "2026-10-06T16:19:26", "plugins": ["above_vwap", "daily_uptrend", "ema9_exit", "resistance_rule", "support_rule"]}
+{"id": "20261006-161949-b9c7ba", "key": "b9c7ba1892a6", "window": "568fb06b0d02", "at": "2026-10-06T16:19:49", "plugins": ["above_vwap", "ema9_exit", "resistance_rule", "rising_price_volume", "support_rule"]}
+{"id": "20261006-161957-62f326", "key": "62f326210810", "window": "568fb06b0d02", "at": "2026-10-06T16:19:57", "plugins": ["above_vwap", "ema9_exit", "resistance_rule", "rising_price_volume", "support_rule", "surge_f3"]}
+{"id": "20261006-162011-11c98e", "key": "11c98ea3f118", "window": "568fb06b0d02", "at": "2026-10-06T16:20:11", "plugins": ["above_vwap", "chart_quality_f2", "ema9_exit", "resistance_rule", "support_rule"]}
+{"id": "20261006-162203-daa520", "key": "daa520c7e14f", "window": "568fb06b0d02", "at": "2026-10-06T16:22:03", "plugins": ["above_vwap", "chart_quality_f2", "ema9_exit", "momentum_tighter", "resistance_rule", "support_rule"]}
+{"id": "20261006-162218-fc35c1", "key": "fc35c1c881f3", "window": "568fb06b0d02", "at": "2026-10-06T16:22:18", "plugins": ["chart_quality_f2", "ema9_exit", "momentum_tighter", "resistance_rule", "support_rule"]}
+{"id": "20261006-162236-e6346b", "key": "e6346b3b9d6b", "window": "568fb06b0d02", "at": "2026-10-06T16:22:36", "plugins": ["above_vwap", "chart_quality_f2", "ema9_exit", "ema9_over_ema20", "resistance_rule", "support_rule"]}
+{"id": "20261006-162257-761893", "key": "761893a15ead", "window": "568fb06b0d02", "at": "2026-10-06T16:22:57", "plugins": ["above_vwap", "chart_quality_f2", "ema9_exit", "pullback_ordinal", "resistance_rule", "support_rule"]}
+{"id": "20261006-162316-392f62", "key": "392f62d84c94", "window": "568fb06b0d02", "at": "2026-10-06T16:23:16", "plugins": ["above_vwap", "pullback_ordinal", "resistance_rule", "support_rule", "vwap_exit"]}
+{"id": "20261006-162344-a24635", "key": "a24635ace7a2", "window": "568fb06b0d02", "at": "2026-10-06T16:23:44", "plugins": ["above_vwap", "resistance_rule", "support_rule"]}
+{"id": "20261006-162431-998860", "key": "998860905287", "window": "568fb06b0d02", "at": "2026-10-06T16:24:31", "plugins": ["above_vwap", "resistance_rule", "support_rule"]}
+{"id": "20261006-162444-7e2a35", "key": "7e2a35dd4038", "window": "568fb06b0d02", "at": "2026-10-06T16:24:44", "plugins": ["above_vwap", "resistance_rule", "support_rule"]}
+{"id": "20261006-163023-124c3e", "key": "124c3ed37671", "window": "568fb06b0d02", "at": "2026-10-06T16:30:23", "plugins": ["above_vwap", "momentum_tighter", "resistance_rule", "support_rule"]}
+{"id": "20261006-164801-a7e577", "key": "a7e577709b4c", "window": "1b4d92bf695d", "at": "2026-10-06T16:48:01", "plugins": []}
+{"id": "20261006-180953-963c74", "key": "963c74a4cccb", "window": "1b4d92bf695d", "at": "2026-10-06T18:09:53", "plugins": ["above_vwap"]}
+{"id": "20261006-192307-e861ed", "key": "e861ed976981", "window": "1b4d92bf695d", "at": "2026-10-06T19:23:07", "plugins": ["above_vwap"]}
+{"id": "20261006-204915-74325b", "key": "74325bd1120e", "window": "1b4d92bf695d", "at": "2026-10-06T20:49:15", "plugins": ["above_vwap", "checkpoint_stop"]}
+{"id": "20261006-210759-749fe4", "key": "749fe44e3d7b", "window": "1b4d92bf695d", "at": "2026-10-06T21:07:59", "plugins": ["above_vwap", "checkpoint_stop", "rising_price_volume"]}
+{"id": "20261006-211343-8ccdc8", "key": "8ccdc8a3c949", "window": "1b4d92bf695d", "at": "2026-10-06T21:13:43", "plugins": ["above_vwap", "rising_price_volume"]}
+{"id": "20261006-211913-8ef84c", "key": "8ef84c591c08", "window": "1b4d92bf695d", "at": "2026-10-06T21:19:13", "plugins": ["above_vwap", "rising_price_volume", "target_fixed_rr"]}
+{"id": "20261006-213229-9d68e1", "key": "9d68e1530446", "window": "db411aaa58ed", "at": "2026-10-06T21:32:29", "plugins": []}
+{"id": "20261006-213229-e583cd", "key": "e583cda76868", "window": "db411aaa58ed", "at": "2026-10-06T21:32:29", "plugins": ["target_fixed_rr"]}
+{"id": "20261006-213349-0f9c50", "key": "0f9c5096c8e0", "window": "db411aaa58ed", "at": "2026-10-06T21:33:49", "plugins": ["above_vwap", "target_fixed_rr"]}
+{"id": "20261006-214215-cd6ddb", "key": "cd6ddbee53a5", "window": "db411aaa58ed", "at": "2026-10-06T21:42:15", "plugins": ["target_fixed_rr", "vwap_cross"]}
+{"id": "20261006-214307-4f2e0b", "key": "4f2e0b93a863", "window": "1b4d92bf695d", "at": "2026-10-06T21:43:07", "plugins": ["vwap_cross"]}
+{"id": "20261006-214348-d8a9bb", "key": "d8a9bbac1695", "window": "1b4d92bf695d", "at": "2026-10-06T21:43:48", "plugins": ["target_fixed_rr", "vwap_cross"]}
+{"id": "20261007-110236-95c453", "key": "95c4531e7bac", "window": "af6d3c7c2d30", "at": "2026-10-07T11:02:36", "plugins": []}
+{"id": "20261007-144446-f1c804", "key": "f1c804382412", "window": "af6d3c7c2d30", "at": "2026-10-07T14:44:46", "plugins": ["vwap_cross"]}
+{"id": "20261007-150930-11c3a3", "key": "11c3a3ba63c7", "window": "af6d3c7c2d30", "at": "2026-10-07T15:09:30", "plugins": ["target_fixed_rr", "vwap_cross"]}
+{"id": "20261007-153859-0018c4", "key": "0018c446f709", "window": "af6d3c7c2d30", "at": "2026-10-07T15:38:59", "plugins": ["above_vwap"]}
+{"id": "20261007-154428-0d738e", "key": "0d738e725db7", "window": "af6d3c7c2d30", "at": "2026-10-07T15:44:28", "plugins": ["above_vwap", "target_fixed_rr"]}

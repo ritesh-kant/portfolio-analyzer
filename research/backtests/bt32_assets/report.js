@@ -44,6 +44,88 @@ function inr(x) {
             : "₹" + Math.round(x).toLocaleString("en-IN");
 }
 function cls(x) { return x > 0 ? "pos" : x < 0 ? "neg" : ""; }
+/* "Check news" result (lab runs only): was there an NSE filing in the 24h before entry? */
+function newsBadge(tr) {
+  if (!tr.news) return null;
+  var map = { news: ["\u{1F4F0} news", "material NSE filing in the 24h before entry"], minor: ["routine", "only routine / unclear NSE filings in the 24h before entry"],
+              none: ["no filing", "no NSE filing in the 24h before entry"],
+              error: ["news ?", "could not be checked"], skipped: ["news ?", "not checked"] };
+  var m = map[tr.news] || map.skipped, el = document.createElement("span");
+  el.className = "newsb " + tr.news;
+  el.textContent = m[0];
+  el.title = tr.news === "news" && tr.news_items ? tr.news_items.join("\n") : m[1];
+  return el;
+}
+/* ---------- What-if: indicators on ONE trade (lab runs) ---------- */
+function toggleWhatIf(c) {
+  if (c.wi) { c.wi.style.display = c.wi.style.display === "none" ? "" : "none"; return; }
+  var W = DATA.whatif, G = W.glyph;
+  var box = c.wi = document.createElement("div");
+  box.className = "whatif";
+  c.sec.insertBefore(box, c.sec.querySelector(".chart-wrap"));
+  box.innerHTML = "<div class='wi-note'>The indicators this run applied are ticked already. Tick or untick others to see what they would have done to <b>this</b> trade only. "
+    + "One trade is an illustration, not evidence — use Apply in the lab to test an indicator properly.</div>";
+  var picks = {};
+  ["entry", "exit"].forEach(function (g) {
+    var col = h("div", { class: "wi-col" }, box);
+    h("h4", {}, col, g === "entry" ? "Entry indicators (would it be taken?)" : "Exit indicators (where would it get out?)");
+    W.plugins.filter(function (p) { return p.group === g; }).forEach(function (p) {
+      var line = h("label", { class: "wi-line", title: p.desc }, col);
+      var cb = h("input", { type: "checkbox" }, line);
+      h("span", {}, line, " " + p.name);
+      var inputs = {};
+      p.params.forEach(function (q) {
+        var el;
+        if (q.kind === "select") {
+          el = h("select", {}, line);
+          q.options.forEach(function (o) { var op = h("option", { value: o }, el, o); if (o === q.default) op.selected = true; });
+        } else {
+          el = h("input", { type: q.kind === "time" ? "text" : "number", value: String(q.default), title: q.label }, line);
+          if (q.step) el.step = String(q.step);
+        }
+        el.className = "wi-p";
+        inputs[q.key] = el;
+      });
+      var pre = (W.selected || []).filter(function (x) { return x.id === p.id; })[0];
+      if (pre) {                      // already applied in this run: start ticked, with its parameters
+        cb.checked = true;
+        Object.keys(inputs).forEach(function (k) { if (pre.params && pre.params[k] !== undefined) inputs[k].value = String(pre.params[k]); });
+        line.classList.add("wi-on");
+      }
+      picks[p.id] = { cb: cb, inputs: inputs };
+    });
+  });
+  var go = h("button", { type: "button", class: "wi-go" }, box, "Run on this trade");
+  var out = h("div", { class: "wi-out" }, box);
+  go.onclick = function () {
+    var sel = Object.keys(picks).filter(function (id) { return picks[id].cb.checked; }).map(function (id) {
+      var prm = {}; Object.keys(picks[id].inputs).forEach(function (k) { prm[k] = picks[id].inputs[k].value; });
+      return { id: id, params: prm };
+    });
+    if (!sel.length) { out.textContent = "Tick at least one indicator."; return; }
+    out.textContent = "Replaying on the 1-minute bars…";
+    fetch(W.url + c.i + "/whatif", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plugins: sel }) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.error) { out.textContent = d.error; return; }
+        var sv = d.saved, base = d.scenarios[0].trade;
+        var html = "<table><thead><tr><th>Scenario</th><th>Entry</th><th>Out</th><th>Exit</th><th class='num'>Gross</th><th class='num'>Net</th><th class='num'>vs saved</th></tr></thead><tbody>"
+          + "<tr class='wi-saved'><td>As saved in this run</td><td>taken</td><td>" + sv.exit_time + " @ " + Number(sv.exit).toFixed(2) + "</td><td>" + nice(sv.exit_reason)
+          + "</td><td class='num " + cls(sv.gross_pct) + "'>" + pct(sv.gross_pct) + "</td><td class='num " + cls(sv.net_real_inr) + "'>" + G + Math.round(sv.net_real_inr) + "</td><td></td></tr>";
+        d.scenarios.forEach(function (s) {
+          var t = s.trade, ok = s.entry_ok;
+          if (t.error) { html += "<tr><td>" + s.label + "</td><td colspan='6'>" + t.error + "</td></tr>"; return; }
+          var diff = t.net_real_inr - sv.net_real_inr;
+          html += "<tr><td>" + s.label + "</td><td class='" + (ok ? "" : "wi-veto") + "'>" + (ok ? "taken" : "✕ vetoed") + "</td><td>"
+            + t.exit_time + " @ " + Number(t.exit).toFixed(2) + "</td><td>" + nice(t.exit_reason) + "</td><td class='num " + cls(t.gross_pct) + "'>" + pct(t.gross_pct)
+            + "</td><td class='num " + cls(t.net_real_inr) + "'>" + G + Math.round(t.net_real_inr) + "</td><td class='num " + cls(diff) + "'>" + (diff >= 0 ? "+" : "") + G + Math.round(diff) + "</td></tr>";
+        });
+        out.innerHTML = html + "</tbody></table><div class='wi-note'>" + d.note + " Scenarios are built from the plain base trade plus what is ticked. A vetoed trade shows what it would have done if it had been taken.</div>";
+      })
+      .catch(function (e) { out.textContent = "Failed: " + e; });
+  };
+}
 function nice(s) { return String(s).split("_").join(" "); }
 function fmtVol(v) {
   return v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? (v / 1e3).toFixed(1) + "K" : String(Math.round(v));
@@ -541,7 +623,9 @@ function buildCards() {
     var sec = h("section", { class: "card", tabindex: "0", "data-i": String(i) }, host);
     var head = h("div", { class: "card-head" }, sec);
     var left = h("div", {}, head);
-    h("h2", {}, left, tr.symbol + "  " + tr.date + "   " + nice(tr.setup));
+    var h2 = h("h2", {}, left, tr.symbol + "  " + tr.date + "   " + nice(tr.setup));
+    var nb = newsBadge(tr);
+    if (nb) h2.appendChild(nb);
     var meta = h("div", { class: "meta" }, left);
     meta.innerHTML =
       "in <b>" + tr.entry_time + "</b> @ <b>" + tr.entry.toFixed(2) + "</b>"
@@ -578,6 +662,11 @@ function buildCards() {
     h("span", { class: "sep" }, grp);
     mk("Reset", "Reset both axes", function () { resetView(c); });
     mk("⛶ Full screen", "Full screen (Esc to exit)", function () { toggleFull(c); });
+    if (DATA.whatif) {
+      h("span", { class: "sep" }, grp);
+      var wb = h("button", { type: "button", title: "Try entry / exit indicators on this one stock" }, grp, "⚗ What-if");
+      wb.onclick = function () { toggleWhatIf(c); };
+    }
 
     var wrap = h("div", { class: "chart-wrap" }, sec);
     c.host = h("div", { class: "chart", role: "img", "aria-label": tr.symbol + " candlestick chart" }, wrap);
@@ -654,6 +743,8 @@ var GROUPS = {
                 of: function (t) { return t.exit_reason === "target" ? "Target hit" : "Target not hit"; } },
   outcome: { label: "Outcome (net @ real costs)", fixed: ["Winner", "Loser"],
              of: function (t) { return t.net_real_inr > 0 ? "Winner" : "Loser"; } },
+  news: { label: "News (NSE filing in 24h before entry)", fixed: ["Material news", "Routine filings only", "No filing", "Not checked / failed"],
+          of: function (t) { return t.news === "news" ? "Material news" : t.news === "minor" ? "Routine filings only" : t.news === "none" ? "No filing" : "Not checked / failed"; } },
   symbol: { label: "Symbol", of: function (t) { return t.symbol; } },
   setup: { label: "Setup", of: function (t) { return nice(t.setup); } },
   month: { label: "Month", byKey: true, of: function (t) { return t.date.slice(0, 7); } },
@@ -662,6 +753,8 @@ var GROUPS = {
              order: WEEKDAYS },
   entry_hour: { label: "Entry hour", byKey: true, of: function (t) { return t.entry_time.slice(0, 2) + ":00"; } }
 };
+var HAS_NEWS = DATA.trades.some(function (t) { return t.news; });   // lab runs where 'Check news' was run
+if (!HAS_NEWS) delete GROUPS.news;
 var groupKey = DATA.default_group && GROUPS[DATA.default_group] ? DATA.default_group : "";
 var openGroups = {};   // "<groupKey>:<name>" -> true, so a re-render keeps what the reader opened
 /* A group of 1,800 trades would lay out 1,800 cards when opened. Show PAGE at a
@@ -806,11 +899,17 @@ function visible() {
   var sym = document.getElementById("f-sym").value;
   var ex = document.getElementById("f-exit").value;
   var out = document.getElementById("f-out").value;
+  var nwEl = document.getElementById("f-news"), nw = nwEl ? nwEl.value : "";
   var monEl = document.getElementById("f-mon"), mon = monEl ? monEl.value : "";
   return cards.filter(function (c) {
     if (sym && c.tr.symbol !== sym) return false;
     if (mon && c.tr.date.slice(0, 7) !== mon) return false;
     if (ex && c.tr.exit_reason !== ex) return false;
+    if (nw === "news" && c.tr.news !== "news") return false;
+    if (nw === "minor" && c.tr.news !== "minor") return false;
+    if (nw === "none" && c.tr.news !== "none") return false;
+    if (nw === "any" && c.tr.news !== "news" && c.tr.news !== "minor") return false;
+    if (nw === "unk" && (c.tr.news === "news" || c.tr.news === "minor" || c.tr.news === "none")) return false;
     if (out === "win" && c.tr.gross_pct <= 0) return false;
     if (out === "loss" && c.tr.gross_pct > 0) return false;
     return true;
@@ -844,7 +943,9 @@ function render() {
   }).forEach(function (c) {
     var row = h("tr", {}, tb);
     h("td", {}, row, c.tr.date.slice(5));
-    h("td", {}, row, c.tr.symbol);
+    var symTd = h("td", {}, row, c.tr.symbol);
+    var nb2 = newsBadge(c.tr);
+    if (nb2) symTd.appendChild(nb2);
     h("td", {}, row, c.tr.entry_time);
     h("td", {}, row, nice(c.tr.exit_reason));
     h("td", { class: "num " + cls(c.tr.gross_pct) }, row, pct(c.tr.gross_pct));
@@ -954,7 +1055,13 @@ function init() {
   if (monSel) Object.keys(months).sort().forEach(function (m) {
     h("option", { value: m }, monSel, monthName(m) + " (" + months[m] + ")");
   });
-  ["f-sym", "f-exit", "f-out", "f-mon"].forEach(function (id) {
+  if (HAS_NEWS) {   // News filter, next to Outcome
+    var lab = document.createElement("label");
+    lab.innerHTML = "News <select id='f-news'><option value=''>all</option><option value='news'>material news</option>"
+      + "<option value='minor'>routine filings only</option><option value='any'>any filing</option><option value='none'>no filing</option><option value='unk'>not checked / failed</option></select>";
+    document.getElementById("f-out").parentNode.after(lab);
+  }
+  ["f-sym", "f-exit", "f-out", "f-mon", "f-news"].forEach(function (id) {
     var el = document.getElementById(id);
     if (el) el.onchange = render;
   });

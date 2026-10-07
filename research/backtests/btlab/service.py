@@ -42,8 +42,8 @@ def parse_request(body: dict) -> dict:
     given = {k: type(getattr(base_mod.BaseRule, k))(rule_in[k])
              for k in asdict(base_mod.BaseRule()) if k in rule_in and k != "market"}
     rule = base_mod.BaseRule.for_market(market, **given)
-    if not 0 < rule.day_chg_min <= rule.day_chg_max <= 100:
-        raise P.PluginError("day change band must satisfy 0 < min <= max")
+    if not 0 < rule.day_chg_min <= rule.day_chg_max <= 1000:
+        raise P.PluginError("day change band must satisfy 0 < min <= max <= 1000")
     patterns = body.get("patterns") or list(base_mod.BULLISH_PATTERNS)
     unknown = [p for p in patterns if p not in base_mod.BULLISH_PATTERNS]
     if unknown:
@@ -70,6 +70,25 @@ def missing_years(cfg: dict) -> list[int]:
     return [y for y in cfg["years"] if not base_mod.year_status(y, rule)["built"]]
 
 
+class NeedNews(Exception):
+    """A selected indicator reads NSE filings that were never fetched for some of the symbols."""
+
+    def __init__(self, symbols: int, total: int):
+        super().__init__(f"filings not fetched for {symbols} of {total} symbols")
+        self.symbols, self.total = symbols, total
+
+
+def _uses_news(cfg: dict) -> bool:
+    return any(x["id"] == "news_reaction" for x in cfg["plugins"])
+
+
+def news_spans(cfg: dict) -> dict:
+    from . import news
+    rc = _run_cfg(cfg)
+    cands, _ = runner.load_candidates(rc.years, rc.rule)
+    return news.candidate_spans(cands[cands["pattern"].isin(rc.patterns)]) if not cands.empty else {}
+
+
 def compute(cfg: dict) -> pd.DataFrame:
     need = missing_years(cfg)
     if need:
@@ -88,6 +107,14 @@ def apply(body: dict, name: str = "", notes: str = "") -> dict:
     if need:
         raise NeedBuild(need)
     base_cfg = {**cfg, "plugins": []}
+    if _uses_news(cfg):
+        if cfg["base"].get("market", "NSE") != "NSE":
+            raise P.PluginError("News + market reaction needs NSE filings; it is not available for US runs")
+        from . import news
+        spans = news_spans(cfg)
+        todo = news.missing_symbols(spans)
+        if todo:
+            raise NeedNews(len(todo), len(spans))
     if not cfg["plugins"]:
         tr = compute(base_cfg)
         return {**store.save_run(base_cfg, tr, metrics.summarize(tr), {}, None),
@@ -126,6 +153,7 @@ def ensure_trades(run_id: str) -> pd.DataFrame:
 
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
+_cancels: dict[str, threading.Event] = {}
 
 
 def start_build(years: list[int], rule: base_mod.BaseRule) -> dict:
@@ -138,6 +166,7 @@ def start_build(years: list[int], rule: base_mod.BaseRule) -> dict:
                "state": "running", "done": 0, "total": 0, "current_year": None,
                "started": time.time(), "error": "", "finished_years": []}
         _jobs[job["id"]] = job
+        cancel = _cancels[job["id"]] = threading.Event()
 
     def work() -> None:
         try:
@@ -147,14 +176,26 @@ def start_build(years: list[int], rule: base_mod.BaseRule) -> dict:
                 def prog(n: int, t: int, s: str) -> None:
                     job["done"], job["total"] = n, t
 
-                base_mod.build_year(y, rule, progress=prog)
+                base_mod.build_year(y, rule, progress=prog, cancel=cancel)
                 job["finished_years"].append(y)
             job["state"] = "done"
+        except base_mod.BuildCancelled:
+            job["state"] = "cancelled"
         except Exception as exc:  # noqa: BLE001
             job["state"], job["error"] = "error", f"{type(exc).__name__}: {exc}"
 
     threading.Thread(target=work, daemon=True).start()
     return job
+
+
+def cancel_build(job_id: str) -> bool:
+    """Ask a running build to stop. Years already finished stay cached; the one in flight is dropped."""
+    with _jobs_lock:
+        ev, job = _cancels.get(job_id), _jobs.get(job_id)
+        if ev is None or job is None or job["state"] != "running":
+            return False
+        ev.set()
+        return True
 
 
 def jobs() -> list[dict]:

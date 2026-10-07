@@ -12,6 +12,8 @@ import subprocess
 from functools import lru_cache
 from pathlib import Path
 
+import pyarrow.parquet as pq
+
 from . import REPO
 
 BACKTESTS = REPO / "research" / "backtests"
@@ -66,15 +68,38 @@ def bar_file(sym: str, year: int, market: str = "NSE") -> Path | None:
     return f if f.exists() else None
 
 
+@lru_cache(maxsize=None)
+def _rows(path: str, mtime_ns: int) -> int:
+    """Row count from the parquet footer (no data read); 0 for an unreadable file."""
+    try:
+        return int(pq.ParquetFile(path).metadata.num_rows)
+    except Exception:  # noqa: BLE001 - a corrupt cache file counts as empty
+        return 0
+
+
+def has_bars(p: Path) -> bool:
+    """False for the empty placeholder files a fetch leaves when the source has no data.
+
+    Upstox serves no 1-minute history before 2022-01-01, so the 2021 files written as
+    warm-up for 2022 are zero-row parquet files. They must not make 2021 look 'built'.
+    """
+    return _rows(str(p), p.stat().st_mtime_ns) > 0
+
+
 def cached_symbols(year: int, market: str = "NSE") -> list[str]:
     if market == "US":
-        return sorted({p.name.split("_")[0] for p in ibkr_us_1m_dir().glob(f"*_*_{year}.parquet")})
+        files = ibkr_us_1m_dir().glob(f"*_*_{year}.parquet")
+        return sorted({p.name.split("_")[0] for p in files if has_bars(p)})
     d = upstox_1m_dir()
-    return sorted(p.name[: -len(f"_{year}.parquet")] for p in d.glob(f"*_{year}.parquet"))
+    return sorted(p.name[: -len(f"_{year}.parquet")] for p in d.glob(f"*_{year}.parquet") if has_bars(p))
 
 
 def cached_years(market: str = "NSE") -> list[int]:
+    """Years with at least one non-empty bar file."""
     d = ibkr_us_1m_dir() if market == "US" else upstox_1m_dir()
-    years = {int(p.stem.rsplit("_", 1)[1]) for p in d.glob("*_*.parquet")
-             if p.stem.rsplit("_", 1)[1].isdigit()}
+    years: set[int] = set()
+    for p in sorted(d.glob("*_*.parquet")):
+        y = p.stem.rsplit("_", 1)[1]
+        if y.isdigit() and int(y) not in years and has_bars(p):
+            years.add(int(y))
     return sorted(years)

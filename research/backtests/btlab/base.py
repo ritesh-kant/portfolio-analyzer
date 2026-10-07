@@ -429,9 +429,18 @@ def year_status(year: int, rule: BaseRule) -> dict:
     return {"year": year, "built": False, "symbols": len(cached_symbols(year, rule.market))}
 
 
+class BuildCancelled(Exception):
+    pass
+
+
 def build_year(year: int, rule: BaseRule, jobs: int | None = None,
-               progress: Callable[[int, int, str], None] | None = None) -> dict:
-    """Build (or rebuild) the candidate table for one calendar year."""
+               progress: Callable[[int, int, str], None] | None = None,
+               cancel: "threading.Event | None" = None) -> dict:
+    """Build (or rebuild) the candidate table for one calendar year.
+
+    `cancel` set mid-build abandons it (BuildCancelled): queued symbols are dropped, the
+    few in flight finish, and nothing is written, so a half-built year never reaches the cache.
+    """
     LAB_CACHE.mkdir(parents=True, exist_ok=True)
     jobs = jobs or max(2, (os.cpu_count() or 4) - 1)      # CPU-bound: processes, not threads (GIL)
     syms = cached_symbols(year, rule.market)
@@ -443,6 +452,9 @@ def build_year(year: int, rule: BaseRule, jobs: int | None = None,
     with ProcessPoolExecutor(max_workers=jobs) as pool:
         futs = {pool.submit(build_symbol, s, year, rule): s for s in syms}
         for n, fut in enumerate(as_completed(futs), 1):
+            if cancel is not None and cancel.is_set():
+                pool.shutdown(wait=False, cancel_futures=True)
+                raise BuildCancelled(f"year {year} build cancelled")
             r = fut.result()
             rows.extend(r["cands"])
             days.update(r["days"])

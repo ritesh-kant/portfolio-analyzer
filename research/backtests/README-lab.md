@@ -32,8 +32,8 @@ volume shelves, prior-session highs, and pivots touched at least twice.
 
 The **Market** switch at the top of step 1 flips the whole lab between NSE and US (NYSE/Nasdaq). Saved runs,
 base data, the trial counter and the form settings are kept per market, and a run from one market never mixes
-into the other. Everything not listed here is shared: the pattern detector, the structural levels, the 33
-indicators and the exit replay.
+into the other. Everything not listed here is shared: the pattern detector, the structural levels, the 37
+indicators and the exit replay (News + market reaction is NSE only).
 
 | | NSE | US |
 | --- | --- | --- |
@@ -62,7 +62,7 @@ numbers as plumbing validation until a broader universe is downloaded. CSV colum
 **Apply ▶** runs the base trade (once per window, reused), then your selection, and shows the result next
 to the base: trades, ₹ per trade (mean, **median**, mean **without the 5 best**), win rate, profit factor,
 drawdown, cumulative curve, exit mix, by-year table, and a plain-English verdict. **⚡ Test each alone**
-runs every indicator separately against the base and ranks them.
+runs every indicator separately against the base and ranks them by return per rupee deployed.
 
 Every Apply is **saved** (`lab_runs/<id>/run.json`) with the exact indicators and parameters, the base
 settings, the git commit, the metrics and the comparison with the base. The *Saved runs* table survives
@@ -73,10 +73,22 @@ reason, pattern, month …) for that run.
 Command line (same store): `pnpm bt:lab build --years 2024,2025`, `pnpm bt:lab apply --years 2026 --with above_vwap,ema9_exit`,
 `pnpm bt:lab runs`, `pnpm bt:lab indicators`.
 
+### News + market reaction (entry indicator, NSE only)
+
+Takes a trade only if the stock had a **material NSE filing** (results, orders, deals, rating, dividend,
+fund-raising, litigation… — `news.tier`) in the look-back window (default 24 h, max 72 h) **and** the price has
+since risen by at least *min move %* (default 2) with RVOL ≥ *min* (default 3). Everything is as of the decision
+bar: the reference price is the first 1-minute open at or after an in-session filing, else the previous close
+(overnight/pre-open news). A filing with no post-publication minute before the decision is ignored. The reaction
+price is the decision bar's close. Exchange queries ("spurt in volume")
+never count (the move caused them). Several filings → the largest move counts.
+Filings come from the `.cache_nse_news/` cache shared with *Check news*; the first Apply that needs symbols
+not yet cached asks to fetch them (one polite request per symbol, ~2 s each, cached forever). Not available for US.
+
 ## How to read a result
 
-* **Judge ₹ per trade, not total ₹.** A filter that removes losing and winning trades alike can raise the
-  total just by trading less. The change column in the verdict is per trade; the total is shown for context.
+* **Judge ₹ per trade, not total ₹** for filters that leave sizing unchanged. A filter can raise the total just
+  by trading less. When a stop setting changes size, compare return per rupee deployed; the verdict does this.
 * **Median and ex-top-5** sit next to every mean. On this strategy a handful of trades can carry a result.
 * **Filters** (entry indicators) report *kept vs dropped*: did the trades it removed do worse than the ones
   it kept? **Exits** report a *paired* change on the trades both runs took. Both p-values use a normal
@@ -115,7 +127,7 @@ Add one `Plugin(...)` to `ENTRY` or `EXIT` in `btlab/plugins.py`. The UI, valida
 
 * **Add-on / pyramiding** – BT44 killed adding to winners both ways; it also changes capital deployed, which
   needs per-rupee accounting rather than ₹ per trade. Say so if you want it.
-* Short side, US, 1-minute pattern triggers, news/catalyst gates (forward-only data).
+* Short side and 1-minute pattern triggers. Historical US runs have no news/catalyst gate.
 * The live daily guardrails (3 strikes, size ladder): a pool replay walks one stock at a time and has no coherent
   day-level P&L to apply them to – same limitation as bt17.
 

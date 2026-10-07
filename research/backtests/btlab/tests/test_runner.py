@@ -22,7 +22,7 @@ def cand(**kw):
                 ema9_5=99.0, ema20_5=98.0, ema200_5=90.0, vwap5=99.5, macd5=0.3, macd5_prev=0.2,
                 macd1=0.2, macd1_prev=0.1, vol_ratio5=2.0, pullback_ord=1, atr_pct=2.0,
                 daily_uptrend=True, f1_uptrend=True, f2_chart=True, f3_surge=True, pv_rising=True,
-                dist_round_pct=0.4, day_key=KEY)
+                dist_round_pct=0.4, vwap_cross_bars=1.0, news_move_pct=3.0, day_key=KEY)
     return {**base, **kw}
 
 
@@ -85,6 +85,15 @@ def test_pattern_low_stop_changes_the_stop_and_the_size():
     assert tr.iloc[0]["stop"] == pytest.approx(99.55) and tr.iloc[0]["stop_source"] == "pattern_low"
 
 
+def test_pattern_low_stop_reports_support_fallback_when_outside_allowed_range():
+    from btlab import metrics
+    tr = runner.run(run_cfg(patterns=["hammer"], plugins=[{"id": "stop_pattern_low"}]),
+                    pd.DataFrame([cand(invalidation=90.0)]), {KEY: day()})
+    assert tr.iloc[0]["stop"] == pytest.approx(99.0)
+    assert tr.iloc[0]["stop_source"] == "support"
+    assert metrics.summarize(tr)["stop_source_mix"] == {"support": 1}
+
+
 # ------------------------------------------------------------------ plugins
 
 def test_every_plugin_describes_itself_and_runs_on_a_row():
@@ -101,9 +110,25 @@ def test_every_plugin_describes_itself_and_runs_on_a_row():
 def test_entry_plugins_filter_as_documented():
     df = pd.DataFrame([cand(), cand(close5=98.0), cand(macd1=0.1, macd1_prev=0.2)])
     assert list(P.entry_mask(df, P.normalise([{"id": "above_vwap"}]))) == [True, False, True]
+    assert list(P.entry_mask(df, P.normalise([{"id": "above_vwap", "params": {"min_pct": 0.5}}]))) == [True, False, True]
+    assert list(P.entry_mask(df, P.normalise([{"id": "above_vwap", "params": {"min_pct": 0.6}}]))) == [False, False, False]
+    assert list(P.entry_mask(df, P.normalise([{"id": "above_vwap", "params": {"max_pct": 0.3}}]))) == [False, False, False]
     assert list(P.entry_mask(df, P.normalise([{"id": "macd1_open"}]))) == [True, True, False]
     assert P.entry_mask(df, P.normalise([{"id": "min_reward_risk", "params": {"min_rr": 2.0}}])).all()
     assert not P.entry_mask(df, P.normalise([{"id": "min_reward_risk", "params": {"min_rr": 2.5}}])).any()
+
+
+def test_support_and_resistance_rules_apply_only_when_selected():
+    df = pd.DataFrame([cand(), cand(support=99.8, support_kind="round"),
+                       cand(resistance=100.5, resistance_kind="pivot_high")])
+    assert P.entry_mask(df, []).all()                                     # unticked: nothing filtered
+    sup = P.entry_mask(df, P.normalise([{"id": "support_rule"}]))
+    assert list(sup) == [True, False, True]                               # 0.2% away is under the 0.3% floor
+    assert list(P.entry_mask(df, P.normalise([{"id": "support_rule", "params": {"kind": "swing"}}]))) \
+        == [True, False, True]
+    assert list(P.entry_mask(df, P.normalise([{"id": "resistance_rule"}]))) == [True, True, False]
+    assert list(P.entry_mask(df, P.normalise([{"id": "resistance_rule", "params": {"kind": "not_round"}}]))) \
+        == [False, False, False]
 
 
 def test_time_window_uses_decision_and_fill_minutes():
@@ -172,3 +197,95 @@ def test_update_and_delete(tmp_store):
     assert store.delete_run(r["id"]) and store.get_run(r["id"]) is None
     with pytest.raises(ValueError):
         store.trades_path("../etc")
+
+
+def test_a_cancelled_build_raises_and_writes_nothing(monkeypatch, tmp_path):
+    import threading
+    from btlab import base as B
+    monkeypatch.setattr(B, "LAB_CACHE", tmp_path)
+    monkeypatch.setattr(B, "cached_symbols", lambda year, market="NSE": ["AAA", "BBB", "CCC"])
+    monkeypatch.setattr(B, "build_symbol", lambda *a, **k: {"cands": [], "days": {}, "funnel": {}, "error": "", "symbol": "X"})
+    ev = threading.Event()
+    ev.set()
+    with pytest.raises(B.BuildCancelled):
+        B.build_year(2099, B.BaseRule(), jobs=1, cancel=ev)
+    assert not list(tmp_path.iterdir())
+
+
+def test_vwap_cross_counts_bars_since_the_close_went_above_vwap():
+    import numpy as np
+    n = 8
+    arr = {"m5_min": np.arange(n) * 5 + 570, "m5_vwap": np.full(n, 100.0),
+           "m5_c": np.array([101, 99, 99, 101, 102, 101, 99, 101], dtype=float)}   # crosses at bars 3 and 7
+    df = pd.DataFrame({"day_key": [KEY] * 5, "decision_min": [570 + 5 * (j + 1) for j in (0, 3, 5, 6, 7)]})
+    got = runner.stamp_vwap_cross(df, {KEY: arr})
+    assert np.isnan(got[0])      # above since the open: no cross to measure
+    assert got[1] == 0           # the decision bar itself crossed
+    assert got[2] == 2           # crossed two bars earlier, still above
+    assert np.isnan(got[3])      # under VWAP now
+    assert got[4] == 0
+
+
+def test_whatif_can_evaluate_vwap_cross(monkeypatch):
+    import numpy as np
+    from dataclasses import asdict
+    from btlab import base as B, whatif
+    arr = day(20)
+    arr["m5_c"][:2] = [99.0, 101.0]
+    arr["m5_vwap"] = np.full(len(arr["m5_min"]), 100.0)
+    candidate = cand(decision_min=610, fill_min=612, fill_k=12)
+    config = cfg()
+    config["base"] = asdict(B.BaseRule())
+    monkeypatch.setattr(whatif.store, "get_run", lambda _id: {"config": config})
+    monkeypatch.setattr(whatif.service, "ensure_trades", lambda _id: pd.DataFrame([
+        {"date": candidate["date"], "symbol": "AAA", "entry_time": "10:12", "setup": "hammer"}]))
+    monkeypatch.setattr(whatif, "_load", lambda _cfg: (pd.DataFrame([candidate]), {KEY: arr}))
+    got = whatif.evaluate("run", 0, [{"id": "vwap_cross"}])
+    assert got["scenarios"][1]["entry_ok"] is True
+
+
+def test_news_reaction_measures_the_move_since_a_material_filing_as_of_the_decision_bar(tmp_path, monkeypatch):
+    import json
+    import numpy as np
+    from btlab import news
+    monkeypatch.setattr(news, "CACHE", tmp_path)
+    IST = "+05:30"
+    rows = [
+        {"t": f"2026-03-02T09:50:00{IST}", "h": "AAA: Bagging/Receiving of orders/contracts", "u": "", "b": ""},   # in-session, material
+        {"t": f"2026-03-01T20:00:00{IST}", "h": "AAA: Financial Results", "u": "", "b": ""},                          # overnight, material
+        {"t": f"2026-03-02T09:40:00{IST}", "h": "AAA: Clarification - Spurt in Volume", "u": "", "b": ""},            # exchange query: never
+        {"t": f"2026-03-02T10:05:00{IST}", "h": "AAA: Financial Results", "u": "", "b": ""},                          # AFTER the decision bar
+    ]
+    (tmp_path / "AAA.json").write_text(json.dumps({"covered": [], "covered_text": [], "rows": rows}))
+    n = 12
+    arr = {"m1_min": np.arange(n * 5) + 555, "m1_o": np.full(n * 5, 98.0)}
+    arr["m1_o"][35] = 99.0                                                    # the 09:50 minute opens at 99
+    df = pd.DataFrame([dict(symbol="AAA", date="2026-03-02", day_key=KEY, decision_min=600, prev_close=95.0, close5=101.0)])
+    got = news.stamp_reaction(df, {KEY: arr}, 24, "material")
+    assert got[0] == pytest.approx((101 / 95 - 1) * 100)         # the overnight filing (ref = prev close) beats 09:50's +2.0%
+    none = news.stamp_reaction(df, {KEY: arr}, 0.5, "material")  # window only reaches back to 09:30: only the query + 09:50 filing
+    assert none[0] == pytest.approx((101 / 99 - 1) * 100)        # in-session ref = the first post-filing minute open
+    assert np.isnan(news.stamp_reaction(df.assign(decision_min=580), {KEY: arr}, 0.5, "material")[0])   # 09:40: only the query
+
+
+def test_news_reaction_excludes_the_price_move_before_an_intrabar_filing(tmp_path, monkeypatch):
+    import json
+    import numpy as np
+    from btlab import news
+    monkeypatch.setattr(news, "CACHE", tmp_path)
+    (tmp_path / "AAA.json").write_text(json.dumps({"covered": [], "rows": [
+        {"t": "2026-03-02T09:53:30+05:30", "h": "AAA: Financial Results", "u": "", "b": ""}]}))
+    arr = {"m1_min": np.arange(555, 605), "m1_o": np.full(50, 100.0)}
+    arr["m1_o"][39] = 103.0  # 09:54, after the filing; the earlier rise must not count
+    df = pd.DataFrame([dict(symbol="AAA", date="2026-03-02", day_key=KEY,
+                            decision_min=600, prev_close=95.0, close5=103.0)])
+    assert news.stamp_reaction(df, {KEY: arr}, 24, "material")[0] == pytest.approx(0.0)
+    assert np.isnan(news.stamp_reaction(df.assign(decision_min=594), {KEY: arr}, 24, "material")[0])
+
+
+def test_news_reaction_plugin_needs_move_and_rvol():
+    df = pd.DataFrame([cand(news_move_pct=3.0, rvol=4.0), cand(news_move_pct=1.0, rvol=4.0),
+                       cand(news_move_pct=float("nan"), rvol=4.0), cand(news_move_pct=3.0, rvol=2.0)])
+    p = P.REGISTRY["news_reaction"]
+    got = p.entry(df, P.resolve_params(p, None)).tolist()
+    assert got == [True, False, False, False]

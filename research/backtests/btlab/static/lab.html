@@ -39,6 +39,12 @@
           <label>Risk per trade <span class="g">₹</span> <input type="number" id="b-risk" step="50" min="50"></label>
           <label>Max position <span class="g">₹</span> <input type="number" id="b-notional" step="5000" min="5000"></label>
         </div>
+        <div class="presets" id="saved-bases">Saved bases:
+          <select id="b-saved"></select>
+          <button type="button" id="b-save" title="Save the settings above (band, RVOL, sizing, entry cap, patterns) under a name">Save as…</button>
+          <button type="button" id="b-default" title="Start the lab with this base">★ Make default</button>
+          <button type="button" id="b-delete" title="Delete this saved base">Delete</button>
+        </div>
         <div class="presets">Presets:
           <button type="button" data-preset="strict">Strict 4–8% · RVOL 3</button>
           <button type="button" data-preset="wide">Wider 3–15% · RVOL 2</button>
@@ -68,8 +74,8 @@
   <main id="results">
     <section id="result-card" class="card empty">
       <h2>Result</h2>
-      <p class="hint">Nothing applied yet. Press <b>Apply ▶</b> to run the base trade on its own, or tick some
-      indicators first. Past runs are listed below and are never lost.</p>
+      <p class="hint">Press <b>Apply ▶</b> to run the base trade on its own, or tick some indicators first. A past run's
+      result opens here when you press <b>View</b> on it in the list below; <b>Compare selected</b> opens a side-by-side. Past runs are never lost.</p>
     </section>
     <section id="scan-card" class="card" hidden></section>
     <section id="compare-card" class="card" hidden></section>
@@ -80,6 +86,7 @@
         <label><input type="checkbox" id="h-star"> ★ only</label>
         <label>Show <select id="h-kind"><option value="">all runs</option><option value="base">base only</option>
           <option value="entry">with entry indicators</option><option value="exit">with exit indicators</option></select></label>
+        <label>Base <select id="h-base" title="Show only the runs made on one base setting"></select></label>
         <button type="button" id="btn-compare" class="ghost" disabled>Compare selected</button>
         <button type="button" id="btn-del-sel" class="ghost" disabled>Delete selected</button>
       </div>

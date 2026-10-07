@@ -61,6 +61,7 @@ def summarize(tr: pd.DataFrame) -> dict:
         "target_hit_pct": round(100.0 * float((tr["exit_reason"] == "target").mean()), 1),
         "stop_pct": round(100.0 * float(tr["exit_reason"].str.contains("stop").mean()), 1),
         "exit_mix": {k: int(v) for k, v in tr["exit_reason"].value_counts().items()},
+        "stop_source_mix": {k: int(v) for k, v in tr["stop_source"].value_counts().items()},
         "by_year": by_year, "curve": curve,
     }
 

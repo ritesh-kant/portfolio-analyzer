@@ -89,3 +89,11 @@ several of those.
 | `research/backtests/ibkr_us_history.py` | the downloader (this tool) |
 | `research/backtests/.cache_ibkr_us/` | parquet cache + `manifest.json` (gitignored) |
 | `research/backtests/README-bt49-us-watchlist.md` | the Yahoo-based US session audit this replaces for older sessions |
+## Cache inventory (2026-10-06)
+
+| Year | Symbols | Bars | Manifest |
+| --- | ---: | ---: | --- |
+| 2026 (01-01..10-02) | 78 | 5.3M | `manifest.json` (= `manifest_2026.json`) |
+| 2025 (01-01..12-31) | 74 | 6.25M | `manifest_2025.json` |
+
+Every download run overwrites `manifest.json` when it ends, so a second year gets its own file. The symbol pool is the late-September 2026 watchlist for both years (survivorship-biased). 13 symbols stopped on repeated request timeouts in 2025 (flagged `stopped_on_timeouts`); for the ones that listed during 2025 these are the empty pre-listing weeks, but that is not verified per symbol. Four 2026 listings (AIIR, CHWM, GYGY, LABT) have no 2025 file.

@@ -59,6 +59,31 @@ def plan_qty(entry: float, stop: float, risk_inr: float, max_notional: float) ->
     return max(0, min(int(risk_inr // per_share), int(max_notional // entry)))
 
 
+def stamp_vwap_cross(df: pd.DataFrame, days: dict) -> np.ndarray:
+    """5-minute bars since the close last crossed from under VWAP to at/above it, as of the decision bar.
+
+    0 = the decision bar itself crossed. NaN when the close is under VWAP at the decision bar, or
+    when it has been above since the first bar of the day (there was no cross to measure).
+    Reads only bars up to and including the decision bar.
+    """
+    out = np.full(len(df), np.nan)
+    for i, (key, dec) in enumerate(zip(df["day_key"], df["decision_min"])):
+        arr = days[key]
+        mins = arr["m5_min"]
+        j = int(np.searchsorted(mins, int(dec) - 5))          # decision bar = the 5-minute bar that just closed
+        if j >= len(mins) or int(mins[j]) != int(dec) - 5:
+            continue
+        above = arr["m5_c"][: j + 1] >= arr["m5_vwap"][: j + 1]      # NaN VWAP compares False
+        if not above[j]:
+            continue
+        k = j
+        while k > 0 and above[k - 1]:
+            k -= 1
+        if k > 0:
+            out[i] = j - k
+    return out
+
+
 def run(cfg: RunConfig, cands: pd.DataFrame, days: dict) -> pd.DataFrame:
     """The closed trades for `cfg`, one row each, in the dashboard's trade-CSV schema."""
     if cands.empty:
@@ -67,6 +92,14 @@ def run(cfg: RunConfig, cands: pd.DataFrame, days: dict) -> pd.DataFrame:
     mk = cfg.rule.mk
     ecfg = replace(P.exit_cfg(selected), market=mk.id)
     df = cands[cands["pattern"].isin(cfg.patterns)]
+    if any(x["id"] == "vwap_cross" for x in selected):
+        df = df.assign(vwap_cross_bars=stamp_vwap_cross(df, days))
+    nr = next((x for x in selected if x["id"] == "news_reaction"), None)
+    if nr is not None:
+        if mk.id != "NSE":
+            raise P.PluginError("News + market reaction needs NSE filings; it is not available for US runs")
+        from . import news
+        df = df.assign(news_move_pct=news.stamp_reaction(df, days, nr["params"]["lookback_h"], nr["params"]["scope"]))
     df = df[P.entry_mask(df, selected)]
     rows: list[dict] = []
     for _, grp in df.sort_values(["date", "symbol", "fill_min", "decision_min"]).groupby(
@@ -78,11 +111,9 @@ def run(cfg: RunConfig, cands: pd.DataFrame, days: dict) -> pd.DataFrame:
                 break
             if c.fill_min <= free_at:
                 continue
-            stop, stop_source = c.stop, "support"
-            if ecfg.stop_mode == "pattern_low":
-                alt = base_mod.tick_down(c.invalidation - mk.tick, mk.tick)
-                if base_mod.stop_ok(c.fill, alt):
-                    stop, stop_source = alt, "pattern_low"
+            stop, stop_source = exit_stop(c, ecfg, mk)
+            if stop <= 0:
+                continue
             qty = plan_qty(c.fill, stop, cfg.risk_inr, cfg.max_notional_inr)
             if qty < 1:
                 continue
@@ -92,6 +123,23 @@ def run(cfg: RunConfig, cands: pd.DataFrame, days: dict) -> pd.DataFrame:
             free_at = ex.minute
             taken += 1
     return pd.DataFrame(rows)
+
+
+def exit_stop(c, ecfg, mk) -> tuple[float, str]:
+    """The stop this candidate trades with: base support (or pattern low), scaled by `stop_mult`.
+
+    `stop_mult` multiplies the stop DISTANCE, so 1.0 is the frozen base stop and 2.0 puts it
+    twice as far below the fill. R, the size and an R target all follow the scaled stop.
+    """
+    stop, source = c.stop, "support"
+    if ecfg.stop_mode == "pattern_low":
+        alt = base_mod.tick_down(c.invalidation - mk.tick, mk.tick)
+        if base_mod.stop_ok(c.fill, alt):
+            stop, source = alt, "pattern_low"
+    if ecfg.stop_mult != 1.0:
+        stop = base_mod.tick_down(c.fill - ecfg.stop_mult * (c.fill - stop), mk.tick)
+        source += f"x{ecfg.stop_mult:g}"
+    return float(stop), source
 
 
 def _trade_row(c, ex, qty: int, stop: float, stop_source: str, ecfg, cfg: RunConfig) -> dict:

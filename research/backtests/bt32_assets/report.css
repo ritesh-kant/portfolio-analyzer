@@ -199,3 +199,20 @@ body.printing .card .chart { height: 400px !important; }
   .card.p-card:first-of-type { break-before: auto; }
   .group.collapsed .group-body { display: block; }
 }
+
+.newsb{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;vertical-align:middle;border:1px solid var(--line,#444);color:var(--dim,#889)}
+.newsb.news{background:#d29922;border-color:#d29922;color:#1a1a1a}
+
+.whatif{margin:10px 0;padding:10px 12px;border:1px solid var(--line,#444);border-radius:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px 20px}
+.whatif .wi-note,.whatif .wi-go,.whatif .wi-out{grid-column:1/-1}
+.whatif .wi-note{color:var(--dim,#889);font-size:12px}
+.whatif h4{margin:4px 0;font-size:12.5px}
+.wi-line{display:flex;gap:6px;align-items:center;font-size:12.5px;padding:2px 0;flex-wrap:wrap}
+.wi-p{width:70px;font-size:12px}
+.wi-go{justify-self:start}
+.wi-out table{width:100%;font-size:12.5px}
+.wi-out td.wi-veto{color:#ff6b7a;font-weight:600}
+.wi-saved td{color:var(--dim,#889)}
+@media(max-width:800px){.whatif{grid-template-columns:1fr}}
+.wi-line.wi-on>span{font-weight:600}
+.newsb.minor{border-style:dashed}

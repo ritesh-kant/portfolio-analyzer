@@ -53,6 +53,7 @@ class ExitCfg:
     stale_minutes: int = 45
     stale_r: float = 0.5
     stop_mode: str = "support"               # support | pattern_low
+    stop_mult: float = 1.0                   # x the base stop distance (1.0 = unchanged)
     market: str = "NSE"                      # clock, tick and cost model of the tape being replayed
     notes: list[str] = field(default_factory=list)
 

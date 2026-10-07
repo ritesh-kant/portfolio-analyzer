@@ -25,3 +25,4 @@ research/backtests/.dashboard_cache/
 # backtest lab: rebuildable candidate tables, and per-run trade CSVs (run.json IS tracked)
 research/backtests/.lab_cache/
 research/backtests/lab_runs/*/trades.csv
+research/backtests/.cache_nse_news/

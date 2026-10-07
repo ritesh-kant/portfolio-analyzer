@@ -90,3 +90,18 @@ svg text{fill:var(--dim);font-size:10px}
 #history tbody tr[data-id]{cursor:pointer}
 #history tbody tr[data-id]:hover td{background:var(--panel2)}
 #history tbody tr.shown td{background:var(--panel2)}
+.plug .sr{display:none;margin:8px 0 2px 24px}
+.plug.on .sr{display:block}
+.srd{width:100%;max-width:300px;background:#0b0f17;border:1px solid #243044;border-radius:6px}
+.srd text{font-family:inherit}
+#b-saved{max-width:100%;background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:3px 6px;font-size:12px}
+.presets button:disabled{opacity:.45;cursor:default}
+
+.newsb{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid var(--line);color:var(--dim)}
+.newsb.news{background:#d29922;border-color:#d29922;color:#1a1a1a}
+
+button.news-done{background:#1f7a3a;border-color:#2ea04f;color:#fff}
+button.news-done:hover{background:#26903f}
+.newsb.minor{border-style:dashed}
+.aibar{margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.aibar select{max-width:340px}
+details.newsd{margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:8px 12px}details.newsd>summary{cursor:pointer;font-size:13px}
