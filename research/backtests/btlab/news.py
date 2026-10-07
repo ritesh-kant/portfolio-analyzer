@@ -31,7 +31,7 @@ import numpy as np  # noqa: F401
 import pandas as pd
 
 from . import service, store  # noqa: F401  (service imports the engine path shim)
-from .paths import BACKTESTS, RUNS_DIR
+from .paths import BACKTESTS, RUNS_DIR, bar_file
 
 from src.scrapers import nse  # noqa: E402  (signal-engine, on sys.path via btlab/__init__)
 
@@ -427,6 +427,12 @@ def prefetch_cancel(key: str) -> bool:
     return False
 
 
+def _reaction_bars(symbol: str, year: int) -> pd.DataFrame | None:
+    """Only the prices needed to place a prior-day filing on the historical tape."""
+    path = bar_file(symbol, year)
+    return pd.read_parquet(path, columns=["open", "close"]).sort_index() if path is not None else None
+
+
 def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str) -> "np.ndarray":
     """Per candidate: how far (%) the price has moved since a qualifying NSE filing, as of the decision bar. NaN = no such filing.
 
@@ -435,16 +441,46 @@ def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str) 
     exchange queries about a price move that already happened ("spurt in volume") never count: that is
     the move causing the filing, not the other way round.
 
-    For an intraday filing, the reference is the first 1-minute open at or after publication;
-    a filing with no observable post-publication minute before the decision is ignored. Overnight
-    or pre-open filings use the previous close. The reaction price is the decision-bar close.
+    For an intraday filing, the reference is the first 1-minute open at or after publication,
+    even when the filing was on an earlier trading day. A filing with no observable
+    post-publication minute on that day is ignored. Off-session filings use the last
+    observed close before publication. The reaction price is the decision-bar close.
     Of several filings the largest move counts.
     """
     import numpy as np
     out = np.full(len(df), np.nan)
     ok_tier = {"material"} | ({"unclear"} if scope == "material+unclear" else set())
     cache: dict[str, list[tuple[datetime, str]]] = {}
+    bar_cache: dict[tuple[str, int], pd.DataFrame | None] = {}
     window = timedelta(hours=lookback_h)
+
+    def prior_reference(sym: str, t: datetime) -> float | None:
+        key = (sym, t.year)
+        if key not in bar_cache:
+            bar_cache[key] = _reaction_bars(*key)
+        bars = bar_cache[key]
+        if bars is None or bars.empty:
+            return None
+        ts = pd.Timestamp(t)
+        minute = t.hour * 60 + t.minute
+        in_session = 9 * 60 + 15 <= minute < 15 * 60 + 30
+        if in_session:
+            if t.second or t.microsecond:
+                ts += pd.Timedelta(minutes=1)
+                ts = ts.replace(second=0, microsecond=0)
+            j = int(bars.index.searchsorted(ts))
+            if j < len(bars) and bars.index[j].date() == t.date():
+                return float(bars["open"].iloc[j])
+            return None
+        j = int(bars.index.searchsorted(ts)) - 1
+        if j >= 0:
+            return float(bars["close"].iloc[j])
+        previous = (sym, t.year - 1)
+        if previous not in bar_cache:
+            bar_cache[previous] = _reaction_bars(*previous)
+        old = bar_cache[previous]
+        return float(old["close"].iloc[-1]) if old is not None and not old.empty else None
+
     for i, (sym, d, key, dec, prev, close5) in enumerate(zip(df["symbol"], df["date"], df["day_key"],
                                                               df["decision_min"], df["prev_close"], df["close5"])):
         if sym not in cache:
@@ -466,6 +502,11 @@ def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str) 
                     if j >= len(arr["m1_min"]) or int(arr["m1_min"][j]) >= int(dec):
                         continue
                     ref = float(arr["m1_o"][j])
+            elif t.date() < t_dec.date():
+                earlier = prior_reference(sym, t)
+                if earlier is None:
+                    continue
+                ref = earlier
             if ref > 0:
                 mv = (float(close5) / ref - 1.0) * 100.0
                 if not best == best or mv > best:

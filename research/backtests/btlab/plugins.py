@@ -84,9 +84,9 @@ def _above_vwap(df: pd.DataFrame, p: dict) -> pd.Series:
     return (dist >= p["min_pct"]) & (dist <= p["max_pct"])
 
 
-def _kind_ok(kind: pd.Series, want: str) -> pd.Series:
+def _kind_ok(kind: pd.Series, want: str, swing_kind: str) -> pd.Series:
     if want == "swing":
-        return kind.astype(str).str.startswith("pivot")
+        return kind.eq(swing_kind)
     if want == "not_round":
         return kind.astype(str) != "round"
     return pd.Series(True, index=kind.index)
@@ -94,12 +94,12 @@ def _kind_ok(kind: pd.Series, want: str) -> pd.Series:
 
 def _support(df: pd.DataFrame, p: dict) -> pd.Series:
     dist = (df["fill"] - df["support"]) / df["fill"] * 100.0
-    return (dist >= p["min_pct"]) & (dist <= p["max_pct"]) & _kind_ok(df["support_kind"], p["kind"])
+    return (dist >= p["min_pct"]) & (dist <= p["max_pct"]) & _kind_ok(df["support_kind"], p["kind"], "pivot_low")
 
 
 def _resistance(df: pd.DataFrame, p: dict) -> pd.Series:
     dist = (df["resistance"] - df["fill"]) / df["fill"] * 100.0
-    return (dist >= p["min_pct"]) & (dist <= p["max_pct"]) & _kind_ok(df["resistance_kind"], p["kind"])
+    return (dist >= p["min_pct"]) & (dist <= p["max_pct"]) & _kind_ok(df["resistance_kind"], p["kind"], "pivot_high")
 
 
 ENTRY: tuple[Plugin, ...] = (
@@ -110,8 +110,8 @@ ENTRY: tuple[Plugin, ...] = (
            entry=_time_window),
     Plugin("momentum_tighter", "entry", "Stronger momentum",
            "Tighten the base momentum band: day change and time-of-day relative volume.",
-           (Param("day_chg_min", "Day chg ≥ %", 5.0, "float", 0, 30, 0.5),
-            Param("day_chg_max", "Day chg ≤ %", 8.0, "float", 0, 30, 0.5),
+           (Param("day_chg_min", "Day chg ≥ %", 5.0, "float", 0, 50, 0.5),
+            Param("day_chg_max", "Day chg ≤ %", 50.0, "float", 0, 100, 0.5),
             Param("rvol_min", "RVOL ≥", 5.0, "float", 0, 50, 0.5)),
            entry=_momentum),
     Plugin("above_vwap", "entry", "Above VWAP",

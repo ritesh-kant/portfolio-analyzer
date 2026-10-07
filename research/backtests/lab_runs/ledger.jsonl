@@ -162,3 +162,11 @@
 {"id": "20261007-150930-11c3a3", "key": "11c3a3ba63c7", "window": "af6d3c7c2d30", "at": "2026-10-07T15:09:30", "plugins": ["target_fixed_rr", "vwap_cross"]}
 {"id": "20261007-153859-0018c4", "key": "0018c446f709", "window": "af6d3c7c2d30", "at": "2026-10-07T15:38:59", "plugins": ["above_vwap"]}
 {"id": "20261007-154428-0d738e", "key": "0d738e725db7", "window": "af6d3c7c2d30", "at": "2026-10-07T15:44:28", "plugins": ["above_vwap", "target_fixed_rr"]}
+{"id": "20261007-201254-9ac1c7", "key": "9ac1c7b49aa0", "window": "af6d3c7c2d30", "at": "2026-10-07T20:12:54", "plugins": ["above_vwap", "news_reaction", "target_fixed_rr"]}
+{"id": "20261007-202024-21ab62", "key": "21ab6259217a", "window": "af6d3c7c2d30", "at": "2026-10-07T20:20:24", "plugins": ["news_reaction", "target_fixed_rr"]}
+{"id": "20261007-202043-48e39b", "key": "48e39b1a25b7", "window": "af6d3c7c2d30", "at": "2026-10-07T20:20:43", "plugins": ["news_reaction"]}
+{"id": "20261007-202105-0549f4", "key": "0549f4c1a16e", "window": "af6d3c7c2d30", "at": "2026-10-07T20:21:05", "plugins": ["news_reaction", "stop_pattern_low"]}
+{"id": "20261007-202121-9e7bb8", "key": "9e7bb884b8ca", "window": "af6d3c7c2d30", "at": "2026-10-07T20:21:21", "plugins": ["ema9_exit", "news_reaction"]}
+{"id": "20261007-202129-378449", "key": "378449e50910", "window": "af6d3c7c2d30", "at": "2026-10-07T20:21:29", "plugins": ["ema20_exit", "news_reaction"]}
+{"id": "20261007-202136-640d72", "key": "640d720b63a3", "window": "af6d3c7c2d30", "at": "2026-10-07T20:21:36", "plugins": ["macd_fade_exit", "news_reaction"]}
+{"id": "20261007-205425-8d8247", "key": "8d8247633be8", "window": "af6d3c7c2d30", "at": "2026-10-07T20:54:25", "plugins": ["news_reaction", "resistance_rule", "target_fixed_rr"]}

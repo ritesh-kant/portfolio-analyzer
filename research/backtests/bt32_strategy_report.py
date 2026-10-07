@@ -218,6 +218,39 @@ def summary_fields(row: pd.Series) -> dict:
     }
 
 
+def news_marks(symbol: str, day: pd.Timestamp, us: bool) -> list[dict]:
+    """NSE filings to draw on the chart: those published since the previous session's close, up to the session's end.
+
+    Read from the lab's per-symbol cache only (`.cache_nse_news/`, filled by 'Check news' or the news indicator);
+    never calls NSE, and an uncached symbol simply has no marks. Routine paperwork is left out. A filing before
+    the open (or last evening) is flagged `pre` and pinned to the first bar by the chart.
+    """
+    if us:
+        return []
+    try:
+        from datetime import datetime, timedelta, timezone
+        from btlab import news as _n
+        f = _n._sym_file(symbol)
+        if not f.exists():
+            return []
+        ist = timezone(timedelta(hours=5, minutes=30))
+        d0 = datetime(day.year, day.month, day.day, tzinfo=ist)
+        lo, hi = d0 - timedelta(hours=8, minutes=30), d0 + timedelta(hours=15, minutes=30)
+        out = []
+        for x in _n._load_sym(symbol)["rows"]:
+            if not x.get("t"):
+                continue
+            t = datetime.fromisoformat(x["t"]).astimezone(ist)
+            k = _n.tier(x["h"])
+            if not (lo <= t <= hi) or k == "routine":
+                continue
+            out.append({"t": t.strftime("%H:%M"), "when": t.strftime("%d %b %H:%M"), "pre": t < d0 + timedelta(hours=9, minutes=15),
+                        "h": x["h"].split(": ", 1)[-1], "k": k})
+        return sorted(out, key=lambda z: (z["pre"] is False, z["when"] if z["pre"] else z["t"]))
+    except Exception:  # noqa: BLE001 - news marks are decoration; never break a chart
+        return []
+
+
 def build_detail(row: pd.Series) -> dict | None:
     """The expensive half of a trade: raw bars, as-of-entry levels, formations.
 
@@ -298,6 +331,13 @@ def build_detail(row: pd.Series) -> dict | None:
             for ts, r in bars_1m.iterrows()
         ],
     }
+
+
+def with_filings(detail: dict | None, row: pd.Series) -> dict | None:
+    """Add the NSE-filing marks to a (possibly disk-cached) detail at serve time: the news cache keeps growing, the chart payload does not."""
+    if not detail or detail.get("_missing"):
+        return detail
+    return {**detail, "filings": news_marks(str(row["symbol"]), pd.Timestamp(row["date"]), is_us(row))}
 
 
 def build_day(row: pd.Series) -> dict | None:

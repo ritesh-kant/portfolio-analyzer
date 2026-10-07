@@ -105,3 +105,42 @@ button.news-done:hover{background:#26903f}
 .newsb.minor{border-style:dashed}
 .aibar{margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.aibar select{max-width:340px}
 details.newsd{margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:8px 12px}details.newsd>summary{cursor:pointer;font-size:13px}
+
+/* Lab: readable controls, one page scroll, and progressive disclosure. */
+:root{--dim:#a8b8ce;--line:#3b4d65;color-scheme:dark}
+[hidden]{display:none!important}
+body{font-size:15px;line-height:1.6}
+header{padding:24px}h1{font-size:28px}h2{font-size:18px}h2 small{font-size:13px}
+nav{white-space:normal;flex-wrap:wrap}nav a{padding:8px 0}
+.layout{display:block;max-width:1480px;margin:auto}
+#setup{position:static;max-height:none;overflow:visible;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start;scroll-margin-top:16px}
+#setup>.card{margin:0}#sec-entry{border-top:3px solid var(--entry)}#sec-exit{border-top:3px solid var(--exit)}
+.base-overview{font-size:16px;font-weight:600;color:var(--ink)}
+.card{padding:20px}.hint,.sub,label,.plug .ds,ul.rule{font-size:14px}
+.chip,.chips.small .chip{font:inherit;min-height:44px;padding:8px 12px}
+button,summary,a.primary{min-height:44px}
+button.ghost,button.mini,.presets button{font-size:13px;padding:8px 12px}
+input[type=search],input[type=number],input[type=time],select,textarea{min-height:44px;font-size:15px;border-color:var(--line)}
+input[type=checkbox]{width:20px;height:20px;accent-color:var(--acc);flex:none}
+.plug .nm{font-size:15px}.plug{padding:12px;margin-top:10px}.plug .params{margin-left:0}
+.research-note{margin-left:29px}.research-note summary{font-size:13px}.research-note .hist{font-size:13px;margin:0}
+.actionbar{grid-column:1/-1;top:auto;bottom:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin:0 0 24px;display:flex;gap:16px;align-items:center;box-shadow:0 8px 24px #0006}
+.actionbar .btns{flex-wrap:wrap;margin-left:auto}.actionbar #btn-apply{order:3}.actionbar #btn-scan{order:2}.actionbar #btn-clear{order:1}
+.actionbar #selsum{font-size:14px;margin:0;border:0;background:none;padding:0;max-width:50%}.btns{flex-wrap:wrap}
+.search-label{margin:10px 0 4px;color:var(--ink)}
+#results{scroll-margin-top:16px}#history-card{scroll-margin-top:16px}
+.kpi .l{font-size:13px}.kpi .v{font-size:23px}.kpi .d{font-size:13px}
+#history-card .bar{margin-top:16px}#history-card .bar label{flex-wrap:wrap}#history-card .bar select{max-width:280px}
+th,td{padding:10px;font-size:14px}.scroll{max-height:650px}thead th{position:sticky;top:0;background:var(--panel);z-index:1}
+.acts{white-space:normal;min-width:220px}.acts>*{display:inline-block;margin:3px}
+a.mini{color:var(--acc);padding:8px}.star{background:transparent;border:1px solid var(--line);border-radius:6px;min-width:44px}
+.sort-button{border:0;background:transparent;color:var(--ink);font:inherit;cursor:pointer;padding:0;text-align:inherit}
+th[aria-sort=ascending] .sort-button::after{content:' ↑'}th[aria-sort=descending] .sort-button::after{content:' ↓'}
+a.primary{display:inline-flex;align-items:center;background:var(--acc);color:#1a1405;border-radius:8px;padding:9px 20px;font-weight:700}
+:focus-visible{outline:3px solid #93c5fd;outline-offset:3px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.skip-link{position:absolute;left:16px;top:-100px;background:var(--panel);padding:12px;z-index:100}.skip-link:focus{top:8px}
+@media(max-width:1100px){.layout{padding:16px}.actionbar{position:static;flex-wrap:wrap}.actionbar #selsum{max-width:none}.actionbar .btns{margin-left:0}}
+@media(max-width:800px){#setup{grid-template-columns:minmax(0,1fr)}.actionbar{display:block}.actionbar #selsum{margin-bottom:12px}.actionbar #btn-apply{flex:1}.actionbar #btn-scan{order:4;flex-basis:100%}}
+@media(max-width:600px){header{padding:20px 16px}.card{padding:16px}.grid2,#entry-list,#exit-list{grid-template-columns:minmax(0,1fr)}.bar{align-items:stretch}.bar>label,.bar>input{width:100%}.bar input[type=search]{max-width:none}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi .v{font-size:20px}#banner{margin:12px 16px}.two>div{overflow:auto}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}

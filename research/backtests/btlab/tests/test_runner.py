@@ -131,6 +131,22 @@ def test_support_and_resistance_rules_apply_only_when_selected():
         == [False, False, False]
 
 
+def test_swing_level_rules_require_the_matching_pivot_direction():
+    df = pd.DataFrame([cand(support_kind="pivot_low", resistance_kind="pivot_high"),
+                       cand(support_kind="pivot_high", resistance_kind="pivot_low"),
+                       cand(support_kind="session_pivot", resistance_kind="session_pivot")])
+    for indicator in ("support_rule", "resistance_rule"):
+        mask = P.entry_mask(df, P.normalise([{"id": indicator, "params": {"kind": "swing"}}]))
+        assert mask.tolist() == [True, False, False]
+
+
+def test_stronger_momentum_default_can_pass_us_base_candidates():
+    from btlab.base import BaseRule
+    rule = BaseRule.for_market("US")
+    df = pd.DataFrame({"day_chg_pct": [rule.day_chg_min, rule.day_chg_max], "rvol": [5.0, 5.0]})
+    assert P.entry_mask(df, P.normalise([{"id": "momentum_tighter"}])).tolist() == [True, True]
+
+
 def test_time_window_uses_decision_and_fill_minutes():
     df = pd.DataFrame([cand(decision_min=600, fill_min=602), cand(decision_min=660, fill_min=662)])
     m = P.entry_mask(df, P.normalise([{"id": "time_window", "params": {"start": "09:30", "end": "11:00"}}]))
@@ -163,6 +179,14 @@ def tmp_store(tmp_path, monkeypatch):
 def cfg(plugins=()):
     return {"years": [2026], "base": {"day_chg_min": 4.0}, "patterns": ["hammer"], "risk_inr": 500,
             "max_notional_inr": 50000, "max_trades": 1, "plugins": list(plugins)}
+
+
+def test_corrected_indicator_runs_get_new_config_keys():
+    for indicator, params in (("news_reaction", {}), ("support_rule", {"kind": "swing"}),
+                              ("resistance_rule", {"kind": "swing"})):
+        canonical = store.canonical_config(cfg([{"id": indicator, "params": params}]))
+        assert canonical["indicator_revisions"] == {indicator: 2}
+    assert "indicator_revisions" not in store.canonical_config(cfg([{"id": "support_rule", "params": {"kind": "any"}}]))
 
 
 def test_identical_config_is_not_saved_twice_and_ledger_counts_distinct_trials(tmp_store):
@@ -249,6 +273,9 @@ def test_news_reaction_measures_the_move_since_a_material_filing_as_of_the_decis
     import numpy as np
     from btlab import news
     monkeypatch.setattr(news, "CACHE", tmp_path)
+    prior = pd.DataFrame({"open": [95.0], "close": [95.0]},
+                         index=pd.to_datetime(["2026-02-27T15:29:00+05:30"]))
+    monkeypatch.setattr(news, "_reaction_bars", lambda symbol, year: prior)
     IST = "+05:30"
     rows = [
         {"t": f"2026-03-02T09:50:00{IST}", "h": "AAA: Bagging/Receiving of orders/contracts", "u": "", "b": ""},   # in-session, material
@@ -266,6 +293,24 @@ def test_news_reaction_measures_the_move_since_a_material_filing_as_of_the_decis
     none = news.stamp_reaction(df, {KEY: arr}, 0.5, "material")  # window only reaches back to 09:30: only the query + 09:50 filing
     assert none[0] == pytest.approx((101 / 99 - 1) * 100)        # in-session ref = the first post-filing minute open
     assert np.isnan(news.stamp_reaction(df.assign(decision_min=580), {KEY: arr}, 0.5, "material")[0])   # 09:40: only the query
+
+
+def test_news_reaction_uses_the_post_filing_open_on_a_prior_trading_day(tmp_path, monkeypatch):
+    import numpy as np
+    from btlab import news
+    monkeypatch.setattr(news, "CACHE", tmp_path)
+    (tmp_path / "AAA.json").write_text(json.dumps({"covered": [], "rows": [
+        {"t": "2026-03-06T11:00:30+05:30", "h": "AAA: Financial Results"}]}))
+    prior = pd.DataFrame({"open": [99.0, 100.0, 110.0], "close": [99.0, 100.0, 110.0]},
+                         index=pd.to_datetime(["2026-03-06T11:00:00+05:30",
+                                               "2026-03-06T11:01:00+05:30",
+                                               "2026-03-06T15:29:00+05:30"]))
+    monkeypatch.setattr(news, "_reaction_bars", lambda symbol, year: prior)
+    key = "AAA|2026-03-09"
+    arr = {"m1_min": np.arange(555, 605), "m1_o": np.full(50, 105.0)}
+    df = pd.DataFrame([dict(symbol="AAA", date="2026-03-09", day_key=key,
+                            decision_min=600, prev_close=110.0, close5=105.0)])
+    assert news.stamp_reaction(df, {key: arr}, 72, "material")[0] == pytest.approx(5.0)
 
 
 def test_news_reaction_excludes_the_price_move_before_an_intrabar_filing(tmp_path, monkeypatch):

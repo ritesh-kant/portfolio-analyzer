@@ -107,14 +107,14 @@ def trade_detail(run_id: str, i: int) -> dict | None:
     d = BACKTESTS / ".dashboard_cache" / f"lab-{run_id}"
     f = d / f"{i}.json"
     if f.exists():
-        return json.loads(f.read_text())
+        return _bt32().with_filings(json.loads(f.read_text()), tr.iloc[i])
     with _detail_lock:
         built = _bt32().build_detail(tr.iloc[i])
         if built is None:
             return {"_missing": True}
         d.mkdir(parents=True, exist_ok=True)
         f.write_text(json.dumps(built))
-        return built
+        return _bt32().with_filings(built, tr.iloc[i])
 
 
 def runs_csv() -> str:

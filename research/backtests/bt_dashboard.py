@@ -353,12 +353,12 @@ class Runs:
         d = CACHE_DIR / f"{run}-{int(meta['mtime'])}"
         f = d / f"{i}.json"
         if f.exists():
-            return json.loads(f.read_text())
+            return bt32.with_filings(json.loads(f.read_text()), df.iloc[i])
         with self.lock:
             lk = self.build_locks.setdefault((run, i), threading.Lock())
         with lk:  # two cards asking for the same trade build it once
             if f.exists():
-                return json.loads(f.read_text())
+                return bt32.with_filings(json.loads(f.read_text()), df.iloc[i])
             built = bt32.build_detail(df.iloc[i])
             if built is None:
                 return {"_missing": True}
@@ -366,7 +366,7 @@ class Runs:
             tmp = f.with_suffix(".tmp")
             tmp.write_text(json.dumps(built))
             tmp.replace(f)
-            return built
+            return bt32.with_filings(built, df.iloc[i])
 
 
 def report_page(runs: Runs, run: str, group: str) -> str | None:

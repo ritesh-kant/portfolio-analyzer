@@ -17,7 +17,7 @@
    seconds and formatted in UTC, so the axis shows IST as printed, with no
    browser-timezone shift. */
 var LWC = window.LightweightCharts;
-var DEFAULT_ZOOM = { "1m": 8, "5m": 2 };
+var DEFAULT_ZOOM = { "1m": 1, "5m": 1 };   // 1 = the whole session (was 8 and 2: a window around the entry)
 var MIN_BARS = 15, CHART_H = 600;
 var WEAK = DATA.weak_strength == null ? 0 : DATA.weak_strength;
 var cards = [], tf = "5m", levelMode = "key";
@@ -36,12 +36,20 @@ function h(tag, attrs, parent, text) {
   if (parent) parent.appendChild(e);
   return e;
 }
+function keyboardAction(el, action, label) {
+  el.tabIndex = 0;
+  if (label) el.setAttribute("aria-label", label);
+  el.addEventListener("keydown", function (ev) {
+    if (ev.target !== el) return;
+    if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); action(); }
+  });
+}
 function pct(x) { return (x >= 0 ? "+" : "") + x.toFixed(2) + "%"; }
 /* US runs (CSV currency USD) are shown in dollars with cents; NSE runs in whole rupees. */
 var US = !!(DATA.summary && DATA.summary.currency === "USD"), CURSYM = US ? "$" : "₹";
 function inr(x) {
   return US ? (x < 0 ? "−$" : "$") + Math.abs(x).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-            : "₹" + Math.round(x).toLocaleString("en-IN");
+            : (x < 0 ? "−₹" : "₹") + Math.round(Math.abs(x)).toLocaleString("en-IN");
 }
 function cls(x) { return x > 0 ? "pos" : x < 0 ? "neg" : ""; }
 /* "Check news" result (lab runs only): was there an NSE filing in the 24h before entry? */
@@ -71,16 +79,16 @@ function toggleWhatIf(c) {
     h("h4", {}, col, g === "entry" ? "Entry indicators (would it be taken?)" : "Exit indicators (where would it get out?)");
     W.plugins.filter(function (p) { return p.group === g; }).forEach(function (p) {
       var line = h("label", { class: "wi-line", title: p.desc }, col);
-      var cb = h("input", { type: "checkbox" }, line);
+      var cb = h("input", { type: "checkbox", "aria-label": p.name }, line);
       h("span", {}, line, " " + p.name);
       var inputs = {};
       p.params.forEach(function (q) {
         var el;
         if (q.kind === "select") {
-          el = h("select", {}, line);
+          el = h("select", { "aria-label": p.name + ": " + q.label }, line);
           q.options.forEach(function (o) { var op = h("option", { value: o }, el, o); if (o === q.default) op.selected = true; });
         } else {
-          el = h("input", { type: q.kind === "time" ? "text" : "number", value: String(q.default), title: q.label }, line);
+          el = h("input", { type: q.kind === "time" ? "text" : "number", value: String(q.default), title: q.label, "aria-label": p.name + ": " + q.label }, line);
           if (q.step) el.step = String(q.step);
         }
         el.className = "wi-p";
@@ -423,6 +431,18 @@ function setSeries(c) {
               shape: "circle", size: 0.6, color: alpha(COL.pattern, weak ? 0.4 : 0.95),
               text: nice(m.name) + " " + m.strength.toFixed(2) + "×" });
   });
+  /* NSE filings: one square per bar (several filings in a bar are counted); before-the-open ones sit on the first bar */
+  var nb = {};
+  (tr.filings || []).forEach(function (n) {
+    var i = n.pre ? 0 : barIndex(data, n.t);
+    (nb[i] = nb[i] || []).push(n);
+  });
+  Object.keys(nb).forEach(function (i) {
+    var g = nb[i], mat = g.some(function (n) { return n.k === "material"; }), n0 = g[0];
+    var head = (n0.pre ? n0.when + " · " : "") + n0.h;
+    mk.push({ time: T[+i], position: "aboveBar", shape: "square", size: 1, color: mat ? "#f59e0b" : alpha("#f59e0b", 0.45),
+              text: "⚡ " + (head.length > 42 ? head.slice(0, 41) + "…" : head) + (g.length > 1 ? " +" + (g.length - 1) : "") });
+  });
   mk.sort(function (a, b) { return a.time - b.time; });
   c.markers.setMarkers(mk);
 
@@ -646,7 +666,7 @@ function buildCards() {
     var grp = h("div", { class: "btns" }, bar);
     var c = { sec: sec, tr: tr, i: i, zlabel: zlabel, chart: null, tf: null };
     function mk(txt, title, fn) {
-      var b = h("button", { type: "button", title: title }, grp, txt);
+      var b = h("button", { type: "button", title: title, "aria-label": title }, grp, txt);
       b.onclick = function () { ensureChart(c); if (c.chart) fn(); };
       return b;
     }
@@ -668,6 +688,13 @@ function buildCards() {
       wb.onclick = function () { toggleWhatIf(c); };
     }
 
+    var advanced = h("details", { class: "advanced-chart" }, bar);
+    h("summary", {}, advanced, "Pan & price controls");
+    var advancedButtons = h("div", { class: "btns" }, advanced);
+    Array.from(grp.querySelectorAll("button")).forEach(function(button) {
+      if (["Earlier candles", "Later candles", "Higher prices", "Lower prices", "Price zoom out", "Price zoom in"].includes(button.getAttribute("aria-label"))) advancedButtons.appendChild(button);
+    });
+    grp.querySelectorAll(".sep").forEach(function(e) { e.remove(); });
     var wrap = h("div", { class: "chart-wrap" }, sec);
     c.host = h("div", { class: "chart", role: "img", "aria-label": tr.symbol + " candlestick chart" }, wrap);
     c.host.style.height = CHART_H + "px";
@@ -784,7 +811,8 @@ function pager(list, gid, parent) {
 function reveal(c) {
   if (c.group && c.group.classList.contains("collapsed")) {
     c.group.classList.remove("collapsed");
-    openGroups[groupKey + ":" + c.group.querySelector(".gname").textContent] = true;
+    openGroups[c.group.dataset.gid] = true;
+    c.group.querySelector(".group-head").setAttribute("aria-expanded", "true");
   }
   if (c.list && c.gi >= (shown[c.gid] || first(c.list))) {
     c.pinned = true;   // just this one: not every card between the page and it
@@ -824,14 +852,17 @@ function groupList(keep) {
   });
 }
 function statSpans(parent, st, total) {
-  var sp = function (html) { h("span", { class: "gstat" }, parent).innerHTML = html; };
-  sp("<b>" + st.n + "</b> trades" + (total ? " (" + (100 * st.n / total).toFixed(1) + "%)" : ""));
-  sp("gross <b class='" + cls(st.gross) + "'>" + pct(st.gross) + "</b>/trade");
-  sp("net @ real <b class='" + cls(st.net) + "'>" + pct(st.net) + "</b>/trade");
-  sp("win <b>" + st.win.toFixed(0) + "%</b>");
-  sp("median <b class='" + cls(st.med) + "'>" + inr(st.med) + "</b>/trade");
-  sp("net <b class='" + cls(st.inr) + "'>" + inr(st.inr) + "</b>");
+  var sp = function (label, value, tone) {
+    var item = h("span", { class: "gstat" }, parent);
+    h("span", {}, item, label + " ");
+    h("b", { class: tone || "" }, item, value);
+  };
+  sp("Trades", String(st.n));
+  sp("Net", inr(st.inr), cls(st.inr));
+  sp("Mean / trade", inr(st.n ? st.inr / st.n : 0), cls(st.inr));
+  sp("Median / trade", inr(st.med), cls(st.med));
 }
+var groupOverviewOpen = false;
 /* put the cards back under #charts in their original order, then (if grouping)
    gather the visible ones under one collapsible header per group */
 function layoutGroups(keep) {
@@ -841,11 +872,13 @@ function layoutGroups(keep) {
   sum.innerHTML = "";
   var btns = document.getElementById("grp-btns");
   if (btns) btns.style.display = groupKey ? "" : "none";
+  if (!keep.length) { h("p", { class: "empty-state" }, sum, "No trades match. Reset the filters or choose a different stock."); return; }
   if (!groupKey) { pager(keep, "flat", host); return; }
   var groups = groupList(keep), total = keep.length;
-  var panel = h("div", { class: "panel" }, sum);
-  h("h3", {}, panel, "By " + GROUPS[groupKey].label.toLowerCase() + " ").appendChild(
-    h("span", {}, null, "— " + groups.length + " groups · click a row to open it"));
+  var panel = h("details", { class: "panel group-overview" }, sum);
+  panel.open = groupOverviewOpen;
+  panel.ontoggle = function () { groupOverviewOpen = panel.open; };
+  h("summary", {}, panel, "Detailed comparison by " + GROUPS[groupKey].label.toLowerCase() + " · " + groups.length + " groups");
   var maxN = Math.max.apply(null, groups.map(function (g) { return g.st.n; }).concat([1]));
   var t = h("table", {}, h("div", { class: "scroll" }, panel));
   var hr = h("tr", {}, h("thead", {}, t));
@@ -855,18 +888,22 @@ function layoutGroups(keep) {
   var tb = h("tbody", {}, t);
   groups.forEach(function (g) {
     var gid = groupKey + ":" + g.name;
-    var wrapG = h("div", { class: "group" + (openGroups[gid] ? "" : " collapsed") }, host);
+    var wrapG = h("div", { class: "group" + (openGroups[gid] ? "" : " collapsed"), "data-gid": gid }, host);
     var toggle = function (collapsed) {
       wrapG.classList.toggle("collapsed", collapsed);
       openGroups[gid] = !collapsed;
+      head.setAttribute("aria-expanded", String(!collapsed));
     };
-    var head = h("div", { class: "group-head" }, wrapG);
-    h("span", { class: "gname" }, head, g.name);
+    var head = h("div", { class: "group-head", role: "button", "aria-expanded": String(!!openGroups[gid]) }, wrapG);
+    var groupName = groupKey === "exit_reason" ? ({stop:"Stop hit",target:"Target hit",eod:"Session close"}[g.name] || nice(g.name)) : g.name;
+    h("span", { class: "gname" }, head, groupName);
     statSpans(head, g.st, total);
+    h("span", { class: "group-action" }, head);
     var body = h("div", { class: "group-body" }, wrapG);
     g.cards.forEach(function (c) { body.appendChild(c.sec); c.group = wrapG; });
     pager(g.cards, gid, body);
     head.onclick = function () { toggle(!wrapG.classList.contains("collapsed")); };
+    keyboardAction(head, head.onclick, groupName + " trade group");
     var row = h("tr", { class: "gr-row" }, tb);
     h("td", { class: "gr-name" }, row, g.name);
     h("td", { class: "num" }, row, String(g.st.n));
@@ -879,8 +916,10 @@ function layoutGroups(keep) {
     h("td", { class: "num " + cls(g.st.inr) }, row, inr(g.st.inr));
     row.onclick = function () {
       toggle(false);
+      head.focus({ preventScroll: true });
       wrapG.scrollIntoView({ behavior: "smooth", block: "start" });
     };
+    keyboardAction(row, row.onclick, "Open " + g.name + " trades");
   });
   var all = h("tr", { class: "gr-total" }, tb), st = stats(keep);
   h("td", { class: "gr-name" }, all, "All");
@@ -920,10 +959,17 @@ function showCount(keep) {
   var el = document.getElementById("f-count");
   if (!el) return;
   var st = stats(keep), all = cards.length;
-  el.innerHTML = "Showing <b>" + keep.length + "</b> of " + all + " trades"
-    + (keep.length ? " · net <b class='" + cls(st.inr) + "'>" + inr(st.inr) + "</b> @ real"
-      + " · median <b class='" + cls(st.med) + "'>" + inr(st.med) + "</b>/trade · win <b>" + st.win.toFixed(0) + "%</b>"
-      : " — no trade matches these filters");
+  el.textContent = "Showing " + keep.length + " of " + all + " trades · headline figures reflect these filters, at real costs.";
+  var values = { "metric-trades": String(st.n), "metric-win": st.n ? st.win.toFixed(1) + "%" : "–",
+    "metric-net": st.n ? inr(st.inr) : "–", "metric-mean": st.n ? inr(st.inr / st.n) : "–", "metric-median": st.n ? inr(st.med) : "–" };
+  Object.keys(values).forEach(function(id) {
+    var metric = document.getElementById(id); if (!metric) return;
+    metric.textContent = values[id];
+    if (["metric-net", "metric-mean", "metric-median"].includes(id)) {
+      metric.className = cls(id === "metric-median" ? st.med : st.inr);
+      metric.parentNode.classList.remove("pos", "neg");
+    }
+  });
 }
 var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function monthName(ym) { return MONTHS[+ym.slice(5, 7) - 1] + " " + ym.slice(0, 4); }
@@ -942,7 +988,7 @@ function render() {
     return (x > y ? 1 : x < y ? -1 : 0) * sortDir;
   }).forEach(function (c) {
     var row = h("tr", {}, tb);
-    h("td", {}, row, c.tr.date.slice(5));
+    h("td", {}, row, c.tr.date);
     var symTd = h("td", {}, row, c.tr.symbol);
     var nb2 = newsBadge(c.tr);
     if (nb2) symTd.appendChild(nb2);
@@ -954,57 +1000,230 @@ function render() {
       reveal(c);
       ensureChart(c);
       c.sec.scrollIntoView({ behavior: "smooth", block: "center" });
+      c.sec.focus({ preventScroll: true });
       c.sec.classList.add("flash");
       setTimeout(function () { c.sec.classList.remove("flash"); }, 2000);
     };
+    keyboardAction(row, row.onclick, "Open " + c.tr.symbol + " trade on " + c.tr.date);
   });
 }
 
 /* ---------- PDF export ----------
-   Prints every trade card currently on screen (current filters / group / "show more"
-   pages). Charts are canvases, so each is built first, the layout is pinned to a
-   fixed page width so they resize to it, then the browser print dialog opens
-   ("Save as PDF"). */
-function exportPdf() {
+   A separate print document contains immutable chart images. The screen layout,
+   pagination, collapsed groups and live canvas sizes cannot split those images. */
+var pdfExportActive = false;
+function nextPaint() {
+  return new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+}
+async function pdfChartSnapshot(tr) {
+  var host = h("div", {class:"pdf-render-host", "aria-hidden":"true"}, document.body);
+  var c = { tr:tr, host:host, zlabel:h("span",{}), legend:h("div",{}), readout:h("div",{}) };
+  try {
+    createChart(c);
+    setSeries(c);
+    await nextPaint();
+    // Include both BUY and SELL plus context, even for a long-held 1-minute trade.
+    var from = Math.max(-0.5, Math.min(c.eIdx, barIndex(c.data, tr.exit_time)) - 8.5);
+    var to = Math.min(c.data.length - 0.5, Math.max(c.eIdx, barIndex(c.data, tr.exit_time)) + 8.5);
+    c.chart.timeScale().setVisibleLogicalRange({from:from, to:to});
+    await nextPaint();
+    return { image:c.chart.takeScreenshot().toDataURL("image/png"), legend:c.legend.innerHTML, readout:c.readout.innerHTML };
+  } finally { if (c.chart) c.chart.remove(); host.remove(); }
+}
+function pdfPrice(value) { return Number.isFinite(value) ? value.toFixed(2) : "—"; }
+function pdfTradeHeading(parent, tr, index, count) {
+  h("h2", {}, parent, "Trade " + (index + 1) + " of " + count + " · " + tr.symbol + " · " + tr.date);
+  h("p", {class:"pdf-trade-meta"}, parent,
+    nice(tr.setup) + " · " + tr.entry_time + " → " + tr.exit_time + " · " + nice(tr.exit_reason)
+    + " · Qty " + tr.qty + " · Entry " + pdfPrice(tr.entry) + " · Stop " + pdfPrice(tr.stop)
+    + " · Target " + pdfPrice(tr.target) + " · Exit " + pdfPrice(tr.exit));
+  h("p", {class:"pdf-trade-meta"}, parent,
+    "Net at real costs " + inr(tr.net_real_inr) + " · " + (US ? "Engine-booked" : "Stress") + " net " + inr(tr.net_stress_inr)
+    + " · Gross " + pct(tr.gross_pct) + " · " + tf + " candles · " + (levelMode === "key" ? "Key price levels" : "All price levels"));
+}
+async function exportPdf() {
+  if (pdfExportActive) return;
   var msg = document.getElementById("export-msg"), btn = document.getElementById("export-pdf");
-  var list = cards.filter(function (c) { return c.sec.style.display !== "none"; });
-  if (!list.length) { msg.textContent = "nothing to export"; return; }
-  if (list.length > 60 && !confirm(list.length + " trades will be exported (one page each). Continue?")) return;
-  btn.disabled = true;
-  var collapsed = Array.prototype.slice.call(document.querySelectorAll(".group.collapsed"));
-  collapsed.forEach(function (g) { g.classList.remove("collapsed"); });
-  var details = Array.prototype.slice.call(document.querySelectorAll("details.levels"));
-  var wasOpen = details.map(function (d) { return d.open; });
-  details.forEach(function (d) { d.open = true; });
-  document.body.classList.add("printing");
-  list.forEach(function (c) { c.sec.classList.add("p-card"); });
-  var t0 = Date.now();
-  (function wait() {
-    var pending = list.filter(function (c) { return !c.failed && !(c.chart && c.tf === tf); });
-    // a few at a time: each lazy chart is built server-side, and 100 at once get dropped
-    var busy = pending.filter(function (c) { return c.loading; }).length;
-    pending.filter(function (c) { return !c.loading; }).slice(0, Math.max(0, 4 - busy))
-      .forEach(function (c) { ensureChart(c); });
-    var left = pending.length;
-    msg.textContent = left ? "building charts… " + (list.length - left) + "/" + list.length : "";
-    if (left && Date.now() - t0 < 120000) { setTimeout(wait, 250); return; }
-    // let autoSize re-measure at print width, then reset each view and print
-    setTimeout(function () {
-      list.forEach(function (c) { if (c.chart) resetView(c); });
-      setTimeout(function () {
-        var done = function () {
-          window.removeEventListener("afterprint", done);
-          document.body.classList.remove("printing");
-          list.forEach(function (c) { c.sec.classList.remove("p-card"); });
-          collapsed.forEach(function (g) { g.classList.add("collapsed"); });
-          details.forEach(function (d, i) { d.open = wasOpen[i]; });
-          btn.disabled = false;
-        };
-        window.addEventListener("afterprint", done);
-        window.print();
-      }, 500);
-    }, 500);
-  })();
+  var list = visible(); // All matching trades, including collapsed groups and later pages.
+  if (!list.length) { msg.textContent = "No trades match the filters. Nothing to export."; return; }
+  if (list.length > 60 && !confirm("Export all " + list.length + " filtered trades, with a chart page and separate level tables for each?")) return;
+  pdfExportActive = true; btn.disabled = true;
+  var root = h("div", {id:"pdf-report", "aria-hidden":"true"}, document.body);
+  var frame = null, detailRequests = new AbortController(), finished = false;
+  var timeout = setTimeout(function() { detailRequests.abort(); }, 120000);
+  var cleanup = function() {
+    if (finished) return; finished = true;
+    clearTimeout(timeout); detailRequests.abort();
+    window.removeEventListener("afterprint", cleanup);
+    if (frame) frame.remove(); root.remove();
+    btn.disabled = false; pdfExportActive = false;
+  };
+  try {
+    var summary = h("section", {class:"pdf-summary"}, root);
+    h("h1", {}, summary, document.title);
+    h("p", {}, summary, "Exploratory backtest · " + list.length + (list.length === 1 ? " exported trade · " : " exported trades · ") + tf + " candles · net at real costs.");
+    var filters = ["f-sym","f-exit","f-mon","f-out","f-news"].map(function(id) {
+      var el = document.getElementById(id);
+      return el && el.value ? el.getAttribute("aria-label") + ": " + el.options[el.selectedIndex].textContent : null;
+    }).filter(Boolean);
+    h("p", {}, summary, filters.length ? "Filters: " + filters.join(" · ") : "Filters: all trades in this run.");
+    var st = stats(list);
+    h("p", {class:"pdf-summary-metrics"}, summary, "Net " + inr(st.inr) + " · Mean/trade " + inr(st.inr/st.n)
+      + " · Median/trade " + inr(st.med) + " · Win rate " + st.win.toFixed(1) + "%");
+    var savedSettings = document.querySelector(".run-notes > p");
+    if (savedSettings) h("p", {class:"pdf-settings"}, summary, savedSettings.textContent);
+    h("p", {}, summary, "Each following chart includes price, MACD and volume. Complete price-level tables follow each chart on separate pages. Charts cover entry through exit with surrounding candles.");
+    var trades = new Array(list.length);
+    // Read the cache with bounded concurrency. Never silently export a missing chart.
+    var cursor = 0;
+    await Promise.all(Array.from({length:Math.min(4,list.length)}, async function() {
+      while (cursor < list.length) {
+        var i = cursor++, source = list[i].tr;
+        msg.textContent = "Loading trade data… " + (i + 1) + "/" + list.length;
+        if (source.bars) trades[i] = source;
+        else {
+          var response = await fetch(DATA.detail_url + list[i].i, {signal:detailRequests.signal});
+          if (!response.ok) throw new Error("Could not load " + source.symbol + " " + source.date + " (" + response.status + ")");
+          trades[i] = Object.assign({},source,await response.json());
+        }
+        if (!trades[i].bars || !trades[i].bars.length) throw new Error("No cached candles for " + source.symbol + " " + source.date);
+      }
+    }));
+    clearTimeout(timeout);
+    for (var i = 0; i < trades.length; i++) {
+      msg.textContent = "Preparing complete charts… " + (i + 1) + "/" + trades.length;
+      var tr = trades[i], snapshot = await pdfChartSnapshot(tr);
+      var page = h("section", {class:"pdf-chart-page"}, root);
+      pdfTradeHeading(page,tr,i,trades.length);
+      h("img", {class:"pdf-chart-image",src:snapshot.image,alt:tr.symbol + " price, MACD and volume chart"}, page);
+      h("div", {class:"pdf-chart-legend"}, page).innerHTML = snapshot.legend;
+      h("div", {class:"pdf-chart-readout"}, page).innerHTML = snapshot.readout;
+      if (tr.levels && tr.levels.length) {
+        var levels = h("section", {class:"pdf-level-page"}, root);
+        pdfTradeHeading(levels,tr,i,trades.length);
+        h("h3", {}, levels, "Complete support and resistance levels");
+        levelTable(levels,tr);
+        var d = levels.querySelector("details"); d.open = true;
+      }
+    }
+    // The iframe stays alive while the native print preview is open. No screen
+    // styles, responsive breakpoints, or afterprint mutations touch its content.
+    frame = h("iframe", {class:"pdf-print-frame",title:"Printable trade report", "aria-hidden":"true"}, document.body);
+    var doc = frame.contentDocument;
+    doc.open(); doc.write("<!doctype html><html><head><meta charset='utf-8'><title></title></head><body></body></html>"); doc.close();
+    doc.title = document.title;
+    var style = doc.createElement("style"); style.textContent = Array.from(document.querySelectorAll("style")).map(function(e) {return e.textContent;}).join("\n");
+    doc.head.appendChild(style);
+    doc.body.className = "pdf-document";
+    var report = root.cloneNode(true); report.removeAttribute("aria-hidden"); doc.body.appendChild(report);
+    await Promise.all(Array.from(doc.images).map(function(img) { return img.decode(); }));
+    await nextPaint();
+    window.addEventListener("afterprint", cleanup, {once:true});
+    // Some browsers dispatch afterprint only on the frame's window.
+    frame.contentWindow.addEventListener("afterprint", cleanup, {once:true});
+    msg.textContent = "Ready: " + trades.length + (trades.length === 1 ? " complete chart." : " complete charts.") + " Choose Save as PDF in the print dialog.";
+    frame.contentWindow.focus(); frame.contentWindow.print();
+  } catch (error) {
+    msg.textContent = "PDF export stopped: " + (error.name === "AbortError" ? "chart data took too long to load. Try fewer trades." : error.message);
+    cleanup();
+  }
+}
+
+function improveReportUX() {
+  var skip = h("a", { class: "skip-link", href: "#charts" }, null, "Skip to trade charts");
+  document.body.prepend(skip);
+  var main = document.querySelector(".main"); main.setAttribute("role", "main");
+  document.getElementById("charts").tabIndex = -1;
+  var side = document.querySelector(".side");
+  side.setAttribute("aria-label", "Trade navigation and chart settings");
+  // Keep reading and keyboard order aligned when the sidebar moves above charts on mobile.
+  main.parentNode.insertBefore(side, main);
+  var header = document.querySelector("header");
+  if (DATA.whatif) {
+    var title = header.querySelector("h1"), runName = title.textContent.replace(/^Lab run — /, "");
+    title.textContent = "Trade explorer";
+    h("p", { class: "run-name" }, header, runName);
+  }
+  var notes = header.querySelector("p");
+  if (notes) {
+    var detail = h("details", { class: "run-notes" }, header);
+    h("summary", {}, detail, "Run details and costs"); detail.appendChild(notes);
+  }
+  if (DATA.whatif) h("p", { class: "hint" }, header, "Exploratory results · net figures include real costs.");
+  var legend = document.getElementById("legend");
+  var key = h("details", { class: "chart-key" }, null);
+  h("summary", {}, key, "Chart legend — colours and indicators");
+  legend.parentNode.insertBefore(key, legend); key.appendChild(legend);
+  document.querySelectorAll(".side .hint").forEach(function(e) {
+    if (e.textContent === "Click any row to jump to its chart.") e.textContent = "Choose a trade row with a click or Enter to open its chart.";
+  });
+  var count = document.getElementById("f-count"); count.setAttribute("role", "status");
+  var reset = h("button", { type: "button", class: "reset-filters" }, count.parentNode, "Reset filters");
+  reset.onclick = function () {
+    ["f-sym", "f-exit", "f-mon", "f-out", "f-news"].forEach(function (id) { var e = document.getElementById(id); if (e) e.value = ""; });
+    render();
+  };
+  document.querySelectorAll(".scroll").forEach(function (e) { e.tabIndex = 0; e.setAttribute("role", "region"); e.setAttribute("aria-label", "Scrollable trade table"); });
+  // Give net mean and median the same prominence as total P&L.
+  var statsHost = document.querySelector(".stats"), oldChips = Array.from(statsHost.children);
+  var diagnostics = h("details", { class: "cost-details" }, null);
+  h("summary", {}, diagnostics, "More metrics and cost assumptions");
+  var diagnosticsBody = h("div", { class: "stats" }, diagnostics);
+  oldChips.forEach(function(chip,i) { if (![0,7,8].includes(i)) diagnosticsBody.appendChild(chip); });
+  if (detail) { detail.appendChild(diagnosticsBody); } else statsHost.after(diagnostics);
+  var headlineLabels = {0: "Trades", 7: "Win rate", 8: "Net P&L"};
+  [0,7,8].forEach(function(i) {
+    var chip = oldChips[i], value = chip.querySelector("b");
+    if (i === 8) value.textContent = inr(DATA.summary.net_real_inr);
+    chip.replaceChildren(h("span", {class: "metric-label"}, null, headlineLabels[i]), value);
+    value.id = {0:"metric-trades",7:"metric-win",8:"metric-net"}[i];
+  });
+  var real = DATA.trades.map(function (t) { return t.net_real_inr; }).filter(function (x) { return Number.isFinite(x); }).sort(function(a,b) { return a-b; });
+  if (real.length) {
+    var mid = Math.floor(real.length / 2), median = real.length % 2 ? real[mid] : (real[mid-1] + real[mid]) / 2;
+    var mean = real.reduce(function(a,b) { return a+b; },0) / real.length;
+    [["Mean / trade", mean], ["Median / trade", median]].forEach(function (v) {
+      var chip = h("span", { class: "chip " + cls(v[1]) }, statsHost);
+      h("span", {class: "metric-label"}, chip, v[0]); h("b", {id: v[0] === "Mean / trade" ? "metric-mean" : "metric-median"}, chip, inr(v[1]));
+    });
+  }
+  // One navigation surface above the charts, with optional controls disclosed on demand.
+  var chartPanel = side.children[0], filterPanel = side.children[1];
+  side.classList.add("explorer-controls");
+  side.replaceChildren(filterPanel, chartPanel);
+  filterPanel.querySelector("h3").textContent = "Explore trades";
+  var primaryFilters = filterPanel.querySelector(".filters");
+  var extra = h("details", {class: "extra-filters"}, null);
+  h("summary", {}, extra, "More filters");
+  var extraFields = h("div", {class: "filters"}, extra);
+  Array.from(primaryFilters.children).forEach(function(label) {
+    if (!label.querySelector("#f-sym")) extraFields.appendChild(label);
+  });
+  primaryFilters.appendChild(document.getElementById("f-grp").parentNode);
+  primaryFilters.appendChild(extra);
+  primaryFilters.appendChild(reset);
+  primaryFilters.appendChild(document.getElementById("grp-btns"));
+  var oldGroupBar = filterPanel.querySelector(".grp"); if (oldGroupBar) oldGroupBar.remove();
+  var tradeList = h("details", {class: "trade-index"}, filterPanel);
+  h("summary", {}, tradeList, "Find a trade by date or stock");
+  tradeList.appendChild(document.getElementById("det").parentNode);
+  var rowHint = Array.from(filterPanel.querySelectorAll("p.hint"))[0]; if (rowHint) tradeList.appendChild(rowHint);
+  chartPanel.classList.add("chart-settings-panel");
+  chartPanel.querySelector("h3").remove();
+  var settings = h("details", {class: "chart-settings"}, null);
+  h("summary", {}, settings, "Chart settings & legend");
+  Array.from(chartPanel.children).forEach(function(child) { settings.appendChild(child); });
+  chartPanel.appendChild(settings);
+  var exportButton = document.getElementById("export-pdf");
+  primaryFilters.appendChild(exportButton);
+  exportButton.title = "Export every trade matching the filters, including collapsed groups. Complete charts and separate price-level tables.";
+  var exportStatus = document.getElementById("export-msg"); exportStatus.setAttribute("role","status"); primaryFilters.appendChild(exportStatus);
+  document.getElementById("f-tf").options[0].textContent = "5-minute candles";
+  document.getElementById("f-tf").options[1].textContent = "1-minute candles";
+  document.getElementById("f-lv").options[0].textContent = "Key support & resistance";
+  document.getElementById("f-lv").options[1].textContent = "All price levels";
+  document.body.classList.add("trade-explorer");
+
 }
 
 function init() {
@@ -1061,6 +1280,10 @@ function init() {
       + "<option value='minor'>routine filings only</option><option value='any'>any filing</option><option value='none'>no filing</option><option value='unk'>not checked / failed</option></select>";
     document.getElementById("f-out").parentNode.after(lab);
   }
+  document.querySelectorAll(".filters label").forEach(function(label) {
+    var select = label.querySelector("select");
+    if (select) select.setAttribute("aria-label", label.firstChild.textContent.trim());
+  });
   ["f-sym", "f-exit", "f-out", "f-mon", "f-news"].forEach(function (id) {
     var el = document.getElementById(id);
     if (el) el.onchange = render;
@@ -1082,8 +1305,8 @@ function init() {
     var setAll = function (collapsed) {
       Array.prototype.forEach.call(document.querySelectorAll(".group"), function (g) {
         g.classList.toggle("collapsed", collapsed);
-        var nm = g.querySelector(".gname").textContent;
-        openGroups[groupKey + ":" + nm] = !collapsed;
+        g.querySelector(".group-head").setAttribute("aria-expanded", String(!collapsed));
+        openGroups[g.dataset.gid] = !collapsed;
       });
     };
     var gb = document.getElementById("grp-btns");
@@ -1094,13 +1317,17 @@ function init() {
   tfSel.value = tf;
   tfSel.onchange = function () { tf = this.value; render(); };
   document.querySelectorAll("#det th").forEach(function (th) {
+    th.setAttribute("aria-sort", th.dataset.k === sortKey ? "ascending" : "none");
     th.onclick = function () {
       var k = th.getAttribute("data-k");
       sortDir = k === sortKey ? -sortDir : 1;
       sortKey = k;
+      document.querySelectorAll("#det th").forEach(function(other) { other.setAttribute("aria-sort", other === th ? (sortDir === 1 ? "ascending" : "descending") : "none"); });
       render();
     };
+    keyboardAction(th, th.onclick, "Sort by " + th.textContent);
   });
+  improveReportUX();
   render();
 }
 document.addEventListener("DOMContentLoaded", init);

@@ -216,3 +216,95 @@ body.printing .card .chart { height: 400px !important; }
 @media(max-width:800px){.whatif{grid-template-columns:1fr}}
 .wi-line.wi-on>span{font-weight:600}
 .newsb.minor{border-style:dashed}
+
+/* Shared report accessibility and responsive navigation. */
+:root{--dim:#a8b8ce;--line:#3b4d65;color-scheme:dark}
+body{font-size:15px}.hint,header p,.filters label,.filters select,.legend,.meta,.toolbar,table,.group-head .gstat{font-size:13px}
+header h1{font-size:25px}.panel h3{font-size:16px}
+button,select,summary{min-height:44px;font:inherit}button{background:#0f1620;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:8px 12px;cursor:pointer}
+.filters label{flex-wrap:wrap}.filters select{max-width:100%;min-width:120px;padding:8px}.toolbar button,.grp button{min-height:44px;padding:8px 10px;font-size:13px;color:var(--ink)}
+:focus-visible{outline:3px solid #93c5fd;outline-offset:3px}
+.skip-link{position:absolute;top:-100px;left:16px;z-index:100;background:var(--panel);color:var(--ink);padding:12px}.skip-link:focus{top:8px}
+.wrap .main{order:1}.wrap .side{order:2}.side{width:360px;max-height:calc(100vh - 24px);overflow:auto}
+.run-notes summary,.chart-key summary{cursor:pointer;color:var(--ink);padding:10px 0}.run-notes{margin-top:8px}.chart-key{margin-top:12px}
+.stats .chip{font-size:13px;padding:10px 14px}.stats .chip b{font-size:17px}
+.scroll{max-width:100%;overflow:auto}th,td{padding:10px 8px}#det th{white-space:nowrap}
+.group-head{position:static}.group.collapsed .group-body{display:none}.group-head .gname{font-size:16px}
+.reset-filters{margin-top:10px}.fcount{font-size:14px}.card-head{flex-wrap:wrap}.kpi{white-space:normal;text-align:left}
+.whatif input,.whatif select{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px;min-height:36px}.wi-line{padding:8px 0}
+@media(max-width:1100px){.wrap{flex-direction:column;padding:12px 16px}.wrap .side{order:0;width:100%;position:static;max-height:none;overflow:visible;display:grid;grid-template-columns:1fr 1fr;gap:12px}.wrap .main{width:100%}.side .panel{min-width:0;margin:0}.stats{padding:16px}header{padding:20px 16px}.scroll{max-height:300px}}
+@media(max-width:650px){.wrap .side{grid-template-columns:minmax(0,1fr)}.card-head{display:block}.card-head .kpi{margin-top:8px}.filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.filters label{display:flex;flex-direction:column;align-items:flex-start}.filters select{width:100%;min-width:0}.filters.grp{display:flex}.card{padding:12px 8px}.chart-legend{max-width:calc(100% - 75px);font-size:11px}.stats{gap:8px}.stats .chip{border-radius:8px;flex:1 1 140px}.toolbar .btns{gap:6px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+@media print{.skip-link,.run-notes,.reset-filters{display:none}.wrap .main{order:initial}.group.collapsed .group-body{display:block}}
+.cost-details{margin:0 26px 16px;color:var(--dim)}.cost-details summary{cursor:pointer}.cost-details .stats{padding:8px 0}
+@media(max-width:1100px){.cost-details{margin:0 16px 12px}}
+
+/* Trade explorer: a single control area and concise group summaries. */
+.trade-explorer header,.trade-explorer>.stats,.trade-explorer>.cost-details,.trade-explorer .wrap{max-width:1640px;margin-left:auto;margin-right:auto}
+.trade-explorer .wrap{display:block;padding-top:8px}
+.trade-explorer .wrap .side{width:100%;position:static;max-height:none;overflow:visible;display:block}
+.trade-explorer .side .panel{margin-bottom:12px}
+.trade-explorer .explorer-controls .filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}
+.trade-explorer .filters label{display:flex;flex-direction:column;align-items:flex-start;gap:5px;font-size:14px}
+.trade-explorer .filters select{font-size:14px;min-width:170px}
+.trade-explorer .extra-filters{position:relative}
+.trade-explorer .extra-filters>.filters{padding:14px 0;min-width:240px}
+.trade-explorer .extra-filters[open]{flex-basis:100%;order:10}
+.trade-explorer .reset-filters{margin:0}
+.trade-explorer #grp-btns{display:flex;flex-wrap:wrap;gap:8px;align-self:flex-end}
+.trade-explorer .trade-index{margin-top:10px}.trade-explorer .trade-index summary{color:var(--dim);cursor:pointer}
+.trade-explorer .chart-settings-panel{background:transparent;border:0;padding:0 4px}
+.trade-explorer .chart-settings>summary{color:var(--dim);cursor:pointer}
+.trade-explorer .chart-settings[open]{padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+.trade-explorer .run-name{font-size:16px;color:var(--ink)}
+.trade-explorer>.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.trade-explorer>.stats>.chip{display:flex;flex-direction:column;border-radius:10px;padding:16px;gap:5px}
+.trade-explorer>.stats .metric-label{font-size:13px;color:var(--dim)}
+.trade-explorer>.stats>.chip>b{font-size:25px;font-variant-numeric:tabular-nums}
+.trade-explorer .run-notes .stats{padding:10px 0}
+.trade-explorer .group-overview{margin-bottom:18px}.trade-explorer .group-overview>summary{cursor:pointer;color:var(--dim)}
+.trade-explorer .group-head{border-color:var(--line);display:grid;grid-template-columns:minmax(140px,1.2fr) repeat(4,minmax(100px,1fr)) auto;align-items:center;gap:12px;padding:18px}
+.trade-explorer .group-head:hover{border-color:var(--dim)}
+.trade-explorer .group-head .gstat{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.trade-explorer .group-head .gstat>b{font-size:16px}
+.trade-explorer .group-action::after{content:'Hide charts';color:var(--acc);font-size:13px}
+.trade-explorer .group.collapsed .group-action::after{content:'Open charts'}
+.trade-explorer .advanced-chart>summary{cursor:pointer;color:var(--dim)}
+.trade-explorer .advanced-chart[open]{flex-basis:100%;order:5}.trade-explorer .advanced-chart .btns{padding:8px 0}
+.trade-explorer .empty-state{padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+@media(max-width:900px){.trade-explorer>.stats{grid-template-columns:repeat(3,minmax(0,1fr))}.trade-explorer .group-head{grid-template-columns:repeat(4,minmax(0,1fr))}.trade-explorer .group-head .gname{grid-column:1/-1}.trade-explorer .group-action{grid-column:1/-1}}
+@media(max-width:600px){.trade-explorer>.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.trade-explorer>.stats>.chip{padding:12px}.trade-explorer>.stats>.chip>b{font-size:22px}.trade-explorer .group-head{grid-template-columns:repeat(2,minmax(0,1fr));padding:14px}.trade-explorer .filters label{width:100%}.trade-explorer .filters select{width:100%;min-width:0}.trade-explorer .extra-filters{width:100%}.trade-explorer .group-action{grid-column:1/-1}.trade-explorer .toolbar{align-items:flex-start}}
+@media print{.trade-explorer .explorer-controls,.trade-explorer .group-overview,.trade-explorer .advanced-chart{display:none!important}}
+.trade-explorer>.stats>.chip>b.pos{color:var(--up)}.trade-explorer>.stats>.chip>b.neg{color:var(--dn)}
+
+
+/* An isolated PDF document avoids live canvases and screen breakpoints at print time. */
+#pdf-report{display:none}
+.pdf-render-host{position:fixed;left:-20000px;top:0;width:1060px;height:440px;pointer-events:none}
+.pdf-print-frame{position:fixed;left:-20000px;top:0;width:1060px;height:740px;border:0}
+body.pdf-document{font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;background:#fff;color:#172033;color-scheme:light}
+html:has(body.pdf-document){background:#fff}
+.pdf-document #pdf-report{display:block;width:100%}
+.pdf-document .pdf-summary{display:flow-root}
+.pdf-document .pdf-summary h1{margin:0 0 14px}
+.pdf-document h1{font-size:21px}.pdf-document h2{font-size:17px;margin:0 0 5px}.pdf-document h3{font-size:14px}
+.pdf-document p{margin:5px 0 10px}.pdf-document .pdf-summary-metrics{font-size:16px;font-weight:600}
+.pdf-document .pdf-settings{font-size:11px;color:#394457}
+.pdf-document .pdf-chart-page,.pdf-document .pdf-level-page{break-before:page;page-break-before:always;padding:0;margin:0}
+.pdf-document .pdf-chart-page{break-inside:avoid;page-break-inside:avoid}
+.pdf-document .pdf-chart-image{display:block;width:100%;height:auto;max-height:150mm;object-fit:contain;break-inside:avoid;page-break-inside:avoid}
+.pdf-document .pdf-trade-meta{font-size:11px;margin:3px 0}
+.pdf-document .pdf-chart-legend,.pdf-document .pdf-chart-readout{font-size:10px;color:#172033;margin-top:6px}
+.pdf-document .pdf-chart-legend .l2,.pdf-document .pdf-chart-readout{display:flex;gap:4px 12px;flex-wrap:wrap}
+.pdf-document .pdf-chart-legend i,.pdf-document .pdf-chart-readout i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}
+.pdf-document details.levels{font-size:11px;color:#172033;margin:0}.pdf-document details.levels>summary{display:none}
+.pdf-document table{font-size:11px;color:#172033}.pdf-document th{position:static;background:#eef2f7;color:#172033}
+.pdf-document tr{break-inside:avoid;page-break-inside:avoid}.pdf-document th,.pdf-document td{padding:6px 8px;border-color:#cad2dd}
+.pdf-document thead{display:table-header-group}.pdf-document .pos{color:#087363}.pdf-document .neg{color:#bd2344}
+.pdf-document details.levels td.res{color:#a21c63}.pdf-document details.levels td.sup{color:#075e8d}
+@media print{
+  @page{size:A4 landscape;margin:10mm}
+  body.pdf-document{width:auto;background:#fff}
+  .pdf-document .pdf-summary{break-after:page;page-break-after:always}
+  .pdf-document .pdf-summary+.pdf-chart-page{break-before:auto;page-break-before:auto}
+}

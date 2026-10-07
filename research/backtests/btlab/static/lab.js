@@ -85,7 +85,7 @@ function restore() {
 }
 function paintGlyph() {
   document.querySelectorAll(".g").forEach((e) => { e.textContent = GLYPH; });
-  $("#mkt").innerHTML = S.meta.markets.map((m) => `<span class="chip ${m.id === S.market ? "on" : ""}" data-m="${m.id}" title="${esc(m.label)}">${esc(m.id)} <small>${esc(m.glyph)}</small></span>`).join("");
+  $("#mkt").innerHTML = S.meta.markets.map((m) => `<button type="button" aria-pressed="${m.id === S.market}" class="chip ${m.id === S.market ? "on" : ""}" data-m="${m.id}" title="${esc(m.label)}">${esc(m.id)} <small>${esc(m.glyph)}</small></button>`).join("");
   document.querySelectorAll("[data-preset]").forEach((b) => {
     const p = presets()[b.dataset.preset];
     b.textContent = `${b.dataset.preset === "strict" ? "Strict" : "Wider"} ${p.day_chg_min}–${p.day_chg_max}% · RVOL ${p.rvol_min}`;
@@ -115,9 +115,9 @@ async function switchMarket(m) {
 function renderYears() {
   const el = $("#years");
   el.innerHTML = S.meta.years.map((y) =>
-    `<span class="chip ${S.years.has(y.year) ? "on" : ""}" data-y="${y.year}" title="${y.built ? `${y.n_candidates} base candidates` : "needs a one-time build (~20 s)"}">` +
-    `<span class="dot ${y.built ? "ready" : ""}"></span>${y.year}</span>`).join("") +
-    `<span class="chip" data-all="1">all</span>`;
+    `<button type="button" aria-pressed="${S.years.has(y.year)}" aria-label="${y.year}, ${y.built ? "base data ready" : "base data needs building"}" class="chip ${S.years.has(y.year) ? "on" : ""}" data-y="${y.year}" title="${y.built ? `${y.n_candidates} base candidates` : "needs a one-time build (~20 s)"}">` +
+    `<span class="dot ${y.built ? "ready" : ""}"></span>${y.year}</button>`).join("") +
+    `<button type="button" class="chip" data-all="1">${S.years.size === S.meta.years.length ? "Clear years" : "Select all years"}</button>`;
   const need = S.meta.years.filter((y) => S.years.has(y.year) && !y.built).map((y) => y.year);
   $("#years-hint").textContent = need.length
     ? `${need.join(", ")} still need a one-time build of the base data (≈20 s each) — it runs automatically when you press Apply.`
@@ -164,9 +164,10 @@ function pluginRow(p) {
     return `<label>${esc(q.label)}${input}</label>`;
   }).join("");
   return `<div class="plug ${on ? "on" : ""}" data-id="${p.id}">
-    <label class="head"><input type="checkbox" data-id="${p.id}" ${on ? "checked" : ""}>
-      <span><span class="nm">${esc(p.name)}</span><br><span class="ds">${esc(p.desc)}</span>
-      ${p.history ? `<br><span class="hist">ⓘ ${esc(p.history)}</span>` : ""}</span></label>
+    <label class="head"><input type="checkbox" aria-label="${esc(p.name)}" aria-describedby="desc-${p.id}" data-id="${p.id}" ${on ? "checked" : ""}>
+      <span><span class="nm">${esc(p.name)}</span><br><span class="ds" id="desc-${p.id}">${esc(p.desc)}</span>
+      </span></label>
+    ${p.history ? `<details class="research-note"><summary>Previous research</summary><p class="hist">${esc(p.history)}</p></details>` : ""}
     ${p.params.length ? `<div class="params">${params}</div>` : ""}${diagram}</div>`;
 }
 
@@ -175,6 +176,30 @@ function renderPlugins() {
     $(`#${g}-list`).innerHTML = S.plugins.filter((p) => p.group === g).map(pluginRow).join("");
   }
   renderSel();
+  filterPlugins();
+}
+
+const expandedPlugins = { entry: false, exit: false };
+const commonPlugins = new Set(["time_window", "above_vwap", "ema9_over_ema20", "macd5_positive", "min_reward_risk", "support_rule", "resistance_rule", "target_fixed_rr", "ema9_exit", "ema20_exit", "vwap_exit", "breakeven"]);
+function filterPlugins() {
+  for (const g of ["entry", "exit"]) {
+    const q = $(`#${g}-search`).value.trim().toLowerCase();
+    const list = S.plugins.filter(p => p.group === g);
+    const common = list.filter(p => commonPlugins.has(p.id));
+    const short = new Set((common.length >= 4 ? common : list.slice(0, 5)).map(p => p.id));
+    let shown = 0;
+    for (const p of list) {
+      const match = (p.name + " " + p.desc).toLowerCase().includes(q);
+      const visible = p.id in S.sel || (match && (q || expandedPlugins[g] || short.has(p.id)));
+      $(`#${g}-list [data-id="${p.id}"]`).hidden = !visible;
+      if (visible) shown++;
+    }
+    $(`#${g}-count`).textContent = shown ? `${shown} of ${list.length} indicators · selected indicators stay visible` : "No matching indicators. Try another search.";
+    const more = $(`#${g}-more`);
+    more.hidden = !!q;
+    more.textContent = expandedPlugins[g] ? "Show fewer indicators" : `Show all ${list.length} ${g} indicators`;
+    more.setAttribute("aria-expanded", String(expandedPlugins[g]));
+  }
 }
 
 function renderSel() {
@@ -183,7 +208,8 @@ function renderSel() {
   const ext = ids.length - ent;
   $("#selsum").innerHTML = ids.length
     ? `<b>${ids.length}</b> selected — <span style="color:var(--entry)">${ent} entry</span> · <span style="color:var(--exit)">${ext} exit</span>`
-    : "Nothing selected — Apply runs the plain base trade.";
+    : "No indicators selected. Run the base trade to start.";
+  $("#selsum").title = ids.map(id => S.plugins.find(p => p.id === id)?.name || id).join(", ");
   for (const g of ["entry", "exit"]) {
     const n = ids.filter((i) => S.plugins.find((p) => p.id === i)?.group === g).length;
     const h = $(`#sec-${g} h2`);
@@ -194,7 +220,7 @@ function renderSel() {
 }
 
 function renderPatterns() {
-  $("#patterns").innerHTML = S.meta.patterns.map((p) => `<span class="chip ${S.patterns.has(p) ? "on" : ""}" data-pat="${p}">${p.replace(/_/g, " ")}</span>`).join("");
+  $("#patterns").innerHTML = S.meta.patterns.map((p) => `<button type="button" aria-pressed="${S.patterns.has(p)}" class="chip ${S.patterns.has(p) ? "on" : ""}" data-pat="${p}">${p.replace(/_/g, " ")}</button>`).join("");
 }
 
 /* Saved base setups: several named bases per market, one of them the default the lab opens with. */
@@ -257,16 +283,21 @@ function wireBases() {
 
 function renderBase() {
   renderSaved();
+  renderBaseOverview();
   $("#base-text").innerHTML = S.meta.base_rule_text.map((t) => `<li>${esc(t)}</li>`).join("");
   $("#b-chg-min").value = S.base.day_chg_min; $("#b-chg-max").value = S.base.day_chg_max; $("#b-rvol").value = S.base.rvol_min;
   $("#b-maxtr").value = S.maxTrades; $("#b-risk").value = S.risk; $("#b-notional").value = S.notional;
+}
+
+function renderBaseOverview() {
+  $("#base-overview").textContent = `Day change ${S.base.day_chg_min}–${S.base.day_chg_max}% · RVOL ≥ ${S.base.rvol_min} · risk ${inr(S.risk)} / trade`;
 }
 
 function readBase() {
   const pz = presets().strict;
   S.base = { day_chg_min: +$("#b-chg-min").value || pz.day_chg_min, day_chg_max: +$("#b-chg-max").value || pz.day_chg_max, rvol_min: +$("#b-rvol").value || 0 };
   S.maxTrades = Math.max(0, +$("#b-maxtr").value || 0); S.risk = +$("#b-risk").value || MARKET_DEFAULTS[S.market].risk; S.notional = +$("#b-notional").value || MARKET_DEFAULTS[S.market].notional;
-  save();
+  renderBaseOverview(); save();
 }
 
 let metaTimer = null;
@@ -283,13 +314,14 @@ function wireLeft() {
     const c = e.target.closest(".chip"); if (!c) return;
     if (c.dataset.all) { const all = S.years.size === S.meta.years.length; S.years = new Set(all ? [] : S.meta.years.map((y) => y.year)); }
     else { const y = +c.dataset.y; S.years.has(y) ? S.years.delete(y) : S.years.add(y); }
-    renderYears(); save();
+    const focusKey = c.dataset.all ? "[data-all]" : `[data-y="${c.dataset.y}"]`;
+    renderYears(); save(); $("#years " + focusKey)?.focus();
   });
   $("#patterns").addEventListener("click", (e) => {
     const c = e.target.closest(".chip"); if (!c) return;
     const p = c.dataset.pat; S.patterns.has(p) ? S.patterns.delete(p) : S.patterns.add(p);
     if (!S.patterns.size) S.patterns.add(p);
-    renderPatterns(); save();
+    renderPatterns(); save(); $(`#patterns [data-pat="${p}"]`)?.focus();
   });
   $("#base-settings").addEventListener("input", () => { readBase(); metaSoon(); });
   $("#base-settings").addEventListener("click", (e) => {
@@ -298,6 +330,8 @@ function wireLeft() {
   });
   $("#mkt").addEventListener("click", (e) => { const c = e.target.closest("[data-m]"); if (c) switchMarket(c.dataset.m); });
   for (const g of ["entry", "exit"]) {
+    $(`#${g}-search`).addEventListener("input", filterPlugins);
+    $(`#${g}-more`).addEventListener("click", () => { expandedPlugins[g] = !expandedPlugins[g]; filterPlugins(); });
     const root = $(`#${g}-list`);
     root.addEventListener("change", (e) => {
       const t = e.target;
@@ -308,6 +342,7 @@ function wireLeft() {
           S.sel[id] = Object.fromEntries(p.params.map((q) => [q.key, q.default]));
         } else delete S.sel[id];
         renderPlugins();
+        $(`#${g}-list input[data-id="${id}"]`).focus();
       } else if (t.dataset.p) {
         const q = S.plugins.find((x) => x.id === t.dataset.p).params.find((x) => x.key === t.dataset.k);
         (S.sel[t.dataset.p] ||= {})[t.dataset.k] = q.kind === "select" || q.kind === "time" ? t.value : +t.value;
@@ -388,14 +423,15 @@ async function runOne(plugins) {
 async function applyNow() {
   if (S.busy) return;
   if (!S.years.size) { banner("Pick at least one year in step 1.", "err"); return; }
-  S.busy = true; $("#btn-apply").disabled = true; $("#btn-apply").textContent = "Running…";
+  S.busy = true; $("#btn-scan").disabled = true; $("#btn-apply").disabled = true; $("#btn-apply").textContent = "Running…";
   try {
     if (!(await ensureBuilt())) return;
     banner("Running…", "", null);
     const rec = await runOne();
-    banner("");
+    if (rec) banner("");
     if (rec) { S.current = rec; renderResult(rec); resumeNews(rec); await loadRuns(); $("#result-card").scrollIntoView({ behavior: "smooth", block: "start" }); }
-  } finally { S.busy = false; $("#btn-apply").disabled = false; $("#btn-apply").textContent = "Apply ▶"; }
+  } catch (error) { banner("The experiment could not finish. Check the server connection and try again.", "err");
+  } finally { S.busy = false; $("#btn-scan").disabled = false; $("#btn-apply").disabled = false; $("#btn-apply").textContent = "Run experiment"; }
 }
 
 /* ---------------------------------------------------------------- result card */
@@ -510,14 +546,15 @@ function tagsFor(rec) {
 
 function renderResult(rec) {
   const m = rec.metrics, b = rec.base?.metrics || null, v = verdict(rec);
-  const card = $("#result-card"); card.className = "card";
+  const card = $("#result-card"); card.className = "card"; card.tabIndex = -1;
   let col = false; try { col = localStorage.getItem("lab.resCollapsed") === "1"; } catch (e) {}
   card.innerHTML = `
     <h2 style="display:flex;align-items:center;gap:8px">Result <small>${esc(rec.name)}${rec.cached ? " · already run, loaded from the saved result" : " · saved"}</small>
-      <button class="mini" type="button" data-act="rescollapse" style="margin-left:auto" title="Show or hide the result details">${col ? "▸ Expand" : "▾ Collapse"}</button></h2>
+      <button class="mini" type="button" aria-expanded="${!col}" aria-controls="result-body" data-act="rescollapse" style="margin-left:auto" title="Show or hide the result details">${col ? "▸ Expand" : "▾ Collapse"}</button></h2>
     <div class="tags">${tagsFor(rec)}</div>
+    ${m.n ? `<div class="kpis">${[["Net at real costs", m.net_real_inr, 0], ["Mean / trade", m.mean_inr, 1], ["Median / trade", m.median_inr, 1]].map(([l, x, d]) => `<div class="kpi"><div class="l">${l}</div><div class="v ${tone(x)}">${inr(x, d)}</div></div>`).join("")}<div class="kpi"><div class="l">Trades · win rate</div><div class="v">${m.n} · ${m.win_pct}%</div></div></div>` : ""}
     <div id="result-body" ${col ? "hidden" : ""}>
-    <p class="hint">${esc(rec.describe)}</p>
+    <details><summary>Exact saved settings</summary><p class="hint">${esc(rec.describe)}</p></details>
     <div class="verdict ${v.w ? "warn" : ""}">${v.t}</div>
     ${m.n ? `<div class="two">
       <div><table><thead><tr><th>Metric</th><th class="num">This run</th>${b ? `<th class="num">Base</th><th class="num">Change</th>` : ""}</tr></thead><tbody>${kpiRows(m, b)}</tbody></table></div>
@@ -528,7 +565,7 @@ function renderResult(rec) {
         ${m.by_year.map((y) => `<tr><td>${y.year}</td><td class="num">${y.n}</td><td class="num">${y.win_pct}%</td><td class="num ${tone(y.mean_inr)}">${inr(y.mean_inr, 1)}</td><td class="num ${tone(y.net_real_inr)}">${inr(y.net_real_inr)}</td></tr>`).join("")}
         </tbody></table></div></div>` : ""}
     <div class="btns" style="justify-content:flex-start;margin-top:12px">
-      ${m.n ? `<a href="/lab/run/${rec.id}" target="_blank"><button class="primary" type="button">Open every trade on a candle chart ↗</button></a>` : ""}
+      ${m.n ? `<a class="primary" href="/lab/run/${rec.id}">Explore trade charts</a>` : ""}
       <button class="ghost" type="button" data-act="load" data-id="${rec.id}">Load these settings</button>
       <button class="ghost" type="button" data-act="note" data-id="${rec.id}">✎ Name / note</button>
       ${m.n && S.market === "NSE" ? newsBtn(rec, "ghost") : ""}
@@ -663,6 +700,8 @@ function renderBaseFilter() {
 }
 
 function renderHistory() {
+  const active = document.activeElement;
+  const focusCmp = active?.dataset.cmp, focusStar = active?.dataset.act === "star" ? active.dataset.id : null;
   renderBaseFilter();
   const q = $("#h-q").value.trim().toLowerCase(), starOnly = $("#h-star").checked, kind = $("#h-kind").value, baseSel = $("#h-base").value;
   let rows = S.runs.filter((r) => {
@@ -684,12 +723,12 @@ function renderHistory() {
     allBox.checked = S.shown.length > 0 && S.shown.every((id) => S.compare.has(id));
     allBox.indeterminate = !allBox.checked && S.shown.some((id) => S.compare.has(id));
   }
-  $("#hist-count").textContent = `${S.runs.length} saved`;
+  $("#hist-count").textContent = `${rows.length} shown · ${S.runs.length} saved`;
   $("#history tbody").innerHTML = rows.map((r) => {
     const m = r.metrics, d = rowDelta(r), yrs = r.config.years;
     return `<tr data-id="${r.id}" class="${S.current?.id === r.id ? "shown" : ""}">
-      <td><input type="checkbox" data-cmp="${r.id}" ${S.compare.has(r.id) ? "checked" : ""} title="select to compare"></td>
-      <td><span class="star ${r.starred ? "on" : ""}" data-act="star" data-id="${r.id}" title="star">${r.starred ? "★" : "☆"}</span></td>
+      <td><input type="checkbox" data-cmp="${r.id}" ${S.compare.has(r.id) ? "checked" : ""} aria-label="Select ${esc(r.name)} saved ${esc(r.created_at)} to compare"></td>
+      <td><button type="button" aria-label="Favourite ${esc(r.name)}" aria-pressed="${!!r.starred}" class="star ${r.starred ? "on" : ""}" data-act="star" data-id="${r.id}" title="star">${r.starred ? "★" : "☆"}</button></td>
       <td class="dim">${esc(r.created_at.replace("T", " ").slice(5, 16))}</td>
       <td><div class="tags">${tagsFor(r)}</div>${r.notes ? `<div class="hint">${esc(r.notes)}</div>` : ""}</td>
       <td>${yrs.length > 2 ? yrs[0] + "–" + yrs[yrs.length - 1] : yrs.join(", ")}</td>
@@ -698,11 +737,19 @@ function renderHistory() {
       <td class="num ${tone(m.median_inr)}">${m.n ? inr(m.median_inr, 1) : "–"}</td>
       <td class="num ${tone(m.net_real_inr)}">${m.n ? inr(m.net_real_inr) : "–"}</td>
       <td class="num ${d == null ? "dim" : tone(d)}">${d == null ? (r.config.plugins.length ? "–" : "base") : sgn(d, (x) => inr(x, 1))}</td>
-      <td class="acts"><button class="mini" data-act="show" data-id="${r.id}">View</button>
-        <button class="mini" data-act="load" data-id="${r.id}" title="load these settings into the form">Load</button>
+      <td class="acts"><button class="mini" data-act="show" data-id="${r.id}">Summary</button>
+        <button class="mini" data-act="load" data-id="${r.id}" title="load these settings into the form">Reuse settings</button>
         ${S.market === "NSE" && r.metrics.n ? newsBtn(r, "mini") : ""}
-        <button class="mini" data-act="del" data-id="${r.id}" title="delete this run">✕</button></td></tr>`;
+        ${m.n ? `<a class="mini" href="/lab/run/${r.id}">Trade charts</a>` : ""}
+        <button class="mini" data-act="del" data-id="${r.id}" aria-label="Delete ${esc(r.name)}">Delete</button></td></tr>`;
   }).join("") || `<tr><td colspan="12" class="dim">No saved runs match.</td></tr>`;
+  document.querySelectorAll("#history th[data-k]").forEach(th => {
+    const active = th.dataset.k === S.sort.k;
+    th.setAttribute("aria-sort", active ? (S.sort.dir === 1 ? "ascending" : "descending") : "none");
+  });
+  if (focusCmp) $(`#history [data-cmp="${focusCmp}"]`)?.focus({ preventScroll: true });
+  if (focusStar) $(`#history [data-act="star"][data-id="${focusStar}"]`)?.focus({ preventScroll: true });
+  $("#btn-compare").textContent = `Compare selected (${S.compare.size})`;
   $("#btn-compare").disabled = S.compare.size < 2;
   const delBtn = $("#btn-del-sel");
   if (delBtn) { delBtn.disabled = S.compare.size < 1; delBtn.textContent = `Delete selected${S.compare.size ? ` (${S.compare.size})` : ""}`; }
@@ -722,11 +769,15 @@ async function showRun(id, scroll = true) {
   const rec = r.data; rec.base = rec.base_id ? (await api(`/api/lab/run/${rec.base_id}`)).data : null;
   S.current = rec; renderResult(rec); renderHistory();
   await resumeNews(rec);
-  if (scroll) $("#result-card").scrollIntoView({ behavior: "smooth", block: "start" });
+  if (scroll) { $("#result-card").focus({ preventScroll: true }); $("#result-card").scrollIntoView({ behavior: "smooth", block: "start" }); }
 }
 
 function wireRight() {
   $("#h-q").addEventListener("input", renderHistory); $("#h-star").addEventListener("change", renderHistory); $("#h-kind").addEventListener("change", renderHistory); $("#h-base").addEventListener("change", renderHistory);
+  document.querySelectorAll("#history th[data-k]").forEach(th => {
+    const button = document.createElement("button"); button.type = "button"; button.className = "sort-button";
+    button.innerHTML = th.innerHTML; th.replaceChildren(button);
+  });
   $("#history thead").addEventListener("click", (e) => {
     const k = e.target.closest("th")?.dataset.k; if (!k) return;
     S.sort = { k, dir: S.sort.k === k ? -S.sort.dir : -1 }; renderHistory();
@@ -765,6 +816,7 @@ function wireRight() {
     const b = e.target.closest("[data-act]"); if (!b) return;
     if (b.dataset.act === "rescollapse") {
       const body = $("#result-body"); body.hidden = !body.hidden;
+      b.setAttribute("aria-expanded", String(!body.hidden));
       b.textContent = body.hidden ? "▸ Expand" : "▾ Collapse";
       try { localStorage.setItem("lab.resCollapsed", body.hidden ? "1" : "0"); } catch (x) {}
       return;
@@ -840,10 +892,10 @@ function renderScan(base, out, running) {
   const bm = base.metrics;
   const sorted = [...out].sort((a, b) => (b.d ?? -1e9) - (a.d ?? -1e9));
   const card = $("#scan-card");
-  card.innerHTML = `<h2 style="cursor:pointer" id="scan-head">${S.scanOpen ? "▾" : "▸"} Each indicator alone vs the base trade <small>${running ? "running…" : "done"} · base: ${bm.n} trades, ${inr(bm.mean_inr, 1)} per trade · click to ${S.scanOpen ? "collapse" : "expand"}</small></h2>
+  card.innerHTML = `<h2><button type="button" class="ghost" id="scan-head" aria-expanded="${S.scanOpen}">${S.scanOpen ? "▾" : "▸"} Each indicator alone vs the base trade <small>${running ? "running…" : "done"} · base: ${bm.n} trades, ${inr(bm.mean_inr, 1)} per trade · ${S.scanOpen ? "collapse" : "expand"}</small></button></h2>
     ${S.scanOpen ? `<p class="hint">Sorted by the change in return per rupee deployed (default settings of each indicator). Click a row to see the full result. With this many tests, expect a few to look good by chance — check the sample size and the median before believing one.</p>
     <div class="scroll"><table><thead><tr><th>Indicator</th><th>type</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">${G()}/trade</th><th class="num">Median</th><th class="num">Return/deployed</th><th class="num">Δ pp</th></tr></thead><tbody>
-    ${sorted.map(({ p, rec, d }) => `<tr data-act="show" data-id="${rec.id}" style="cursor:pointer"><td>${esc(p.name)}</td><td class="${p.group === "entry" ? "" : ""}"><span class="tag ${p.group}">${p.group}</span></td>
+    ${sorted.map(({ p, rec, d }) => `<tr data-act="show" data-id="${rec.id}" style="cursor:pointer"><td><button type="button" class="mini" data-act="show" data-id="${rec.id}">${esc(p.name)}</button></td><td class="${p.group === "entry" ? "" : ""}"><span class="tag ${p.group}">${p.group}</span></td>
       <td class="num">${rec.metrics.n}</td><td class="num">${rec.metrics.n ? rec.metrics.win_pct + "%" : "–"}</td>
       <td class="num ${tone(rec.metrics.mean_inr)}">${rec.metrics.n ? inr(rec.metrics.mean_inr, 1) : "–"}</td>
       <td class="num ${tone(rec.metrics.median_inr)}">${rec.metrics.n ? inr(rec.metrics.median_inr, 1) : "–"}</td>

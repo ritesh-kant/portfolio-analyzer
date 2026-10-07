@@ -4,20 +4,21 @@
 <title>Backtest lab</title>
 <link rel="stylesheet" href="/lab/static/lab.css">
 </head><body>
+<a class="skip-link" href="#results">Skip to results and saved runs</a>
 <header>
   <div class="hrow">
     <div>
       <h1>Backtest lab</h1>
-      <p>One fixed <b>base trade</b> (a candlestick pattern, bounded by support and resistance, on momentum
-      stocks). Tick indicators, press <b>Apply</b>, and see what each one did to profit and loss.
-      Every result is saved with exactly what was applied.</p>
+      <p>Choose your data, add optional indicators, and compare the result with the base trade.
+      Every run and its exact settings are saved.</p>
+      <p class="hint">Exploratory results · repeated trials on the same data are not independent evidence.</p>
     </div>
-    <nav><a href="/">← All backtests</a><a href="/api/lab/runs.csv">⬇ Export all runs (CSV)</a></nav>
+    <nav aria-label="Lab navigation"><a href="#setup">Set up experiment</a><a href="#results">Results</a><a href="#history-card">Saved runs</a><a href="/">← All backtests</a><a href="/api/lab/runs.csv">⬇ Export all runs (CSV)</a></nav>
   </div>
 </header>
-<div id="banner" hidden></div>
+<div id="banner" role="status" aria-live="polite" hidden></div>
 <div class="layout">
-  <aside id="setup">
+  <section id="setup" aria-label="Set up experiment">
     <section class="card" id="sec-window">
       <h2><span class="n">1</span> Data window</h2>
       <div class="sub" style="margin:0 0 6px">Market</div>
@@ -27,10 +28,12 @@
       <p class="hint" id="years-hint"></p>
     </section>
     <section class="card" id="sec-base">
-      <h2><span class="n">2</span> Base trade <small>fixed — every result is compared with it</small></h2>
-      <ul id="base-text" class="rule"></ul>
+      <h2><span class="n">2</span> Base trade <small>baseline for comparison</small></h2>
+      <p id="base-overview" class="base-overview"></p>
+      <p class="hint">A bullish pattern triggers an entry; structural support sets the stop and resistance sets the target.</p>
+      <details><summary>How the base trade works</summary><ul id="base-text" class="rule"></ul></details>
       <details id="base-settings">
-        <summary>Base settings</summary>
+        <summary>Adjust base settings</summary>
         <div class="grid2">
           <label>Day change ≥ % <input type="number" id="b-chg-min" step="0.5" min="0.5"></label>
           <label>Day change ≤ % <input type="number" id="b-chg-max" step="0.5" min="1"></label>
@@ -40,7 +43,7 @@
           <label>Max position <span class="g">₹</span> <input type="number" id="b-notional" step="5000" min="5000"></label>
         </div>
         <div class="presets" id="saved-bases">Saved bases:
-          <select id="b-saved"></select>
+          <select id="b-saved" aria-label="Saved base settings"></select>
           <button type="button" id="b-save" title="Save the settings above (band, RVOL, sizing, entry cap, patterns) under a name">Save as…</button>
           <button type="button" id="b-default" title="Start the lab with this base">★ Make default</button>
           <button type="button" id="b-delete" title="Delete this saved base">Delete</button>
@@ -56,46 +59,54 @@
     </section>
     <section class="card group-entry" id="sec-entry">
       <h2><span class="n">3</span> Entry indicators <small>decide <b>which</b> base trades are taken</small></h2>
+      <label class="search-label" for="entry-search">Find an entry indicator</label>
+      <input type="search" id="entry-search" placeholder="Search by name or description…" aria-controls="entry-list">
+      <p class="hint" id="entry-count" role="status"></p>
       <div id="entry-list"></div>
+      <button type="button" class="ghost" id="entry-more" aria-expanded="false" aria-controls="entry-list">Show all entry indicators</button>
     </section>
     <section class="card group-exit" id="sec-exit">
       <h2><span class="n">4</span> Exit indicators <small>decide <b>how</b> a taken trade is closed</small></h2>
+      <label class="search-label" for="exit-search">Find an exit indicator</label>
+      <input type="search" id="exit-search" placeholder="Search by name or description…" aria-controls="exit-list">
+      <p class="hint" id="exit-count" role="status"></p>
       <div id="exit-list"></div>
+      <button type="button" class="ghost" id="exit-more" aria-expanded="false" aria-controls="exit-list">Show all exit indicators</button>
     </section>
     <div class="actionbar" id="actionbar">
-      <div id="selsum">Nothing selected — Apply runs the plain base trade.</div>
+      <div id="selsum">No indicators selected. Run the base trade to start.</div>
       <div class="btns">
-        <button type="button" id="btn-clear" class="ghost">Clear</button>
-        <button type="button" id="btn-scan" class="ghost" title="Runs every indicator on its own against the base">⚡ Test each alone</button>
-        <button type="button" id="btn-apply" class="primary">Apply ▶</button>
+        <button type="button" id="btn-clear" class="ghost">Clear indicators</button>
+        <button type="button" id="btn-scan" class="ghost" title="Runs every indicator on its own against the base">Test each indicator separately</button>
+        <button type="button" id="btn-apply" class="primary">Run experiment</button>
       </div>
     </div>
-  </aside>
-  <main id="results">
-    <section id="result-card" class="card empty">
+
+  </section>
+  <main id="results" tabindex="-1">
+    <section id="result-card" class="card empty" tabindex="-1">
       <h2>Result</h2>
-      <p class="hint">Press <b>Apply ▶</b> to run the base trade on its own, or tick some indicators first. A past run's
-      result opens here when you press <b>View</b> on it in the list below; <b>Compare selected</b> opens a side-by-side. Past runs are never lost.</p>
+      <p class="hint">Run the base trade first, or select indicators to test a change. You can also open a saved summary or its trade charts below.</p>
     </section>
     <section id="scan-card" class="card" hidden></section>
     <section id="compare-card" class="card" hidden></section>
     <section class="card" id="history-card">
-      <h2>Saved runs <small id="hist-count"></small></h2>
+      <h2>Saved runs <small id="hist-count" role="status"></small></h2><p class="hint">Open a summary, inspect trade charts, or reuse settings. Select two or more runs to compare. All figures below include real costs.</p>
       <div class="bar">
-        <input id="h-q" type="search" placeholder="Filter — indicator, year, note…">
-        <label><input type="checkbox" id="h-star"> ★ only</label>
+        <label class="search-label" for="h-q">Search saved runs</label><input id="h-q" type="search" placeholder="Filter — indicator, year, note…">
+        <label><input type="checkbox" id="h-star"> Favourites only</label>
         <label>Show <select id="h-kind"><option value="">all runs</option><option value="base">base only</option>
           <option value="entry">with entry indicators</option><option value="exit">with exit indicators</option></select></label>
         <label>Base <select id="h-base" title="Show only the runs made on one base setting"></select></label>
         <button type="button" id="btn-compare" class="ghost" disabled>Compare selected</button>
         <button type="button" id="btn-del-sel" class="ghost" disabled>Delete selected</button>
       </div>
-      <div class="scroll"><table id="history"><thead><tr>
-        <th><input type="checkbox" id="h-all" title="select all shown"></th><th></th><th data-k="created_at">when</th><th data-k="name">applied</th>
+      <div class="scroll" tabindex="0" role="region" aria-label="Saved runs table"><table id="history"><caption class="sr-only">Saved experiments, with net results at real costs</caption><thead><tr>
+        <th><input type="checkbox" id="h-all" aria-label="Select all shown runs"></th><th><span class="sr-only">Favourite</span></th><th data-k="created_at">Saved</th><th data-k="name">Settings</th>
         <th data-k="years">years</th><th data-k="n" class="num">trades</th>
         <th data-k="win" class="num">win %</th><th data-k="mean" class="num"><span class="g">₹</span>/trade</th>
-        <th data-k="median" class="num">median</th><th data-k="net" class="num">net <span class="g">₹</span></th>
-        <th data-k="delta" class="num">Δ <span class="g">₹</span>/trade vs base</th><th></th></tr></thead><tbody></tbody></table></div>
+        <th data-k="median" class="num">Median / trade</th><th data-k="net" class="num">net <span class="g">₹</span></th>
+        <th data-k="delta" class="num">Δ <span class="g">₹</span>/trade vs base</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
     </section>
   </main>
 </div>

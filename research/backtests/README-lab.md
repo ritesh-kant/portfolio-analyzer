@@ -78,8 +78,9 @@ Command line (same store): `pnpm bt:lab build --years 2024,2025`, `pnpm bt:lab a
 Takes a trade only if the stock had a **material NSE filing** (results, orders, deals, rating, dividend,
 fund-raising, litigation… — `news.tier`) in the look-back window (default 24 h, max 72 h) **and** the price has
 since risen by at least *min move %* (default 2) with RVOL ≥ *min* (default 3). Everything is as of the decision
-bar: the reference price is the first 1-minute open at or after an in-session filing, else the previous close
-(overnight/pre-open news). A filing with no post-publication minute before the decision is ignored. The reaction
+bar: the reference price is the first 1-minute open at or after an in-session filing, including one on a prior
+trading day. Off-session filings use the last observed close before publication. An in-session filing with no
+observable post-publication minute on its day before the decision is ignored. The reaction
 price is the decision bar's close. Exchange queries ("spurt in volume")
 never count (the move caused them). Several filings → the largest move counts.
 Filings come from the `.cache_nse_news/` cache shared with *Check news*; the first Apply that needs symbols

@@ -37,6 +37,9 @@ _lock = threading.RLock()
 def canonical_config(cfg: dict) -> dict:
     """The part of a request that determines the trades, in a stable shape."""
     base = {k: v for k, v in cfg["base"].items() if not (k == "market" and v == "NSE")}   # NSE keys predate markets
+    revised = {x["id"]: 2 for x in cfg["plugins"]
+               if x["id"] == "news_reaction" or
+               (x["id"] in ("support_rule", "resistance_rule") and x["params"].get("kind") == "swing")}
     return {
         "years": sorted(int(y) for y in cfg["years"]),
         "base": dict(sorted(base.items())),
@@ -45,6 +48,7 @@ def canonical_config(cfg: dict) -> dict:
         "max_trades": int(cfg["max_trades"]),
         "plugins": [{"id": x["id"], "params": dict(sorted(x["params"].items()))}
                     for x in sorted(cfg["plugins"], key=lambda x: x["id"])],
+        **({"indicator_revisions": revised} if revised else {}),
         "lab_version": LAB_VERSION,
     }
 
