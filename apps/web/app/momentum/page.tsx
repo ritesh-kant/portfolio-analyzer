@@ -1,15 +1,13 @@
 'use client';
 
 import Link from 'next/link';
+import { ReviewFilters } from '../../components/momentum-review-controls';
+import { ReviewExport } from '../../components/momentum-review-export';
 import { useEffect, useMemo, useState } from 'react';
 
 import { MomentumTradeChart } from '../../components/momentum-trade-chart';
 import { ConfidenceMeter } from '../../components/signals/ConfidenceMeter';
-import {
-  calculateTradeConfidence,
-  type ConfidenceBand,
-  type TradeConfidence,
-} from '../../lib/momentum-confidence';
+import { calculateTradeConfidence, type ConfidenceBand } from '../../lib/momentum-confidence';
 import { fetchMomentumTrades, type MomentumTrade } from '../../lib/momentum-api';
 import { SideBadge } from '../../components/momentum-side-badge';
 import { orderVerbs, sideOf } from '../../lib/momentum-side';
@@ -46,7 +44,6 @@ const strategyLabel = (value: string | undefined) =>
     warrior_strict_short: 'Warrior strict · short',
   })[value ?? ''] ?? 'Earlier paper run';
 
-
 function pnlClass(value: number | null | undefined) {
   return value == null ? 'text-ink/55' : value >= 0 ? 'text-emerald-700' : 'text-rose-600';
 }
@@ -60,21 +57,6 @@ function confidenceClass(band: ConfidenceBand) {
   }[band];
 }
 
-function ConfidenceBadge({ confidence }: { confidence: TradeConfidence }) {
-  const label =
-    confidence.score === null ? 'Confidence unavailable' : `Confidence ${confidence.score}`;
-  const coverage = `${confidence.evidenceCoverage}% evidence`;
-  return (
-    <span
-      title={`${label}; ${coverage}`}
-      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${confidenceClass(confidence.band)}`}
-    >
-      {confidence.score === null ? 'Confidence —' : `Confidence ${confidence.score}`}
-      {confidence.evidenceCoverage < 100 ? ` · ${confidence.evidenceCoverage}%` : ''}
-    </span>
-  );
-}
-
 function TradeRow({
   trade,
   active,
@@ -85,10 +67,10 @@ function TradeRow({
   onClick: () => void;
 }) {
   const net = trade.net_inr;
-  const confidence = calculateTradeConfidence(trade);
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
       className={`w-full border-b border-black/5 px-3 py-3 text-left transition last:border-0 hover:bg-accent/5 ${active ? 'bg-accent/10' : ''}`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -99,7 +81,6 @@ function TradeRow({
             <span className="rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink/60">
               {trade.setup.replaceAll('_', ' ')}
             </span>
-            <ConfidenceBadge confidence={confidence} />
             {trade.news_context && trade.news_context.length > 0 && (
               <span
                 title={`${trade.news_context.length} news item(s) near entry`}
@@ -433,7 +414,13 @@ function NewsContext({ trade }: { trade: MomentumTrade }) {
 
 function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => void }) {
   return (
-    <section className="space-y-4">
+    <section
+      className="space-y-4 review-detail"
+      id="momentum-detail"
+      tabIndex={-1}
+      aria-label={`${trade.symbol} trade review`}
+    >
+      <ReviewExport />
       {/* Back button — only visible on mobile (hidden on lg where the list is always shown) */}
       <button
         type="button"
@@ -512,10 +499,6 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
         </div>
       </div>
 
-      <TradeConfidenceCard trade={trade} />
-      <EntryReason trade={trade} />
-      <NewsContext trade={trade} />
-
       {/* Charts */}
       <div className="space-y-3">
         <div>
@@ -534,10 +517,22 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
         <MomentumTradeChart trade={trade} interval="5m" />
       </div>
 
+      <details className="review-disclosure">
+        <summary>Entry evidence and confidence</summary>
+        <TradeConfidenceCard trade={trade} />
+        <EntryReason trade={trade} />
+      </details>
+      <details className="review-disclosure">
+        <summary>Company news near entry</summary>
+        <NewsContext trade={trade} />
+      </details>
+
       {/* Metrics row */}
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="metric-chip">
-          <p className="text-xs text-ink/55">{sideOf(trade) === 'short' ? 'Cover (buy back)' : 'Exit'}</p>
+          <p className="text-xs text-ink/55">
+            {sideOf(trade) === 'short' ? 'Cover (buy back)' : 'Exit'}
+          </p>
           <p className="mt-1 font-semibold">
             {trade.exit_price == null
               ? 'Still open'
@@ -547,7 +542,8 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
         <div className="metric-chip">
           <p className="text-xs text-ink/55">Position</p>
           <p className="mt-1 font-semibold">
-            {trade.qty} shares{sideOf(trade) === 'short' ? ' short' : ''} · {money(trade.notional_inr)}
+            {trade.qty} shares{sideOf(trade) === 'short' ? ' short' : ''} ·{' '}
+            {money(trade.notional_inr)}
           </p>
         </div>
         <div className="metric-chip">
@@ -556,7 +552,7 @@ function TradeDetail({ trade, onBack }: { trade: MomentumTrade; onBack: () => vo
         </div>
       </div>
 
-      <p className="text-xs leading-relaxed text-ink/55">
+      <p className="review-keyboard-help text-xs leading-relaxed text-ink/55">
         Focus either chart, then use <kbd className="rounded bg-black/5 px-1">+</kbd> /{' '}
         <kbd className="rounded bg-black/5 px-1">−</kbd> to zoom,{' '}
         <kbd className="rounded bg-black/5 px-1">0</kbd> to reset, and{' '}
@@ -575,6 +571,8 @@ export default function MomentumPage() {
   const [error, setError] = useState<string | null>(null);
   // On mobile, track whether the user is viewing the list or the detail panel
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
+  const [query, setQuery] = useState('');
+  const [sessionDate, setSessionDate] = useState('');
 
   useEffect(() => {
     fetchMomentumTrades()
@@ -598,6 +596,15 @@ export default function MomentumPage() {
     return [...next.entries()].sort(([a], [b]) => b.localeCompare(a));
   }, [trades]);
 
+  const filteredGroups = groups
+    .map(
+      ([date, items]) =>
+        [
+          date,
+          items.filter((t) => t.symbol.toLowerCase().includes(query.trim().toLowerCase())),
+        ] as const,
+    )
+    .filter(([date, items]) => items.length && (!sessionDate || sessionDate === date));
   const trade = trades.find((item) => item._id === selected) ?? null;
 
   const totalGross = trades.reduce((sum, item) => sum + (item.gross_inr ?? 0), 0);
@@ -617,10 +624,11 @@ export default function MomentumPage() {
   function handleSelectTrade(id: string) {
     setSelected(id);
     setMobileView('detail');
+    requestAnimationFrame(() => document.getElementById('momentum-detail')?.focus());
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 momentum-review">
       {/* Page header */}
       <section className="flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -654,14 +662,14 @@ export default function MomentumPage() {
         </div>
         <div className="flex gap-3">
           <div className="metric-chip text-right">
-            <p className="text-xs text-ink/55">Gross P&amp;L</p>
+            <p className="text-xs text-ink/55">All trades · Gross P&amp;L</p>
             <p className={`font-display text-xl ${pnlClass(totalGross)}`}>
               {totalGross >= 0 ? '+' : ''}
               {money(totalGross)}
             </p>
           </div>
           <div className="metric-chip text-right">
-            <p className="text-xs text-ink/55">Net P&amp;L</p>
+            <p className="text-xs text-ink/55">All trades · Net P&amp;L</p>
             <p className={`font-display text-xl ${pnlClass(totalNet)}`}>
               {totalNet >= 0 ? '+' : ''}
               {money(totalNet)}
@@ -672,7 +680,8 @@ export default function MomentumPage() {
 
       {/* Day-wise P&L, all arms combined */}
       {!loading && !error && dayTotals.length > 0 && (
-        <section className="overflow-hidden rounded-xl border border-black/10 bg-panel shadow-card">
+        <details className="review-history overflow-hidden rounded-xl border border-black/10 bg-panel shadow-card">
+          <summary>Daily P&amp;L breakdown · {dayTotals.length} sessions</summary>
           <div className="border-b border-black/10 px-4 py-3">
             <h2 className="font-display text-lg">Day-wise P&amp;L</h2>
             <p className="text-xs text-ink/55">
@@ -707,8 +716,22 @@ export default function MomentumPage() {
               </tbody>
             </table>
           </div>
-        </section>
+        </details>
       )}
+      <ReviewFilters
+        query={query}
+        onQuery={setQuery}
+        date={sessionDate}
+        dates={groups.map(([date]) => ({ value: date, label: dateLabel(date) }))}
+        onDate={(value) => {
+          setSessionDate(value);
+          if (value) setOpenDates((current) => new Set([...current, value]));
+        }}
+      />
+      <p role="status" className="text-sm text-ink/70">
+        {filteredGroups.reduce((sum, [, items]) => sum + items.length, 0)} matching trades · choose
+        a trade to review its charts.
+      </p>
 
       {/* States */}
       {loading && (
@@ -725,15 +748,16 @@ export default function MomentumPage() {
 
       {/* Main content: list + detail */}
       {!loading && !error && trades.length > 0 && (
-        <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
           {/* Trade list sidebar
               - Mobile: full width, hidden when a trade is selected (mobileView === 'detail')
               - lg+: always visible as a fixed-width sidebar */}
           <aside
-            className={`overflow-hidden rounded-xl border border-black/10 bg-panel shadow-card ${mobileView === 'detail' ? 'hidden lg:block' : 'block'}`}
+            aria-label="Trade list"
+            className={`review-list overflow-hidden rounded-xl border border-black/10 bg-panel shadow-card ${mobileView === 'detail' ? 'hidden lg:block' : 'block'}`}
           >
-            {groups.map(([date, items]) => {
-              const isOpen = openDates.has(date);
+            {filteredGroups.map(([date, items]) => {
+              const isOpen = !!query || !!sessionDate || openDates.has(date);
               return (
                 <section key={date} className="border-b border-black/5 last:border-0">
                   <button

@@ -55,7 +55,8 @@ function cls(x) { return x > 0 ? "pos" : x < 0 ? "neg" : ""; }
 /* "Check news" result (lab runs only): was there an NSE filing in the 24h before entry? */
 function newsBadge(tr) {
   if (!tr.news) return null;
-  var map = { news: ["\u{1F4F0} news", "material NSE filing in the 24h before entry"], minor: ["routine", "only routine / unclear NSE filings in the 24h before entry"],
+  var map = { news: ["\u26A1 news", "material filing in the 24h before entry"],
+              offering: ["\u26A1 offering", "only share-offering filings in the 24h before entry (dilution: not a catalyst)"], minor: ["routine", "only routine / unclear NSE filings in the 24h before entry"],
               none: ["no filing", "no NSE filing in the 24h before entry"],
               error: ["news ?", "could not be checked"], skipped: ["news ?", "not checked"] };
   var m = map[tr.news] || map.skipped, el = document.createElement("span");
@@ -439,15 +440,32 @@ function setSeries(c) {
   });
   Object.keys(nb).forEach(function (i) {
     var g = nb[i], mat = g.some(function (n) { return n.k === "material"; }), n0 = g[0];
+    var dil = !mat && g.some(function (n) { return n.k === "offering"; });    // share offering (US): news, but the wrong sign for a long
     var head = (n0.pre ? n0.when + " · " : "") + n0.h;
-    mk.push({ time: T[+i], position: "aboveBar", shape: "square", size: 1, color: mat ? "#f59e0b" : alpha("#f59e0b", 0.45),
-              text: "⚡ " + (head.length > 42 ? head.slice(0, 41) + "…" : head) + (g.length > 1 ? " +" + (g.length - 1) : "") });
+    mk.push({ time: T[+i], position: "aboveBar", shape: "square", size: 1, color: dil ? COL.dn : mat ? "#f59e0b" : alpha("#f59e0b", 0.45),
+              text: "⚡ " + (n0.pre ? "pre-open" : head.length > 42 ? head.slice(0, 41) + "…" : head) + (g.length > 1 ? " +" + (g.length - 1) : "") });
   });
   mk.sort(function (a, b) { return a.time - b.time; });
   c.markers.setMarkers(mk);
+  showNewsLine(c);
 
   resetView(c);
   showLegend(c, null);
+}
+
+/* every filing drawn on the chart, listed under the title (the chart pins before-the-open ones to its first candle, where a label would be clipped) */
+function showNewsLine(c) {
+  var f = c.tr.filings || [];
+  if (!c.newsLine) {
+    c.newsLine = document.createElement("div");
+    c.newsLine.className = "newsline";
+    c.sec.querySelector(".card-head > div").appendChild(c.newsLine);
+  }
+  c.newsLine.textContent = "";
+  f.forEach(function (n) {
+    var li = h("span", { class: "nl " + n.k, title: n.k }, c.newsLine);
+    li.textContent = "\u26A1 " + (n.pre ? n.when : n.t) + " \u00B7 " + n.h;
+  });
 }
 
 /* ---------- view control ---------- */

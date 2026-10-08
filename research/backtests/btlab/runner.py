@@ -92,14 +92,13 @@ def run(cfg: RunConfig, cands: pd.DataFrame, days: dict) -> pd.DataFrame:
     mk = cfg.rule.mk
     ecfg = replace(P.exit_cfg(selected), market=mk.id)
     df = cands[cands["pattern"].isin(cfg.patterns)]
+    nr = next((x for x in selected if x["id"] == "news_reaction"), None)
     if any(x["id"] == "vwap_cross" for x in selected):
         df = df.assign(vwap_cross_bars=stamp_vwap_cross(df, days))
-    nr = next((x for x in selected if x["id"] == "news_reaction"), None)
     if nr is not None:
-        if mk.id != "NSE":
-            raise P.PluginError("News + market reaction needs NSE filings; it is not available for US runs")
         from . import news
-        df = df.assign(news_move_pct=news.stamp_reaction(df, days, nr["params"]["lookback_h"], nr["params"]["scope"]))
+        df = df.assign(news_move_pct=news.stamp_reaction(df, days, nr["params"]["lookback_h"],
+                                                         nr["params"]["scope"], mk.id))
     df = df[P.entry_mask(df, selected)]
     rows: list[dict] = []
     for _, grp in df.sort_values(["date", "symbol", "fill_min", "decision_min"]).groupby(

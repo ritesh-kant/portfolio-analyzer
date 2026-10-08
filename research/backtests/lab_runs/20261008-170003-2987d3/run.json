@@ -1,0 +1,141 @@
+{
+ "id": "20261008-170003-2987d3",
+ "key": "2987d3cf967b",
+ "window": "84bbcbf16467",
+ "created_at": "2026-10-08T17:00:03",
+ "name": "US \u00b7 Entry: News + market reaction",
+ "notes": "",
+ "starred": false,
+ "is_base": false,
+ "base_id": "20261008-165404-b78f43",
+ "config": {
+  "years": [
+   2025,
+   2026
+  ],
+  "base": {
+   "day_chg_max": 700.0,
+   "day_chg_min": 1.0,
+   "entry_cutoff_min": 900,
+   "entry_slip_pct": 0.03,
+   "fill_valid_minutes": 15,
+   "market": "US",
+   "pattern_tf": "5m",
+   "rvol_min": 1.5,
+   "session_level_sessions": 10,
+   "stop_buffer_pct": 0.1,
+   "target_buffer_pct": 0.15
+  },
+  "patterns": [
+   "bullish_engulfing",
+   "dragonfly_doji",
+   "hammer",
+   "inverted_hammer",
+   "morning_doji_star",
+   "morning_star",
+   "rising_three",
+   "three_white_soldiers",
+   "tweezer_bottom"
+  ],
+  "risk_inr": 50.0,
+  "max_notional_inr": 100000.0,
+  "max_trades": 0,
+  "plugins": [
+   {
+    "id": "news_reaction",
+    "params": {
+     "lookback_h": 24.0,
+     "min_move_pct": 2.0,
+     "min_rvol": 3.0,
+     "scope": "material"
+    }
+   }
+  ],
+  "indicator_revisions": {
+   "news_reaction": 2
+  },
+  "lab_version": "lab-1"
+ },
+ "git": {
+  "sha": "65b987b",
+  "dirty": true
+ },
+ "metrics": {
+  "n": 6,
+  "symbols": 4,
+  "days": 5,
+  "win_pct": 50.0,
+  "gross_pct_mean": 0.2889,
+  "net_real_pct_mean": 0.0125,
+  "net_stress_pct_mean": -0.7887,
+  "net_real_inr": -137.0,
+  "net_stress_inr": -462.0,
+  "gross_inr": -24.0,
+  "costs_inr": 113.0,
+  "mean_inr": -22.81,
+  "median_inr": 1.27,
+  "mean_ex_top5_inr": -89.7,
+  "top5_share_pct": null,
+  "profit_factor": 0.25,
+  "avg_win_inr": 15.5,
+  "avg_loss_inr": -61.1,
+  "max_drawdown_inr": -179.0,
+  "deployed_inr": 40596.0,
+  "return_on_deployed_pct": -0.337,
+  "mean_r": -0.456,
+  "target_hit_pct": 66.7,
+  "stop_pct": 33.3,
+  "exit_mix": {
+   "target": 4,
+   "stop": 2
+  },
+  "stop_source_mix": {
+   "support": 6
+  },
+  "by_year": [
+   {
+    "year": 2025,
+    "n": 2,
+    "net_real_inr": -179.0,
+    "mean_inr": -89.6,
+    "win_pct": 0.0
+   },
+   {
+    "year": 2026,
+    "n": 4,
+    "net_real_inr": 42.0,
+    "mean_inr": 10.6,
+    "win_pct": 75.0
+   }
+  ],
+  "curve": [
+   -89.7,
+   -179.2,
+   -164.2,
+   -168.3,
+   -143.6,
+   -136.9
+  ]
+ },
+ "vs_base": {
+  "base_id": "20261008-165404-b78f43",
+  "overlap": {
+   "base_n": 61,
+   "run_n": 6,
+   "same": 6,
+   "dropped": 55,
+   "new": 0
+  },
+  "removed": {
+   "n": 55,
+   "mean_inr": -24.36,
+   "median_inr": -53.68,
+   "net_real_inr": -1340.0
+  },
+  "kept_vs_removed": {
+   "z": 0.07,
+   "p": 0.948
+  }
+ },
+ "trial_n": 2
+}

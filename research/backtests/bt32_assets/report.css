@@ -308,3 +308,9 @@ html:has(body.pdf-document){background:#fff}
   .pdf-document .pdf-summary{break-after:page;page-break-after:always}
   .pdf-document .pdf-summary+.pdf-chart-page{break-before:auto;page-break-before:auto}
 }
+
+.newsb.offering{background:#7f1d1d;border-color:#fb7185;color:#fecdd3}
+.newsline{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.newsline .nl{font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid #f59e0b;color:#fcd34d;background:rgba(245,158,11,.08)}
+.newsline .nl.unclear,.newsline .nl.query{border-style:dashed;opacity:.7}
+.newsline .nl.offering{border-color:#fb7185;color:#fda4af;background:rgba(251,113,133,.08)}

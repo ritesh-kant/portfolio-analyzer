@@ -170,3 +170,16 @@
 {"id": "20261007-202129-378449", "key": "378449e50910", "window": "af6d3c7c2d30", "at": "2026-10-07T20:21:29", "plugins": ["ema20_exit", "news_reaction"]}
 {"id": "20261007-202136-640d72", "key": "640d720b63a3", "window": "af6d3c7c2d30", "at": "2026-10-07T20:21:36", "plugins": ["macd_fade_exit", "news_reaction"]}
 {"id": "20261007-205425-8d8247", "key": "8d8247633be8", "window": "af6d3c7c2d30", "at": "2026-10-07T20:54:25", "plugins": ["news_reaction", "resistance_rule", "target_fixed_rr"]}
+{"id": "20261008-165219-c9cee5", "key": "c9cee5d2812f", "window": "db411aaa58ed", "at": "2026-10-08T16:52:19", "plugins": ["news_reaction"]}
+{"id": "20261008-165404-b78f43", "key": "b78f43f768df", "window": "84bbcbf16467", "at": "2026-10-08T16:54:04", "plugins": []}
+{"id": "20261008-165404-45fda1", "key": "45fda13d2410", "window": "84bbcbf16467", "at": "2026-10-08T16:54:04", "plugins": ["news_reaction"]}
+{"id": "20261008-170003-2987d3", "key": "2987d3cf967b", "window": "84bbcbf16467", "at": "2026-10-08T17:00:03", "plugins": ["news_reaction"]}
+{"id": "20261008-174328-e133cc", "key": "e133cca8a4f7", "window": "84bbcbf16467", "at": "2026-10-08T17:43:28", "plugins": ["news_reaction"]}
+{"id": "20261008-174855-cd1666", "key": "cd16661538a3", "window": "84bbcbf16467", "at": "2026-10-08T17:48:55", "plugins": ["news_reaction"]}
+{"id": "20261008-175058-940942", "key": "940942a89f3c", "window": "84bbcbf16467", "at": "2026-10-08T17:50:58", "plugins": ["news_reaction"]}
+{"id": "20261008-184237-fb6b84", "key": "fb6b84483ba0", "window": "af6d3c7c2d30", "at": "2026-10-08T18:42:37", "plugins": ["news_reaction", "resistance_rule", "target_fixed_rr"]}
+{"id": "20261008-202904-bd908b", "key": "bd908bc1de01", "window": "af6d3c7c2d30", "at": "2026-10-08T20:29:04", "plugins": ["news_reaction", "resistance_rule", "target_fixed_rr"]}
+{"id": "20261008-203006-c29964", "key": "c29964a53667", "window": "af6d3c7c2d30", "at": "2026-10-08T20:30:06", "plugins": ["news_reaction", "resistance_rule", "target_fixed_rr"]}
+{"id": "20261008-203546-c05675", "key": "c05675421d99", "window": "e1626e54c02c", "at": "2026-10-08T20:35:46", "plugins": []}
+{"id": "20261008-203548-c0e6f2", "key": "c0e6f27e003c", "window": "e1626e54c02c", "at": "2026-10-08T20:35:48", "plugins": ["news_reaction", "target_fixed_rr"]}
+{"id": "20261008-203550-712b01", "key": "712b01bde6c7", "window": "e1626e54c02c", "at": "2026-10-08T20:35:50", "plugins": ["news_reaction", "target_fixed_rr"]}

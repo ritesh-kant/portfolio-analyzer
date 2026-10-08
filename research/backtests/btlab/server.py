@@ -82,6 +82,12 @@ def report_page(run_id: str) -> str | None:
             if t:
                 row["news"] = t["status"]
                 row["news_items"] = [f'[{x["k"]}] {x["h"]}' for x in t["items"][:4]]
+    market = rec["config"]["base"].get("market") or "NSE"
+    for (_, trow), row in zip(tr.iterrows(), rows):  # no 'Check news' result for this trade: badge it from the filings cache (never fetches)
+        if "news" not in row:
+            st = news.entry_status(str(trow["symbol"]), str(trow["date"]), str(trow["entry_time"]), market)
+            if st:
+                row["news"], row["news_items"] = st["status"], st["items"]
     data = {"trades": rows, "summary": bt32.summarise(rows),
             "weak_strength": bt32.STRENGTH_WEAK_BELOW, "rules_version": bt32.PATTERN_RULES_VERSION,
             "lazy": True, "whatif": {"url": f"/api/lab/run/{run_id}/trade/", "plugins": P.catalog(),
@@ -226,7 +232,9 @@ def handle(h, method: str, path: str, query: str) -> bool:
                 return h.json(400 if r.get("error") else 200, r) or True
             if path == "/api/lab/news/prefetch":          # fetch the filings an Apply with 'News + market reaction' needs
                 cfg = service.parse_request(b)
-                return h.json(200, news.prefetch_start(service.news_spans(cfg))) or True
+                mid = cfg["base"].get("market", "NSE")
+                r = news.prefetch_start(service.news_spans(cfg), mid)
+                return h.json(400 if r.get("error") else 200, r) or True
             if path == "/api/lab/news/prefetch/cancel":
                 return h.json(200, {"cancelled": news.prefetch_cancel(str(b.get("key", "")))}) or True
             if path == "/api/lab/build":
@@ -240,8 +248,9 @@ def handle(h, method: str, path: str, query: str) -> bool:
                 except service.NeedBuild as nb:
                     return h.json(409, {"need_build": nb.years}) or True
                 except service.NeedNews as nn:
-                    return h.json(409, {"need_news": {"symbols": nn.symbols, "total": nn.total,
-                                                      "est_s": int(nn.symbols * 2)}}) or True
+                    return h.json(409, {"need_news": {"symbols": nn.symbols, "total": nn.total, "market": nn.market,
+                                                      "source": "SEC EDGAR" if nn.market == "US" else "NSE",
+                                                      "est_s": int(nn.symbols * (0.5 if nn.market == "US" else 2))}}) or True
                 for r in (rec, rec.get("base")):     # re-use news already fetched for the same stocks (no NSE call)
                     if r:
                         news.attach_from_cache(r["id"])

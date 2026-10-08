@@ -31,3 +31,113 @@ body {
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
+
+/* Momentum review: keep selection and charts ahead of detailed evidence. */
+.momentum-review :is(button, a, input, select, summary):focus-visible {
+  outline: 3px solid #0f766e;
+  outline-offset: 3px;
+}
+.momentum-review :is(button, a, summary) {
+  touch-action: manipulation;
+}
+.momentum-review [class*='text-ink/'] {
+  color: #52606b;
+}
+.review-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid #c5ccc9;
+  border-radius: 12px;
+  background: #fffaf2;
+}
+.review-filters label {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 180px;
+}
+.review-filters :is(input, select) {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #89978f;
+  border-radius: 8px;
+  background: #fff;
+  color: #17212a;
+  font-weight: 400;
+}
+.review-filters button,
+.review-export button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid #89978f;
+  border-radius: 8px;
+  background: #fffaf2;
+  font-weight: 600;
+}
+.review-export {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 13px;
+}
+.review-export button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.review-history > summary,
+.review-disclosure > summary {
+  padding: 14px 16px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  min-height: 48px;
+}
+.review-disclosure {
+  border: 1px solid #c5ccc9;
+  border-radius: 12px;
+  background: #fffaf2;
+}
+.review-disclosure[open] {
+  padding-bottom: 16px;
+}
+.review-disclosure[open] > :not(summary) {
+  margin: 12px 16px;
+}
+.review-list button {
+  min-height: 44px;
+}
+.review-list button[aria-pressed='true'] {
+  box-shadow: inset 4px 0 #0f766e;
+  background: #e1eeea;
+}
+.review-detail {
+  min-width: 0;
+}
+.review-detail table {
+  min-width: 460px;
+}
+.review-detail div:has(> table) {
+  overflow-x: auto;
+}
+@media (min-width: 1024px) {
+  .review-list {
+    align-self: start;
+    position: sticky;
+    top: 90px;
+    max-height: 75vh;
+    overflow-y: auto !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .momentum-review * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}

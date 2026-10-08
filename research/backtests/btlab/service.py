@@ -73,9 +73,9 @@ def missing_years(cfg: dict) -> list[int]:
 class NeedNews(Exception):
     """A selected indicator reads NSE filings that were never fetched for some of the symbols."""
 
-    def __init__(self, symbols: int, total: int):
+    def __init__(self, symbols: int, total: int, market: str = "NSE"):
         super().__init__(f"filings not fetched for {symbols} of {total} symbols")
-        self.symbols, self.total = symbols, total
+        self.symbols, self.total, self.market = symbols, total, market
 
 
 def _uses_news(cfg: dict) -> bool:
@@ -85,7 +85,6 @@ def _uses_news(cfg: dict) -> bool:
 def news_spans(cfg: dict) -> dict:
     from . import news
     rc = _run_cfg(cfg)
-    cands, _ = runner.load_candidates(rc.years, rc.rule)
     return news.candidate_spans(cands[cands["pattern"].isin(rc.patterns)]) if not cands.empty else {}
 
 
@@ -108,13 +107,12 @@ def apply(body: dict, name: str = "", notes: str = "") -> dict:
         raise NeedBuild(need)
     base_cfg = {**cfg, "plugins": []}
     if _uses_news(cfg):
-        if cfg["base"].get("market", "NSE") != "NSE":
-            raise P.PluginError("News + market reaction needs NSE filings; it is not available for US runs")
         from . import news
+        mid = cfg["base"].get("market", "NSE")
         spans = news_spans(cfg)
-        todo = news.missing_symbols(spans)
+        todo = news.missing_symbols(spans, mid)
         if todo:
-            raise NeedNews(len(todo), len(spans))
+            raise NeedNews(len(todo), len(spans), mid)
     if not cfg["plugins"]:
         tr = compute(base_cfg)
         return {**store.save_run(base_cfg, tr, metrics.summarize(tr), {}, None),

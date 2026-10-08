@@ -1,0 +1,195 @@
+{
+ "id": "20261008-203006-c29964",
+ "key": "c29964a53667",
+ "window": "af6d3c7c2d30",
+ "created_at": "2026-10-08T20:30:06",
+ "name": "Entry: News + market reaction + Resistance rule \u00b7 Exit: Fixed R target",
+ "notes": "",
+ "starred": false,
+ "is_base": false,
+ "base_id": "20261007-110236-95c453",
+ "config": {
+  "years": [
+   2022,
+   2023,
+   2024,
+   2025,
+   2026
+  ],
+  "base": {
+   "day_chg_max": 500.0,
+   "day_chg_min": 0.5,
+   "entry_cutoff_min": 870,
+   "entry_slip_pct": 0.03,
+   "fill_valid_minutes": 15,
+   "pattern_tf": "5m",
+   "rvol_min": 1.0,
+   "session_level_sessions": 10,
+   "stop_buffer_pct": 0.1,
+   "target_buffer_pct": 0.15
+  },
+  "patterns": [
+   "bullish_engulfing",
+   "dragonfly_doji",
+   "hammer",
+   "inverted_hammer",
+   "morning_doji_star",
+   "morning_star",
+   "rising_three",
+   "three_white_soldiers",
+   "tweezer_bottom"
+  ],
+  "risk_inr": 500.0,
+  "max_notional_inr": 100000.0,
+  "max_trades": 0,
+  "plugins": [
+   {
+    "id": "news_reaction",
+    "params": {
+     "lookback_h": 2.0,
+     "min_move_pct": 1.5,
+     "min_rvol": 1.5,
+     "scope": "material",
+     "trigger": "breakout"
+    }
+   },
+   {
+    "id": "resistance_rule",
+    "params": {
+     "kind": "any",
+     "max_pct": 50,
+     "min_pct": 1.0
+    }
+   },
+   {
+    "id": "target_fixed_rr",
+    "params": {
+     "rr": 2.0,
+     "stop_x": 1.0
+    }
+   }
+  ],
+  "indicator_revisions": {
+   "news_reaction": 2
+  },
+  "lab_version": "lab-1"
+ },
+ "git": {
+  "sha": "65b987b",
+  "dirty": true
+ },
+ "metrics": {
+  "n": 12,
+  "symbols": 11,
+  "days": 12,
+  "win_pct": 41.7,
+  "gross_pct_mean": 0.5943,
+  "net_real_pct_mean": 0.3957,
+  "net_stress_pct_mean": -0.4067,
+  "net_real_inr": 939.0,
+  "net_stress_inr": -4452.0,
+  "gross_inr": 2232.0,
+  "costs_inr": 1293.0,
+  "mean_inr": 78.25,
+  "median_inr": -136.52,
+  "mean_ex_top5_inr": -432.63,
+  "top5_share_pct": 423.0,
+  "profit_factor": 1.31,
+  "avg_win_inr": 793.5,
+  "avg_loss_inr": -432.6,
+  "max_drawdown_inr": -1494.0,
+  "deployed_inr": 672779.0,
+  "return_on_deployed_pct": 0.14,
+  "mean_r": 0.152,
+  "target_hit_pct": 33.3,
+  "stop_pct": 33.3,
+  "exit_mix": {
+   "target": 4,
+   "eod": 4,
+   "stop": 4
+  },
+  "stop_source_mix": {
+   "support": 12
+  },
+  "by_year": [
+   {
+    "year": 2022,
+    "n": 2,
+    "net_real_inr": 624.0,
+    "mean_inr": 312.2,
+    "win_pct": 50.0
+   },
+   {
+    "year": 2023,
+    "n": 2,
+    "net_real_inr": -751.0,
+    "mean_inr": -375.5,
+    "win_pct": 0.0
+   },
+   {
+    "year": 2024,
+    "n": 3,
+    "net_real_inr": -414.0,
+    "mean_inr": -137.9,
+    "win_pct": 33.3
+   },
+   {
+    "year": 2025,
+    "n": 4,
+    "net_real_inr": 1592.0,
+    "mean_inr": 398.1,
+    "win_pct": 75.0
+   },
+   {
+    "year": 2026,
+    "n": 1,
+    "net_real_inr": -113.0,
+    "mean_inr": -113.0,
+    "win_pct": 0.0
+   }
+  ],
+  "curve": [
+   953.5,
+   624.4,
+   33.4,
+   -126.6,
+   659.2,
+   21.8,
+   -540.4,
+   366.4,
+   1031.4,
+   1687.8,
+   1052.0,
+   939.0
+  ]
+ },
+ "vs_base": {
+  "base_id": "20261007-110236-95c453",
+  "overlap": {
+   "base_n": 9748,
+   "run_n": 12,
+   "same": 5,
+   "dropped": 9743,
+   "new": 7
+  },
+  "removed": {
+   "n": 9743,
+   "mean_inr": -171.78,
+   "median_inr": -92.05,
+   "net_real_inr": -1673697.0
+  },
+  "kept_vs_removed": {
+   "z": -0.83,
+   "p": 0.407
+  },
+  "paired": {
+   "n": 5,
+   "mean_change_inr": 652.31,
+   "median_change_inr": 551.5,
+   "changed": 3,
+   "z": 2.13,
+   "p": 0.033
+  }
+ },
+ "trial_n": 15
+}

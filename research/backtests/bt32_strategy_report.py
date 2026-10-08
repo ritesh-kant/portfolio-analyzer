@@ -219,33 +219,28 @@ def summary_fields(row: pd.Series) -> dict:
 
 
 def news_marks(symbol: str, day: pd.Timestamp, us: bool) -> list[dict]:
-    """NSE filings to draw on the chart: those published since the previous session's close, up to the session's end.
+    """Filings to draw on the chart: those published since the previous session's close, up to the session's end.
 
-    Read from the lab's per-symbol cache only (`.cache_nse_news/`, filled by 'Check news' or the news indicator);
-    never calls NSE, and an uncached symbol simply has no marks. Routine paperwork is left out. A filing before
-    the open (or last evening) is flagged `pre` and pinned to the first bar by the chart.
+    NSE announcements, or for US the company's SEC EDGAR filings; read from the lab's per-symbol caches only
+    (`.cache_nse_news/`, `.cache_sec_news/`), never fetched here: an uncached symbol simply has no marks.
+    Routine paperwork is left out. A filing before the open (or last evening) is flagged `pre` and pinned to the
+    first bar by the chart.
     """
-    if us:
-        return []
     try:
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
         from btlab import news as _n
-        f = _n._sym_file(symbol)
-        if not f.exists():
-            return []
-        ist = timezone(timedelta(hours=5, minutes=30))
-        d0 = datetime(day.year, day.month, day.day, tzinfo=ist)
-        lo, hi = d0 - timedelta(hours=8, minutes=30), d0 + timedelta(hours=15, minutes=30)
+        tz = _n.news_sec.NY if us else _n._IST
+        d0 = datetime(day.year, day.month, day.day, tzinfo=tz)
+        open_h, open_m = (9, 30) if us else (9, 15)
+        lo, hi = d0 - timedelta(hours=8, minutes=30 if not us else 0), d0 + timedelta(hours=16 if us else 15, minutes=0 if us else 30)
+        pre_end = d0 + timedelta(hours=open_h, minutes=open_m)
         out = []
-        for x in _n._load_sym(symbol)["rows"]:
-            if not x.get("t"):
-                continue
-            t = datetime.fromisoformat(x["t"]).astimezone(ist)
-            k = _n.tier(x["h"])
+        for t, h, k in _n.filings_of(symbol, "US" if us else "NSE"):
+            t = t.astimezone(tz)
             if not (lo <= t <= hi) or k == "routine":
                 continue
-            out.append({"t": t.strftime("%H:%M"), "when": t.strftime("%d %b %H:%M"), "pre": t < d0 + timedelta(hours=9, minutes=15),
-                        "h": x["h"].split(": ", 1)[-1], "k": k})
+            out.append({"t": t.strftime("%H:%M"), "when": t.strftime("%d %b %H:%M"), "pre": t < pre_end,
+                        "h": h, "k": k})
         return sorted(out, key=lambda z: (z["pre"] is False, z["when"] if z["pre"] else z["t"]))
     except Exception:  # noqa: BLE001 - news marks are decoration; never break a chart
         return []

@@ -31,6 +31,7 @@ import numpy as np  # noqa: F401
 import pandas as pd
 
 from . import service, store  # noqa: F401  (service imports the engine path shim)
+from . import news_sec
 from .paths import BACKTESTS, RUNS_DIR, bar_file
 
 from src.scrapers import nse  # noqa: E402  (signal-engine, on sys.path via btlab/__init__)
@@ -376,23 +377,31 @@ def candidate_spans(cands: pd.DataFrame) -> dict[str, tuple[date, date]]:
                      date.fromisoformat(str(r["max"])[:10])) for s, r in g.sort_index().iterrows()}
 
 
-def missing_symbols(spans: dict[str, tuple[date, date]]) -> list[str]:
+def missing_symbols(spans: dict[str, tuple[date, date]], market: str = "NSE") -> list[str]:
     out = []
     for s, (a, b) in spans.items():
+        if market == "US":
+            if not news_sec.sym_file(s).exists() or _gaps(news_sec.load_sym(s)["covered"], a, b):
+                out.append(s)
+            continue
         f = _sym_file(s)
         if not f.exists() or _gaps(_load_sym(s)["covered"], a, b):
             out.append(s)
     return out
 
 
-def prefetch_key(spans: dict) -> str:
-    return hashlib.sha1(json.dumps({k: [str(a), str(b)] for k, (a, b) in spans.items()}, sort_keys=True).encode()).hexdigest()[:12]
+def prefetch_key(spans: dict, market: str = "NSE") -> str:
+    return hashlib.sha1(json.dumps({"m": market, **{k: [str(a), str(b)] for k, (a, b) in spans.items()}},
+                                   sort_keys=True).encode()).hexdigest()[:12]
 
 
-def prefetch_start(spans: dict[str, tuple[date, date]]) -> dict:
+def prefetch_start(spans: dict[str, tuple[date, date]], market: str = "NSE") -> dict:
     """Fetch (in a background thread) every symbol of `spans` that the cache does not cover yet."""
-    key = prefetch_key(spans)
-    todo = {s: spans[s] for s in missing_symbols(spans)}
+    if market == "US" and not news_sec.user_agent():
+        return {"error": "SEC requires a contact in the User-Agent: set SEC_USER_AGENT (environment or the repo .env), "
+                         "e.g. SEC_USER_AGENT='Your Name you@example.com', then restart the dashboard."}
+    key = prefetch_key(spans, market)
+    todo = {s: spans[s] for s in missing_symbols(spans, market)}
     with _lock:
         cur = _pre_jobs.get(key)
         if cur and cur["state"] == "running":
@@ -402,13 +411,17 @@ def prefetch_start(spans: dict[str, tuple[date, date]]) -> dict:
 
     def work() -> None:
         try:
-            _data, failed = asyncio.run(_fetch(todo, job))
+            if market == "US":
+                failed, unmapped = news_sec.fetch_all(todo, job)
+                job["unmapped"] = sorted(unmapped)
+            else:
+                _data, failed = asyncio.run(_fetch(todo, job))
             job["failed"] = sorted(failed)
             job["state"] = "cancelled" if job.get("cancel") else "failed" if failed else "done"
             if failed:
                 job["error"] = f"{len(failed)} symbol(s) could not be fetched: {sorted(failed)[:5]}; try again (fetched ones are kept)"
         except Exception as e:  # noqa: BLE001
-            job["state"], job["error"] = "failed", repr(e)[:300]
+            job["state"], job["error"] = "failed", str(e)[:300] if market == "US" else repr(e)[:300]
 
     threading.Thread(target=work, daemon=True).start()
     return {"key": key, **{k: v for k, v in job.items() if k != "cancel"}}
@@ -427,19 +440,31 @@ def prefetch_cancel(key: str) -> bool:
     return False
 
 
-def _reaction_bars(symbol: str, year: int) -> pd.DataFrame | None:
+def filings_of(symbol: str, market: str = "NSE") -> list[tuple[datetime, str, str]]:
+    """(published at in the exchange's own clock, headline, tier) for a symbol's cached filings; routine ones left out of US."""
+    if market == "US":
+        return news_sec.rows_of(symbol)
+    f = _sym_file(symbol)
+    rows = _load_sym(symbol)["rows"] if f.exists() else []
+    return [(datetime.fromisoformat(x["t"]).astimezone(_IST), x["h"].split(": ", 1)[-1], tier(x["h"]))
+            for x in rows if x["t"]]
+
+
+def _reaction_bars(symbol: str, year: int, market: str = "NSE") -> pd.DataFrame | None:
     """Only the prices needed to place a prior-day filing on the historical tape."""
-    path = bar_file(symbol, year)
+    path = bar_file(symbol, year, market)
     return pd.read_parquet(path, columns=["open", "close"]).sort_index() if path is not None else None
 
 
-def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str) -> "np.ndarray":
-    """Per candidate: how far (%) the price has moved since a qualifying NSE filing, as of the decision bar. NaN = no such filing.
+def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str, market: str = "NSE") -> "np.ndarray":
+    """Per candidate: how far (%) the price has moved since a qualifying filing, as of the decision bar. NaN = no such filing.
+
+    NSE: corporate announcements. US: SEC EDGAR filings (8-K items, 6-K, 425; see news_sec), on the New York clock.
 
     A filing qualifies when it was published inside the `lookback_h` hours before the decision bar closed,
     and its subject is material (scope "material") or material/unclear (scope "material+unclear");
-    exchange queries about a price move that already happened ("spurt in volume") never count: that is
-    the move causing the filing, not the other way round.
+    exchange queries about a price move that already happened ("spurt in volume") and, for the US,
+    share offerings never count: the first is the move causing the filing, the second the wrong sign for a long.
 
     For an intraday filing, the reference is the first 1-minute open at or after publication,
     even when the filing was on an earlier trading day. A filing with no observable
@@ -450,26 +475,31 @@ def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str) 
     import numpy as np
     out = np.full(len(df), np.nan)
     ok_tier = {"material"} | ({"unclear"} if scope == "material+unclear" else set())
-    cache: dict[str, list[tuple[datetime, str]]] = {}
+    tz = news_sec.NY if market == "US" else _IST
+    open_min, close_min = (9 * 60 + 30, 16 * 60) if market == "US" else (9 * 60 + 15, 15 * 60 + 30)
+    bars_for = _reaction_bars if market == "NSE" else (lambda sym, year: _reaction_bars(sym, year, market))
+    cache: dict[str, list[tuple[datetime, str, str]]] = {}
     bar_cache: dict[tuple[str, int], pd.DataFrame | None] = {}
     window = timedelta(hours=lookback_h)
 
     def prior_reference(sym: str, t: datetime) -> float | None:
         key = (sym, t.year)
         if key not in bar_cache:
-            bar_cache[key] = _reaction_bars(*key)
+            bar_cache[key] = bars_for(*key)
         bars = bar_cache[key]
         if bars is None or bars.empty:
             return None
         ts = pd.Timestamp(t)
+        if bars.index.tz is not None:
+            ts = ts.tz_convert(bars.index.tz)
         minute = t.hour * 60 + t.minute
-        in_session = 9 * 60 + 15 <= minute < 15 * 60 + 30
+        in_session = open_min <= minute < close_min
         if in_session:
             if t.second or t.microsecond:
                 ts += pd.Timedelta(minutes=1)
                 ts = ts.replace(second=0, microsecond=0)
             j = int(bars.index.searchsorted(ts))
-            if j < len(bars) and bars.index[j].date() == t.date():
+            if j < len(bars) and bars.index[j].date() == ts.date():
                 return float(bars["open"].iloc[j])
             return None
         j = int(bars.index.searchsorted(ts)) - 1
@@ -477,22 +507,20 @@ def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str) 
             return float(bars["close"].iloc[j])
         previous = (sym, t.year - 1)
         if previous not in bar_cache:
-            bar_cache[previous] = _reaction_bars(*previous)
+            bar_cache[previous] = bars_for(*previous)
         old = bar_cache[previous]
         return float(old["close"].iloc[-1]) if old is not None and not old.empty else None
 
     for i, (sym, d, key, dec, prev, close5) in enumerate(zip(df["symbol"], df["date"], df["day_key"],
                                                               df["decision_min"], df["prev_close"], df["close5"])):
         if sym not in cache:
-            f = _sym_file(sym)
-            rows = _load_sym(sym)["rows"] if f.exists() else []
-            cache[sym] = [(datetime.fromisoformat(x["t"]).astimezone(_IST), x["h"]) for x in rows if x["t"]]
+            cache[sym] = filings_of(sym, market)
         day = datetime.fromisoformat(str(d)[:10])
-        t_dec = day.replace(hour=int(dec) // 60, minute=int(dec) % 60, tzinfo=_IST)
+        t_dec = day.replace(hour=int(dec) // 60, minute=int(dec) % 60, tzinfo=tz)
         arr = days[key]
         best = np.nan
-        for t, h in cache[sym]:
-            if not (t_dec - window <= t <= t_dec) or tier(h) not in ok_tier:
+        for t, _h, k in cache[sym]:
+            if not (t_dec - window <= t <= t_dec) or k not in ok_tier:
                 continue
             ref = float(prev)
             if t.date() == t_dec.date():
@@ -513,3 +541,28 @@ def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str) 
                     best = mv
         out[i] = best
     return out
+
+
+def entry_status(symbol: str, day: str, entry_time: str, market: str, hours: float = 24.0) -> dict | None:
+    """The 'news' badge for one trade, from the filings cache only: what was filed in the `hours` before the entry.
+
+    status: news (a material filing) | offering (only share-offering filings, US) | minor (only unclear / query filings)
+    | none (cached, nothing filed). None when the symbol's filings were never fetched for that day: no badge rather than a false 'none'.
+    """
+    d = date.fromisoformat(str(day)[:10])
+    if market == "US":
+        c = news_sec.load_sym(symbol)
+        covered = news_sec.sym_file(symbol).exists() and not _gaps(c["covered"], d - timedelta(days=2), d)
+        tz = news_sec.NY
+    else:
+        covered = _sym_file(symbol).exists() and not _gaps(_load_sym(symbol)["covered"], d - timedelta(days=1), d)
+        tz = _IST
+    if not covered:
+        return None
+    hh, mm = str(entry_time).split(":")[:2]
+    t1 = datetime(d.year, d.month, d.day, int(hh), int(mm), tzinfo=tz)
+    hits = [(t, h, k) for t, h, k in filings_of(symbol, market) if t1 - timedelta(hours=hours) <= t <= t1 and k != "routine"]
+    hits.sort(key=lambda x: (news_sec.TIER_ORDER.get(x[2], 3) if x[2] != "query" else 4, -x[0].timestamp()))
+    kinds = {k for _, _, k in hits}
+    status = "news" if "material" in kinds else "offering" if "offering" in kinds else "minor" if hits else "none"
+    return {"status": status, "items": [f'[{k}] {t.strftime("%d %b %H:%M")} · {h}' for t, h, k in hits[:4]]}

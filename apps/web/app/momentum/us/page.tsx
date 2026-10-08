@@ -3,8 +3,14 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
+import { ReviewFilters } from '../../../components/momentum-review-controls';
+import { ReviewExport } from '../../../components/momentum-review-export';
 import { SideBadge } from '../../../components/momentum-side-badge';
-import { MomentumTradeChart, US_LOCALE, US_LOCALE_IST } from '../../../components/momentum-trade-chart';
+import {
+  MomentumTradeChart,
+  US_LOCALE,
+  US_LOCALE_IST,
+} from '../../../components/momentum-trade-chart';
 import type { MomentumTrade } from '../../../lib/momentum-api';
 import { orderVerbs, sideOf } from '../../../lib/momentum-side';
 import {
@@ -21,9 +27,15 @@ const money = (value: number | undefined) =>
   value === undefined ? '—' : `$${value.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
 const at = (value: string | undefined) =>
   value
-    ? new Date(value).toLocaleTimeString('en-US', { timeZone: ET, hour: '2-digit', minute: '2-digit', hour12: false })
+    ? new Date(value).toLocaleTimeString('en-US', {
+        timeZone: ET,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      })
     : '—';
-const dateKey = (value: string) => new Intl.DateTimeFormat('en-CA', { timeZone: ET }).format(new Date(value));
+const dateKey = (value: string) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: ET }).format(new Date(value));
 const dateLabel = (value: string) =>
   new Date(`${value}T12:00:00-04:00`).toLocaleDateString('en-US', {
     weekday: 'short',
@@ -47,7 +59,8 @@ const REJECTION_LABEL: Record<string, string> = {
   ok: 'Passed',
 };
 const rejectionLabel = (reason: string) =>
-  REJECTION_LABEL[reason] ?? (reason.startsWith('exchange:') ? `Not a listed venue (${reason.slice(9)})` : reason);
+  REJECTION_LABEL[reason] ??
+  (reason.startsWith('exchange:') ? `Not a listed venue (${reason.slice(9)})` : reason);
 
 function pnlClass(value: number | undefined) {
   return value === undefined ? 'text-ink/55' : value >= 0 ? 'text-emerald-700' : 'text-rose-600';
@@ -128,9 +141,9 @@ function ScreenStatus({ session }: { session: USWatchlistSession | null }) {
 
       {session && session.missing_criteria.length > 0 && (
         <p className="mt-3 border-t border-accent/15 pt-3 text-sm text-ink/70">
-          <strong>This is not the guide&apos;s screen yet.</strong> Missing: {session.missing_criteria.join(', ')}.
-          Names passing an incomplete screen are counted separately so a forward result cannot quietly claim to have
-          tested all five.
+          <strong>This is not the guide&apos;s screen yet.</strong> Missing:{' '}
+          {session.missing_criteria.join(', ')}. Names passing an incomplete screen are counted
+          separately so a forward result cannot quietly claim to have tested all five.
         </p>
       )}
     </section>
@@ -145,12 +158,13 @@ function Funnel({ session }: { session: USWatchlistSession }) {
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-display text-lg">Screen funnel · {dateLabel(session.date)}</h2>
         <p className="text-xs text-ink/55">
-          {session.considered} considered → {session.passed} passed → {session.complete} on the full screen
+          {session.considered} considered → {session.passed} passed → {session.complete} on the full
+          screen
         </p>
       </div>
       <p className="mt-1 text-xs text-ink/60">
-        Rejections are kept, not discarded. An empty watchlist from a quiet market and one from a broken input look
-        identical unless the reasons are recorded.
+        Rejections are kept, not discarded. An empty watchlist from a quiet market and one from a
+        broken input look identical unless the reasons are recorded.
       </p>
       {rejections.length === 0 ? (
         <p className="mt-3 text-sm text-ink/55">Nothing was rejected in this session.</p>
@@ -175,7 +189,7 @@ function Funnel({ session }: { session: USWatchlistSession }) {
             <thead>
               <tr className="text-ink/55">
                 {['Symbol', 'Price', 'Day change', 'RVOL', 'Float', 'Full screen'].map((label) => (
-                  <th key={label} className="p-1 font-semibold">
+                  <th key={label} scope="col" className="p-1 font-semibold">
                     {label}
                   </th>
                 ))}
@@ -212,24 +226,27 @@ function ShortFunnel({ session }: { session: USWatchlistSession }) {
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-display text-lg">Short screen (losers) · {dateLabel(session.date)}</h2>
         <p className="text-xs text-ink/55">
-          {short.considered} considered → {short.passed} passed · down at least {Math.abs(short.day_chg_max_pct)}%
+          {short.considered} considered → {short.passed} passed · down at least{' '}
+          {Math.abs(short.day_chg_max_pct)}%
         </p>
       </div>
       <p className="mt-1 text-xs text-ink/60">
-        Not 10% like the long side: once a stock is 10% below yesterday&apos;s close, SEC Rule 201 forbids selling it
-        short on the way down, so those entries are refused. Every paper short also assumes borrowable shares that no
-        free feed can confirm.
+        Not 10% like the long side: once a stock is 10% below yesterday&apos;s close, SEC Rule 201
+        forbids selling it short on the way down, so those entries are refused. Every paper short
+        also assumes borrowable shares that no free feed can confirm.
       </p>
       {passed.length > 0 && (
         <div className="mt-3 overflow-x-auto border-t border-black/5 pt-3">
           <table className="w-full text-left text-xs tabular-nums">
             <thead>
               <tr className="text-ink/55">
-                {['Symbol', 'Price', 'Day change', 'RVOL', 'Float', 'SSR from yesterday'].map((label) => (
-                  <th key={label} className="p-1 font-semibold">
-                    {label}
-                  </th>
-                ))}
+                {['Symbol', 'Price', 'Day change', 'RVOL', 'Float', 'SSR from yesterday'].map(
+                  (label) => (
+                    <th key={label} scope="col" className="p-1 font-semibold">
+                      {label}
+                    </th>
+                  ),
+                )}
               </tr>
             </thead>
             <tbody>
@@ -251,10 +268,20 @@ function ShortFunnel({ session }: { session: USWatchlistSession }) {
   );
 }
 
-function TradeRow({ trade, active, onClick }: { trade: USMomentumTrade; active: boolean; onClick: () => void }) {
+function TradeRow({
+  trade,
+  active,
+  onClick,
+}: {
+  trade: USMomentumTrade;
+  active: boolean;
+  onClick: () => void;
+}) {
   const net = trade.net_usd;
   return (
     <button
+      type="button"
+      aria-pressed={active}
       onClick={onClick}
       className={`w-full border-b border-black/5 px-3 py-3 text-left transition last:border-0 hover:bg-accent/5 ${active ? 'bg-accent/10' : ''}`}
     >
@@ -282,7 +309,9 @@ function TradeRow({ trade, active, onClick }: { trade: USMomentumTrade; active: 
           </div>
           <p className="mt-1 text-xs text-ink/55">
             {orderVerbs(trade).open} {money(trade.entry_price)} at {at(trade.entry_time)}
-            {trade.exit_price !== undefined ? ` → ${orderVerbs(trade).close} ${money(trade.exit_price)} at ${at(trade.exit_time)}` : ' · Open'}
+            {trade.exit_price !== undefined
+              ? ` → ${orderVerbs(trade).close} ${money(trade.exit_price)} at ${at(trade.exit_time)}`
+              : ' · Open'}
           </p>
         </div>
         <div className={`shrink-0 text-right text-sm font-bold ${pnlClass(net)}`}>
@@ -304,20 +333,33 @@ function FilingsContext({ trade }: { trade: USMomentumTrade }) {
   if (!items || items.length === 0) return null;
   const filedAt = (value: string) =>
     new Date(value).toLocaleString('en-US', {
-      timeZone: ET, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+      timeZone: ET,
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
     });
   return (
     <section className="rounded-xl border border-black/10 bg-panel p-4 shadow-card">
       <h3 className="font-display text-lg">Filings before entry</h3>
       <p className="text-xs text-ink/55">
-        {trade.symbol}&apos;s own SEC EDGAR filings from the previous trading day to entry (Eastern time) — for context
-        only, not a signal input.
+        {trade.symbol}&apos;s own SEC EDGAR filings from the previous trading day to entry (Eastern
+        time) — for context only, not a signal input.
       </p>
       <ul className="mt-3 space-y-2">
         {items.map((item, i) => (
-          <li key={`${item.published_at}-${i}`} className="rounded-lg bg-black/[0.03] p-2.5 text-sm">
+          <li
+            key={`${item.published_at}-${i}`}
+            className="rounded-lg bg-black/[0.03] p-2.5 text-sm"
+          >
             {item.url ? (
-              <a href={item.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+              <a
+                href={item.url}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-accent hover:underline"
+              >
                 {item.headline}
               </a>
             ) : (
@@ -344,7 +386,13 @@ function TradeDetail({ trade, onBack }: { trade: USMomentumTrade; onBack: () => 
   const costOverRisk = trade.cost_over_risk;
   const short = sideOf(trade) === 'short';
   return (
-    <section className="space-y-4">
+    <section
+      className="space-y-4 review-detail"
+      id="momentum-detail"
+      tabIndex={-1}
+      aria-label={`${trade.symbol} US trade review`}
+    >
+      <ReviewExport disabled={!trade.chart?.bars?.length} />
       <button
         type="button"
         onClick={onBack}
@@ -373,70 +421,40 @@ function TradeDetail({ trade, onBack }: { trade: USMomentumTrade; onBack: () => 
           <div className="min-w-0">
             <h2 className="flex flex-wrap items-center gap-2 font-display text-2xl">
               {trade.symbol} <SideBadge trade={trade} />
-              <span className="text-base font-medium text-ink/55">· {trade.setup.replaceAll('_', ' ')}</span>
+              <span className="text-base font-medium text-ink/55">
+                · {trade.setup.replaceAll('_', ' ')}
+              </span>
             </h2>
             <p className="mt-1 text-sm text-ink/60">
-              {short ? 'Short sale' : 'Entry'} {money(trade.entry_price)} at {at(trade.entry_time)} · Stop{' '}
-              {money(trade.stop)}
+              {short ? 'Short sale' : 'Entry'} {money(trade.entry_price)} at {at(trade.entry_time)}{' '}
+              · Stop {money(trade.stop)}
               {trade.target ? ` · Target ${money(trade.target)}` : ''}
             </p>
           </div>
           <p className={`shrink-0 font-display text-xl ${pnlClass(trade.net_usd)}`}>
-            {trade.net_usd === undefined ? 'Open' : `${trade.net_usd >= 0 ? '+' : ''}${money(trade.net_usd)}`}
+            {trade.net_usd === undefined
+              ? 'Open'
+              : `${trade.net_usd >= 0 ? '+' : ''}${money(trade.net_usd)}`}
           </p>
         </div>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           <span className="rounded-full bg-accent/10 px-2.5 py-1 text-accent">
             Day change {trade.day_chg_pct?.toFixed(2) ?? '—'}%
           </span>
-          <span className="rounded-full bg-black/5 px-2.5 py-1">RVOL {trade.rvol?.toFixed(2) ?? '—'}×</span>
-          <span className="rounded-full bg-black/5 px-2.5 py-1">Float {shares(trade.float_shares)}</span>
-          <span className="rounded-full bg-black/5 px-2.5 py-1">Catalyst {trade.catalyst == null ? 'unknown' : trade.catalyst ? 'yes' : 'no'}</span>
-          {trade.exchange && <span className="rounded-full bg-black/5 px-2.5 py-1">{trade.exchange}</span>}
+          <span className="rounded-full bg-black/5 px-2.5 py-1">
+            RVOL {trade.rvol?.toFixed(2) ?? '—'}×
+          </span>
+          <span className="rounded-full bg-black/5 px-2.5 py-1">
+            Float {shares(trade.float_shares)}
+          </span>
+          <span className="rounded-full bg-black/5 px-2.5 py-1">
+            Catalyst {trade.catalyst == null ? 'unknown' : trade.catalyst ? 'yes' : 'no'}
+          </span>
+          {trade.exchange && (
+            <span className="rounded-full bg-black/5 px-2.5 py-1">{trade.exchange}</span>
+          )}
         </div>
       </div>
-
-      {short && (
-        <section className="rounded-xl border border-rose-200 bg-rose-50/40 p-4 text-sm">
-          <h3 className="font-display text-lg">Short-sale rules on this trade</h3>
-          <ul className="mt-1 list-disc space-y-1 pl-5 text-ink/70">
-            <li>
-              Sold short at {money(trade.entry_price)}; covered by buying back
-              {trade.exit_price !== undefined ? ` at ${money(trade.exit_price)}` : ' — still open'}. The stop{' '}
-              {money(trade.stop)} sits above the sale, the target {money(trade.target ?? undefined)} below.
-            </li>
-            <li>
-              Borrow (locate):{' '}
-              <strong>{trade.locate_verified ? 'confirmed' : 'NOT verified'}</strong>. A real short needs borrowable
-              shares; this paper trade assumed them. Low-float names are often hard to borrow.
-            </li>
-            <li>
-              SEC Rule 201: the entry was allowed because the stock had not yet traded 10% below yesterday&apos;s close
-              (after that, breakdown shorts are refused).
-            </li>
-          </ul>
-        </section>
-      )}
-
-      <FilingsContext trade={trade} />
-
-      {/* The number that decides whether a US setup is worth taking at all. */}
-      {costOverRisk !== undefined && (
-        <section className="rounded-xl border border-accent/15 bg-accent/[0.045] p-4 text-sm">
-          <h3 className="font-display text-lg">Could this trade pay for itself?</h3>
-          <p className="mt-1 text-ink/70">
-            Round-trip cost {money(trade.costs_usd)} against {money(trade.risk_usd)} at risk ={' '}
-            <strong>{costOverRisk.toFixed(2)}×</strong>. At a 2:1 target that means this trade needed{' '}
-            <strong>{(((1 + costOverRisk) / 3) * 100).toFixed(1)}%</strong> of trades like it to win, against the 33.3%
-            the 2:1 rule advertises when costs are ignored.
-          </p>
-          <p className="mt-2 text-xs text-ink/60">
-            US fees are charged per share, and the one-cent minimum tick is a fixed cost too — both are a larger
-            percentage the cheaper the stock. Inside the guide&apos;s $1–$20 band that is the binding constraint, not
-            commission rates.
-          </p>
-        </section>
-      )}
 
       {trade.chart?.bars?.length ? (
         <div className="space-y-3">
@@ -444,28 +462,89 @@ function TradeDetail({ trade, onBack }: { trade: USMomentumTrade; onBack: () => 
             <div>
               <h3 className="font-display text-lg">{trade.symbol} · 1-minute execution chart</h3>
               <p className="text-xs text-ink/55">
-                {chartInIST ? 'India time (IST).' : 'Eastern time.'} Precise candles and fills at the execution timeframe.
+                {chartInIST ? 'India time (IST).' : 'Eastern time.'} Precise candles and fills at
+                the execution timeframe.
               </p>
             </div>
             <button
               type="button"
               onClick={() => setChartInIST((v) => !v)}
-              className="metric-chip shrink-0 px-3 py-1 text-xs"
+              aria-pressed={chartInIST}
+              className="metric-chip min-h-11 shrink-0 px-3 py-1 text-sm"
             >
               Show {chartInIST ? 'ET' : 'IST'}
             </button>
           </div>
-          <MomentumTradeChart trade={trade as unknown as MomentumTrade} interval="1m" locale={chartLocale} />
+          <MomentumTradeChart
+            trade={trade as unknown as MomentumTrade}
+            interval="1m"
+            locale={chartLocale}
+          />
           <div>
             <h3 className="font-display text-lg">{trade.symbol} · 5-minute decision chart</h3>
-            <p className="text-xs text-ink/55">The scanner&apos;s EMA, VWAP, and MACD decision timeframe.</p>
+            <p className="text-xs text-ink/55">
+              The scanner&apos;s EMA, VWAP, and MACD decision timeframe.
+            </p>
           </div>
-          <MomentumTradeChart trade={trade as unknown as MomentumTrade} interval="5m" locale={chartLocale} />
+          <MomentumTradeChart
+            trade={trade as unknown as MomentumTrade}
+            interval="5m"
+            locale={chartLocale}
+          />
         </div>
       ) : (
         <p className="metric-chip py-6 text-center text-sm text-ink/55">
           No candle snapshot was stored with this trade.
         </p>
+      )}
+
+      {short && (
+        <details className="review-disclosure">
+          <summary>Short-sale rules and borrow status</summary>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-ink/70">
+            <li>
+              Sold short at {money(trade.entry_price)}; covered by buying back
+              {trade.exit_price !== undefined ? ` at ${money(trade.exit_price)}` : ' — still open'}.
+              The stop {money(trade.stop)} sits above the sale, the target{' '}
+              {money(trade.target ?? undefined)} below.
+            </li>
+            <li>
+              Borrow (locate):{' '}
+              <strong>{trade.locate_verified ? 'confirmed' : 'NOT verified'}</strong>. A real short
+              needs borrowable shares; this paper trade assumed them. Low-float names are often hard
+              to borrow.
+            </li>
+            <li>
+              SEC Rule 201: the entry was allowed because the stock had not yet traded 10% below
+              yesterday&apos;s close (after that, breakdown shorts are refused).
+            </li>
+          </ul>
+        </details>
+      )}
+
+      {!!trade.news_context?.length && (
+        <details className="review-disclosure">
+          <summary>Filings before entry ({trade.news_context.length})</summary>
+          <FilingsContext trade={trade} />
+        </details>
+      )}
+
+      {/* The number that decides whether a US setup is worth taking at all. */}
+      {costOverRisk !== undefined && (
+        <details className="review-disclosure">
+          <summary>Costs and break-even win rate</summary>
+          <p className="mt-1 text-ink/70">
+            Round-trip cost {money(trade.costs_usd)} against {money(trade.risk_usd)} at risk ={' '}
+            <strong>{costOverRisk.toFixed(2)}×</strong>. At a 2:1 target that means this trade
+            needed <strong>{(((1 + costOverRisk) / 3) * 100).toFixed(1)}%</strong> of trades like it
+            to win, against the 33.3% the 2:1 rule advertises when costs are ignored.
+          </p>
+          <p className="mt-2 text-xs text-ink/60">
+            US fees are charged per share, and the one-cent minimum tick is a fixed cost too — both
+            are a larger percentage the cheaper the stock. Inside the guide&apos;s $1–$20 band that
+            is the binding constraint, not commission rates.
+          </p>
+        </details>
       )}
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -499,6 +578,8 @@ export default function USMomentumPage() {
   const [openDates, setOpenDates] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [sessionDate, setSessionDate] = useState('');
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
 
   useEffect(() => {
@@ -509,7 +590,9 @@ export default function USMomentumPage() {
         setSelected(nextTrades[0]?._id ?? null);
         setOpenDates(nextTrades[0] ? new Set([dateKey(nextTrades[0].entry_time)]) : new Set());
       })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load US momentum data'))
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : 'Could not load US momentum data'),
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -522,6 +605,15 @@ export default function USMomentumPage() {
     return [...next.entries()].sort(([a], [b]) => b.localeCompare(a));
   }, [trades]);
 
+  const filteredGroups = groups
+    .map(
+      ([date, items]) =>
+        [
+          date,
+          items.filter((item) => item.symbol.toLowerCase().includes(query.trim().toLowerCase())),
+        ] as const,
+    )
+    .filter(([date, items]) => items.length && (!sessionDate || sessionDate === date));
   const trade = trades.find((item) => item._id === selected) ?? null;
   const totalNet = trades.reduce((sum, item) => sum + (item.net_usd ?? 0), 0);
   const latest = sessions[0] ?? null;
@@ -529,17 +621,20 @@ export default function USMomentumPage() {
   function handleSelectTrade(id: string) {
     setSelected(id);
     setMobileView('detail');
+    requestAnimationFrame(() => document.getElementById('momentum-detail')?.focus());
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 momentum-review">
       <section className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-accent">Paper-trade review · US</p>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-accent">
+            Paper-trade review · US
+          </p>
           <h1 className="font-display text-3xl tracking-tight">US momentum trades</h1>
           <p className="mt-1 text-sm text-ink/65">
-            The Warrior five-criteria screen, run on US equities in Eastern time. Separate universe, separate cost
-            model, separate ledger from the NSE arm — the two are never summed.
+            Choose a paper trade to review its candles, execution and costs. Prices are in USD;
+            trade times are Eastern time.
           </p>
           <Link
             href="/momentum"
@@ -555,7 +650,7 @@ export default function USMomentumPage() {
           </Link>
         </div>
         <div className="metric-chip text-right">
-          <p className="text-xs text-ink/55">Recorded P&amp;L</p>
+          <p className="text-xs text-ink/55">All trades · net P&amp;L</p>
           <p className={`font-display text-xl ${pnlClass(totalNet)}`}>
             {totalNet >= 0 ? '+' : ''}
             {money(totalNet)}
@@ -563,30 +658,65 @@ export default function USMomentumPage() {
         </div>
       </section>
 
-      {!loading && !error && <ScreenStatus session={latest} />}
-      {!loading && !error && latest && <Funnel session={latest} />}
-      {!loading && !error && latest && <ShortFunnel session={latest} />}
+      {!loading && !error && (
+        <>
+          {latest && latest.missing_criteria.length > 0 && (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <strong>Partial screening.</strong> Missing: {latest.missing_criteria.join(', ')}.
+              These results do not represent the full five-criteria screen.
+            </p>
+          )}
+          <details className="review-disclosure">
+            <summary>
+              Latest screening session{latest ? ` · ${dateLabel(latest.date)}` : ''}
+            </summary>
+            <ScreenStatus session={latest} />
+            {latest && <Funnel session={latest} />}
+            {latest && <ShortFunnel session={latest} />}
+          </details>
+          <ReviewFilters
+            query={query}
+            onQuery={setQuery}
+            date={sessionDate}
+            onDate={setSessionDate}
+            dates={groups.map(([date]) => ({ value: date, label: dateLabel(date) }))}
+          />
+          <p role="status" className="text-sm text-ink/70">
+            {filteredGroups.reduce((sum, [, items]) => sum + items.length, 0)} matching trades ·
+            choose a trade to review its charts.
+          </p>
+          {trades.length > 0 && filteredGroups.length === 0 && (
+            <p className="metric-chip">
+              No trades match these filters. Try another symbol or clear the filters.
+            </p>
+          )}
+        </>
+      )}
 
-      {loading && <div className="metric-chip py-12 text-center text-sm text-ink/55">Loading US momentum data…</div>}
+      {loading && (
+        <div className="metric-chip py-12 text-center text-sm text-ink/55">
+          Loading US momentum data…
+        </div>
+      )}
       {error && <div className="metric-chip border-rose-200 py-6 text-rose-700">{error}</div>}
 
       {!loading && !error && trades.length === 0 && (
         <div className="metric-chip space-y-2 py-10 text-center text-sm text-ink/60">
           <p className="font-semibold text-ink/75">No US paper trades recorded yet.</p>
           <p className="mx-auto max-w-xl">
-            The screen, the cost model and this review page are built. What is missing is a US market-data feed to run
-            them against — until one is wired up, no session can be screened and no trade can be taken.
+            Recorded trades will appear here. You can review screening activity in the US watchlist.
           </p>
         </div>
       )}
 
       {!loading && !error && trades.length > 0 && (
-        <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
           <aside
-            className={`overflow-hidden rounded-xl border border-black/10 bg-panel shadow-card ${mobileView === 'detail' ? 'hidden lg:block' : 'block'}`}
+            aria-label="US trade list"
+            className={`review-list overflow-hidden rounded-xl border border-black/10 bg-panel shadow-card ${mobileView === 'detail' ? 'hidden lg:block' : 'block'}`}
           >
-            {groups.map(([date, items]) => {
-              const isOpen = openDates.has(date);
+            {filteredGroups.map(([date, items]) => {
+              const isOpen = !!query || !!sessionDate || openDates.has(date);
               return (
                 <section key={date} className="border-b border-black/5 last:border-0">
                   <button

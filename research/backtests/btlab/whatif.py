@@ -77,9 +77,10 @@ def evaluate(run_id: str, i: int, plugins: list[dict]) -> dict:
     nr = next((s for s in selected if s["id"] == "news_reaction"), None)
     if nr is not None and rc.rule.mk.id != "NSE":
         raise P.PluginError("News + market reaction needs NSE filings; it is not available for US runs")
-    if nr is not None and rc.rule.mk.id == "NSE":      # reads the filings cache only (no NSE call)
+    if nr is not None:                                 # reads the filings cache only (no NSE / EDGAR call)
         from . import news
-        one = one.assign(news_move_pct=news.stamp_reaction(one, days, nr["params"]["lookback_h"], nr["params"]["scope"]))
+        one = one.assign(news_move_pct=news.stamp_reaction(one, days, nr["params"]["lookback_h"],
+                                                           nr["params"]["scope"], rc.rule.mk.id))
     c = next(one.itertuples(index=False))
     entry_sel = [s for s in selected if P.REGISTRY[s["id"]].group == "entry"]
     exit_sel = [s for s in selected if P.REGISTRY[s["id"]].group == "exit"]

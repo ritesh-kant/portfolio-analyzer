@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import { ReviewFilters } from './momentum-review-controls';
+import { ReviewExport } from './momentum-review-export';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 import { orderVerbs } from '../lib/momentum-side';
@@ -58,8 +60,7 @@ export const NSE_WATCHLIST: WatchlistMarket = {
   barsNote: 'Exchange 1-minute candles for the whole session.',
   newsNote:
     "This company's own NSE filings from the start of the previous trading day to the end of this session, and nothing else: media recaps are written after a stock has moved. Routine filings (analyst meets, AGM notices) are dimmed; fund-raising is marked as dilution. Context only: the scanner never reads these.",
-  newsEmpty:
-    'No NSE filings in the window: nothing official from the company explains this move.',
+  newsEmpty: 'No NSE filings in the window: nothing official from the company explains this move.',
   fetchSessions: () => fetchMomentumWatchlist(),
   fetchBars: fetchWatchlistBars,
   empty: 'The scanner has not put any names on its watchlist yet.',
@@ -74,19 +75,34 @@ function useFormat() {
     const { symbol, numberLocale, timeZone } = market.locale;
     return {
       money: (value: number | null | undefined) =>
-        value == null ? '—' : `${symbol}${value.toLocaleString(numberLocale, { maximumFractionDigits: 2 })}`,
+        value == null
+          ? '—'
+          : `${symbol}${value.toLocaleString(numberLocale, { maximumFractionDigits: 2 })}`,
       at: (value: string | null | undefined) =>
         value
-          ? new Date(value).toLocaleTimeString(numberLocale, { timeZone, hour: '2-digit', minute: '2-digit', hour12: false })
+          ? new Date(value).toLocaleTimeString(numberLocale, {
+              timeZone,
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            })
           : '—',
       // A session date is a calendar date, not an instant: format it in UTC so
       // no zone can move it to the day before.
       dateLabel: (value: string) =>
         new Date(`${value}T12:00:00Z`).toLocaleDateString(numberLocale, {
-          weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
+          weekday: 'short',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+          timeZone: 'UTC',
         }),
       newsDay: (value: string) =>
-        new Date(value).toLocaleDateString(numberLocale, { timeZone, day: 'numeric', month: 'short' }),
+        new Date(value).toLocaleDateString(numberLocale, {
+          timeZone,
+          day: 'numeric',
+          month: 'short',
+        }),
     };
   }, [market]);
 }
@@ -95,7 +111,8 @@ function useFormat() {
 type NameNews = 'loading' | WatchlistNewsItem[] | { error: string };
 const newsItems = (news: NameNews | undefined) => (Array.isArray(news) ? news : []);
 /** Announcements and offerings — the filings that can move a stock; routine paperwork left out. */
-const signalItems = (news: NameNews | undefined) => newsItems(news).filter((item) => item.kind !== 'filing');
+const signalItems = (news: NameNews | undefined) =>
+  newsItems(news).filter((item) => item.kind !== 'filing');
 
 const KIND_CHIP: Record<WatchlistNewsItem['kind'], { label: string; className: string }> = {
   news: { label: 'Announcement', className: 'bg-emerald-100 text-emerald-800' },
@@ -117,7 +134,8 @@ const strategyLabel = (value: string | undefined) =>
 /** News is about the company, so it is keyed by symbol whatever the side. */
 const nameKey = (date: string, symbol: string) => `${date}:${symbol}`;
 /** A name can be on the long AND the short screen on one day: two entries. */
-const selectKey = (date: string, name: WatchlistName) => `${date}:${name.symbol}:${name.side ?? 'long'}`;
+const selectKey = (date: string, name: WatchlistName) =>
+  `${date}:${name.symbol}:${name.side ?? 'long'}`;
 /** Day change with its sign, red when the stock is down. */
 const dayChg = (value: number, digits: number) => (
   <span className={value < 0 ? 'text-rose-600' : 'text-emerald-700'}>
@@ -125,7 +143,8 @@ const dayChg = (value: number, digits: number) => (
     {value.toFixed(digits)}%
   </span>
 );
-const truncate = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+const truncate = (text: string, max: number) =>
+  text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
 /** Where a headline sits against the session and the scanner's first flag. */
 function newsTiming(
@@ -139,16 +158,28 @@ function newsTiming(
   const zoned = new Date(published);
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: market.locale.timeZone }).format(zoned);
   const hhmm = new Intl.DateTimeFormat('en-GB', {
-    timeZone: market.locale.timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    timeZone: market.locale.timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
   }).format(zoned);
   if (day < date || (day === date && hhmm < market.open)) {
     return { label: 'Before the open', className: 'bg-sky-100 text-sky-800' };
   }
-  if (published <= Date.parse(firstSeen)) return { label: 'Before first flag', className: 'bg-sky-100 text-sky-800' };
+  if (published <= Date.parse(firstSeen))
+    return { label: 'Before first flag', className: 'bg-sky-100 text-sky-800' };
   return { label: 'After first flag', className: 'bg-black/5 text-ink/60' };
 }
 
-function NewsPanel({ date, name, news }: { date: string; name: WatchlistName; news: NameNews | undefined }) {
+function NewsPanel({
+  date,
+  name,
+  news,
+}: {
+  date: string;
+  name: WatchlistName;
+  news: NameNews | undefined;
+}) {
   const market = useContext(MarketContext);
   const { at, newsDay } = useFormat();
   const items = newsItems(news);
@@ -156,11 +187,15 @@ function NewsPanel({ date, name, news }: { date: string; name: WatchlistName; ne
     <section className="rounded-xl border border-black/10 p-4">
       <h3 className="font-display text-lg">Company filings</h3>
       <p className="text-xs text-ink/55">{market.newsNote}</p>
-      {(news === undefined || news === 'loading') && <p className="mt-3 text-sm text-ink/55">Looking up filings…</p>}
+      {(news === undefined || news === 'loading') && (
+        <p className="mt-3 text-sm text-ink/55">Looking up filings…</p>
+      )}
       {news && !Array.isArray(news) && news !== 'loading' && (
         <p className="mt-3 text-sm text-rose-700">News lookup failed: {news.error}</p>
       )}
-      {Array.isArray(news) && items.length === 0 && <p className="mt-3 text-sm text-ink/55">{market.newsEmpty}</p>}
+      {Array.isArray(news) && items.length === 0 && (
+        <p className="mt-3 text-sm text-ink/55">{market.newsEmpty}</p>
+      )}
       {items.length > 0 && (
         <ul className="mt-3 space-y-2">
           {items.map((item, i) => {
@@ -172,7 +207,12 @@ function NewsPanel({ date, name, news }: { date: string; name: WatchlistName; ne
                 className={`rounded-lg bg-black/[0.03] p-2.5 text-sm ${item.kind === 'filing' ? 'opacity-70' : ''}`}
               >
                 {item.url ? (
-                  <a href={item.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-accent hover:underline"
+                  >
                     {item.headline}
                   </a>
                 ) : (
@@ -182,8 +222,16 @@ function NewsPanel({ date, name, news }: { date: string; name: WatchlistName; ne
                   <p className="mt-1 line-clamp-2 text-xs text-ink/70">{item.text}</p>
                 )}
                 <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink/55">
-                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${kind.className}`}>{kind.label}</span>
-                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${timing.className}`}>{timing.label}</span>
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${kind.className}`}
+                  >
+                    {kind.label}
+                  </span>
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${timing.className}`}
+                  >
+                    {timing.label}
+                  </span>
                   {newsDay(item.published_at)} {at(item.published_at)} · {item.publisher}
                 </p>
               </li>
@@ -244,10 +292,13 @@ function NameRow({
   const { money, at } = useFormat();
   const headlines = signalItems(news);
   const traded = name.trades.length > 0;
-  const net = traded ? name.trades.reduce((sum, t) => sum + (t.net_inr ?? t.net_usd ?? 0), 0) : null;
+  const net = traded
+    ? name.trades.reduce((sum, t) => sum + (t.net_inr ?? t.net_usd ?? 0), 0)
+    : null;
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
       className={`w-full border-b border-black/5 px-3 py-3 text-left transition last:border-0 hover:bg-accent/5 ${active ? 'bg-accent/10' : ''}`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -318,8 +369,9 @@ function NameDetail({
     market
       .fetchBars(name.symbol, date)
       .then(({ bars: next }) => !cancelled && setBars(next))
-      .catch((err: unknown) =>
-        !cancelled && setError(err instanceof Error ? err.message : 'Could not load candles'),
+      .catch(
+        (err: unknown) =>
+          !cancelled && setError(err instanceof Error ? err.message : 'Could not load candles'),
       );
     return () => {
       cancelled = true;
@@ -327,9 +379,10 @@ function NameDetail({
   }, [date, name.symbol, market]);
 
   const record = useMemo(() => (bars ? asChartRecord(date, name, bars) : null), [bars, date, name]);
-  const levels = useMemo(() => bars
-    ? watchlistLevels(bars, name.last_seen, market.code)
-    : [], [bars, name.last_seen, market.code]);
+  const levels = useMemo(
+    () => (bars ? watchlistLevels(bars, name.last_seen, market.code) : []),
+    [bars, name.last_seen, market.code],
+  );
   const markers = useMemo(
     () => [
       ...name.flags.map((flag) => ({
@@ -349,7 +402,13 @@ function NameDetail({
   );
 
   return (
-    <section className="space-y-4 rounded-xl border border-black/10 bg-panel p-4 shadow-card">
+    <section
+      className="space-y-4 review-detail rounded-xl border border-black/10 bg-panel p-4 shadow-card"
+      id="momentum-detail"
+      tabIndex={-1}
+      aria-label={`${name.symbol} watchlist review`}
+    >
+      <ReviewExport disabled={!record || !!error} />
       <button
         type="button"
         onClick={onBack}
@@ -359,7 +418,9 @@ function NameDetail({
       </button>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink/45">{dateLabel(date)}</p>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink/45">
+            {dateLabel(date)}
+          </p>
           <h2 className="flex items-center gap-2 font-display text-2xl">
             {name.symbol} {name.side === 'short' && <SideBadge trade={name} />}
           </h2>
@@ -377,69 +438,6 @@ function NameDetail({
         </div>
       </div>
 
-      {/* Why it was on the watchlist */}
-      <div className="overflow-hidden rounded-xl border border-black/10">
-        <table className="w-full text-left text-sm tabular-nums">
-          <thead className="bg-black/[0.025]">
-            <tr className="text-xs font-bold uppercase tracking-wide text-ink/50">
-              <th className="px-3 py-2">Flagged</th>
-              <th className="px-3 py-2">Reason</th>
-              <th className="px-3 py-2">Day chg</th>
-              <th className="px-3 py-2">RVOL</th>
-            </tr>
-          </thead>
-          <tbody>
-            {name.flags.map((flag, i) => (
-              <tr key={`${flag.time}-${i}`} className="border-t border-black/5">
-                <td className="px-3 py-2 font-medium">{at(flag.time)}</td>
-                <td className="px-3 py-2 text-ink/70">{flag.reason.replaceAll('_', ' ')}</td>
-                <td className="px-3 py-2">{Number.isFinite(flag.day_chg_pct) ? `${flag.day_chg_pct.toFixed(2)}%` : '—'}</td>
-                <td className="px-3 py-2">{Number.isFinite(flag.rvol) ? `${flag.rvol.toFixed(2)}×` : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {name.details && name.details.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-3">
-          {name.details.map((d) => (
-            <div key={d.label} className="metric-chip">
-              <p className="text-xs text-ink/55">{d.label}</p>
-              <p className="mt-1 font-semibold">{d.value}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <GateChecklist market={market.code} timeZone={market.locale.timeZone} name={name} />
-
-      <NewsPanel date={date} name={name} news={news} />
-
-      {name.trades.length > 0 && (
-        <div className="metric-chip">
-          <p className="text-xs text-ink/55">Paper trades on this name this session</p>
-          {name.trades.map((t) => {
-            const net = t.net_inr ?? t.net_usd;
-            return (
-              <p key={t._id} className="mt-1 text-sm">
-                <SideBadge trade={t} /> {strategyLabel(t.strategy)} · {orderVerbs(t).open} {money(t.entry_price)} at {at(t.entry_time)}
-                {t.exit_price != null ? ` → ${orderVerbs(t).close} ${money(t.exit_price)} at ${at(t.exit_time)}` : ' · Open'}
-                {net != null && (
-                  <span className={`ml-2 font-semibold ${pnlClass(net)}`}>
-                    {net >= 0 ? '+' : ''}
-                    {money(net)}
-                  </span>
-                )}
-              </p>
-            );
-          })}
-          <Link href={market.tradesHref} className="mt-1 inline-block text-xs font-semibold text-accent">
-            Review on the trades page →
-          </Link>
-        </div>
-      )}
-
       {/* Charts */}
       {error && <div className="metric-chip border-rose-200 py-6 text-rose-700">{error}</div>}
       {!error && !record && (
@@ -450,22 +448,110 @@ function NameDetail({
           <div>
             <h3 className="font-display text-lg">{name.symbol} · 1-minute chart</h3>
             <p className="text-xs text-ink/55">
-              {market.barsNote} Amber lines mark each time the scanner
-              flagged the name; blue dotted lines mark company filings published during market hours.
+              {market.barsNote} Amber lines mark each time the scanner flagged the name; blue dotted
+              lines mark company filings published during market hours.
             </p>
           </div>
-          <MomentumTradeChart trade={record} interval="1m" watchMarkers={markers} watchLevels={levels} locale={market.locale} />
+          <MomentumTradeChart
+            trade={record}
+            interval="1m"
+            watchMarkers={markers}
+            watchLevels={levels}
+            locale={market.locale}
+          />
           <div>
             <h3 className="font-display text-lg">{name.symbol} · 5-minute chart</h3>
             <p className="text-xs text-ink/55">
               The same session resampled to the scanner&apos;s 5-minute decision timeframe.
             </p>
           </div>
-          <MomentumTradeChart trade={record} interval="5m" watchMarkers={markers} watchLevels={levels} locale={market.locale} />
+          <MomentumTradeChart
+            trade={record}
+            interval="5m"
+            watchMarkers={markers}
+            watchLevels={levels}
+            locale={market.locale}
+          />
         </div>
       )}
 
-      <p className="text-xs leading-relaxed text-ink/55">
+      <details className="review-disclosure">
+        <summary>Scanner flags and session details</summary> {/* Why it was on the watchlist */}
+        <div className="overflow-hidden rounded-xl border border-black/10">
+          <table className="w-full text-left text-sm tabular-nums">
+            <thead className="bg-black/[0.025]">
+              <tr className="text-xs font-bold uppercase tracking-wide text-ink/50">
+                <th className="px-3 py-2">Flagged</th>
+                <th className="px-3 py-2">Reason</th>
+                <th className="px-3 py-2">Day chg</th>
+                <th className="px-3 py-2">RVOL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {name.flags.map((flag, i) => (
+                <tr key={`${flag.time}-${i}`} className="border-t border-black/5">
+                  <td className="px-3 py-2 font-medium">{at(flag.time)}</td>
+                  <td className="px-3 py-2 text-ink/70">{flag.reason.replaceAll('_', ' ')}</td>
+                  <td className="px-3 py-2">
+                    {Number.isFinite(flag.day_chg_pct) ? `${flag.day_chg_pct.toFixed(2)}%` : '—'}
+                  </td>
+                  <td className="px-3 py-2">
+                    {Number.isFinite(flag.rvol) ? `${flag.rvol.toFixed(2)}×` : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {name.details && name.details.length > 0 && (
+          <div className="grid gap-3 sm:grid-cols-3">
+            {name.details.map((d) => (
+              <div key={d.label} className="metric-chip">
+                <p className="text-xs text-ink/55">{d.label}</p>
+                <p className="mt-1 font-semibold">{d.value}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </details>
+      <details className="review-disclosure">
+        <summary>Why it was or wasn’t traded</summary>
+        <GateChecklist market={market.code} timeZone={market.locale.timeZone} name={name} />
+      </details>
+      <details className="review-disclosure">
+        <summary>Company filings and news</summary>
+        <NewsPanel date={date} name={name} news={news} />
+      </details>
+      {name.trades.length > 0 && (
+        <div className="metric-chip">
+          <p className="text-xs text-ink/55">Paper trades on this name this session</p>
+          {name.trades.map((t) => {
+            const net = t.net_inr ?? t.net_usd;
+            return (
+              <p key={t._id} className="mt-1 text-sm">
+                <SideBadge trade={t} /> {strategyLabel(t.strategy)} · {orderVerbs(t).open}{' '}
+                {money(t.entry_price)} at {at(t.entry_time)}
+                {t.exit_price != null
+                  ? ` → ${orderVerbs(t).close} ${money(t.exit_price)} at ${at(t.exit_time)}`
+                  : ' · Open'}
+                {net != null && (
+                  <span className={`ml-2 font-semibold ${pnlClass(net)}`}>
+                    {net >= 0 ? '+' : ''}
+                    {money(net)}
+                  </span>
+                )}
+              </p>
+            );
+          })}
+          <Link
+            href={market.tradesHref}
+            className="mt-1 inline-block text-xs font-semibold text-accent"
+          >
+            Review on the trades page →
+          </Link>
+        </div>
+      )}
+      <p className="review-keyboard-help text-xs leading-relaxed text-ink/55">
         Focus either chart, then use <kbd className="rounded bg-black/5 px-1">+</kbd> /{' '}
         <kbd className="rounded bg-black/5 px-1">−</kbd> to zoom,{' '}
         <kbd className="rounded bg-black/5 px-1">0</kbd> to reset, and{' '}
@@ -493,6 +579,8 @@ function WatchlistView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
+  const [query, setQuery] = useState('');
+  const [sessionDate, setSessionDate] = useState('');
   const [news, setNews] = useState<Record<string, NameNews>>({});
 
   useEffect(() => {
@@ -520,17 +608,25 @@ function WatchlistView() {
         .map((n) => n.symbol)
         .filter((symbol) => news[nameKey(session.date, symbol)] === undefined);
       if (!pending.length) continue;
-      setNews((prev) => ({ ...prev, ...Object.fromEntries(pending.map((s) => [nameKey(session.date, s), 'loading' as const])) }));
+      setNews((prev) => ({
+        ...prev,
+        ...Object.fromEntries(pending.map((s) => [nameKey(session.date, s), 'loading' as const])),
+      }));
       fetchWatchlistNews(session.date, pending, market.code)
         .then(({ news: bySymbol }) =>
           setNews((prev) => ({
             ...prev,
-            ...Object.fromEntries(pending.map((s) => [nameKey(session.date, s), bySymbol[s] ?? []])),
+            ...Object.fromEntries(
+              pending.map((s) => [nameKey(session.date, s), bySymbol[s] ?? []]),
+            ),
           })),
         )
         .catch((err: unknown) => {
           const error = { error: err instanceof Error ? err.message : 'News lookup failed' };
-          setNews((prev) => ({ ...prev, ...Object.fromEntries(pending.map((s) => [nameKey(session.date, s), error])) }));
+          setNews((prev) => ({
+            ...prev,
+            ...Object.fromEntries(pending.map((s) => [nameKey(session.date, s), error])),
+          }));
         });
     }
   }, [sessions, openDates, news, market.code]);
@@ -544,13 +640,21 @@ function WatchlistView() {
     return null;
   }, [sessions, selected]);
 
+  const filteredSessions = sessions
+    .map((s) => ({
+      ...s,
+      names: s.names.filter((n) => n.symbol.toLowerCase().includes(query.trim().toLowerCase())),
+    }))
+    .filter((s) => s.names.length && (!sessionDate || sessionDate === s.date));
   const totalNames = sessions.reduce((sum, s) => sum + s.names.length, 0);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 momentum-review">
       <section className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-accent">Scanner review</p>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-accent">
+            Scanner review
+          </p>
           <h1 className="font-display text-3xl tracking-tight">{market.title}</h1>
           <p className="mt-1 text-sm text-ink/65">{market.intro}</p>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -578,10 +682,13 @@ function WatchlistView() {
       </section>
 
       {!loading && !error && sessions.length > 0 && (
-        <section className="overflow-hidden rounded-xl border border-black/10 bg-panel shadow-card">
+        <details className="review-history overflow-hidden rounded-xl border border-black/10 bg-panel shadow-card">
+          <summary>Daily scanner breakdown · {sessions.length} sessions</summary>
           <div className="border-b border-black/10 px-4 py-3">
             <h2 className="font-display text-lg">Day-wise watchlist</h2>
-            <p className="text-xs text-ink/55">How many names were watched each session, and how many became trades.</p>
+            <p className="text-xs text-ink/55">
+              How many names were watched each session, and how many became trades.
+            </p>
           </div>
           <div className="max-h-80 overflow-x-auto overflow-y-auto">
             <table className="w-full text-left text-sm tabular-nums">
@@ -599,11 +706,16 @@ function WatchlistView() {
                   <tr key={date} className="border-t border-black/5">
                     <td className="px-4 py-2 font-medium">{dateLabel(date)}</td>
                     <td className="px-4 py-2 text-ink/60">{names.length}</td>
-                    <td className="px-4 py-2 text-ink/60">{names.reduce((sum, n) => sum + n.flags.length, 0)}</td>
-                    <td className="px-4 py-2 text-ink/60">{names.filter((n) => n.trades.length > 0).length}</td>
+                    <td className="px-4 py-2 text-ink/60">
+                      {names.reduce((sum, n) => sum + n.flags.length, 0)}
+                    </td>
+                    <td className="px-4 py-2 text-ink/60">
+                      {names.filter((n) => n.trades.length > 0).length}
+                    </td>
                     <td className="px-4 py-2 text-ink/60">
                       {names.every((n) => Array.isArray(news[nameKey(date, n.symbol)]))
-                        ? names.filter((n) => newsItems(news[nameKey(date, n.symbol)]).length > 0).length
+                        ? names.filter((n) => newsItems(news[nameKey(date, n.symbol)]).length > 0)
+                            .length
                         : '—'}
                     </td>
                   </tr>
@@ -611,26 +723,39 @@ function WatchlistView() {
               </tbody>
             </table>
           </div>
-        </section>
+        </details>
       )}
+      <ReviewFilters
+        query={query}
+        onQuery={setQuery}
+        date={sessionDate}
+        dates={sessions.map((s) => ({ value: s.date, label: dateLabel(s.date) }))}
+        onDate={(value) => {
+          setSessionDate(value);
+          if (value) setOpenDates((current) => new Set([...current, value]));
+        }}
+      />
+      <p role="status" className="text-sm text-ink/70">
+        {filteredSessions.reduce((sum, s) => sum + s.names.length, 0)} matching stocks · choose a
+        stock to review its session.
+      </p>
 
       {loading && (
         <div className="metric-chip py-12 text-center text-sm text-ink/55">Loading watchlist…</div>
       )}
       {error && <div className="metric-chip border-rose-200 py-6 text-rose-700">{error}</div>}
       {!loading && !error && sessions.length === 0 && (
-        <div className="metric-chip py-12 text-center text-sm text-ink/55">
-          {market.empty}
-        </div>
+        <div className="metric-chip py-12 text-center text-sm text-ink/55">{market.empty}</div>
       )}
 
       {!loading && !error && sessions.length > 0 && (
-        <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
           <aside
-            className={`overflow-hidden rounded-xl border border-black/10 bg-panel shadow-card ${mobileView === 'detail' ? 'hidden lg:block' : 'block'}`}
+            aria-label="Watchlist stocks"
+            className={`review-list overflow-hidden rounded-xl border border-black/10 bg-panel shadow-card ${mobileView === 'detail' ? 'hidden lg:block' : 'block'}`}
           >
-            {sessions.map(({ date, names }) => {
-              const isOpen = openDates.has(date);
+            {filteredSessions.map(({ date, names }) => {
+              const isOpen = !!query || !!sessionDate || openDates.has(date);
               return (
                 <section key={date} className="border-b border-black/5 last:border-0">
                   <button
@@ -666,6 +791,9 @@ function WatchlistView() {
                         onClick={() => {
                           setSelected(selectKey(date, name));
                           setMobileView('detail');
+                          requestAnimationFrame(() =>
+                            document.getElementById('momentum-detail')?.focus(),
+                          );
                         }}
                       />
                     ))}

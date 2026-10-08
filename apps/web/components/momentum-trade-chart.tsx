@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { reviewChartSnapshots } from './momentum-review-export';
 import {
   type AutoscaleInfo,
   CandlestickSeries,
@@ -28,7 +29,13 @@ import {
 import type { MomentumTrade } from '../lib/momentum-api';
 import { orderVerbs, sideOf } from '../lib/momentum-side';
 import { containingBarIndex, fiveMinuteBars } from '../lib/momentum-bars';
-import { type Point, type TradeLevel, points, sessionBars, tradeLevels } from '../lib/momentum-session';
+import {
+  type Point,
+  type TradeLevel,
+  points,
+  sessionBars,
+  tradeLevels,
+} from '../lib/momentum-session';
 
 // Mirrors candles.STRENGTH_WEAK_BELOW: a formation whose confirming candle
 // spans less than this multiple of the recent average range is drawn faint.
@@ -111,7 +118,11 @@ const formatter = (locale: ChartLocale) => (value: number) =>
   `${locale.symbol}${value.toLocaleString(locale.numberLocale, { maximumFractionDigits: 2 })}`;
 
 const fmtVolume = (value: number) =>
-  value >= 1_000_000 ? `${(value / 1_000_000).toFixed(2)}M` : value >= 1_000 ? `${(value / 1_000).toFixed(2)}K` : `${Math.round(value)}`;
+  value >= 1_000_000
+    ? `${(value / 1_000_000).toFixed(2)}M`
+    : value >= 1_000
+      ? `${(value / 1_000).toFixed(2)}K`
+      : `${Math.round(value)}`;
 
 const zoneClocks = new Map<string, Intl.DateTimeFormat>();
 
@@ -137,8 +148,16 @@ function wallClock(ms: number, timeZone: string): UTCTimestamp {
     zoneClocks.set(timeZone, clock);
   }
   const part: Record<string, number> = {};
-  for (const { type, value } of clock.formatToParts(ms)) if (type !== 'literal') part[type] = Number(value);
-  return (Date.UTC(part.year ?? 1970, (part.month ?? 1) - 1, part.day ?? 1, part.hour ?? 0, part.minute ?? 0, part.second ?? 0) / 1000) as UTCTimestamp;
+  for (const { type, value } of clock.formatToParts(ms))
+    if (type !== 'literal') part[type] = Number(value);
+  return (Date.UTC(
+    part.year ?? 1970,
+    (part.month ?? 1) - 1,
+    part.day ?? 1,
+    part.hour ?? 0,
+    part.minute ?? 0,
+    part.second ?? 0,
+  ) / 1000) as UTCTimestamp;
 }
 
 // Vertical de-collision for the horizontal price-line labels. Levels, BUY and
@@ -179,7 +198,11 @@ function stackLabelYs(desired: number[], gap = 13, minY = -Infinity, maxY = Infi
 }
 
 type Attached = SeriesAttachedParameter<Time, SeriesType>;
-type Paint = (ctx: CanvasRenderingContext2D, size: { width: number; height: number }, api: Attached) => void;
+type Paint = (
+  ctx: CanvasRenderingContext2D,
+  size: { width: number; height: number },
+  api: Attached,
+) => void;
 
 /**
  * A canvas layer inside one series' pane, for the drawings the library has no
@@ -224,7 +247,11 @@ function haloText(
   x: number,
   y: number,
   color: string,
-  { align = 'left', alpha = 1, size = 11 }: { align?: CanvasTextAlign; alpha?: number; size?: number } = {},
+  {
+    align = 'left',
+    alpha = 1,
+    size = 11,
+  }: { align?: CanvasTextAlign; alpha?: number; size?: number } = {},
 ) {
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -273,7 +300,9 @@ interface ChartHandles {
 }
 
 const hexAlpha = (hex: string, alpha: number) =>
-  `${hex}${Math.round(alpha * 255).toString(16).padStart(2, '0')}`;
+  `${hex}${Math.round(alpha * 255)
+    .toString(16)
+    .padStart(2, '0')}`;
 
 export function MomentumTradeChart({
   trade,
@@ -301,14 +330,23 @@ export function MomentumTradeChart({
     return interval === '5m' ? points(fiveMinuteBars(raw)) : points(raw);
   }, [interval, trade.chart?.bars, trade.entry_time]);
   const defaultZoom = interval === '5m' ? DEFAULT_ZOOM_5M : DEFAULT_ZOOM_1M;
-  const levels = useMemo(() => (watching ? watchLevels ?? [] : tradeLevels(trade)), [trade, watching, watchLevels]);
+  const levels = useMemo(
+    () => (watching ? (watchLevels ?? []) : tradeLevels(trade)),
+    [trade, watching, watchLevels],
+  );
 
   const [hover, setHover] = useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const handlesRef = useRef<ChartHandles | null>(null);
-  const sceneRef = useRef<Scene>({ patterns: [], labels: [], watch: [], anchorPrices: [], data: [] });
+  const sceneRef = useRef<Scene>({
+    patterns: [],
+    labels: [],
+    watch: [],
+    anchorPrices: [],
+    data: [],
+  });
   const hoverRef = useRef<number | null>(null);
   const timeIndexRef = useRef(new Map<number, number>());
   const framedRef = useRef<string | null>(null);
@@ -334,16 +372,35 @@ export function MomentumTradeChart({
         fontSize: 11,
         fontFamily: FONT,
         attributionLogo: true,
-        panes: { separatorColor: TV.border, separatorHoverColor: 'rgba(41, 98, 255, 0.25)', enableResize: true },
+        panes: {
+          separatorColor: TV.border,
+          separatorHoverColor: 'rgba(41, 98, 255, 0.25)',
+          enableResize: true,
+        },
       },
       grid: { vertLines: { color: TV.grid }, horzLines: { color: TV.grid } },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: TV.crosshair, width: 1, style: LineStyle.Dashed, labelBackgroundColor: TV.crosshairLabel },
-        horzLine: { color: TV.crosshair, width: 1, style: LineStyle.Dashed, labelBackgroundColor: TV.crosshairLabel },
+        vertLine: {
+          color: TV.crosshair,
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: TV.crosshairLabel,
+        },
+        horzLine: {
+          color: TV.crosshair,
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: TV.crosshairLabel,
+        },
       },
       rightPriceScale: { borderColor: TV.border },
-      timeScale: { borderColor: TV.border, timeVisible: true, secondsVisible: false, rightOffset: 4 },
+      timeScale: {
+        borderColor: TV.border,
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 4,
+      },
       localization: {
         locale: locale.numberLocale,
         // Times are already shifted to the market's wall clock (see `wallClock`), so read them back as UTC.
@@ -363,8 +420,18 @@ export function MomentumTradeChart({
       },
       // Plain vertical scroll is left to the page — several charts stack on one
       // screen. Horizontal swipe pans; pinch / ctrl+wheel zooms (listener below).
-      handleScale: { mouseWheel: false, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
-      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: {
+        mouseWheel: false,
+        pinch: true,
+        axisPressedMouseMove: true,
+        axisDoubleClickReset: true,
+      },
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: false,
+      },
     });
 
     const candles = chart.addSeries(CandlestickSeries, {
@@ -398,24 +465,39 @@ export function MomentumTradeChart({
     });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
     const line = (color: string, lineWidth: 1 | 2, paneIndex = 0) =>
-      chart.addSeries(LineSeries, {
-        color,
-        lineWidth,
-        priceLineVisible: false,
-        lastValueVisible: paneIndex === 1,
-        crosshairMarkerVisible: false,
-      }, paneIndex);
+      chart.addSeries(
+        LineSeries,
+        {
+          color,
+          lineWidth,
+          priceLineVisible: false,
+          lastValueVisible: paneIndex === 1,
+          crosshairMarkerVisible: false,
+        },
+        paneIndex,
+      );
     const ema9 = line(TV.ema9, 1);
     const ema20 = line(TV.ema20, 1);
     const vwap = line(TV.vwap, 2);
-    const histogram = chart.addSeries(HistogramSeries, {
-      priceLineVisible: false,
-      lastValueVisible: false,
-      priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
-    }, 1);
+    const histogram = chart.addSeries(
+      HistogramSeries,
+      {
+        priceLineVisible: false,
+        lastValueVisible: false,
+        priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+      },
+      1,
+    );
     const macd = line(TV.macd, 1, 1);
     const signal = line(TV.signal, 1, 1);
-    macd.createPriceLine({ price: 0, color: TV.crosshairLabel, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: '' });
+    macd.createPriceLine({
+      price: 0,
+      color: TV.crosshairLabel,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: false,
+      title: '',
+    });
     const panes = chart.panes();
     panes[0]?.setStretchFactor(3);
     panes[1]?.setStretchFactor(1);
@@ -459,7 +541,11 @@ export function MomentumTradeChart({
         ctx.stroke();
         ctx.restore();
         const midX = Math.min(Math.max((startX + endX) / 2, 80), size.width - 80);
-        haloText(ctx, pattern.label, midX, top + 22, TV.patternText, { align: 'center', alpha: pattern.weak ? 0.45 : 1, size: 10 });
+        haloText(ctx, pattern.label, midX, top + 22, TV.patternText, {
+          align: 'center',
+          alpha: pattern.weak ? 0.45 : 1,
+          size: 10,
+        });
       }
 
       scene.watch.forEach((marker, i) => {
@@ -477,7 +563,14 @@ export function MomentumTradeChart({
         // Flags label from the bottom of the price pane, news from the top,
         // so the two families never print over each other.
         const y = marker.news ? LEGEND_HEIGHT + 14 + (i % 3) * 13 : size.height - 6 - (i % 3) * 13;
-        haloText(ctx, `${marker.news ? '📰' : '👀'} ${marker.label}`, Math.min(x + 4, size.width - 200), y, marker.news ? TV.newsText : TV.flagText, { size: 10 });
+        haloText(
+          ctx,
+          `${marker.news ? '📰' : '👀'} ${marker.label}`,
+          Math.min(x + 4, size.width - 200),
+          y,
+          marker.news ? TV.newsText : TV.flagText,
+          { size: 10 },
+        );
       });
 
       // Every label shares the same left-anchored x, so stack them vertically
@@ -486,9 +579,16 @@ export function MomentumTradeChart({
       // is panned out of the pane has nothing to point at and is hidden.
       const items = scene.labels
         .map((label) => ({ ...label, lineY: api.series.priceToCoordinate(label.price) }))
-        .filter((item): item is typeof item & { lineY: number } =>
-          item.lineY !== null && item.lineY >= 0 && item.lineY <= size.height);
-      const ys = stackLabelYs(items.map((item) => item.lineY - 4), 13, LEGEND_HEIGHT + 34, size.height - 4);
+        .filter(
+          (item): item is typeof item & { lineY: number } =>
+            item.lineY !== null && item.lineY >= 0 && item.lineY <= size.height,
+        );
+      const ys = stackLabelYs(
+        items.map((item) => item.lineY - 4),
+        13,
+        LEGEND_HEIGHT + 34,
+        size.height - 4,
+      );
       items.forEach((item, i) => {
         const y = ys[i]!;
         if (Math.abs(y - (item.lineY - 4)) > 0.5) {
@@ -547,7 +647,8 @@ export function MomentumTradeChart({
     macd.attachPrimitive(watchLinesMacd);
 
     chart.subscribeCrosshairMove((param) => {
-      const index = typeof param.time === 'number' ? timeIndexRef.current.get(param.time) ?? null : null;
+      const index =
+        typeof param.time === 'number' ? (timeIndexRef.current.get(param.time) ?? null) : null;
       if (index === hoverRef.current) return;
       hoverRef.current = index;
       setHover(index);
@@ -571,12 +672,36 @@ export function MomentumTradeChart({
     host.addEventListener('wheel', onWheel, { passive: false });
 
     handlesRef.current = {
-      chart, candles, volume, ema9, ema20, vwap, histogram, macd, signal, markers,
+      chart,
+      candles,
+      volume,
+      ema9,
+      ema20,
+      vwap,
+      histogram,
+      macd,
+      signal,
+      markers,
       overlays: [patternBands, priceOverlay, watchLinesMacd],
       priceLines: [],
     };
     framedRef.current = null;
+    const container = containerRef.current;
+    if (container)
+      reviewChartSnapshots.set(container, async () => {
+        const range = chart.timeScale().getVisibleLogicalRange();
+        try {
+          chart.timeScale().fitContent();
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+          return chart.takeScreenshot().toDataURL('image/png');
+        } finally {
+          if (range) chart.timeScale().setVisibleLogicalRange(range);
+        }
+      });
     return () => {
+      if (container) reviewChartSnapshots.delete(container);
       host.removeEventListener('wheel', onWheel);
       handlesRef.current = null;
       chart.remove();
@@ -594,12 +719,28 @@ export function MomentumTradeChart({
     const times = allData.map((bar) => wallClock(Date.parse(bar.time), locale.timeZone));
     timeIndexRef.current = new Map(times.map((time, index) => [time as number, index]));
 
-    candles.setData(allData.map((bar, i) => ({ time: times[i]!, open: bar.open, high: bar.high, low: bar.low, close: bar.close })));
-    volume.setData(allData.map((bar, i) => ({ time: times[i]!, value: bar.volume, color: bar.close >= bar.open ? TV.volumeUp : TV.volumeDown })));
+    candles.setData(
+      allData.map((bar, i) => ({
+        time: times[i]!,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+      })),
+    );
+    volume.setData(
+      allData.map((bar, i) => ({
+        time: times[i]!,
+        value: bar.volume,
+        color: bar.close >= bar.open ? TV.volumeUp : TV.volumeDown,
+      })),
+    );
     const lineData = (pick: (bar: Point) => number | null) =>
       allData.map((bar, i) => {
         const value = pick(bar);
-        return value === null || !Number.isFinite(value) ? { time: times[i]! } : { time: times[i]!, value };
+        return value === null || !Number.isFinite(value)
+          ? { time: times[i]! }
+          : { time: times[i]!, value };
       });
     ema9.setData(lineData((bar) => bar.ema9));
     ema20.setData(lineData((bar) => bar.ema20));
@@ -607,29 +748,38 @@ export function MomentumTradeChart({
     macd.setData(lineData((bar) => bar.macd));
     signal.setData(lineData((bar) => bar.signal));
     // TradingView's four-shade histogram: a bar is dark while momentum builds, pale while it fades.
-    histogram.setData(allData.map((bar, i) => {
-      const value = bar.histogram;
-      if (value === null) return { time: times[i]! };
-      const prev = allData[i - 1]?.histogram ?? null;
-      const color = value >= 0
-        ? (prev === null || value >= prev ? TV.histUpGrowing : TV.histUpFalling)
-        : (prev === null || value <= prev ? TV.histDownFalling : TV.histDownRising);
-      return { time: times[i]!, value, color };
-    }));
+    histogram.setData(
+      allData.map((bar, i) => {
+        const value = bar.histogram;
+        if (value === null) return { time: times[i]! };
+        const prev = allData[i - 1]?.histogram ?? null;
+        const color =
+          value >= 0
+            ? prev === null || value >= prev
+              ? TV.histUpGrowing
+              : TV.histUpFalling
+            : prev === null || value <= prev
+              ? TV.histDownFalling
+              : TV.histDownRising;
+        return { time: times[i]!, value, color };
+      }),
+    );
 
     for (const priceLine of handles.priceLines) candles.removePriceLine(priceLine);
     handles.priceLines = [];
     const addLine = (price: number, color: string, style: LineStyle, title = '', axis = true) =>
-      handles.priceLines.push(candles.createPriceLine({
-        price,
-        color: hexAlpha(color, 0.75),
-        lineWidth: 1,
-        lineStyle: style,
-        axisLabelVisible: axis,
-        axisLabelColor: color,
-        axisLabelTextColor: TV.background,
-        title,
-      }));
+      handles.priceLines.push(
+        candles.createPriceLine({
+          price,
+          color: hexAlpha(color, 0.75),
+          lineWidth: 1,
+          lineStyle: style,
+          axisLabelVisible: axis,
+          axisLabelColor: color,
+          axisLabelTextColor: TV.background,
+          title,
+        }),
+      );
 
     const labels: Scene['labels'] = [];
     const entryIndex = containingBarIndex(allData, trade.entry_time, interval);
@@ -642,10 +792,22 @@ export function MomentumTradeChart({
     // On a trade, levels within 0.3% of BUY/SELL are merged into those lines.
     // A watched name has no fill, so its reference levels remain visible.
     for (const level of levels) {
-      if (!watching && Math.abs(level.price - trade.entry_price) / trade.entry_price <= 0.003) continue;
-      if (!watching && trade.exit_price != null && Math.abs(level.price - trade.exit_price) / trade.exit_price <= 0.003) continue;
+      if (!watching && Math.abs(level.price - trade.entry_price) / trade.entry_price <= 0.003)
+        continue;
+      if (
+        !watching &&
+        trade.exit_price != null &&
+        Math.abs(level.price - trade.exit_price) / trade.exit_price <= 0.003
+      )
+        continue;
       const color = level.side === 'resistance' ? TV.resistance : TV.support;
-      addLine(level.price, color, level.faint ? LineStyle.Dashed : LineStyle.Solid, '', !level.faint);
+      addLine(
+        level.price,
+        color,
+        level.faint ? LineStyle.Dashed : LineStyle.Solid,
+        '',
+        !level.faint,
+      );
       labels.push({
         key: level.label,
         price: level.price,
@@ -662,19 +824,59 @@ export function MomentumTradeChart({
       const openColor = short ? TV.sell : TV.buy;
       const closeColor = short ? TV.buy : TV.sell;
       addLine(trade.entry_price, openColor, LineStyle.Dotted);
-      labels.push({ key: 'OPEN', price: trade.entry_price, text: `${verbs.open.toUpperCase()} ${fmt(trade.entry_price)}`, color: openColor, opacity: 1 });
+      labels.push({
+        key: 'OPEN',
+        price: trade.entry_price,
+        text: `${verbs.open.toUpperCase()} ${fmt(trade.entry_price)}`,
+        color: openColor,
+        opacity: 1,
+      });
       if (trade.exit_price != null) {
         addLine(trade.exit_price, closeColor, LineStyle.Dotted);
-        labels.push({ key: 'CLOSE', price: trade.exit_price, text: `${verbs.close.toUpperCase()} ${fmt(trade.exit_price)}`, color: closeColor, opacity: 1 });
+        labels.push({
+          key: 'CLOSE',
+          price: trade.exit_price,
+          text: `${verbs.close.toUpperCase()} ${fmt(trade.exit_price)}`,
+          color: closeColor,
+          opacity: 1,
+        });
       }
       if (entryIndex >= 0)
-        tradeMarkers.push(short
-          ? { time: times[entryIndex]!, position: 'aboveBar', shape: 'arrowDown', color: TV.down, text: verbs.open }
-          : { time: times[entryIndex]!, position: 'belowBar', shape: 'arrowUp', color: TV.up, text: verbs.open });
+        tradeMarkers.push(
+          short
+            ? {
+                time: times[entryIndex]!,
+                position: 'aboveBar',
+                shape: 'arrowDown',
+                color: TV.down,
+                text: verbs.open,
+              }
+            : {
+                time: times[entryIndex]!,
+                position: 'belowBar',
+                shape: 'arrowUp',
+                color: TV.up,
+                text: verbs.open,
+              },
+        );
       if (exitIndex >= 0)
-        tradeMarkers.push(short
-          ? { time: times[exitIndex]!, position: 'belowBar', shape: 'arrowUp', color: TV.up, text: verbs.close }
-          : { time: times[exitIndex]!, position: 'aboveBar', shape: 'arrowDown', color: TV.down, text: verbs.close });
+        tradeMarkers.push(
+          short
+            ? {
+                time: times[exitIndex]!,
+                position: 'belowBar',
+                shape: 'arrowUp',
+                color: TV.up,
+                text: verbs.close,
+              }
+            : {
+                time: times[exitIndex]!,
+                position: 'aboveBar',
+                shape: 'arrowDown',
+                color: TV.down,
+                text: verbs.close,
+              },
+        );
     }
     markers.setMarkers(tradeMarkers);
 
@@ -689,28 +891,44 @@ export function MomentumTradeChart({
       // stock's recent average is drawn faint: the label is right, the
       // candle is not worth acting on. See candles.STRENGTH_WEAK_BELOW.
       const size = match.strength === undefined ? '' : ` · ${match.strength.toFixed(2)}×`;
-      return [{
-        start: times[start]!,
-        end: times[end]!,
-        label: `${match.name.replaceAll('_', ' ')} · ${match.timeframe}${size}`,
-        weak: match.strength !== undefined && match.strength < WEAK_STRENGTH,
-      }];
+      return [
+        {
+          start: times[start]!,
+          end: times[end]!,
+          label: `${match.name.replaceAll('_', ' ')} · ${match.timeframe}${size}`,
+          weak: match.strength !== undefined && match.strength < WEAK_STRENGTH,
+        },
+      ];
     });
     const watch: Scene['watch'] = (watchMarkers ?? []).flatMap((marker) => {
       const index = containingBarIndex(allData, marker.time, interval);
-      return index >= 0 ? [{ time: times[index]!, label: marker.label, news: marker.kind === 'news' }] : [];
+      return index >= 0
+        ? [{ time: times[index]!, label: marker.label, news: marker.kind === 'news' }]
+        : [];
     });
     const anchorPrices = watching
       ? levels.map((level) => level.price)
-      : [trade.entry_price, trade.stop, ...(trade.exit_price != null ? [trade.exit_price] : [])].filter(Number.isFinite);
+      : [
+          trade.entry_price,
+          trade.stop,
+          ...(trade.exit_price != null ? [trade.exit_price] : []),
+        ].filter(Number.isFinite);
     sceneRef.current = { patterns, labels, watch, anchorPrices, data: allData };
     for (const overlay of handles.overlays) overlay.redraw();
 
     // Opens zoomed onto the fill, as the review always starts there.
     frameRef.current = () => {
-      const count = Math.min(allData.length, Math.max(MIN_VISIBLE_BARS, Math.ceil(allData.length / defaultZoom)));
-      const start = Math.min(Math.max(0, entryIndex - Math.floor(count / 2)), allData.length - count);
-      handles.chart.timeScale().setVisibleLogicalRange({ from: start - 0.5, to: start + count - 0.5 });
+      const count = Math.min(
+        allData.length,
+        Math.max(MIN_VISIBLE_BARS, Math.ceil(allData.length / defaultZoom)),
+      );
+      const start = Math.min(
+        Math.max(0, entryIndex - Math.floor(count / 2)),
+        allData.length - count,
+      );
+      handles.chart
+        .timeScale()
+        .setVisibleLogicalRange({ from: start - 0.5, to: start + count - 0.5 });
       candles.priceScale().applyOptions({ autoScale: true });
       handles.histogram.priceScale().applyOptions({ autoScale: true });
     };
@@ -736,7 +954,10 @@ export function MomentumTradeChart({
     const next = Math.min(Math.max(width * factor, MIN_VISIBLE_BARS), total + 10);
     const center = anchor ?? (range.from + range.to) / 2;
     const ratio = next / width;
-    ts.setVisibleLogicalRange({ from: center - (center - range.from) * ratio, to: center + (range.to - center) * ratio });
+    ts.setVisibleLogicalRange({
+      from: center - (center - range.from) * ratio,
+      to: center + (range.to - center) * ratio,
+    });
   }
 
   function pan(direction: -1 | 1) {
@@ -757,7 +978,9 @@ export function MomentumTradeChart({
     return (
       <div className="rounded-xl border border-dashed border-black/15 bg-black/[0.02] px-4 py-10 text-center text-sm text-ink/55">
         {watching
-          ? 'No candles are available for this name on this session.'
+          ? interval === '5m'
+            ? 'No complete 5-minute candles are available for this session.'
+            : 'No candles are available for this name on this session.'
           : 'No candle snapshot is available for this older trade. New closed trades automatically retain their one-minute bars for chart review.'}
       </div>
     );
@@ -768,68 +991,178 @@ export function MomentumTradeChart({
   const prevClose = allData[shown - 1]?.close ?? bar.open;
   const change = bar.close - prevClose;
   const barColor = bar.close >= bar.open ? TV.up : TV.down;
-  const num = (value: number | null) => (value === null ? '∅' : value.toLocaleString(locale.numberLocale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-  const button = 'rounded px-2 py-1 text-[#b2b5be] hover:bg-[#2a2e39] hover:text-[#d1d4dc]';
+  const num = (value: number | null) =>
+    value === null
+      ? '∅'
+      : value.toLocaleString(locale.numberLocale, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+  const button =
+    'min-h-11 min-w-11 rounded px-3 py-2 text-[#b2b5be] hover:bg-[#2a2e39] hover:text-[#d1d4dc]';
 
   return (
     <div
+      data-chart-timezone={locale.timeZone}
+      data-chart-currency={locale.symbol}
+      data-review-chart
       ref={containerRef}
       tabIndex={0}
       onPointerDown={(event) => event.currentTarget.focus()}
       onKeyDown={(event) => {
-        if (event.key === '+' || event.key === '=') { event.preventDefault(); zoomTime(0.5); }
-        else if (event.key === '-') { event.preventDefault(); zoomTime(2); }
-        else if (event.key === '0') { event.preventDefault(); frameRef.current(); }
-        else if (event.key === 'ArrowLeft') { event.preventDefault(); pan(-1); }
-        else if (event.key === 'ArrowRight') { event.preventDefault(); pan(1); }
+        if (event.key === '+' || event.key === '=') {
+          event.preventDefault();
+          zoomTime(0.5);
+        } else if (event.key === '-') {
+          event.preventDefault();
+          zoomTime(2);
+        } else if (event.key === '0') {
+          event.preventDefault();
+          frameRef.current();
+        } else if (event.key === 'ArrowLeft') {
+          event.preventDefault();
+          pan(-1);
+        } else if (event.key === 'ArrowRight') {
+          event.preventDefault();
+          pan(1);
+        }
       }}
       className={`overflow-hidden rounded-xl border border-black/10 bg-[#131722] outline-none focus:ring-2 focus:ring-accent ${isFullscreen ? 'flex flex-col rounded-none' : ''}`}
-      aria-label={`${trade.symbol} ${interval} chart; plus or minus to zoom, zero to reset, arrow left/right to pan`}
+      aria-label={`${trade.symbol} ${interval} chart (${locale.timeZone}); plus or minus to zoom, zero to reset, arrow left/right to pan`}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2a2e39] px-2 py-1 text-xs">
+      <div
+        data-chart-controls
+        className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2a2e39] px-2 py-1 text-xs"
+      >
         <div className="flex items-center gap-2 px-1">
           <span className="font-semibold text-[#d1d4dc]">{trade.symbol}</span>
           <span className="rounded bg-[#2a2e39] px-1.5 py-0.5 text-[#d1d4dc]">{interval}</span>
         </div>
         <div className="flex items-center gap-0.5">
-          <button type="button" onClick={() => pan(-1)} className={button} aria-label="Show earlier candles">‹</button>
-          <button type="button" onClick={() => zoomTime(2)} className={button} aria-label="Zoom out">−</button>
-          <button type="button" onClick={() => zoomTime(0.5)} className={button} aria-label="Zoom in">+</button>
-          <button type="button" onClick={() => pan(1)} className={button} aria-label="Show later candles">›</button>
+          <button
+            type="button"
+            onClick={() => pan(-1)}
+            className={button}
+            aria-label="Show earlier candles"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            onClick={() => zoomTime(2)}
+            className={button}
+            aria-label="Zoom out"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            onClick={() => zoomTime(0.5)}
+            className={button}
+            aria-label="Zoom in"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={() => pan(1)}
+            className={button}
+            aria-label="Show later candles"
+          >
+            ›
+          </button>
           <span className="mx-1 h-4 w-px bg-[#2a2e39]" aria-hidden="true" />
-          <button type="button" onClick={() => frameRef.current()} className={button}>Reset</button>
-          <button type="button" onClick={() => { void toggleFullscreen(); }} className={button}>{isFullscreen ? 'Exit full screen' : 'Full screen'}</button>
+          <button type="button" onClick={() => frameRef.current()} className={button}>
+            Reset
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void toggleFullscreen();
+            }}
+            className={button}
+          >
+            {isFullscreen ? 'Exit full screen' : 'Full screen'}
+          </button>
         </div>
       </div>
-      <div className={`relative ${isFullscreen ? 'min-h-0 flex-1' : 'h-[540px]'}`}>
+      <div data-chart-plot className={`relative ${isFullscreen ? 'min-h-0 flex-1' : 'h-[540px]'}`}>
         <div ref={hostRef} className="absolute inset-0" />
-        <div className="pointer-events-none absolute left-2 top-1.5 z-10 text-xs leading-5" style={{ fontFamily: FONT }}>
-          <div className="flex flex-wrap gap-x-2 text-[#b2b5be]">
-            <span className="font-semibold text-[#d1d4dc]">{trade.symbol} · {interval}</span>
-            <span>O <span style={{ color: barColor }}>{num(bar.open)}</span></span>
-            <span>H <span style={{ color: barColor }}>{num(bar.high)}</span></span>
-            <span>L <span style={{ color: barColor }}>{num(bar.low)}</span></span>
-            <span>C <span style={{ color: barColor }}>{num(bar.close)}</span></span>
-            <span style={{ color: change >= 0 ? TV.up : TV.down }}>
-              {change >= 0 ? '+' : ''}{num(change)} ({change >= 0 ? '+' : ''}{prevClose ? ((change / prevClose) * 100).toFixed(2) : '0.00'}%)
-            </span>
-            <span>Vol <span style={{ color: barColor }}>{fmtVolume(bar.volume)}</span></span>
-          </div>
-          <div className="flex flex-wrap gap-x-3 text-[#b2b5be]">
-            <span>EMA 9 <span style={{ color: TV.ema9 }}>{num(bar.ema9)}</span></span>
-            <span>EMA 20 <span style={{ color: TV.ema20 }}>{num(bar.ema20)}</span></span>
-            <span>VWAP <span style={{ color: TV.vwap }}>{num(bar.vwap)}</span></span>
-          </div>
+      </div>
+      <div className="px-3 py-2 text-xs leading-5" style={{ fontFamily: FONT }}>
+        <div className="flex flex-wrap gap-x-2 text-[#b2b5be]">
+          <span className="font-semibold text-[#d1d4dc]">
+            {trade.symbol} · {interval}
+          </span>
+          <span>
+            O <span style={{ color: barColor }}>{num(bar.open)}</span>
+          </span>
+          <span>
+            H <span style={{ color: barColor }}>{num(bar.high)}</span>
+          </span>
+          <span>
+            L <span style={{ color: barColor }}>{num(bar.low)}</span>
+          </span>
+          <span>
+            C <span style={{ color: barColor }}>{num(bar.close)}</span>
+          </span>
+          <span style={{ color: change >= 0 ? TV.up : TV.down }}>
+            {change >= 0 ? '+' : ''}
+            {num(change)} ({change >= 0 ? '+' : ''}
+            {prevClose ? ((change / prevClose) * 100).toFixed(2) : '0.00'}%)
+          </span>
+          <span>
+            Vol <span style={{ color: barColor }}>{fmtVolume(bar.volume)}</span>
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-x-3 text-[#b2b5be]">
+          <span>
+            EMA 9 <span style={{ color: TV.ema9 }}>{num(bar.ema9)}</span>
+          </span>
+          <span>
+            EMA 20 <span style={{ color: TV.ema20 }}>{num(bar.ema20)}</span>
+          </span>
+          <span>
+            VWAP <span style={{ color: TV.vwap }}>{num(bar.vwap)}</span>
+          </span>
         </div>
       </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-[#2a2e39] px-3 py-1.5 text-xs text-[#b2b5be]">
-        <span className="text-amber-200">▱ completed pattern</span>
-        {levels.length > 0 && <><span style={{ color: TV.resistance }}>— resistance</span><span style={{ color: TV.support }}>— support</span><span className="text-slate-500">{watching ? 'dashed = reference at latest flag, not a trade level' : 'dashed = recorded only, gates nothing'}</span></>}
-        {watching
-          ? <><span className="text-amber-300">┆ 👀 flagged by scanner</span>{watchMarkers?.some((m) => m.kind === 'news') && <span className="text-sky-300">┆ 📰 headline published</span>}</>
-          : <><span style={{ color: TV.stop }}>- - stop</span><span style={{ color: TV.target }}>- - target</span></>}
-        <span className="text-slate-500">Drag to pan · drag the price or time axis to stretch it (double-click it to reset) · pinch or ctrl+scroll to zoom · keys: +/− zoom, 0 reset, ←/→ pan</span>
-      </div>
+      <details className="border-t border-[#2a2e39] text-[#d1d4dc]">
+        <summary className="cursor-pointer px-3 py-3 text-sm">
+          Chart legend and keyboard controls
+        </summary>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-[#2a2e39] px-3 py-1.5 text-xs text-[#b2b5be]">
+          <span className="text-amber-200">▱ completed pattern</span>
+          {levels.length > 0 && (
+            <>
+              <span style={{ color: TV.resistance }}>— resistance</span>
+              <span style={{ color: TV.support }}>— support</span>
+              <span className="text-slate-500">
+                {watching
+                  ? 'dashed = reference at latest flag, not a trade level'
+                  : 'dashed = recorded only, gates nothing'}
+              </span>
+            </>
+          )}
+          {watching ? (
+            <>
+              <span className="text-amber-300">┆ 👀 flagged by scanner</span>
+              {watchMarkers?.some((m) => m.kind === 'news') && (
+                <span className="text-sky-300">┆ 📰 headline published</span>
+              )}
+            </>
+          ) : (
+            <>
+              <span style={{ color: TV.stop }}>- - stop</span>
+              <span style={{ color: TV.target }}>- - target</span>
+            </>
+          )}
+          <span className="text-slate-500">
+            Drag to pan · drag the price or time axis to stretch it (double-click it to reset) ·
+            pinch or ctrl+scroll to zoom · keys: +/− zoom, 0 reset, ←/→ pan
+          </span>
+        </div>
+      </details>
     </div>
   );
 }

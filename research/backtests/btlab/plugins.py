@@ -192,7 +192,7 @@ ENTRY: tuple[Plugin, ...] = (
            history="BT24 entry location.",
            entry=lambda df, p: df["dist_round_pct"] >= p["min_pct"]),
     Plugin("news_reaction", "entry", "News + market reaction",
-           "Only take the trade if the stock had a MATERIAL NSE filing (results, order win, deal, rating, dividend, fund-raising, litigation…) in the look-back window AND the price has since moved up by at least the given % with the day's volume to match. Exchange queries about a move that already happened ('spurt in volume') never count. NSE only; needs the filings fetched once (the lab asks).",
+           "Only take the trade if the stock had a MATERIAL filing (NSE announcements; US: SEC 8-K items, 6-K: results, order win, deal, rating, dividend, fund-raising, litigation…) in the look-back window AND the price has since moved up by at least the given % with the day's volume to match. Exchange queries about a move that already happened ('spurt in volume') and share offerings never count. Needs the filings fetched once (the lab asks).",
            (Param("lookback_h", "News within last (h)", 24, "float", 1, 72, 1),
             Param("min_move_pct", "Price up since news ≥ %", 2.0, "float", 0, 30, 0.5),
             Param("min_rvol", "RVOL ≥", 3.0, "float", 0, 50, 0.5),

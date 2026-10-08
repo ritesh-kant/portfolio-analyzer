@@ -334,3 +334,76 @@ def test_news_reaction_plugin_needs_move_and_rvol():
     p = P.REGISTRY["news_reaction"]
     got = p.entry(df, P.resolve_params(p, None)).tolist()
     assert got == [True, False, False, False]
+
+
+def test_sec_tiers_separate_catalysts_from_dilution_and_paperwork():
+    from btlab import news_sec as S
+    assert S.sec_tier("8-K", "2.02,9.01") == "material"          # results
+    assert S.sec_tier("8-K", "7.01,9.01") == "material"          # Reg FD: where small caps file press releases
+    assert S.sec_tier("8-K", "5.02") == "unclear"                # officer change
+    assert S.sec_tier("8-K", "3.02") == "offering"               # unregistered share sale
+    assert S.sec_tier("424B5", "") == "offering"
+    assert S.sec_tier("8-K", "9.01") == "routine"
+    assert S.sec_tier("6-K", "") == "material"
+    assert S.sec_tier("10-Q", "") == "unclear"
+    assert S.sec_tier("DEF 14A", "") == "routine"
+    assert S.headline("8-K", "2.02,9.01") == "8-K · 2.02 Results of operations"
+
+
+def test_news_reaction_on_the_us_tape_reads_the_edgar_cache_in_new_york_time(tmp_path, monkeypatch):
+    import json
+    import numpy as np
+    from btlab import news, news_sec
+    monkeypatch.setattr(news_sec, "CACHE", tmp_path)
+    rows = [
+        {"t": "2026-03-02T12:30:00+00:00", "f": "8-K", "i": "7.01,9.01", "u": ""},   # 07:30 ET pre-market press release -> ref = previous close
+        {"t": "2026-03-02T14:50:00+00:00", "f": "8-K", "i": "3.02", "u": ""},        # 09:50 ET share offering: never counts
+        {"t": "2026-03-02T15:10:00+00:00", "f": "8-K", "i": "5.02", "u": ""},        # 10:10 ET officer change: unclear
+    ]
+    (tmp_path / "AAA.json").write_text(json.dumps({"cik": 1, "covered": [], "rows": rows}))
+    n = 60
+    m1 = np.arange(n) * 1 + 570                                                     # 1-minute bars from 09:30 New York
+    o = np.full(n, 11.0)
+    o[40] = 12.0                                                                    # the 10:10 bar opens at 12
+    arr = {"m1_min": m1, "m1_o": o}
+    df = pd.DataFrame([dict(symbol="AAA", date="2026-03-02", day_key=KEY, decision_min=620, prev_close=10.0, close5=13.0)])
+    got = news.stamp_reaction(df, {KEY: arr}, 24, "material", "US")
+    assert got[0] == pytest.approx(30.0)                                            # 13 vs the previous close of 10 (pre-market news)
+    assert np.isnan(news.stamp_reaction(df, {KEY: arr}, 1.5, "material", "US")[0])  # the 07:30 release is outside a 1.5 h window ending 10:20
+    loose = news.stamp_reaction(df, {KEY: arr}, 1.5, "material+unclear", "US")
+    assert loose[0] == pytest.approx((13.0 / 12.0 - 1) * 100)                       # the 5.02 at 10:10 counts: reference = first open at or after it
+    assert news.missing_symbols({"AAA": (pd.Timestamp("2026-03-01").date(), pd.Timestamp("2026-03-02").date())}, "US") == ["AAA"]   # cache has no covered range yet
+
+
+def test_prefetch_for_the_us_refuses_without_an_sec_contact(monkeypatch):
+    from btlab import news, news_sec
+    monkeypatch.setattr(news_sec, "user_agent", lambda: "")
+    r = news.prefetch_start({"AAA": (pd.Timestamp("2026-03-01").date(), pd.Timestamp("2026-03-02").date())}, "US")
+    assert "SEC_USER_AGENT" in r["error"]
+
+
+def test_chart_marks_for_a_us_trade_come_from_the_edgar_cache(tmp_path, monkeypatch):
+    import json
+    import bt32_strategy_report as bt32
+    from btlab import news_sec
+    monkeypatch.setattr(news_sec, "CACHE", tmp_path)
+    rows = [{"t": "2026-03-02T12:30:00+00:00", "f": "8-K", "i": "7.01", "u": ""},      # 07:30 ET, before the open
+            {"t": "2026-03-02T15:00:00+00:00", "f": "424B5", "i": "", "u": ""},        # 10:00 ET offering
+            {"t": "2026-03-02T15:05:00+00:00", "f": "DEF 14A", "i": "", "u": ""},      # routine: left out
+            {"t": "2026-02-20T15:00:00+00:00", "f": "8-K", "i": "2.02", "u": ""}]      # too old
+    (tmp_path / "AAA.json").write_text(json.dumps({"cik": 1, "covered": [], "rows": rows}))
+    got = bt32.news_marks("AAA", pd.Timestamp("2026-03-02"), True)
+    assert [(g["t"], g["pre"], g["k"]) for g in got] == [("07:30", True, "material"), ("10:00", False, "offering")]
+    assert got[0]["h"] == "8-K · 7.01 Reg FD disclosure"
+
+
+def test_entry_status_badges_a_trade_from_the_cache_and_stays_silent_when_not_fetched(tmp_path, monkeypatch):
+    import json
+    from btlab import news, news_sec
+    monkeypatch.setattr(news_sec, "CACHE", tmp_path)
+    rows = [{"t": "2026-04-10T01:35:00+00:00", "f": "8-K", "i": "1.01,8.01", "u": ""}]       # 21:35 ET on 9 Apr
+    (tmp_path / "MEDS.json").write_text(json.dumps({"cik": 1, "covered": [["2026-04-01", "2026-04-30"]], "rows": rows}))
+    st = news.entry_status("MEDS", "2026-04-10", "13:09", "US")
+    assert st["status"] == "news" and "1.01 Material agreement" in st["items"][0]
+    assert news.entry_status("MEDS", "2026-04-10", "13:09", "US", hours=10)["status"] == "none"   # 21:35 is 15.5 h earlier
+    assert news.entry_status("ZZZ", "2026-04-10", "13:09", "US") is None                          # never fetched: no false 'no filing'

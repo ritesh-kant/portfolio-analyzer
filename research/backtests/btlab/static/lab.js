@@ -393,18 +393,21 @@ async function ensureBuilt() {
 
 // The 'News + market reaction' indicator reads NSE filings; fetch the ones never fetched (one request per symbol, ~2 s each), then re-run.
 async function ensureNews(need, plugins) {
-  const ok = confirm(`'News + market reaction' needs NSE filings for ${need.symbols} of ${need.total} symbols that were never fetched.\n\n` +
-    `About ${Math.ceil(need.est_s / 60)} min, one polite request per symbol; cached forever after, shared by every run. Fetch now?`);
+  const ok = confirm(`'News + market reaction' needs ${need.source || "NSE"} filings for ${need.symbols} of ${need.total} symbols that were never fetched.\n\n` +
+    `About ${Math.max(1, Math.ceil(need.est_s / 60))} min, one polite request per symbol; cached forever after, shared by every run. Fetch now?`);
   if (!ok) return false;
   const job = await api("/api/lab/news/prefetch", "POST", payload(plugins));
   if (!job.ok) { banner(job.data?.error || "could not start the news fetch", "err"); return false; }
   const key = job.data.key;
   for (;;) {
     const j = (await api(`/api/lab/news/prefetch/${key}`)).data || {};
-    if (j.state === "done") break;
+    if (j.state === "done") {
+      if (j.unmapped?.length) { banner(`${j.unmapped.length} symbol(s) have no EDGAR CIK today (delisted or renamed) and count as 'no filing': ${j.unmapped.slice(0, 6).join(", ")}${j.unmapped.length > 6 ? "…" : ""}`, ""); await new Promise((res) => setTimeout(res, 4000)); }
+      break;
+    }
     if (j.state === "cancelled") { banner("News fetch cancelled — nothing was run.", "err"); setTimeout(() => banner(""), 3000); return false; }
     if (j.state === "failed" || j.state === "unknown") { banner(j.error || "News fetch failed", "err"); return false; }
-    banner(`Fetching NSE filings… ${j.done || 0}/${j.total || need.symbols} symbols (one-time, cached afterwards)`, "", j.total ? j.done / j.total : 0,
+    banner(`Fetching ${need.source || "NSE"} filings… ${j.done || 0}/${j.total || need.symbols} symbols (one-time, cached afterwards)`, "", j.total ? j.done / j.total : 0,
       () => api("/api/lab/news/prefetch/cancel", "POST", { key }));
     await new Promise((res) => setTimeout(res, 2000));
   }

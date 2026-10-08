@@ -12,7 +12,7 @@ const US_WATCHLIST: WatchlistMarket = {
   open: '09:30',
   title: 'US momentum watchlist',
   intro:
-    'Every name that passed the US screen, day by day, with the 1-minute bars the session traded on and a 5-minute view. Times are New York time (or India time with the toggle); money is in dollars.',
+    'Choose a stock and session to review scanner flags and charts. Prices are in US dollars; switch the clock between New York and India time.',
   links: [
     { href: '/momentum/us', label: '← US momentum' },
     { href: '/momentum/watchlist', label: 'NSE watchlist →' },
@@ -38,7 +38,12 @@ export default function USMomentumWatchlistPage() {
   return (
     <>
       <div className="mx-auto flex max-w-6xl justify-end px-4 pt-4">
-        <button type="button" onClick={() => setIst((v) => !v)} className="metric-chip px-3 py-1 text-xs">
+        <button
+          type="button"
+          aria-pressed={ist}
+          onClick={() => setIst((v) => !v)}
+          className="metric-chip min-h-11 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+        >
           Times in {ist ? 'IST' : 'ET'} · show {ist ? 'ET' : 'IST'}
         </button>
       </div>
