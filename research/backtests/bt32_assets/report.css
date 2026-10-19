@@ -82,6 +82,12 @@ body.has-zoom { overflow: hidden; }
 }
 .toolbar button:hover:not(:disabled) { color: var(--ink); border-color: var(--dim); }
 .toolbar button:disabled { opacity: .35; cursor: not-allowed; }
+.toolbar .tfsw { display: inline-flex; }
+.toolbar .tfsw button { border-radius: 0; }
+.toolbar .tfsw button:first-child { border-radius: 5px 0 0 5px; }
+.toolbar .tfsw button:last-child { border-radius: 0 5px 5px 0; margin-left: -1px; }
+.toolbar .btns > button[aria-pressed="true"] { color: var(--ink); border-color: #e2b93b; background: #2a2412; }
+.toolbar .tfsw button[aria-pressed="true"] { color: var(--ink); border-color: var(--acc); background: #2a2412; position: relative; z-index: 1; }
 .toolbar .sep { width: 1px; height: 14px; background: var(--line); margin: 0 3px; }
 .readout {
   min-height: 17px; padding: 2px 4px 4px; font-size: 11px; color: var(--dim);
@@ -314,3 +320,122 @@ html:has(body.pdf-document){background:#fff}
 .newsline .nl{font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid #f59e0b;color:#fcd34d;background:rgba(245,158,11,.08)}
 .newsline .nl.unclear,.newsline .nl.query{border-style:dashed;opacity:.7}
 .newsline .nl.offering{border-color:#fb7185;color:#fda4af;background:rgba(251,113,133,.08)}
+
+/* ---- fixed range volume profile settings ---- */
+.vp-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 8px; margin-bottom: 6px;
+  border: 1px solid var(--line); border-radius: 6px; background: #0f1620; font-size: 11.5px; color: var(--dim); }
+.vp-panel label { display: inline-flex; align-items: center; gap: 4px; }
+.vp-panel select, .vp-panel input { background: #101922; color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; font-size: 11.5px; }
+.vp-panel input[type=number] { width: 56px; }
+.vp-panel button { background: #0f1620; color: var(--dim); border: 1px solid var(--line); border-radius: 5px; padding: 2px 7px; font-size: 11.5px; cursor: pointer; }
+.vp-panel button[aria-pressed="true"] { color: var(--ink); border-color: #e2b93b; background: #2a2412; }
+.vp-info { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 2px 14px; font-variant-numeric: tabular-nums; }
+.vp-info span { display: inline-flex; align-items: center; gap: 4px; }
+.vp-info i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.vp-info b { color: var(--ink); font-weight: 500; }
+.vp-panel .vp-title { color: var(--ink); font-weight: 600; }
+.vp-panel select:disabled, .vp-panel input:disabled, .vp-panel button:disabled { opacity: .4; cursor: not-allowed; }
+.vp-panel input[type=checkbox] { width: auto; }
+.vp-info .warn { color: #fbbf24; }
+
+/* ---------- compact trade card (2026-10-13): the chart gets the space ----------
+   Header = 2 rows (title + P&L; key prices + facts + filings dropdown), one slim toolbar, the chart sized to the
+   viewport. The 44px touch targets above stay on touch screens; a mouse gets 28px controls. */
+.card { padding: 8px 10px 4px; }
+.card-head { display: block; }
+.ch-title { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 14px; }
+.ch-title h2 { margin: 0; font-size: 15px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.ch-title h2 .sym { font-weight: 700; letter-spacing: .2px; }
+.ch-title h2 .sub { color: var(--dim); font-weight: 400; font-size: 13px; }
+.ch-title h2 .newsb { margin-left: 0; }
+.card-head .kpi { text-align: right; white-space: nowrap; font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.card-head .kpi b { display: inline; font-size: 13px; font-weight: 600; color: var(--ink); }
+.card-head .kpi b.pos { color: var(--up); } .card-head .kpi b.neg { color: var(--dn); }
+.card-head .kpi .kd { margin: 0 6px; opacity: .5; }
+.ch-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 12px; margin-top: 5px; }
+.ch-meta .keys { margin-top: 0; gap: 4px; }
+.ch-meta .key { font-size: 11.5px; padding: 1px 7px; }
+.card-head .ch-meta .meta { margin: 0; font-size: 12px; }
+details.filings { position: relative; font-size: 12px; }
+details.filings > summary { min-height: 0; cursor: pointer; list-style: none; padding: 1px 9px; border-radius: 999px;
+  border: 1px solid #f59e0b; color: #fcd34d; background: rgba(245,158,11,.08); }
+details.filings > summary::-webkit-details-marker { display: none; }
+details.filings > summary::after { content: " \25BE"; }
+details.filings[open] > .newsline { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; width: max-content; max-width: min(560px, 90vw);
+  display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 8px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+.newsline .nl { border-radius: 6px; }
+
+.card .toolbar { flex-wrap: nowrap; gap: 8px; padding: 6px 0; }
+.card .toolbar .btns { flex-wrap: wrap; gap: 3px; min-width: 0; }
+.card .toolbar .zlabel { white-space: nowrap; font-size: 11.5px; color: var(--dim); margin-left: auto; }
+.card .toolbar .sep { display: inline-block; width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+.card .toolbar .btns > button[aria-pressed="true"] { color: var(--ink); border-color: #e2b93b; background: #2a2412; }
+.card .advanced-chart { position: relative; }
+.card .advanced-chart > summary { list-style: none; color: var(--dim); }
+.card .advanced-chart > summary::-webkit-details-marker { display: none; }
+.card .advanced-chart > summary::after { content: " \25BE"; }
+.card .advanced-chart > .pop { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; display: flex; flex-wrap: nowrap; gap: 3px;
+  padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+.trade-explorer .card .advanced-chart[open] { flex-basis: auto; order: 0; }
+.trade-explorer .card .advanced-chart .btns { padding: 6px; }
+
+.card .chart { height: clamp(520px, calc(100vh - 190px), 1000px); }
+.card:fullscreen .chart, .card.zoomed .chart { height: calc(100vh - 160px) !important; }
+.card:fullscreen, .card.zoomed { justify-content: flex-start; }
+.chart-legend { top: 4px; left: 8px; font-size: 11.5px; line-height: 1.45; }
+.chart-legend .l3 { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 2px; color: var(--ink); }
+.chart-legend .l3 .nt { color: #fcd34d; }
+.card .readout { padding: 4px 2px 2px; font-size: 11.5px; }
+.card details.levels { margin: 0 2px 4px; }
+.card .vp-panel { gap: 4px 10px; padding: 5px 8px; margin: 0 0 6px; }
+.card .vp-info { gap: 2px 12px; }
+
+@media (pointer: fine) {
+  .card .toolbar button, .card .toolbar summary, .card .vp-panel button, .card .vp-panel select, .card .vp-panel input,
+  .card details.levels > summary, .card details.filings > summary {
+    min-height: 28px; padding: 3px 9px; font-size: 12.5px; line-height: 1.3; border-radius: 6px;
+  }
+  .card .toolbar summary { display: inline-flex; align-items: center; border: 1px solid var(--line); background: #0f1620; cursor: pointer; }
+  .card .vp-panel select, .card .vp-panel input { padding: 2px 5px; }
+  .card details.filings > summary { min-height: 22px; padding: 1px 9px; border-radius: 999px; }
+  .card details.levels > summary { min-height: 0; padding: 4px 0; }
+}
+@media (max-width: 650px) {
+  .ch-title { display: block; } .card-head .kpi { text-align: left; white-space: normal; margin-top: 2px; }
+  .card .toolbar { flex-wrap: wrap; } .card .toolbar .zlabel { margin-left: 0; }
+  .card .chart { height: clamp(460px, calc(100vh - 160px), 760px); }
+}
+.card .advanced-chart > .pop button { white-space: nowrap; }
+.vp-panel.idle > label, .vp-panel.idle > button { display: none; }
+.vp-panel.idle .vp-info { flex-basis: auto; }
+.card .toolbar summary { display: inline-flex; align-items: center; border: 1px solid var(--line); background: #0f1620; border-radius: 6px; padding: 8px 10px; cursor: pointer; }
+@media (pointer: fine) { .card .toolbar summary { padding: 3px 9px; } }
+@media (max-width: 650px) { .card .toolbar .btns { gap: 4px; } .card .toolbar button { padding: 8px 9px; } }
+.card .toolbar .histsel { background: #0f1620; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0; }
+@media (pointer: fine) { .card .toolbar .histsel { min-height: 28px; padding: 2px 6px; font-size: 12.5px; } }
+
+/* ---------- card header: outcome, R, plain-language story, trade-to-trade navigation ---------- */
+.ch-title { align-items: center; }
+.card-head .kpi { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-left: auto; }
+.card-head .kpi .outcome { font-size: 12px; font-weight: 700; letter-spacing: .04em; padding: 2px 10px; border-radius: 999px; border: 1px solid; }
+.card-head .kpi .outcome b { font-size: 14px; letter-spacing: 0; margin-left: 2px; color: inherit; }
+.card-head .kpi .outcome.win { color: var(--up); border-color: #1f5f52; background: #0d2b26; }
+.card-head .kpi .outcome.loss { color: var(--dn); border-color: #5f1f2e; background: #2b1219; }
+.card-head .kpi .rmul { font-weight: 700; font-size: 13px; color: var(--ink); }
+.card-head .kpi .rmul.pos { color: var(--up); } .card-head .kpi .rmul.neg { color: var(--dn); }
+.card-head .kpi .kmore { font-size: 11.5px; color: var(--dim); }
+.tnav { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; }
+.tnav button { background: #0f1620; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; min-width: 28px; min-height: 28px; font-size: 16px; line-height: 1; cursor: pointer; }
+.tnav button:hover { border-color: var(--acc); }
+.tnav-lbl { font-size: 12px; color: var(--dim); min-width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
+.card .story { margin: 6px 0 2px; font-size: 13px; color: var(--dim); line-height: 1.5; }
+.card .story b { color: var(--ink); font-weight: 600; }
+.card.flash { box-shadow: 0 0 0 2px var(--acc); transition: box-shadow .3s; }
+.kbd-hint { font-size: 12px; color: var(--dim); margin: 6px 0 0; }
+.kbd-hint kbd { display: inline-block; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font: 11px/1.5 ui-monospace, monospace; color: var(--ink); background: #0f1620; }
+@media (max-width: 650px) {
+  .card-head .kpi { margin-left: 0; margin-top: 4px; }
+  .tnav { margin: 6px 0 0; }
+}
+@media print { .tnav, .kbd-hint { display: none !important; } }

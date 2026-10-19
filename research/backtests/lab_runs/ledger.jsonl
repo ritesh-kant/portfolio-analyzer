@@ -193,3 +193,52 @@
 {"id": "20261008-213835-1f2805", "key": "1f2805598f20", "window": "af6d3c7c2d30", "at": "2026-10-08T21:38:35", "plugins": ["news_reaction", "resistance_rule", "vwap_exit"]}
 {"id": "20261008-213851-4d209e", "key": "4d209ec56c11", "window": "af6d3c7c2d30", "at": "2026-10-08T21:38:51", "plugins": ["news_reaction", "resistance_rule", "target_fixed_rr", "vwap_exit"]}
 {"id": "20261008-214130-331280", "key": "33128044cdaa", "window": "af6d3c7c2d30", "at": "2026-10-08T21:41:30", "plugins": ["news_reaction", "resistance_rule", "target_fixed_rr"]}
+{"id": "20261008-224156-04fcc9", "key": "04fcc90d6962", "window": "af6d3c7c2d30", "at": "2026-10-08T22:41:56", "plugins": ["news_reaction", "resistance_rule", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261008-224308-21b196", "key": "21b196534f4d", "window": "af6d3c7c2d30", "at": "2026-10-08T22:43:08", "plugins": ["checkpoint_stop", "news_reaction", "resistance_rule", "tap_high_ceiling"]}
+{"id": "20261010-223647-500539", "key": "5005399c9110", "window": "77ef1f0f2667", "at": "2026-10-10T22:36:47", "plugins": []}
+{"id": "20261010-223657-7d6d22", "key": "7d6d22f97dfe", "window": "77ef1f0f2667", "at": "2026-10-10T22:36:57", "plugins": ["checkpoint_stop", "news_reaction", "resistance_rule", "tap_high_ceiling"]}
+{"id": "20261011-153741-a7de16", "key": "a7de16af36bf", "window": "77ef1f0f2667", "at": "2026-10-11T15:37:41", "plugins": ["checkpoint_stop", "news_reaction", "resistance_rule", "tap_high_ceiling"]}
+{"id": "20261011-153818-d28a03", "key": "d28a03c2c45f", "window": "77ef1f0f2667", "at": "2026-10-11T15:38:18", "plugins": ["news_reaction", "resistance_rule", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261011-155253-a793c5", "key": "a793c5284957", "window": "673e24d0896e", "at": "2026-10-11T15:52:53", "plugins": []}
+{"id": "20261011-155254-cee438", "key": "cee4380bf6ae", "window": "673e24d0896e", "at": "2026-10-11T15:52:54", "plugins": ["checkpoint_stop", "news", "resistance_rule", "tap_high_ceiling"]}
+{"id": "20261011-155324-4d1a19", "key": "4d1a19756bc6", "window": "e76a7f714134", "at": "2026-10-11T15:53:24", "plugins": []}
+{"id": "20261011-155325-53620d", "key": "53620d743bef", "window": "e76a7f714134", "at": "2026-10-11T15:53:25", "plugins": ["checkpoint_stop", "news", "resistance_rule", "tap_high_ceiling"]}
+{"id": "20261011-155409-6f288c", "key": "6f288c150d78", "window": "e76a7f714134", "at": "2026-10-11T15:54:09", "plugins": ["news", "resistance_rule", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261011-161315-b8849e", "key": "b8849ed53f67", "window": "77ef1f0f2667", "at": "2026-10-11T16:13:15", "plugins": ["news", "resistance_rule", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261011-205304-1ef582", "key": "1ef5822ce03e", "window": "77ef1f0f2667", "at": "2026-10-11T20:53:04", "plugins": ["market_reaction", "news", "resistance_rule", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261011-212907-5f2376", "key": "5f23763dcda8", "window": "77ef1f0f2667", "at": "2026-10-11T21:29:07", "plugins": ["market_reaction", "news", "resistance_rule", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261011-213051-77b541", "key": "77b54164e3d9", "window": "e76a7f714134", "at": "2026-10-11T21:30:51", "plugins": ["market_reaction", "news"]}
+{"id": "20261011-233121-a771a2", "key": "a771a225d4fa", "window": "e76a7f714134", "at": "2026-10-11T23:31:21", "plugins": ["market_reaction", "news"]}
+{"id": "20261012-103600-f63fce", "key": "f63fce6f873d", "window": "e76a7f714134", "at": "2026-10-12T10:36:00", "plugins": ["market_reaction", "news", "target_fixed_rr"]}
+{"id": "20261012-121517-747831", "key": "747831d46046", "window": "a1506ecb5f6a", "at": "2026-10-12T12:15:17", "plugins": []}
+{"id": "20261012-121518-3685a1", "key": "3685a12412dc", "window": "a1506ecb5f6a", "at": "2026-10-12T12:15:18", "plugins": ["indecision_candle", "market_reaction", "news", "target_fixed_rr"]}
+{"id": "20261012-155205-9f56ba", "key": "9f56ba5b4101", "window": "2ae9d7d996d2", "at": "2026-10-12T15:52:05", "plugins": []}
+{"id": "20261012-155206-fbff2e", "key": "fbff2ebfe53c", "window": "2ae9d7d996d2", "at": "2026-10-12T15:52:06", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-160322-3ebc56", "key": "3ebc5661895a", "window": "2ae9d7d996d2", "at": "2026-10-12T16:03:22", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-161326-27589c", "key": "27589c61ab44", "window": "2ae9d7d996d2", "at": "2026-10-12T16:13:26", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-162154-4c290d", "key": "4c290d50e535", "window": "2ae9d7d996d2", "at": "2026-10-12T16:21:54", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-163755-c71dee", "key": "c71dee634f30", "window": "6c56d7f17047", "at": "2026-10-12T16:37:55", "plugins": []}
+{"id": "20261012-163806-da39ea", "key": "da39ea2c27e2", "window": "6c56d7f17047", "at": "2026-10-12T16:38:06", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-164919-e98c24", "key": "e98c24fbdc99", "window": "6c56d7f17047", "at": "2026-10-12T16:49:19", "plugins": ["news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-170328-bf68e3", "key": "bf68e3a63cde", "window": "df726b0517fa", "at": "2026-10-12T17:03:28", "plugins": []}
+{"id": "20261012-170330-b821ef", "key": "b821ef5c5c43", "window": "df726b0517fa", "at": "2026-10-12T17:03:30", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-170349-0e9520", "key": "0e9520d0182f", "window": "df726b0517fa", "at": "2026-10-12T17:03:49", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-170358-eab94a", "key": "eab94a079115", "window": "df726b0517fa", "at": "2026-10-12T17:03:58", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-170533-aaf785", "key": "aaf78503ad0f", "window": "df726b0517fa", "at": "2026-10-12T17:05:33", "plugins": ["news"]}
+{"id": "20261012-170541-2b2fb8", "key": "2b2fb8a4ca9f", "window": "df726b0517fa", "at": "2026-10-12T17:05:41", "plugins": ["news"]}
+{"id": "20261012-170557-a46461", "key": "a46461626d64", "window": "df726b0517fa", "at": "2026-10-12T17:05:57", "plugins": ["news"]}
+{"id": "20261012-170633-80b810", "key": "80b81041e8aa", "window": "df726b0517fa", "at": "2026-10-12T17:06:33", "plugins": ["market_reaction", "news"]}
+{"id": "20261012-170738-e292d5", "key": "e292d59231ff", "window": "df726b0517fa", "at": "2026-10-12T17:07:38", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-170748-ace1da", "key": "ace1dac3c53c", "window": "df726b0517fa", "at": "2026-10-12T17:07:48", "plugins": ["news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-170913-2b7143", "key": "2b71430b0289", "window": "2ae9d7d996d2", "at": "2026-10-12T17:09:13", "plugins": ["market_reaction", "news"]}
+{"id": "20261012-170921-584dea", "key": "584dea6902af", "window": "2ae9d7d996d2", "at": "2026-10-12T17:09:21", "plugins": ["market_reaction", "news"]}
+{"id": "20261012-171155-296d20", "key": "296d20b883a6", "window": "2ae9d7d996d2", "at": "2026-10-12T17:11:55", "plugins": ["checkpoint_stop", "market_reaction", "news"]}
+{"id": "20261012-171524-970b09", "key": "970b09e3c1e4", "window": "2ae9d7d996d2", "at": "2026-10-12T17:15:24", "plugins": ["market_reaction", "news", "target_fixed_rr"]}
+{"id": "20261012-171620-52d51c", "key": "52d51cae0269", "window": "2ae9d7d996d2", "at": "2026-10-12T17:16:20", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-181559-aaec1f", "key": "aaec1fb5bd81", "window": "6c56d7f17047", "at": "2026-10-12T18:15:59", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-191828-dac55c", "key": "dac55cb1f5c5", "window": "6c56d7f17047", "at": "2026-10-12T19:18:28", "plugins": ["news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-194506-be17e6", "key": "be17e6bb99fb", "window": "6c56d7f17047", "at": "2026-10-12T19:45:06", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-202221-608003", "key": "608003faf6fb", "window": "6c56d7f17047", "at": "2026-10-12T20:22:21", "plugins": ["market_reaction", "news", "news_pullback", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-202302-9538f8", "key": "9538f8e49f90", "window": "6c56d7f17047", "at": "2026-10-12T20:23:02", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-202353-371080", "key": "3710800fdaf6", "window": "6c56d7f17047", "at": "2026-10-12T20:23:53", "plugins": ["market_reaction", "news", "news_pullback", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261012-205104-ed4ba5", "key": "ed4ba59b1a40", "window": "6c56d7f17047", "at": "2026-10-12T20:51:04", "plugins": ["market_reaction", "news", "news_pullback", "tap_high_ceiling", "target_fixed_rr"]}

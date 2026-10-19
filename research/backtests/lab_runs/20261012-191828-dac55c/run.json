@@ -1,0 +1,231 @@
+{
+ "id": "20261012-191828-dac55c",
+ "key": "dac55cb1f5c5",
+ "window": "6c56d7f17047",
+ "created_at": "2026-10-12T19:18:28",
+ "name": "Entry: News \u00b7 Exit: Tap-high ceiling + Fixed R target",
+ "notes": "",
+ "starred": false,
+ "is_base": false,
+ "base_id": "20261012-181547-c71dee",
+ "config": {
+  "years": [
+   2026
+  ],
+  "base": {
+   "day_chg_max": 500.0,
+   "day_chg_min": 1.0,
+   "entry_cutoff_min": 870,
+   "entry_mode": "market",
+   "entry_slip_pct": 0.03,
+   "fill_valid_minutes": 15,
+   "pattern_tf": "1m",
+   "rvol_min": 1.5,
+   "session_level_sessions": 10,
+   "stop_buffer_pct": 0.1,
+   "target_buffer_pct": 0.15
+  },
+  "patterns": [
+   "bullish_engulfing",
+   "dragonfly_doji",
+   "hammer",
+   "inverted_hammer",
+   "morning_doji_star",
+   "morning_star",
+   "rising_three",
+   "three_white_soldiers",
+   "tweezer_bottom"
+  ],
+  "risk_inr": 500.0,
+  "max_notional_inr": 100000.0,
+  "max_trades": 0,
+  "plugins": [
+   {
+    "id": "news",
+    "params": {
+     "bar_window_min": 30,
+     "lookback_h": 2.0,
+     "scope": "material",
+     "trigger": "news_bar"
+    }
+   },
+   {
+    "id": "tap_high_ceiling",
+    "params": {
+     "touches": "3"
+    }
+   },
+   {
+    "id": "target_fixed_rr",
+    "params": {
+     "rr": 2.0,
+     "stop_x": 1.0
+    }
+   }
+  ],
+  "indicator_revisions": {
+   "news": 4
+  },
+  "news_data_key": "1d0b720e3bdcb96b",
+  "lab_version": "lab-1"
+ },
+ "git": {
+  "sha": "3afcb07",
+  "dirty": true
+ },
+ "metrics": {
+  "n": 81,
+  "symbols": 61,
+  "days": 49,
+  "win_pct": 22.2,
+  "gross_pct_mean": -0.2728,
+  "net_real_pct_mean": -0.4652,
+  "net_stress_pct_mean": -1.2641,
+  "net_real_inr": -23511.0,
+  "net_stress_inr": -73488.0,
+  "gross_inr": -11684.0,
+  "costs_inr": 11828.0,
+  "mean_inr": -290.26,
+  "median_inr": -585.95,
+  "mean_ex_top5_inr": -366.87,
+  "top5_share_pct": null,
+  "profit_factor": 0.35,
+  "avg_win_inr": 695.3,
+  "avg_loss_inr": -571.9,
+  "max_drawdown_inr": -24364.0,
+  "deployed_inr": 6252946.0,
+  "return_on_deployed_pct": -0.376,
+  "mean_r": -0.652,
+  "target_hit_pct": 19.8,
+  "stop_pct": 70.4,
+  "exit_mix": {
+   "stop": 57,
+   "target": 16,
+   "eod": 8
+  },
+  "stop_source_mix": {
+   "support": 81
+  },
+  "by_year": [
+   {
+    "year": 2026,
+    "n": 81,
+    "net_real_inr": -23511.0,
+    "mean_inr": -290.3,
+    "win_pct": 22.2
+   }
+  ],
+  "curve": [
+   -639.4,
+   -1283.6,
+   -424.8,
+   -1036.0,
+   -1593.3,
+   -1124.5,
+   -577.0,
+   -1097.9,
+   -1694.9,
+   -2354.2,
+   -2511.5,
+   -3059.7,
+   -3663.2,
+   -4303.8,
+   -4900.2,
+   -4058.3,
+   -4715.8,
+   -5360.0,
+   -5923.7,
+   -6540.9,
+   -7211.8,
+   -6374.6,
+   -7009.7,
+   -6510.9,
+   -7116.6,
+   -7779.6,
+   -7792.7,
+   -7007.0,
+   -7601.8,
+   -7843.4,
+   -7586.9,
+   -8245.4,
+   -8819.0,
+   -9416.2,
+   -10041.3,
+   -10575.5,
+   -9828.3,
+   -10342.9,
+   -11016.1,
+   -11368.5,
+   -11721.8,
+   -12320.4,
+   -11611.0,
+   -12202.3,
+   -12614.1,
+   -13279.8,
+   -12514.1,
+   -12447.0,
+   -13041.0,
+   -12169.5,
+   -12792.0,
+   -13410.0,
+   -12521.0,
+   -13062.7,
+   -13648.7,
+   -14210.6,
+   -14882.8,
+   -15486.0,
+   -14667.8,
+   -15331.7,
+   -15950.1,
+   -16468.2,
+   -17102.3,
+   -17764.9,
+   -18342.1,
+   -18975.2,
+   -19485.4,
+   -20029.1,
+   -20622.1,
+   -21297.3,
+   -21909.4,
+   -22512.1,
+   -21613.2,
+   -22126.0,
+   -22781.9,
+   -23406.0,
+   -24000.5,
+   -23199.8,
+   -23782.1,
+   -24363.6,
+   -23511.4
+  ]
+ },
+ "vs_base": {
+  "base_id": "20261012-181547-c71dee",
+  "overlap": {
+   "base_n": 40973,
+   "run_n": 81,
+   "same": 59,
+   "dropped": 40914,
+   "new": 22
+  },
+  "removed": {
+   "n": 40914,
+   "mean_inr": -187.64,
+   "median_inr": -104.07,
+   "net_real_inr": -7676994.0
+  },
+  "kept_vs_removed": {
+   "z": -3.52,
+   "p": 0.0
+  },
+  "paired": {
+   "n": 59,
+   "mean_change_inr": 52.81,
+   "median_change_inr": 0.0,
+   "changed": 21,
+   "z": 0.91,
+   "p": 0.364
+  }
+ },
+ "trial_n": 4
+}

@@ -216,10 +216,12 @@ def initial_state(
     with_levels: bool = False,
     add_shelves: bool = False,
     atr: float | None = None,
+    tap_min_touches: int = 0,
 ) -> ExitState:
     levels: list[Level] = []
     if with_levels and bars_tf is not None and not bars_tf.empty:
-        levels = derive_levels(bars_tf, prev_day, orb, add_shelves=add_shelves, atr=atr)
+        levels = derive_levels(bars_tf, prev_day, orb, add_shelves=add_shelves, atr=atr,
+                               tap_min_touches=tap_min_touches)
     return ExitState(entry=entry, hard_stop=hard_stop, trail=hard_stop, highest=entry,
                      levels=levels,
                      structural_support=nearest_structural_support(levels, entry),

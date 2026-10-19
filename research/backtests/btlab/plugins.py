@@ -102,6 +102,37 @@ def _resistance(df: pd.DataFrame, p: dict) -> pd.Series:
     return (dist >= p["min_pct"]) & (dist <= p["max_pct"]) & _kind_ok(df["resistance_kind"], p["kind"], "pivot_high")
 
 
+def _news_pullback(df: pd.DataFrame, p: dict) -> pd.Series:
+    one = p["timeframe"] == "1m"
+    col = df["news_pullback_ord_1m" if one else "news_pullback_ord"]
+    return (col >= p["min_ordinal"]) & (col <= p["max_ordinal"]) & df["news_in_pullback_1m" if one else "news_in_pullback"].astype(bool)
+
+
+def _news(df: pd.DataFrame, p: dict) -> pd.Series:
+    ok = df["news_move_pct"].notna()
+    if p.get("trigger") == "news_bar":
+        ok &= df["news_delay_min"].le(p["bar_window_min"])         # NaN (no filing) compares False
+        ok &= df["news_move_pct"].ge(p["bar_min_move_pct"])        # never buy a bar that is down on the filing
+    return ok
+
+
+def news_bar_trigger(selected: list[dict]) -> bool:
+    return any(x["id"] == "news" and x["params"].get("trigger") == "news_bar" for x in selected)
+
+
+def first_news_bar(df: pd.DataFrame, selected: list[dict]) -> pd.DataFrame:
+    """The news-bar trigger: of the rows that passed every entry indicator, only the first per stock per day.
+
+    "First" is by decision bar, so the trade is the earliest bar at which the filing, its window and the
+    price / volume tests all hold. One trade per stock per day, so a stop-out is not re-entered on the same
+    story by a later bar (or by another filing of the same news cluster).
+    """
+    if df.empty or not news_bar_trigger(selected):
+        return df
+    ordered = df.sort_values(["date", "symbol", "decision_min", "fill_min"], kind="stable")
+    return ordered[~ordered.duplicated(["date", "symbol"])]
+
+
 ENTRY: tuple[Plugin, ...] = (
     Plugin("time_window", "entry", "Time of day",
            "Only take entries inside a clock window (decision after the start, fill before the end).",
@@ -161,11 +192,19 @@ ENTRY: tuple[Plugin, ...] = (
            "Skip trades whose support stop is further than this below the entry.",
            (Param("max_pct", "Stop ≤ % below", 1.5, "float", 0.3, 3, 0.1),),
            entry=lambda df, p: (df["fill"] - df["stop"]) / df["fill"] * 100.0 <= p["max_pct"]),
-    Plugin("pullback_ordinal", "entry", "First / second pullback only",
-           "The pattern is the 1st or 2nd pullback after the day's first sharp advance.",
-           (Param("max_ordinal", "Pullback ≤", 2, "int", 1, 6, 1),),
-           history="BT20 pullback ordinal.",
-           entry=lambda df, p: (df["pullback_ord"] >= 1) & (df["pullback_ord"] <= p["max_ordinal"])),
+    Plugin("pullback_ordinal", "entry", "Pullback number (from / to)",
+           "Only bars on a chosen pullback of the day's move: from N to M, so 2 to 2 is 'only the 2nd' and 2 to 3 is 'the 2nd and 3rd'. Counted from the day's first sharp advance: each confirmed swing high after it advances the count (1 = the first pullback). For a count from the news instead, use News pullback number.",
+           (Param("min_ordinal", "Pullback from", 1, "int", 1, 6, 1),
+            Param("max_ordinal", "Pullback to", 2, "int", 1, 6, 1)),
+           history="BT20 pullback ordinal (1st-2nd pullback). The exact from / to range is untested.",
+           entry=lambda df, p: (df["pullback_ord"] >= p.get("min_ordinal", 1)) & (df["pullback_ord"] <= p["max_ordinal"])),
+    Plugin("news_pullback", "entry", "News pullback number (from / to)",
+           "Only bars that sit INSIDE a chosen pullback of the NEWS move, so the base candlestick pattern must form during the pullback (use it with the pattern trigger, not news_bar). Pullbacks are counted from the filing as confirmed swing highs on the chosen candle (5m or 1m): 1 = the first pullback after the news spike, from N to M (2 to 2 = only the 2nd, 2 to 3 = the 2nd and 3rd). A bar is inside the pullback only while the latest confirmed swing high has not been traded above since it printed; once price makes a new high the stock is rallying again, not pulling back, until a new peak is confirmed. Needs News ticked (its lookback and scope pick the filing). A swing high is confirmed 3 candles after it prints (15 minutes on 5m, 3 on 1m).",
+           (Param("timeframe", "Swing highs on", "5m", "select", options=("5m", "1m")),
+            Param("min_ordinal", "Pullback from", 1, "int", 1, 6, 1),
+            Param("max_ordinal", "Pullback to", 1, "int", 1, 6, 1)),
+           history="Untested. The day-advance count (Pullback number) was BT20. A bare swing-high count once labelled a new-high bar 'pullback 1', a bare % depth did not test for a pattern; hence the in-pullback phase.",
+           entry=_news_pullback),
     Plugin("uptrend_f1", "entry", "Uptrend (F1)",
            "EMA9 over EMA20, above VWAP, and yesterday's close above the 20-day average.",
            history="BT22 quality bundle F1+F2+F3: KILLED.", entry=lambda df, p: df["f1_uptrend"]),
@@ -191,15 +230,21 @@ ENTRY: tuple[Plugin, ...] = (
            (Param("min_pct", "Distance ≥ %", 0.15, "float", 0, 1, 0.05),),
            history="BT24 entry location.",
            entry=lambda df, p: df["dist_round_pct"] >= p["min_pct"]),
-    Plugin("news_reaction", "entry", "News + market reaction",
-           "A qualifying company filing followed by a price rise at the base candlestick decision. NSE uses subject categories; US uses SEC acceptance time, which can lag the press release. Queries and share offerings are excluded. Session RVOL includes volume before news; post_news measures only today's volume after the filing against the same minutes in prior sessions. The base RVOL floor still applies. Needs cached filings.",
+    Plugin("news", "entry", "News",
+           "A qualifying company filing published inside the lookback before the base candlestick decision. No price test: that is the separate Market reaction indicator. NSE uses subject categories; US uses SEC acceptance time, which can lag the press release. Queries and share offerings are excluded. Needs cached filings. Entry trigger 'news_bar' drops the candlestick: the trade is the FIRST bar (per stock per day) after a filing that passes every ticked entry indicator, within the window and with price up at least the floor since the filing, bought at the next minute's open. It runs on the no-pattern base (switched automatically).",
            (Param("lookback_h", "News within last (h)", 24, "float", 1, 72, 1),
-            Param("min_move_pct", "Price up since news ≥ %", 2.0, "float", 0, 30, 0.5),
-            Param("min_rvol", "RVOL ≥", 3.0, "float", 0, 50, 0.5),
             Param("scope", "Counts as news", "material", "select", options=("material", "material+unclear")),
-            Param("volume_mode", "Volume confirmation", "session", "select", options=("session", "post_news")),
-            Param("trigger", "Entry trigger", "pattern", "select", options=("pattern",))),
-           history="news-trader (BT12) found no drift after news on a next-day basis; this asks the intraday question instead: news AND an on-the-tape reaction at the pattern.",
+            Param("trigger", "Entry trigger", "pattern", "select", options=("pattern", "news_bar")),
+            Param("bar_window_min", "News bar within (min of the filing; news_bar only)", 30, "int", 1, 390, 5),
+            Param("bar_min_move_pct", "News bar: price up since filing ≥ % (news_bar only)", 0.5, "float", 0, 30, 0.1)),
+           history="news-trader (BT12) found no drift after news on a next-day basis; tick Market reaction as well to ask the intraday question. The news_bar trigger is untested.",
+           entry=_news),
+    Plugin("market_reaction", "entry", "Market reaction",
+           "The tape confirms the news: price is up at least this much since the filing at the base candlestick decision, on enough volume. It measures from the filing found by the News indicator, so tick News too (its lookback and scope apply). Session RVOL includes volume before the filing; post_news measures only today's volume after it against the same minutes in prior sessions. The base RVOL floor still applies.",
+           (Param("min_move_pct", "Price up since news ≥ %", 2.0, "float", 0, 30, 0.5),
+            Param("min_rvol", "RVOL ≥", 3.0, "float", 0, 50, 0.5),
+            Param("volume_mode", "Volume confirmation", "session", "select", options=("session", "post_news"))),
+           history="Split out of the old combined 'News + market reaction' indicator: News alone isolates the filing effect, adding this isolates the tape's confirmation.",
            entry=lambda df, p: (df["news_move_pct"] >= p["min_move_pct"]) &
                  (df["news_rvol"] if p["volume_mode"] == "post_news" else df["rvol"]).ge(p["min_rvol"])),
     Plugin("support_rule", "entry", "Support rule",
@@ -239,7 +284,16 @@ def _stale(cfg: ExitCfg, p: dict) -> None:
     cfg.stale_exit, cfg.stale_minutes, cfg.stale_r = True, int(p["minutes"]), float(p["r"])
 
 
+def _tap(cfg: ExitCfg, p: dict) -> None:
+    cfg.tap_touches = int(p["touches"])
+
+
 EXIT: tuple[Plugin, ...] = (
+    Plugin("tap_high_ceiling", "exit", "Tap-high ceiling",
+           "Treat a price that 5-minute bars were rejected at repeatedly (highs within 0.15%, each closing back under, at least 2 bars apart) as resistance, even when the swing-pivot test missed it. If it is nearer than the base target, the target moves to 0.15% under it. Same rule as the engine's --tap-levels flag.",
+           (Param("touches", "Taps needed", "3", "select", options=("2", "3")),),
+           history="BT61 / 2026-10-08-tap-high-levels: LATENTVIEW 2024-03-28 had 487.20 x3 under a 494 spike; the pivot test saw none of it.",
+           exit=_tap),
     Plugin("target_fixed_rr", "exit", "Fixed R target",
            "Replace the resistance target with a fixed multiple of the risk. Optionally scale the stop distance (R follows it).",
            (Param("rr", "Target at R", 2.0, "float", 0.5, 10, 0.25),
@@ -277,7 +331,37 @@ EXIT: tuple[Plugin, ...] = (
            exit=_stale),
 )
 
-REGISTRY: dict[str, Plugin] = {p.id: p for p in (*ENTRY, *EXIT)}
+# The pre-split combined indicator: not offered in the UI, but saved runs and their trades still resolve it.
+LEGACY: tuple[Plugin, ...] = (
+    Plugin("news_reaction", "entry", "News + market reaction",
+           "Superseded by the separate News and Market reaction indicators; kept so saved runs still load and re-run.",
+           (Param("lookback_h", "News within last (h)", 24, "float", 1, 72, 1),
+            Param("min_move_pct", "Price up since news ≥ %", 2.0, "float", 0, 30, 0.5),
+            Param("min_rvol", "RVOL ≥", 3.0, "float", 0, 50, 0.5),
+            Param("scope", "Counts as news", "material", "select", options=("material", "material+unclear")),
+            Param("volume_mode", "Volume confirmation", "session", "select", options=("session", "post_news")),
+            Param("trigger", "Entry trigger", "pattern", "select", options=("pattern",))),
+           entry=lambda df, p: (df["news_move_pct"] >= p["min_move_pct"]) &
+                 (df["news_rvol"] if p["volume_mode"] == "post_news" else df["rvol"]).ge(p["min_rvol"])),
+)
+
+REGISTRY: dict[str, Plugin] = {p.id: p for p in (*ENTRY, *EXIT, *LEGACY)}
+NEWS_IDS = ("news_reaction", "news", "market_reaction")      # indicators that read the filings cache
+
+
+def news_params(selected: list[dict]) -> dict | None:
+    """The stamping parameters for the filings cache, or None when no news indicator is selected.
+
+    News owns the filing (lookback, scope); Market reaction owns the tape test (volume mode, RVOL floor).
+    The legacy combined indicator carries all of them itself.
+    """
+    by_id = {x["id"]: x["params"] for x in selected}
+    if "news_reaction" in by_id:
+        return by_id["news_reaction"]
+    if "news" not in by_id:
+        return None
+    r = by_id.get("market_reaction", {})
+    return {**by_id["news"], "volume_mode": r.get("volume_mode", "session"), "min_rvol": r.get("min_rvol", 0.0)}
 
 
 def catalog() -> list[dict[str, Any]]:
@@ -291,13 +375,15 @@ class PluginError(ValueError):
 def resolve_params(plugin: Plugin, given: dict | None) -> dict[str, Any]:
     """Defaults filled in, values coerced and clamped to the declared range."""
     given = given or {}
-    if plugin.id == "news_reaction":
+    if plugin.id in NEWS_IDS:
         unknown = set(given) - {p.key for p in plugin.params}
         if unknown:
-            raise PluginError("news_reaction: unsupported parameter(s): " + ", ".join(sorted(unknown)))
-        if given.get("trigger", "pattern") != "pattern":
+            raise PluginError(f"{plugin.id}: unsupported parameter(s): " + ", ".join(sorted(unknown)))
+    if "trigger" in {p.key for p in plugin.params} and plugin.id in NEWS_IDS:
+        allowed = ("pattern", "news_bar") if plugin.id == "news" else ("pattern",)
+        if given.get("trigger", "pattern") not in allowed:
             raise PluginError("News trigger '" + str(given["trigger"]) + "' has no implementation in this Lab. "
-                              "Choose 'pattern' for a new experiment; the historical saved result is preserved.")
+                              "Choose one of " + ", ".join(allowed) + " for a new experiment; the historical saved result is preserved.")
     out: dict[str, Any] = {}
     for p in plugin.params:
         v = given.get(p.key, p.default)
@@ -321,6 +407,14 @@ def resolve_params(plugin: Plugin, given: dict | None) -> dict[str, Any]:
             if p.max is not None:
                 v = min(p.max, v)
         out[p.key] = v
+    if plugin.id in ("pullback_ordinal", "news_pullback"):
+        if out["min_ordinal"] > out["max_ordinal"]:
+            raise PluginError("Pullback from must not be above Pullback to")
+        if plugin.id == "pullback_ordinal" and out["min_ordinal"] == 1:
+            out.pop("min_ordinal")            # the default is dropped so a saved run keeps the key it always had
+    if plugin.id == "news" and out.get("trigger") != "news_bar":
+        out.pop("bar_window_min", None)       # both are meaningless for the pattern trigger; dropping them keeps every saved config key as it was
+        out.pop("bar_min_move_pct", None)
     return out
 
 
@@ -342,6 +436,12 @@ def normalise(selected: list[dict]) -> list[dict]:
                                   "cannot be combined")
             seen[plugin.exclusive] = plugin.id
         out.append({"id": plugin.id, "params": resolve_params(plugin, item.get("params"))})
+    if "market_reaction" in ids and not ids & {"news", "news_reaction"}:
+        raise PluginError("Market reaction measures the move since a filing: also tick News.")
+    if "news_pullback" in ids and not ids & {"news", "news_reaction"}:
+        raise PluginError("News pullback number counts from the filing: also tick News.")
+    if "news" in ids and "news_reaction" in ids:
+        raise PluginError("News + market reaction (saved) cannot be combined with News")
     return sorted(out, key=lambda x: x["id"])
 
 

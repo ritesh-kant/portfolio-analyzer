@@ -43,6 +43,7 @@ class ExitCfg:
     vwap_exit: bool = False
     volume_climax_exit: bool = False
     resistance_reject_exit: bool = False
+    tap_touches: int = 0                     # BT61: 0 off; 2 or 3 = taps needed for a tap_high ceiling
     swing_trail: bool = False
     breakeven: bool = False
     breakeven_r: float = 1.0

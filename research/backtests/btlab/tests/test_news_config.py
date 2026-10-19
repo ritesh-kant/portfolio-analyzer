@@ -10,6 +10,12 @@ import pytest
 
 from btlab import base, news, news_sec, plugins as P, runner, service, store, whatif
 from btlab.tests.test_runner import KEY, cand, cfg, day
+from btlab.tests.test_sim import FLAT, mk
+
+
+def open_day():
+    """A session tape that starts at 09:15, so a pre-open filing has an open to be measured from."""
+    return mk([FLAT] * 50, start=555)
 
 
 @pytest.fixture
@@ -57,7 +63,7 @@ def test_news_spans_loads_candidates_and_respects_patterns(monkeypatch):
 
 
 def test_apply_requires_news_then_saves_and_reuses_a_distinct_current_run(isolated, monkeypatch):
-    monkeypatch.setattr(runner, "load_candidates", lambda *args: (pd.DataFrame([cand()]), {KEY: day()}))
+    monkeypatch.setattr(runner, "load_candidates", lambda *args: (pd.DataFrame([cand(close5=105)]), {KEY: open_day()}))
     body = {"years": [2026], "plugins": [{"id": "news_reaction"}]}
     with pytest.raises(service.NeedNews) as exc:
         service.apply(body)
@@ -73,7 +79,7 @@ def test_apply_requires_news_then_saves_and_reuses_a_distinct_current_run(isolat
     assert second["id"] != first["id"]
     trades = pd.read_csv(store.trades_path(second["id"]))
     assert trades.iloc[0]["news_filing_at"].startswith("2026-03-02T08:01")
-    assert trades.iloc[0]["news_reference"] == 95.0
+    assert trades.iloc[0]["news_reference"] == 100.0       # the session open, not the prior close (95)
 
 
 @pytest.mark.parametrize("mode", ["pullback", "breakout"])
@@ -161,7 +167,7 @@ def test_us_whatif_uses_the_us_filings_and_timezone(isolated, monkeypatch):
     monkeypatch.setattr(store, "get_run", lambda run_id: {"config": config})
     monkeypatch.setattr(service, "ensure_trades", lambda run_id: pd.DataFrame([
         {"date": "2026-03-02", "symbol": "AAA", "entry_time": "10:02", "setup": "hammer"}]))
-    monkeypatch.setattr(whatif, "_load", lambda config: (pd.DataFrame([cand()]), {KEY: day()}))
+    monkeypatch.setattr(whatif, "_load", lambda config: (pd.DataFrame([cand(close5=105)]), {KEY: open_day()}))
     result = whatif.evaluate("run", 0, [{"id": "news_reaction"}])
     assert result["scenarios"][1]["entry_ok"] is True
 
@@ -212,3 +218,67 @@ def test_missing_intraday_reference_does_not_count_the_earlier_price_gap(isolate
     write_news([filing(at="09:20:00")])
     arr = {"m1_min": np.arange(590, 660), "m1_o": np.full(70, 105.0)}
     assert np.isnan(news.stamp_reaction(pd.DataFrame([cand(close5=105)]), {KEY: arr}, 24, "material")[0])
+
+
+# ------------------------------------------------------------------ 'Check news' on a US run (EDGAR)
+
+def _us_trades():
+    return pd.DataFrame([
+        {"symbol": "MEDS", "date": "2026-03-03", "entry_time": "10:15"},    # 8-K 2.02 filed 08:30 ET: material
+        {"symbol": "OFFR", "date": "2026-03-03", "entry_time": "10:15"},    # only an S-3: a share offering
+        {"symbol": "QUIE", "date": "2026-03-03", "entry_time": "10:15"},    # covered, nothing filed
+        {"symbol": "GONE", "date": "2026-03-03", "entry_time": "10:15"},    # delisted ticker, no CIK
+        {"symbol": "NEVR", "date": "2026-03-03", "entry_time": "10:15"}])   # never fetched
+
+
+def _sec_sym(cik, rows, covered=(("2026-03-01", "2026-03-03"),)):
+    return {"cik": cik, "covered": [list(c) for c in covered], "rows": rows}
+
+
+def _us_data():
+    f = lambda form, items, utc: {"t": f"2026-03-03T{utc}+00:00", "f": form, "i": items, "u": "https://sec.gov/x"}
+    return {"MEDS": _sec_sym(1, [f("8-K", "2.02,9.01", "13:30:00"), f("4", "", "14:00:00")]),     # 13:30Z = 08:30 EST
+            "OFFR": _sec_sym(2, [f("S-3", "", "13:00:00")]),
+            "QUIE": _sec_sym(3, []),
+            "GONE": _sec_sym(None, [], covered=())}
+
+
+def test_us_check_news_classifies_edgar_filings_on_the_new_york_clock():
+    res = news._classify("r", _us_trades(), _us_data(), set(), market="US")
+    st = {t["symbol"]: t for t in res["trades"]}
+    assert st["MEDS"]["status"] == "news" and st["MEDS"]["material"] == 1 and "2.02" in st["MEDS"]["items"][0]["h"]
+    assert st["MEDS"]["count"] == 1                          # the Form 4 is routine and left out
+    assert st["OFFR"]["status"] == "minor" and st["OFFR"]["items"][0]["k"] == "offering"
+    assert st["QUIE"]["status"] == "none"
+    assert st["GONE"]["status"] == "error" and "CIK" in st["GONE"]["note"]    # unknown coverage is never "no news"
+    assert st["NEVR"]["status"] == "skipped"
+    assert res["market"] == "US" and "EDGAR" in res["source"]
+
+
+def test_us_check_news_window_is_24h_before_the_entry_in_new_york_time():
+    data = _us_data()
+    tr = pd.DataFrame([{"symbol": "MEDS", "date": "2026-03-03", "entry_time": "08:29"}])   # a minute before the filing
+    assert news._classify("r", tr, data, set(), market="US")["trades"][0]["status"] == "none"
+
+
+def test_us_check_news_fetches_edgar_only_for_missing_symbols(isolated, monkeypatch):
+    for s, d in _us_data().items():
+        news_sec.sym_file(s).write_text(json.dumps(d))
+    asked = {}
+
+    def fake_fetch_all(spans, job):
+        asked.update(spans)
+        job.update(total=len(spans), done=len(spans), requests=len(spans))
+        return set(), []
+    monkeypatch.setattr(news_sec, "fetch_all", fake_fetch_all)
+    job = {}
+    res = news._run_us("r", _us_trades(), job)
+    assert list(asked) == ["GONE", "NEVR"] and job["cached"] == 3     # an unmapped ticker has no coverage, so it is retried and job["source"] == "SEC EDGAR"
+    assert asked["NEVR"] == (date(2026, 3, 1), date(2026, 3, 3))
+    assert res["market"] == "US"
+
+
+def test_us_check_news_needs_a_sec_contact(isolated, monkeypatch):
+    monkeypatch.setattr(store, "get_run", lambda rid: {"config": {"base": {"market": "US"}}})
+    monkeypatch.setattr(news_sec, "user_agent", lambda: "")
+    assert "SEC_USER_AGENT" in news.start("r")["error"]

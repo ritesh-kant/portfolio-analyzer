@@ -105,6 +105,43 @@ def load_1m(symbol: str, day: pd.Timestamp, us: bool = False) -> pd.DataFrame:
     return df if df.empty else df[session_mask(df, day)]
 
 
+HISTORY_MAX_SESSIONS = 65
+
+
+def history_1m(row: pd.Series, sessions: int = 21) -> dict:
+    """The `sessions` trading days BEFORE the trade's day, as raw 1-minute bars `[date, HH:MM, o, h, l, c, v]`.
+
+    Fetched on demand by the chart's History control; strictly earlier sessions (the trade day itself is in
+    build_detail's payload). Read from the same cache as everything else, so a day missing there is missing here.
+    """
+    sessions = max(1, min(int(sessions), HISTORY_MAX_SESSIONS))
+    day = pd.Timestamp(row["date"]).normalize()
+    us, sym = is_us(row), str(row["symbol"])
+    df = read_cache(sym, day.year, us)
+    wall = df.index.tz_localize(None) if not df.empty else pd.DatetimeIndex([])
+    dates = wall.normalize()
+    if len(set(dates[dates < day])) < sessions:      # early in the year: the window reaches into last year's file
+        prev = read_cache(sym, day.year - 1, us)
+        if not prev.empty:
+            df = pd.concat([prev, df]).sort_index() if not df.empty else prev.sort_index()
+            df = df[~df.index.duplicated(keep="last")]
+            wall = df.index.tz_localize(None)
+            dates = wall.normalize()
+    if df.empty:
+        return {"sessions": [], "bars": []}
+    keep_days = sorted(set(dates[dates < day]))[-sessions:]
+    keep = dates.isin(keep_days)
+    sub, w = df[keep], wall[keep]
+    bars = [[t.strftime("%Y-%m-%d"), t.strftime("%H:%M"), round(float(o), 2), round(float(h), 2),
+             round(float(lo), 2), round(float(c), 2), float(v)]
+            for t, o, h, lo, c, v in zip(w, sub["open"], sub["high"], sub["low"], sub["close"], sub["volume"])]
+    return {"sessions": [d.strftime("%Y-%m-%d") for d in keep_days], "bars": bars}
+
+
+# Bump when the per-trade chart payload gains a field, so cached details are rebuilt lazily.
+DETAIL_VERSION = 2
+
+
 def scan_patterns(bars: pd.DataFrame, timeframe: str) -> list[dict]:
     """Every formation in the session, found by PREFIX scan.
 
@@ -122,6 +159,7 @@ def scan_patterns(bars: pd.DataFrame, timeframe: str) -> list[dict]:
             seen[key] = {
                 "name": m.name, "timeframe": m.timeframe, "direction": m.direction,
                 "kind": m.kind, "strength": round(float(m.strength), 2),
+                "prior_trend": m.prior_trend,
                 "start": pd.Timestamp(m.start).strftime("%H:%M"),
                 "end": pd.Timestamp(m.end).strftime("%H:%M"),
             }
@@ -172,6 +210,26 @@ def _key_level(row: pd.Series, side: str, entry: float, lv: list[dict]) -> dict 
     return key
 
 
+def _news_reaction(row: pd.Series, clock) -> dict | None:
+    """Where the Lab's market-reaction gate decided "the market has reacted" (lab runs with a News/Market reaction indicator).
+
+    The gate reads the decision bar's close, so the decision is the last bar that closed at `trigger_time`
+    (it starts one minute earlier, on both the 1- and the 5-minute chart).
+    """
+    mv = row.get("news_move_pct")
+    if not _num(mv) or "trigger_time" not in row or pd.isna(row["trigger_time"]):
+        return None
+    dec = pd.Timestamp(f"2000-01-01 {row['trigger_time']}")
+    ref = row.get("news_reference")
+    rv = row.get("news_rvol")
+    filing = row.get("news_filing_at")
+    return {"decided_at": clock("trigger_time"), "bar": (dec - pd.Timedelta(minutes=1)).strftime("%H:%M"),
+            "move_pct": round(float(mv), 2), "ref": round(float(ref), 2) if _num(ref) else None,
+            "rvol": round(float(rv), 2) if _num(rv) else None,
+            "filing_at": str(filing)[11:16] if isinstance(filing, str) and len(filing) >= 16 else None,
+            "headline": str(row.get("news_headline") or "")[:80]}
+
+
 def summary_fields(row: pd.Series) -> dict:
     """Everything about a trade that comes from the CSV row alone (no bar cache).
 
@@ -195,6 +253,7 @@ def summary_fields(row: pd.Series) -> dict:
         return float(v) if v is not None and pd.notna(v) else default
 
     return {
+        "news_reaction": _news_reaction(row, clock),
         "symbol": str(row["symbol"]), "date": str(day.date()),
         "currency": "USD" if us else "INR",
         "setup": str(row.get("setup") or "n/a"),

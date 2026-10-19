@@ -447,3 +447,16 @@ def test_attention_ledger_preserves_exact_evidence():
     )
     PaperLedger(db, None, False).attention(event)
     assert db["mt_attention"].insert_one.call_args.args[0]["evidence"] == evidence
+
+
+def test_hammer_position_tolerance_is_widened():
+    """JBMA 2025-01-30 10:58: body bottom 760.65 sits 0.85 over the prior low 759.80.
+
+    The detector's ``near`` there is ~0.6 (0.2 x mean range of the prior 5 bars): TA-Lib's
+    limit refused it, 1.5x accepts it.
+    """
+    prev = pd.Series({"open": 761.0, "high": 762.3, "low": 759.8, "close": 760.6})
+    bar = pd.Series({"open": 760.65, "high": 761.7, "low": 757.6, "close": 761.7})
+    near = 0.6
+    assert not (min(bar["open"], bar["close"]) <= prev["low"] + near)       # old rule
+    assert c.hammer_at_prior_low(prev, bar, near)                           # new rule

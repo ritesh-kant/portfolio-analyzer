@@ -13,6 +13,7 @@ What it serves
                              filters, a sortable trade table, one chart per trade
   /run/<run>?group=exit_reason   same, opened already grouped
   /api/run/<run>/trade/<i>   one trade's bars + as-of-entry levels + formations
+  /api/run/<run>/trade/<i>/history?days=N   the N sessions before it (1-minute bars, chart History control)
   /files/<name>.html         the static reports already built in this folder
 
 A "run" is any `*.csv` in this folder with the bt17 trade columns (date, symbol,
@@ -350,7 +351,7 @@ class Runs:
         rows, df = got
         if not 0 <= i < len(df):
             return None
-        d = CACHE_DIR / f"{run}-{int(meta['mtime'])}"
+        d = CACHE_DIR / f"{run}-{int(meta['mtime'])}-d{bt32.DETAIL_VERSION}"
         f = d / f"{i}.json"
         if f.exists():
             return bt32.with_filings(json.loads(f.read_text()), df.iloc[i])
@@ -681,6 +682,17 @@ def make_handler(runs: Runs):
                     if page is None:
                         return self.send(404, b"unknown run", "text/plain")
                     return self.send(200, page.encode(), "text/html; charset=utf-8")
+                m = re.fullmatch(r"/api/run/([^/]+)/trade/(\d+)/history", path)
+                if m:
+                    runs.ensure(m.group(1))
+                    got, i = runs.load(m.group(1)), int(m.group(2))
+                    if got is None or not 0 <= i < len(got[1]):
+                        return self.json(404, {"error": "unknown trade"})
+                    try:
+                        n = int((q.get("days") or ["21"])[0])
+                    except ValueError:
+                        n = 21
+                    return self.json(200, bt32.history_1m(got[1].iloc[i], n))
                 m = re.fullmatch(r"/api/run/([^/]+)/trade/(\d+)", path)
                 if m:
                     runs.ensure(m.group(1))

@@ -1,10 +1,13 @@
 """Apply a plugin selection to the candidate table and replay the chosen trades.
 
-Selection (per symbol per day, exactly as live would behave):
+Selection (as live would behave):
   1. entry plugins keep the candidates that pass;
-  2. candidates are taken in the order their buy-stop FILLS, one position at a time;
+  2. candidates are taken in the order their buy-stop FILLS, one position at a time per stock;
   3. after a trade closes the next candidate must fill later than the exit;
-  4. at most `max_trades` per symbol per day (default 0 = unlimited; a new entry must fill after the last exit).
+  4. at most `max_trades` per symbol per day (default 0 = unlimited; a new entry must fill after the last exit);
+  5. at most `max_positions` positions open at once across all stocks (default 0 = unlimited): a candidate
+     that would fill while that many are already open is skipped, so it takes no trade and does not count
+     against `max_trades`.
 
 A candidate an indicator vetoes is simply not there, so the next one steps up:
 this is a replay, not a row deletion, which is why a filtered run can contain
@@ -19,8 +22,10 @@ import numpy as np
 import pandas as pd
 
 from . import base as base_mod
+from . import hybrid
 from . import plugins as P
 from .sim import CHECKPOINT_RR, simulate
+from src.momentum_trader.levels import tap_high_from_arrays
 
 STRESS_SLIP = 0.0040          # bt17's +40 bps/side stress; the CSV's net_inr/net_pct carry it
 
@@ -33,6 +38,7 @@ class RunConfig:
     risk_inr: float = 500.0
     max_notional_inr: float = 50_000.0
     max_trades: int = 0            # 0 = no limit: re-enter whenever a new candidate fills after the last exit
+    max_positions: int = 0         # 0 = no limit: positions open at the same time, across all stocks
     plugins: list[dict] = field(default_factory=list)
 
 
@@ -50,6 +56,15 @@ def load_candidates(years: list[int], rule: base_mod.BaseRule) -> tuple[pd.DataF
         days.update(got[1])
     df = pd.concat([f for f in frames if not f.empty], ignore_index=True) if frames else pd.DataFrame()
     return df, days
+
+
+def pool(cands: pd.DataFrame, cfg: RunConfig) -> pd.DataFrame:
+    """The candidates a run may take: the chosen patterns, or all of them when no pattern is required."""
+    if cfg.rule.entry_mode == "market" or cands.empty:
+        return cands
+    if cfg.rule.entry_mode == "hybrid":
+        return hybrid.pool(cands, cfg.patterns)
+    return cands[cands["pattern"].isin(cfg.patterns)]
 
 
 def plan_qty(entry: float, stop: float, risk_inr: float, max_notional: float) -> int:
@@ -70,8 +85,9 @@ def stamp_vwap_cross(df: pd.DataFrame, days: dict) -> np.ndarray:
     for i, (key, dec) in enumerate(zip(df["day_key"], df["decision_min"])):
         arr = days[key]
         mins = arr["m5_min"]
-        j = int(np.searchsorted(mins, int(dec) - 5))          # decision bar = the 5-minute bar that just closed
-        if j >= len(mins) or int(mins[j]) != int(dec) - 5:
+        want = base_mod.last5_start(dec)                      # the last 5-minute bar closed at the decision
+        j = int(np.searchsorted(mins, want))
+        if j >= len(mins) or int(mins[j]) != want:
             continue
         above = arr["m5_c"][: j + 1] >= arr["m5_vwap"][: j + 1]      # NaN VWAP compares False
         if not above[j]:
@@ -91,36 +107,74 @@ def run(cfg: RunConfig, cands: pd.DataFrame, days: dict) -> pd.DataFrame:
     selected = P.normalise(cfg.plugins)
     mk = cfg.rule.mk
     ecfg = replace(P.exit_cfg(selected), market=mk.id)
-    df = cands[cands["pattern"].isin(cfg.patterns)]
-    nr = next((x for x in selected if x["id"] == "news_reaction"), None)
+    df = pool(cands, cfg)
+    nparams = P.news_params(selected)
     if any(x["id"] == "vwap_cross" for x in selected):
         df = df.assign(vwap_cross_bars=stamp_vwap_cross(df, days))
-    if nr is not None:
+    if nparams is not None:
         from . import news
-        df = news.stamp_candidates(df, days, nr["params"], mk.id)
-    df = df[P.entry_mask(df, selected)]
+        df = news.stamp_candidates(df, days, nparams, mk.id)
+    df = P.first_news_bar(df[P.entry_mask(df, selected)], selected)
     rows: list[dict] = []
-    for _, grp in df.sort_values(["date", "symbol", "fill_min", "decision_min"]).groupby(
-            ["date", "symbol"], sort=False):
-        arr = days[grp["day_key"].iloc[0]]
-        free_at, taken = -1, 0
-        for c in grp.itertuples(index=False):
-            if cfg.max_trades and taken >= cfg.max_trades:
-                break
-            if c.fill_min <= free_at:
-                continue
-            stop, stop_source = exit_stop(c, ecfg, mk)
-            if stop <= 0:
-                continue
-            qty = plan_qty(c.fill, stop, cfg.risk_inr, cfg.max_notional_inr)
-            if qty < 1:
-                continue
-            ex = simulate(arr, int(c.fill_k), float(c.fill), float(stop), float(c.target),
-                          float(c.resistance), qty, ecfg)
-            rows.append(_trade_row(c, ex, qty, stop, stop_source, ecfg, cfg))
-            free_at = ex.minute
-            taken += 1
+    order: list[tuple] = []
+    state: dict[tuple, tuple[int, int]] = {}                # (day, symbol) -> (minute the last trade exited, trades taken)
+    open_exits: dict[str, list[int]] = {}                   # day -> exit minute of every position taken that day
+    # Chronological across stocks, so "how many positions are open at this fill" is answerable.
+    for c in df.sort_values(["date", "fill_min", "decision_min", "symbol"]).itertuples(index=False):
+        free_at, taken = state.get((c.date, c.symbol), (-1, 0))
+        if cfg.max_trades and taken >= cfg.max_trades:
+            continue
+        if c.fill_min <= free_at:
+            continue
+        exits = open_exits.setdefault(c.date, [])
+        if cfg.max_positions and sum(1 for e in exits if e >= c.fill_min) >= cfg.max_positions:
+            continue
+        arr = days[c.day_key]
+        c = with_tap_ceiling(c, arr, ecfg, cfg.rule)
+        stop, stop_source = exit_stop(c, ecfg, mk)
+        if stop <= 0:
+            continue
+        qty = plan_qty(c.fill, stop, cfg.risk_inr, cfg.max_notional_inr)
+        if qty < 1:
+            continue
+        ex = simulate(arr, int(c.fill_k), float(c.fill), float(stop), float(c.target),
+                      float(c.resistance), qty, ecfg)
+        rows.append(_trade_row(c, ex, qty, stop, stop_source, ecfg, cfg))
+        order.append((c.date, c.symbol, c.fill_min, c.decision_min))
+        state[(c.date, c.symbol)] = (ex.minute, taken + 1)
+        exits.append(ex.minute)
+    rows = [r for _, r in sorted(zip(order, rows), key=lambda x: x[0])]      # the dashboard's order: day, stock, fill
     return pd.DataFrame(rows)
+
+
+def with_tap_ceiling(c, arr: dict, ecfg, rule: base_mod.BaseRule):
+    """`c` with its target capped at a `tap_high` ceiling, when that is the nearer one.
+
+    BT61 (engine flag `--tap-levels N`): 5-minute highs that were rejected N+ times are added to
+    the level set, so the nearest structural resistance can be one the pivot test never saw. Read
+    from the 5-minute bars up to and including the decision bar only. The base candidate is
+    untouched, which is why this is an exit-group indicator and needs no base rebuild.
+    """
+    if not ecfg.tap_touches:
+        return c
+    m5 = arr["m5_min"]
+    want = base_mod.last5_start(c.decision_min)
+    j = int(np.searchsorted(m5, want))
+    if j >= len(m5) or int(m5[j]) != want:
+        return c
+    buf, tick = rule.target_buffer_pct, rule.mk.tick
+    picks = []
+    for x in tap_high_from_arrays(arr["m5_h"][: j + 1], arr["m5_c"][: j + 1], arr["m5_v"][: j + 1],
+                                  ecfg.tap_touches):
+        t = x.price if buf <= 0 else base_mod.tick_down(x.price * (1.0 - buf / 100.0), tick)
+        if x.price > c.trigger and t > c.fill:
+            picks.append((t, x))
+    if not picks:
+        return c
+    t, x = min(picks, key=lambda p: (p[0], p[1].price))
+    if t >= c.target:
+        return c
+    return c._replace(target=float(t), resistance=float(x.price), resistance_kind="tap_high")
 
 
 def exit_stop(c, ecfg, mk) -> tuple[float, str]:

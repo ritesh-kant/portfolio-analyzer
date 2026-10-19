@@ -246,6 +246,14 @@ class EngineConfig:
     # the 2R target. OFF by default: this changes which trades exist, so every
     # recorded run keeps the level set it was measured with.
     volume_shelf_levels: bool = False
+    # BT61 (research/hypotheses/2026-10-08-tap-high-levels.md): add ceilings
+    # that 5-minute bars were rejected at N+ separate times (0 = off). The
+    # pivot test misses a triple top when a taller or equal bar sits within 3
+    # bars (LATENTVIEW 2024-03-28: 487.20 x3 hidden by a 494 spike, the engine
+    # used the round ₹490). 5-minute levels only: exits/target of 5-minute
+    # setups and the 5-minute half of the headroom test; 1-minute setups keep
+    # today's level set. 0 reproduces every earlier run exactly.
+    tap_levels_min_touches: int = 0
     # A forward playbook may name its exact setup and pullback ordinal. Empty
     # tuples preserve the full frozen Warrior setup list.
     allowed_setups: tuple[str, ...] = ()
@@ -459,6 +467,8 @@ class EngineConfig:
             raise ValueError(
                 "require_light_pullback_volume needs require_micro_pullback"
             )
+        if self.tap_levels_min_touches not in (0, 2, 3):
+            raise ValueError("tap_levels_min_touches must be 0 (off), 2 or 3")
         if self.session_level_sessions < 0 or not 0.0 <= self.target_buffer_pct < 5.0:
             raise ValueError("session_level_sessions must be >= 0 and "
                              "target_buffer_pct in [0, 5)")
@@ -1443,6 +1453,7 @@ def _attention_resistance_levels(
     prev_day: dict[str, float] | None,
     v2: bool,
     shelves: bool,
+    tap_min_touches: int = 0,
 ) -> list[Level]:
     """Structural-level inputs shared by the signal and fill checks.
 
@@ -1455,7 +1466,8 @@ def _attention_resistance_levels(
         # intentionally uses only one-minute levels.
         bars_5m = resample_5m(bars_1m)
         if not bars_5m.empty:
-            levels += derive_levels(bars_5m, prev_day, add_shelves=shelves, atr=None)
+            levels += derive_levels(bars_5m, prev_day, add_shelves=shelves, atr=None,
+                                    tap_min_touches=tap_min_touches)
     return levels
 
 
@@ -1468,6 +1480,7 @@ def _resistance_aware_attention_confirmation(
     shelves: bool = False,
     require_rising_price_volume: bool = False,
     extra_levels: list[Level] | None = None,
+    tap_min_touches: int = 0,
 ) -> tuple[Setup | None, str]:
     """Apply the unchanged 1-minute confirmation to structural resistance.
 
@@ -1486,7 +1499,8 @@ def _resistance_aware_attention_confirmation(
     if prior.empty:
         return setup, reason
     levels_before_confirmation = (
-        _attention_resistance_levels(prior, prev_day, v2, shelves) + list(extra_levels or [])
+        _attention_resistance_levels(prior, prev_day, v2, shelves, tap_min_touches)
+        + list(extra_levels or [])
     )
 
     # What counts as a ceiling for the headroom test. A round number is a
@@ -1653,6 +1667,7 @@ def _open_position(state: DayState, cand: Candidate, when: pd.Timestamp, fill: f
         entry=fill, hard_stop=cand.setup.stop, bars_tf=tf, prev_day=state.prev_day,
         with_levels=ec.use_resistance_reject or cfg.use_structural_exit_levels,
         add_shelves=cfg.volume_shelf_levels,
+        tap_min_touches=0 if is_1m else cfg.tap_levels_min_touches,
     )
     target_source = "fixed_2r" if ec.has_target else "disabled"
     checkpoint: float | None = None
@@ -1718,6 +1733,7 @@ def _fill_resistance_evidence(
         return None
     levels = _attention_resistance_levels(
         completed_bars, state.prev_day, cfg.resistance_veto_v2, cfg.volume_shelf_levels,
+        cfg.tap_levels_min_touches,
     )
     if cfg.session_levels_veto:
         levels = levels + state.session_levels
@@ -2106,6 +2122,7 @@ def step(
                 cfg.resistance_veto_v2, guide, cfg.volume_shelf_levels,
                 cfg.require_rising_price_volume,
                 extra_levels=state.session_levels if cfg.session_levels_veto else None,
+                tap_min_touches=cfg.tap_levels_min_touches,
             )
         else:
             setup, confirmation_reason = _attention_confirmation(

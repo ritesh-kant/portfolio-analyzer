@@ -138,10 +138,10 @@ class _Session:
             await self.client.aclose()
 
 
-def _entry_dt(row: pd.Series) -> datetime:
+def _entry_dt(row: pd.Series, tz=_IST) -> datetime:
     hh, mm = str(row["entry_time"]).split(":")[:2]
     d = datetime.fromisoformat(str(row["date"])[:10])
-    return d.replace(hour=int(hh), minute=int(mm), tzinfo=_IST)
+    return d.replace(hour=int(hh), minute=int(mm), tzinfo=tz)
 
 
 def _sym_file(symbol: str) -> Path:
@@ -236,30 +236,64 @@ async def _fetch(spans: dict[str, tuple[date, date]], job: dict, want_text: bool
 
 async def _run(run_id: str, tr: pd.DataFrame, job: dict, want_text: bool = False, labels: dict | None = None) -> dict:
     """One request per symbol for the span of its trades, minus whatever any earlier run already fetched."""
-    by_sym: dict[str, list[date]] = {}
-    for _, r in tr.iterrows():
-        by_sym.setdefault(str(r["symbol"]), []).append(date.fromisoformat(str(r["date"])[:10]))
-    spans = {s: (min(ds) - timedelta(days=1), max(ds)) for s, ds in sorted(by_sym.items())}
+    spans = _trade_spans(tr, 1)
     data, failed = await _fetch(spans, job, want_text)
     return _classify(run_id, tr, data, failed, labels)
 
 
-def _classify(run_id: str, tr: pd.DataFrame, data: dict[str, dict], failed: set[str], labels: dict | None = None) -> dict:
-    """Per trade: news (material filing) / minor (only routine, unclear or exchange-query filings) / none / error / skipped, from the per-symbol cache contents in `data`."""
+def _trade_spans(tr: pd.DataFrame, lead_days: int) -> dict[str, tuple[date, date]]:
+    by_sym: dict[str, list[date]] = {}
+    for _, r in tr.iterrows():
+        by_sym.setdefault(str(r["symbol"]), []).append(date.fromisoformat(str(r["date"])[:10]))
+    return {s: (min(ds) - timedelta(days=lead_days), max(ds)) for s, ds in sorted(by_sym.items())}
+
+
+US_LEAD_DAYS = 2   # the same window `entry_status` needs covered for a US trade
+
+
+def _run_us(run_id: str, tr: pd.DataFrame, job: dict) -> dict:
+    """The US check: SEC EDGAR filings for each traded ticker, fetched once per ticker and shared by every run."""
+    spans = _trade_spans(tr, US_LEAD_DAYS)
+    todo = {s: spans[s] for s in missing_symbols(spans, "US")}
+    job["source"] = "SEC EDGAR"
+    failed, _unmapped = news_sec.fetch_all(todo, job)
+    job["cached"] = len(spans) - len(todo)
+    data = {s: news_sec.load_sym(s) for s in spans if news_sec.sym_file(s).exists()}
+    return _classify(run_id, tr, data, failed, market="US")
+
+
+def _us_rows(info: dict) -> list[dict]:
+    """A US symbol's cached filings in the NSE row shape (`t`, `h`, `u`) plus their tier; routine forms are left out."""
+    out = []
+    for x in info["rows"]:
+        k = news_sec.sec_tier(x["f"], x["i"])
+        if k != "routine":
+            out.append({"t": x["t"], "h": news_sec.headline(x["f"], x["i"]), "u": x["u"], "kw": k})
+    return out
+
+
+def _classify(run_id: str, tr: pd.DataFrame, data: dict[str, dict], failed: set[str], labels: dict | None = None,
+              market: str = "NSE") -> dict:
+    """Per trade: news (material filing) / minor (only routine, unclear, offering or exchange-query filings) / none / error / skipped, from the per-symbol cache contents in `data`."""
+    us = market == "US"
     trades = []
     for i, r in tr.reset_index(drop=True).iterrows():
         sym, d = str(r["symbol"]), date.fromisoformat(str(r["date"])[:10])
-        t1 = _entry_dt(r).astimezone(timezone.utc)
+        t1 = _entry_dt(r, news_sec.NY if us else _IST).astimezone(timezone.utc)
         t0 = t1 - LOOKBACK
         info = data.get(sym)
-        if info is None or sym in failed or _gaps(info["covered"], d - timedelta(days=1), d):
+        if us and info is not None and sym not in failed and info.get("cik") is None:
+            trades.append({"i": int(i), "symbol": sym, "date": str(d), "status": "error", "count": None,
+                           "items": [], "note": "SEC coverage unavailable: historical ticker has no CIK mapping."})
+            continue
+        if info is None or sym in failed or _gaps(info["covered"], d - timedelta(days=US_LEAD_DAYS if us else 1), d):
             trades.append({"i": int(i), "symbol": sym, "date": str(d), "status": "error" if sym in failed else "skipped",
                            "count": None, "items": []})
             continue
         hits = []
-        for x in info["rows"]:
+        for x in (_us_rows(info) if us else info["rows"]):
             if x["t"] and t0 <= datetime.fromisoformat(x["t"]) <= t1:
-                kw = tier(x["h"])
+                kw = x["kw"] if us else tier(x["h"])
                 lab = labels.get(filing_key(sym, x)) if labels else None
                 hits.append({**x, "kw": kw, "k": lab["k"] if lab else kw, **({"ai": lab["c"]} if lab else {})})
         hits.sort(key=lambda x: (TIER_ORDER[x["k"]], -datetime.fromisoformat(x["t"]).timestamp()))
@@ -267,7 +301,8 @@ def _classify(run_id: str, tr: pd.DataFrame, data: dict[str, dict], failed: set[
         trades.append({"i": int(i), "symbol": sym, "date": str(d), "status": "news" if mat else "minor" if hits else "none",
                        "count": len(hits), "material": mat, "items": hits[:MAX_ITEMS]})
     return {"run_id": run_id, "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "lookback_h": 24, "source": "NSE corporate announcements", "trades": trades,
+            "lookback_h": 24, "market": market,
+            "source": "SEC EDGAR filings (acceptance time)" if us else "NSE corporate announcements", "trades": trades,
             "version": RESULT_VERSION,
             "summary": {k: sum(1 for t in trades if t["status"] == k) for k in ("news", "minor", "none", "error", "skipped")}}
 
@@ -276,8 +311,10 @@ def start(run_id: str) -> dict:
     rec = store.get_run(run_id)
     if rec is None:
         return {"error": "unknown run"}
-    if (rec["config"]["base"].get("market") or "NSE") != "NSE":
-        return {"error": "news check is NSE-only"}
+    market = rec["config"]["base"].get("market") or "NSE"
+    if market == "US" and not news_sec.user_agent():
+        return {"error": "SEC requires a contact in the User-Agent: set SEC_USER_AGENT (environment or the repo .env), "
+                         "e.g. SEC_USER_AGENT='Your Name you@example.com', then restart the dashboard."}
     with _lock:
         cur = _jobs.get(run_id)
         if cur and cur["state"] == "running":
@@ -288,7 +325,7 @@ def start(run_id: str) -> dict:
     def work() -> None:
         try:
             tr = service.ensure_trades(run_id)
-            res = asyncio.run(_run(run_id, tr, job))
+            res = _run_us(run_id, tr, job) if market == "US" else asyncio.run(_run(run_id, tr, job))
             news_path(run_id).write_text(json.dumps(res))
             job["state"] = "cancelled" if job.get("cancel") else "done"
         except Exception as e:  # noqa: BLE001
@@ -350,14 +387,18 @@ def attach_from_cache(run_id: str) -> bool:
     Returns True if a result was written.
     """
     rec = store.get_run(run_id)
-    if (rec is None or news_path(run_id).exists()
-            or (rec["config"]["base"].get("market") or "NSE") != "NSE" or not CACHE.exists()):
+    market = (rec["config"]["base"].get("market") or "NSE") if rec else "NSE"
+    if rec is None or news_path(run_id).exists() or not (news_sec.CACHE if market == "US" else CACHE).exists():
         return False
     tr = service.ensure_trades(run_id)
     if tr.empty:
         return False
-    data = {s: _load_sym(s) for s in tr["symbol"].astype(str).unique() if _sym_file(s).exists()}
-    res = _classify(run_id, tr, data, set())
+    syms = tr["symbol"].astype(str).unique()
+    if market == "US":
+        data = {s: news_sec.load_sym(s) for s in syms if news_sec.sym_file(s).exists()}
+    else:
+        data = {s: _load_sym(s) for s in syms if _sym_file(s).exists()}
+    res = _classify(run_id, tr, data, set(), market=market)
     if not (res["summary"]["news"] or res["summary"]["minor"] or res["summary"]["none"]):
         return False
     res["from_cache"] = True
@@ -502,8 +543,9 @@ def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str, 
 
     For an intraday filing, the reference is the first 1-minute open at or after publication,
     even when the filing was on an earlier trading day. A filing with no observable
-    post-publication minute on that day is ignored. Off-session filings use the last
-    observed close before publication. The reaction price is the decision-bar close.
+    post-publication minute on that day is ignored. Off-session filings (pre-open, after the close, weekends)
+    use the first 1-minute open after publication, so the overnight gap is not counted as a reaction.
+    The reaction price is the decision-bar close.
     Of several filings the largest move counts.
     """
     return _stamp_reaction(df, days, lookback_h, scope, market)["news_move_pct"]
@@ -514,6 +556,12 @@ def _stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str,
     out = np.full(len(df), np.nan)
     rvol_out = np.full(len(df), np.nan)
     refs = np.full(len(df), np.nan)
+    delay = np.full(len(df), np.nan)
+    pullback = np.full(len(df), np.nan)
+    pullback_1m = np.full(len(df), np.nan)
+    in_pb = np.zeros(len(df), bool)
+    in_pb_1m = np.zeros(len(df), bool)
+    pivots: dict[tuple[str, str], list[int]] = {}
     filing_at, headlines = [""] * len(df), [""] * len(df)
     ok_tier = {"material"} | ({"unclear"} if scope == "material+unclear" else set())
     tz = news_sec.NY if market == "US" else _IST
@@ -565,7 +613,48 @@ def _stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str,
             return np.nan
         return float(actual.sum() / expected.sum())
 
-    def prior_reference(sym: str, t: datetime) -> float | None:
+    def pullback_state(day_key: str, tf: str, arr: dict, since: int, dec: int) -> tuple[float, bool]:
+        """(pullback number, is the decision bar inside that pullback) for the news move, on `tf` candles.
+
+        The number counts confirmed swing highs since the filing: 0 = the first leg is still running, 1 = the
+        first pullback after the news spike, and so on. The bar is INSIDE the pullback only while the latest
+        confirmed swing high has not been exceeded since it printed: once price trades above it the stock is
+        rallying again, not pulling back, until a new peak is confirmed. `tf` is "5m" or "1m": the engine's own
+        pivot definition and confirmation delay (PIVOT_K candles of that timeframe), read from the last candle of
+        that timeframe closed at the decision, so nothing is looked ahead. A pivot at bar i needs bars up to
+        i + PIVOT_K, so on a whole-day frame it is the same pivot a truncated frame would find whenever
+        i <= last closed bar - PIVOT_K. Whether it has been exceeded reads 1-minute highs up to the decision bar
+        (the timeframe's own closed candles when a tape has no 1-minute highs).
+        """
+        from . import base
+        from src.momentum_trader.levels import PIVOT_K, swing_pivot_positions
+        pre = "m1" if tf == "1m" else "m5"
+        if f"{pre}_min" not in arr or f"{pre}_h" not in arr:    # a minimal test tape; every real day has both
+            return np.nan, False
+        mins = arr[f"{pre}_min"]
+        if (day_key, tf) not in pivots:
+            n = len(mins)
+            frame = pd.DataFrame({"open": arr[f"{pre}_o"], "high": arr[f"{pre}_h"], "low": arr[f"{pre}_l"],
+                                  "close": arr[f"{pre}_c"], "volume": np.ones(n)})
+            pivots[(day_key, tf)] = swing_pivot_positions(frame)[0]
+        want = dec - 1 if tf == "1m" else base.last5_start(dec)
+        j = int(np.searchsorted(mins, want))
+        if j >= len(mins) or int(mins[j]) != want:
+            return np.nan, False
+        anchor = max(0, int(np.searchsorted(mins, since, side="right")) - 1)     # the bar holding the filing
+        confirmed = [i for i in pivots[(day_key, tf)] if anchor <= i <= j - PIVOT_K]
+        if not confirmed:
+            return 0.0, False
+        last = confirmed[-1]
+        peak, start = float(arr[f"{pre}_h"][last]), int(mins[last])
+        if "m1_h" in arr:
+            m1 = arr["m1_min"]
+            highs = arr["m1_h"][(m1 >= start) & (m1 < dec)]
+        else:
+            highs = arr[f"{pre}_h"][last: j + 1]
+        return float(len(confirmed)), not bool((highs > peak).any())
+
+    def prior_reference(sym: str, t: datetime, before: "date") -> float | None:
         key = (sym, t.year)
         if key not in bar_cache:
             bar_cache[key] = bars_for(*key)
@@ -585,17 +674,18 @@ def _stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str,
             if j < len(bars) and bars.index[j].date() == ts.date():
                 return float(bars["open"].iloc[j])
             return None
-        j = int(bars.index.searchsorted(ts)) - 1
-        if j >= 0:
-            return float(bars["close"].iloc[j])
-        previous = (sym, t.year - 1)
-        if previous not in bar_cache:
-            bar_cache[previous] = bars_for(*previous)
-        old = bar_cache[previous]
-        return float(old["close"].iloc[-1]) if old is not None and not old.empty else None
+        # off-session: the first open the market offered after publication, so the overnight gap is not "reaction".
+        # Only sessions before the decision day are read here; the decision day's own open comes from `days`.
+        j = int(bars.index.searchsorted(ts))
+        if j < len(bars) and bars.index[j].date() < before:
+            return float(bars["open"].iloc[j])
+        return None
 
+    # the reaction price is the decision bar's close (a 1-minute bar's, when the lab triggers on 1-minute candles);
+    # a table built before `close_dec` existed has only 5-minute decision bars, where the two are the same
+    react = df["close_dec"] if "close_dec" in df else df["close5"]
     for i, (sym, d, key, dec, prev, close5) in enumerate(zip(df["symbol"], df["date"], df["day_key"],
-                                                              df["decision_min"], df["prev_close"], df["close5"])):
+                                                              df["decision_min"], df["prev_close"], react)):
         if sym not in cache:
             cache[sym] = filings_of(sym, market)
         day = datetime.fromisoformat(str(d)[:10])
@@ -615,12 +705,27 @@ def _stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str,
                     ref = float(arr["m1_o"][j])
                 elif tm >= open_min:
                     continue  # missing post-filing tape must not fall back to the pre-news daily close
+                else:
+                    # pre-open filing: measure from the session's first open, not yesterday's close (the gap
+                    # is the market's first price for the news, not a reaction to confirm)
+                    if not len(arr["m1_min"]) or int(arr["m1_min"][0]) >= int(dec):
+                        continue
+                    ref = float(arr["m1_o"][0])
             elif t.date() < t_dec.date():
-                earlier = prior_reference(sym, t)
+                earlier = prior_reference(sym, t, t_dec.date())
                 if earlier is None:
-                    continue
+                    # off-session on an earlier day with no session in between: first open of the decision day
+                    minute = t.hour * 60 + t.minute
+                    if open_min <= minute < close_min or not len(arr["m1_min"]) or int(arr["m1_min"][0]) >= int(dec):
+                        continue
+                    earlier = float(arr["m1_o"][0])
                 ref = earlier
             if ref > 0:
+                # minutes the reaction clock has run at this decision bar: from the filing, or from the day's open
+                # when the filing came earlier (the pre-open / earlier-day reference is the open, not the filing)
+                since = open_min
+                if t.date() == t_dec.date():
+                    since = max(open_min, t.hour * 60 + t.minute + int(bool(t.second or t.microsecond)))
                 if volume_mode == "post_news":
                     rv = post_rvol(sym, t, t_dec)
                 else:
@@ -630,10 +735,14 @@ def _stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str,
                 mv = (float(close5) / ref - 1.0) * 100.0
                 if not best == best or mv > best:
                     best = mv
-                    rvol_out[i], refs[i] = rv, ref
+                    rvol_out[i], refs[i], delay[i] = rv, ref, int(dec) - since
+                    pullback[i], in_pb[i] = pullback_state(key, "5m", arr, since, int(dec))
+                    pullback_1m[i], in_pb_1m[i] = pullback_state(key, "1m", arr, since, int(dec))
                     filing_at[i], headlines[i] = t.isoformat(), headline
         out[i] = best
-    return {"news_move_pct": out, "news_rvol": rvol_out, "news_reference": refs,
+    return {"news_move_pct": out, "news_rvol": rvol_out, "news_reference": refs, "news_delay_min": delay, "news_pullback_ord": pullback,
+            "news_pullback_ord_1m": pullback_1m,
+            "news_in_pullback": in_pb, "news_in_pullback_1m": in_pb_1m,
             "news_filing_at": filing_at, "news_headline": headlines}
 
 

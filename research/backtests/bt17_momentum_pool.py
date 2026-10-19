@@ -407,6 +407,9 @@ def main() -> int:
                          "headroom test, so supply built inside a fast move is "
                          "visible (pivots are blind to it by construction). See "
                          "research/hypotheses/2026-09-16-volume-shelf-levels.md")
+    ap.add_argument("--tap-levels", type=int, default=0, choices=(0, 2, 3),
+                    help="BT61: add 5-minute ceilings rejected at N+ separate bars "
+                         "(0 = off). See research/hypotheses/2026-10-08-tap-high-levels.md")
     ap.add_argument("--require-1m-agreement", action="store_true",
                     help="refuse a 5-min entry whose own 1-min chart disagrees (1-min "
                          "EMA9>EMA20, green trigger minute closing in its top 40%% on "
@@ -635,6 +638,7 @@ def main() -> int:
                        require_1m_agreement=a.require_1m_agreement,
                        resistance_veto_v2=a.resistance_v2,
                        volume_shelf_levels=a.volume_shelves,
+                       tap_levels_min_touches=a.tap_levels,
                        breakeven_at_r=a.breakeven_at_r,
                        legacy_same_bar_breakeven=a.legacy_same_bar_breakeven,
                        no_trailing_stops=a.no_trailing_stops,

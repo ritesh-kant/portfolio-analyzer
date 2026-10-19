@@ -41,6 +41,7 @@ def _one(c, days: dict, rc: runner.RunConfig, selected: list[dict]) -> dict:
     """The trade this candidate becomes with `selected`'s exit indicators."""
     mk = rc.rule.mk
     ecfg = replace(P.exit_cfg(selected), market=mk.id)
+    c = runner.with_tap_ceiling(c, days[c.day_key], ecfg, rc.rule)
     stop, stop_source = runner.exit_stop(c, ecfg, mk)
     if stop <= 0:
         return {"error": "stop would be below zero"}
@@ -74,14 +75,14 @@ def evaluate(run_id: str, i: int, plugins: list[dict]) -> dict:
     selected = P.normalise(plugins)
     if any(s["id"] == "vwap_cross" for s in selected):
         one = one.assign(vwap_cross_bars=runner.stamp_vwap_cross(one, days))
-    nr = next((s for s in selected if s["id"] == "news_reaction"), None)
-    if nr is not None:                                 # reads the filings cache only (no NSE / EDGAR call)
+    nparams = P.news_params(selected)
+    if nparams is not None:                                 # reads the filings cache only (no NSE / EDGAR call)
         from . import news
         d = date.fromisoformat(str(row["date"])[:10])
         spans = {str(row["symbol"]): (d - timedelta(days=news.PREFETCH_DAYS), d)}
         if news.unmapped_symbols(spans, rc.rule.mk.id) or news.missing_symbols(spans, rc.rule.mk.id):
             raise P.PluginError("News coverage is incomplete for this trade. Fetch its filings in the Lab first.")
-        one = news.stamp_candidates(one, days, nr["params"], rc.rule.mk.id)
+        one = news.stamp_candidates(one, days, nparams, rc.rule.mk.id)
     c = next(one.itertuples(index=False))
     entry_sel = [s for s in selected if P.REGISTRY[s["id"]].group == "entry"]
     exit_sel = [s for s in selected if P.REGISTRY[s["id"]].group == "exit"]

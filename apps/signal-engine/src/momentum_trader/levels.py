@@ -54,6 +54,13 @@ SESSION_LEVEL_SESSIONS = 10   # sessions before today whose highs are known
 TARGET_BUFFER_PCT = 0.15      # a capped target sits this far under its level
 TICK = 0.05                   # NSE equity tick
 
+# Repeated-rejection ("tap") resistance (BT61,
+# research/hypotheses/2026-10-08-tap-high-levels.md). Fixed from the
+# LATENTVIEW 2024-03-28 chart (taps 486.95 / 487.20 / 487.20 at 11:05-11:25,
+# blinded to the pivot test by a 494 spike at 11:00) before any replay ran.
+TAP_TOL_PCT = 0.15       # highs within 0.15% of each other are the same ceiling
+TAP_MIN_GAP_BARS = 2     # taps must be >= 2 bars apart: one push is one tap
+
 # Volume-shelf parameters. A shelf is a local peak in the volume-by-price
 # profile, so the bucket width sets what "one level" means. The default scales
 # with the symbol's own 1-minute noise: a shelf narrower than a typical bar is
@@ -68,7 +75,7 @@ SHELF_PEAK_WIDTH = 1             # buckets either side the peak must beat
 class Level:
     price: float
     kind: str          # pivot_high | pivot_low | prev_day | orb | round | shelf
-                       # | session_high | session_pivot
+                       # | session_high | session_pivot | tap_high
     touches: int
     volume: float
     strength: float    # touches, plus a small bonus for volume traded there
@@ -133,6 +140,52 @@ def cluster(points: list[tuple[float, float]], kind: str,
         price = wsum / vol_sum if vol_sum > 0 else sum(p for p, _ in g) / len(g)
         out.append(Level(price=price, kind=kind, touches=len(g), volume=vol_sum,
                          strength=float(len(g)) + min(vol_sum / 1e6, 1.0)))
+    return sorted(out, key=lambda x: x.strength, reverse=True)
+
+
+def tap_high_levels(bars: pd.DataFrame, min_touches: int = 2,
+                    tol_pct: float = TAP_TOL_PCT,
+                    min_gap_bars: int = TAP_MIN_GAP_BARS) -> list[Level]:
+    """Ceilings that price was rejected at repeatedly, pivot or not.
+
+    A swing pivot asks "is this the local peak?" and so cannot see a level
+    that is hit again and again when a taller bar or an equal high sits within
+    `k` bars. This asks the question a chart reader asks: how many separate
+    bars pushed to about this price and closed back under it?
+
+    Bars are grouped by high within `tol_pct` of a seed high (highest first).
+    A tap counts only if the bar closed below the level, and two taps must be
+    `min_gap_bars` apart. The level is the top of the taps. Only completed
+    bars in `bars` are read, so nothing here looks ahead.
+    """
+    validate_bars(bars)
+    return tap_high_from_arrays(
+        bars["high"].to_numpy(dtype=float), bars["close"].to_numpy(dtype=float),
+        bars["volume"].to_numpy(dtype=float), min_touches, tol_pct, min_gap_bars)
+
+
+def tap_high_from_arrays(h: np.ndarray, c: np.ndarray, v: np.ndarray, min_touches: int = 2,
+                         tol_pct: float = TAP_TOL_PCT,
+                         min_gap_bars: int = TAP_MIN_GAP_BARS) -> list[Level]:
+    """`tap_high_levels` on bare high / close / volume arrays (the Lab stores bars that way)."""
+    if min_touches < 2 or len(h) < 2:
+        return []
+    used = np.zeros(len(h), dtype=bool)
+    out: list[Level] = []
+    for i in np.argsort(-h, kind="stable"):
+        if used[i]:
+            continue
+        near = np.flatnonzero(~used & (np.abs(h - h[i]) / h[i] * 100.0 <= tol_pct))
+        level = float(h[near].max())
+        taps: list[int] = []
+        for j in near:                       # near is ascending in time
+            if c[j] < level and (not taps or j - taps[-1] >= min_gap_bars):
+                taps.append(int(j))
+        used[near] = True
+        if len(taps) >= min_touches:
+            vol = float(v[taps].sum())
+            out.append(Level(price=level, kind="tap_high", touches=len(taps),
+                             volume=vol, strength=float(len(taps)) + min(vol / 1e6, 1.0)))
     return sorted(out, key=lambda x: x.strength, reverse=True)
 
 
@@ -234,6 +287,7 @@ def derive_levels(
     add_round: bool = True,
     add_shelves: bool = False,
     atr: float | None = None,
+    tap_min_touches: int = 0,
 ) -> list[Level]:
     """Every level worth knowing about, strongest first.
 
@@ -242,6 +296,10 @@ def derive_levels(
     `add_shelves` is off by default so every existing caller and every recorded
     backtest keeps the level set it was measured with. `atr` only sets the
     shelf bucket width and is ignored when shelves are off.
+
+    `tap_min_touches` (0 = off, the default) adds `tap_high_levels` with that
+    many required taps. Pass it for 5-minute bars only: on 1-minute bars every
+    stall is a tap.
     """
     if bars.empty:
         return []
@@ -262,6 +320,8 @@ def derive_levels(
         levels.append(Level(major, "round", 1, 0.0, 1.0))
     if add_shelves:
         levels += volume_shelf_levels(bars, atr)
+    if tap_min_touches:
+        levels += tap_high_levels(bars, tap_min_touches)
     return [x for x in levels if x.touches >= MIN_TOUCHES]
 
 

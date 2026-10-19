@@ -39,6 +39,15 @@ outcome) combine; each dropdown option shows its trade count ("Mar 2026 (13)") a
 under them reads "Showing 13 of 133 trades · net ₹ · median ₹/trade · win %" for whatever
 is filtered. Group by then splits that filtered set.
 
+**Each trade card** opens with its outcome in plain words: a **WIN / LOSS** badge with the net ₹
+at real costs, the move in **R** (exit − entry over entry − stop), then gross % and the stressed
+figure in small print. One sentence tells the trade: "Bought 831 at 120.24 at 12:36, sold at
+119.85 at 12:37 — stopped out. Held 1 min. Risked ₹324 (stop 0.32% below the entry). Costs ₹182."
+**‹ 3 / 19 ›** on the card, or the **J** / **K** keys, step to the next / previous trade that
+passes the filters, in the order shown (opening a collapsed group when needed). In full screen
+they swap the next trade onto the screen, so you can flip through every chart without leaving it.
+A lab run's *← Back to this run in the lab* opens that run's result in the lab (`/lab#run/<id>`).
+
 **Group by** (side panel, or `?group=exit_reason` / `?group=target_hit` in the URL):
 
 | | |

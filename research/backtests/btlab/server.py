@@ -61,8 +61,10 @@ def describe_config(rec: dict) -> str:
     b = c["base"]
     g = "$" if b.get("market") == "US" else "₹"
     return (f"{'US · ' if b.get('market') == 'US' else ''}years {', '.join(map(str, c['years']))} · momentum {b['day_chg_min']:g}–{b['day_chg_max']:g}% "
-            f"RVOL≥{b['rvol_min']:g} · {len(c['patterns'])} patterns · risk {g}{c['risk_inr']:g}/trade · "
-            f"{c['max_trades'] or 'unlimited'}/day · indicators: " + ("; ".join(ind) if ind else "none (base trade)"))
+            f"RVOL≥{b['rvol_min']:g} · {'no pattern (market entry)' if b.get('entry_mode') == 'market' else str(len(c['patterns'])) + ' patterns + doji / spinning top after a downtrend' if b.get('entry_mode') == 'hybrid' else str(len(c['patterns'])) + ' patterns'}"
+            f"{' · 1-minute candles' if b.get('pattern_tf') == '1m' else ''} · risk {g}{c['risk_inr']:g}/trade · "
+            f"{c['max_trades'] or 'unlimited'}/day · "
+            f"{str(c['max_positions']) + ' open at once' if c.get('max_positions') else 'unlimited open at once'} · indicators: " + ("; ".join(ind) if ind else "none (base trade)"))
 
 
 def report_page(run_id: str) -> str | None:
@@ -94,7 +96,7 @@ def report_page(run_id: str) -> str | None:
                                     "selected": rec["config"]["plugins"],
                                     "glyph": "$" if rec["config"]["base"].get("market") == "US" else "₹"},
             "detail_url": f"/api/lab/run/{run_id}/trade/",
-            "back": {"href": "/lab", "text": "← Back to the lab"}, "default_group": "exit_reason"}
+            "back": {"href": f"/lab#run/{run_id}", "text": "← Back to this run in the lab"}, "default_group": "exit_reason"}
     sub = (f"<b>{html.escape(rec['name'])}</b> · saved {rec['created_at']} · "
            f"{html.escape(describe_config(rec))}. Charts are built from the cached 1-minute bars "
            "when you scroll to them. The support/resistance drawn is recomputed as of the entry bar; "
@@ -110,7 +112,7 @@ def trade_detail(run_id: str, i: int) -> dict | None:
     tr = service.ensure_trades(run_id)
     if not 0 <= i < len(tr):
         return None
-    d = BACKTESTS / ".dashboard_cache" / f"lab-{run_id}"
+    d = BACKTESTS / ".dashboard_cache" / f"lab-{run_id}-d{_bt32().DETAIL_VERSION}"
     f = d / f"{i}.json"
     if f.exists():
         return _bt32().with_filings(json.loads(f.read_text()), tr.iloc[i])
@@ -121,6 +123,20 @@ def trade_detail(run_id: str, i: int) -> dict | None:
         d.mkdir(parents=True, exist_ok=True)
         f.write_text(json.dumps(built))
         return _bt32().with_filings(built, tr.iloc[i])
+
+
+def trade_history(run_id: str, i: int, q: dict) -> dict | None:
+    """Prior sessions' 1-minute bars for the chart's History control (?days=N trading days)."""
+    if store.get_run(run_id) is None:
+        return None
+    tr = service.ensure_trades(run_id)
+    if not 0 <= i < len(tr):
+        return None
+    try:
+        n = int((q.get("days") or ["21"])[0])
+    except ValueError:
+        n = 21
+    return _bt32().history_1m(tr.iloc[i], n)
 
 
 def runs_csv() -> str:
@@ -197,6 +213,10 @@ def handle(h, method: str, path: str, query: str) -> bool:
             m = re.fullmatch(r"/api/lab/run/([\w\-]+)/news", path)
             if m:
                 return h.json(200, news.status(m.group(1))) or True
+            m = re.fullmatch(r"/api/lab/run/([\w\-]+)/trade/(\d+)/history", path)
+            if m:
+                d = trade_history(m.group(1), int(m.group(2)), q)
+                return (h.json(200, d) if d is not None else h.json(404, {"error": "unknown trade"})) or True
             m = re.fullmatch(r"/api/lab/run/([\w\-]+)/trade/(\d+)", path)
             if m:
                 d = trade_detail(m.group(1), int(m.group(2)))
@@ -230,7 +250,7 @@ def handle(h, method: str, path: str, query: str) -> bool:
                     return h.json(200, {"cancelled": news.cancel(m.group(1))}) or True
                 r = news.start(m.group(1))
                 return h.json(400 if r.get("error") else 200, r) or True
-            if path == "/api/lab/news/prefetch":          # fetch the filings an Apply with 'News + market reaction' needs
+            if path == "/api/lab/news/prefetch":          # fetch the filings an Apply with 'News' needs
                 cfg = service.parse_request(b)
                 mid = cfg["base"].get("market", "NSE")
                 r = news.prefetch_start(service.news_spans(cfg), mid)

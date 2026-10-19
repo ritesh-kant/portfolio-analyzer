@@ -1,0 +1,138 @@
+{
+ "id": "20261012-170748-ace1da",
+ "key": "ace1dac3c53c",
+ "window": "df726b0517fa",
+ "created_at": "2026-10-12T17:07:48",
+ "name": "US \u00b7 Entry: News \u00b7 Exit: Tap-high ceiling + Fixed R target",
+ "notes": "",
+ "starred": false,
+ "is_base": false,
+ "base_id": "20261012-170510-bf68e3",
+ "config": {
+  "years": [
+   2026
+  ],
+  "base": {
+   "day_chg_max": 700.0,
+   "day_chg_min": 1.0,
+   "entry_cutoff_min": 900,
+   "entry_mode": "hybrid",
+   "entry_slip_pct": 0.03,
+   "fill_valid_minutes": 15,
+   "market": "US",
+   "pattern_tf": "1m",
+   "rvol_min": 1.5,
+   "session_level_sessions": 10,
+   "stop_buffer_pct": 0.1,
+   "target_buffer_pct": 0.15
+  },
+  "patterns": [
+   "bullish_engulfing",
+   "dragonfly_doji",
+   "hammer",
+   "inverted_hammer",
+   "morning_doji_star",
+   "morning_star",
+   "rising_three",
+   "three_white_soldiers",
+   "tweezer_bottom"
+  ],
+  "risk_inr": 50.0,
+  "max_notional_inr": 100000.0,
+  "max_trades": 0,
+  "plugins": [
+   {
+    "id": "news",
+    "params": {
+     "lookback_h": 1,
+     "scope": "material",
+     "trigger": "pattern"
+    }
+   },
+   {
+    "id": "tap_high_ceiling",
+    "params": {
+     "touches": "3"
+    }
+   },
+   {
+    "id": "target_fixed_rr",
+    "params": {
+     "rr": 2.0,
+     "stop_x": 1.0
+    }
+   }
+  ],
+  "indicator_revisions": {
+   "news": 4
+  },
+  "news_data_key": "b952edb9e19cb8c8",
+  "lab_version": "lab-1"
+ },
+ "git": {
+  "sha": "3afcb07",
+  "dirty": true
+ },
+ "metrics": {
+  "n": 2,
+  "symbols": 2,
+  "days": 2,
+  "win_pct": 0.0,
+  "gross_pct_mean": -1.3074,
+  "net_real_pct_mean": -1.8146,
+  "net_stress_pct_mean": -2.6093,
+  "net_real_inr": -164.0,
+  "net_stress_inr": -241.0,
+  "gross_inr": -100.0,
+  "costs_inr": 64.0,
+  "mean_inr": -81.87,
+  "median_inr": -81.87,
+  "mean_ex_top5_inr": null,
+  "top5_share_pct": null,
+  "profit_factor": 0.0,
+  "avg_win_inr": 0.0,
+  "avg_loss_inr": -81.9,
+  "max_drawdown_inr": -164.0,
+  "deployed_inr": 9692.0,
+  "return_on_deployed_pct": -1.689,
+  "mean_r": -1.638,
+  "target_hit_pct": 0.0,
+  "stop_pct": 100.0,
+  "exit_mix": {
+   "stop": 2
+  },
+  "stop_source_mix": {
+   "support": 2
+  },
+  "by_year": [
+   {
+    "year": 2026,
+    "n": 2,
+    "net_real_inr": -164.0,
+    "mean_inr": -81.9,
+    "win_pct": 0.0
+   }
+  ],
+  "curve": [
+   -54.7,
+   -163.7
+  ]
+ },
+ "vs_base": {
+  "base_id": "20261012-170510-bf68e3",
+  "overlap": {
+   "base_n": 331,
+   "run_n": 2,
+   "same": 2,
+   "dropped": 329,
+   "new": 0
+  },
+  "removed": {
+   "n": 329,
+   "mean_inr": -45.36,
+   "median_inr": -64.81,
+   "net_real_inr": -14924.0
+  }
+ },
+ "trial_n": 9
+}

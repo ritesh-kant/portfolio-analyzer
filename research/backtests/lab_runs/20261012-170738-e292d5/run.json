@@ -1,0 +1,92 @@
+{
+ "id": "20261012-170738-e292d5",
+ "key": "e292d59231ff",
+ "window": "df726b0517fa",
+ "created_at": "2026-10-12T17:07:38",
+ "name": "US \u00b7 Entry: Market reaction + News \u00b7 Exit: Tap-high ceiling + Fixed R target",
+ "notes": "",
+ "starred": false,
+ "is_base": false,
+ "base_id": "20261012-170510-bf68e3",
+ "config": {
+  "years": [
+   2026
+  ],
+  "base": {
+   "day_chg_max": 700.0,
+   "day_chg_min": 1.0,
+   "entry_cutoff_min": 900,
+   "entry_mode": "hybrid",
+   "entry_slip_pct": 0.03,
+   "fill_valid_minutes": 15,
+   "market": "US",
+   "pattern_tf": "1m",
+   "rvol_min": 1.5,
+   "session_level_sessions": 10,
+   "stop_buffer_pct": 0.1,
+   "target_buffer_pct": 0.15
+  },
+  "patterns": [
+   "bullish_engulfing",
+   "dragonfly_doji",
+   "hammer",
+   "inverted_hammer",
+   "morning_doji_star",
+   "morning_star",
+   "rising_three",
+   "three_white_soldiers",
+   "tweezer_bottom"
+  ],
+  "risk_inr": 50.0,
+  "max_notional_inr": 100000.0,
+  "max_trades": 0,
+  "plugins": [
+   {
+    "id": "market_reaction",
+    "params": {
+     "min_move_pct": 1.0,
+     "min_rvol": 1.5,
+     "volume_mode": "post_news"
+    }
+   },
+   {
+    "id": "news",
+    "params": {
+     "lookback_h": 1,
+     "scope": "material",
+     "trigger": "pattern"
+    }
+   },
+   {
+    "id": "tap_high_ceiling",
+    "params": {
+     "touches": "3"
+    }
+   },
+   {
+    "id": "target_fixed_rr",
+    "params": {
+     "rr": 2.0,
+     "stop_x": 1.0
+    }
+   }
+  ],
+  "indicator_revisions": {
+   "market_reaction": 4,
+   "news": 4
+  },
+  "news_data_key": "b952edb9e19cb8c8",
+  "lab_version": "lab-1"
+ },
+ "git": {
+  "sha": "3afcb07",
+  "dirty": true
+ },
+ "metrics": {
+  "n": 0
+ },
+ "vs_base": {
+  "base_id": "20261012-170510-bf68e3"
+ },
+ "trial_n": 8
+}

@@ -31,15 +31,18 @@ from .paths import RUNS_DIR
 from . import plugins as P
 
 LEDGER = RUNS_DIR / "ledger.jsonl"
-NEWS_REVISION = 3
+NEWS_REVISION = 4
 _lock = threading.RLock()
 
 
 def canonical_config(cfg: dict) -> dict:
     """The part of a request that determines the trades, in a stable shape."""
-    base = {k: v for k, v in cfg["base"].items() if not (k == "market" and v == "NSE")}   # NSE keys predate markets
-    revised = {x["id"]: NEWS_REVISION if x["id"] == "news_reaction" else 2 for x in cfg["plugins"]
-               if x["id"] == "news_reaction" or
+    base = {k: v for k, v in cfg["base"].items()
+            if not (k == "market" and v == "NSE")                 # NSE keys predate markets
+            and not (k == "entry_mode" and v == "pattern")        # so do keys that predate the no-pattern option
+            and not (k == "stop_levels" and v == "all")}          # and the stop-levels option
+    revised = {x["id"]: NEWS_REVISION if x["id"] in P.NEWS_IDS else 2 for x in cfg["plugins"]
+               if x["id"] in P.NEWS_IDS or
                (x["id"] in ("support_rule", "resistance_rule") and x["params"].get("kind") == "swing")}
     return {
         "years": sorted(int(y) for y in cfg["years"]),
@@ -47,6 +50,7 @@ def canonical_config(cfg: dict) -> dict:
         "patterns": sorted(cfg["patterns"]),
         "risk_inr": float(cfg["risk_inr"]), "max_notional_inr": float(cfg["max_notional_inr"]),
         "max_trades": int(cfg["max_trades"]),
+        **({"max_positions": int(cfg["max_positions"])} if cfg.get("max_positions") else {}),   # absent = unlimited, so old keys stand
         "plugins": [{"id": x["id"], "params": dict(sorted(x["params"].items()))}
                     for x in sorted(cfg["plugins"], key=lambda x: x["id"])],
         **({"indicator_revisions": revised} if revised else {}),
@@ -58,8 +62,14 @@ def canonical_config(cfg: dict) -> dict:
 def rebuild_error(rec: dict) -> str | None:
     """Never replace a historical result with trades from different indicator semantics."""
     cfg = rec["config"]
-    if any(x["id"] == "news_reaction" for x in cfg["plugins"]):
-        rev = cfg.get("indicator_revisions", {}).get("news_reaction", 1)
+    if any(x["id"] == "news" and x["params"].get("trigger") == "news_bar" and "bar_min_move_pct" not in x["params"]
+           for x in cfg["plugins"]):
+        return ("This saved news_bar run predates the price-up-since-filing floor and its original trades.csv "
+                "is missing. Restore that CSV, or Apply the settings as a new experiment (set the floor to 0 "
+                "to reproduce it). Its saved metrics have been preserved.")
+    news_ids = [x["id"] for x in cfg["plugins"] if x["id"] in P.NEWS_IDS]
+    if news_ids:
+        rev = min(cfg.get("indicator_revisions", {}).get(i, 1) for i in news_ids)
         if rev != NEWS_REVISION:
             return ("This saved news run uses an older indicator revision and its original trades.csv "
                     "is missing. Restore that CSV to view its original charts, or Apply the settings "
@@ -75,7 +85,7 @@ def window_key(cfg: dict) -> str:
     """Same data and base rule, any indicators: what a 'trial' is counted against."""
     c = canonical_config(cfg)
     blob = json.dumps({k: c[k] for k in ("years", "base", "patterns", "risk_inr",
-                                         "max_notional_inr", "max_trades")}, sort_keys=True)
+                                         "max_notional_inr", "max_trades", "max_positions") if k in c}, sort_keys=True)
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 

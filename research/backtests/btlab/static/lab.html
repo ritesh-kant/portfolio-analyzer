@@ -4,111 +4,184 @@
 <title>Backtest lab</title>
 <link rel="stylesheet" href="/lab/static/lab.css">
 </head><body>
-<a class="skip-link" href="#results">Skip to results and saved runs</a>
-<header>
-  <div class="hrow">
-    <div>
-      <h1>Backtest lab</h1>
-      <p>Choose your data, add optional indicators, and compare the result with the base trade.
-      Every run and its exact settings are saved.</p>
-      <p class="hint">Exploratory results · repeated trials on the same data are not independent evidence.</p>
-    </div>
-    <nav aria-label="Lab navigation"><a href="#setup">Set up experiment</a><a href="#results">Results</a><a href="#history-card">Saved runs</a><a href="/">← All backtests</a><a href="/api/lab/runs.csv">⬇ Export all runs (CSV)</a></nav>
+<a class="skip-link" href="#panel-build">Skip to the experiment builder</a>
+<header class="top">
+  <div class="brand">
+    <h1>Backtest lab</h1>
+    <p>Take one fixed <b>base trade</b>, add indicators, and see whether they beat it at real costs. Every run is saved with its exact settings.</p>
   </div>
+  <nav aria-label="Lab links">
+    <a href="/">← All backtests</a>
+    <a href="/api/lab/runs.csv" title="Every saved run, one row each, for a spreadsheet">⬇ Export runs (CSV)</a>
+    <button type="button" class="linkish" id="btn-help" aria-expanded="false" aria-controls="help">? How it works</button>
+  </nav>
 </header>
+
+<section id="help" class="help" hidden aria-label="How the lab works">
+  <div class="help-steps">
+    <div><span class="n">1</span><b>Pick the data</b><br>Market and years. Results from several years are pooled.</div>
+    <div><span class="n">2</span><b>Check the base trade</b><br>The fixed rule every experiment is compared with. Change it only under <i>Adjust</i>.</div>
+    <div><span class="n">3</span><b>Add indicators</b><br><span class="c-entry">Entry</span> indicators decide <i>which</i> trades are taken. <span class="c-exit">Exit</span> indicators decide <i>how</i> they are closed.</div>
+    <div><span class="n">4</span><b>Run and read the verdict</b><br>Better / worse / no clear difference vs the base, at real costs, with the median beside the mean.</div>
+  </div>
+  <details class="glossary"><summary>Glossary: the words used on this page</summary>
+    <dl>
+      <dt>Base trade</dt><dd>The unchanged rule. Every experiment is measured against it on the same data.</dd>
+      <dt>Day change</dt><dd>How far the stock has moved since yesterday's close at the moment of the decision.</dd>
+      <dt>RVOL</dt><dd>Relative volume: today's volume so far ÷ the usual volume by this time of day. 3 = three times the normal activity.</dd>
+      <dt>VWAP</dt><dd>Volume-weighted average price of the session: the "fair" price most traders benchmark against.</dd>
+      <dt>EMA9 / 20 / 200</dt><dd>Exponential moving averages over 9, 20 and 200 bars. Short over long = an uptrend.</dd>
+      <dt>MACD</dt><dd>A momentum gauge: the gap between a fast and a slow moving average. Positive = momentum is up.</dd>
+      <dt>R</dt><dd>The trade's risk unit: entry minus stop. A 2R target is twice that distance above the entry.</dd>
+      <dt>Support / resistance</dt><dd>Price levels where buyers (support, below) or sellers (resistance, above) showed up before. The stop goes under support, the target under resistance.</dd>
+      <dt>Real costs</dt><dd>Brokerage, taxes, exchange fees and slippage, itemised. Every ₹ figure on this page is after them.</dd>
+      <dt>Median / trade</dt><dd>The middle trade. If the mean is positive and the median is negative, a few big winners carry the result.</dd>
+      <dt>Without the 5 best</dt><dd>The mean after removing the five best trades: shows whether the result relies on luck.</dd>
+      <dt>Profit factor</dt><dd>Total won ÷ total lost. Above 1 = profitable.</dd>
+      <dt>p-value</dt><dd>Roughly, the chance of a difference this large with no real effect. Above 0.1 = indistinguishable from noise.</dd>
+      <dt>Trial #</dt><dd>How many experiments were run on this data window. The more you try, the more will look good by chance.</dd>
+    </dl>
+  </details>
+  <p class="hint">Results here are exploratory. Anything intended to be believed or shipped still needs a pre-registered hypothesis. Manual: <code>research/backtests/README-lab.md</code>.</p>
+</section>
+
 <div id="banner" role="status" aria-live="polite" hidden></div>
-<div class="layout">
+
+<div class="tabs" role="tablist" aria-label="Lab sections">
+  <button type="button" role="tab" id="tab-build" aria-controls="panel-build" data-tab="build">Build experiment</button>
+  <button type="button" role="tab" id="tab-result" aria-controls="panel-result" data-tab="result">Result <span class="badge" id="result-badge" hidden></span></button>
+  <button type="button" role="tab" id="tab-runs" aria-controls="panel-runs" data-tab="runs">Saved runs <span class="badge" id="runs-badge"></span></button>
+</div>
+
+<!-- ============================================================ BUILD -->
+<div class="panel build" id="panel-build" role="tabpanel" aria-labelledby="tab-build">
   <section id="setup" aria-label="Set up experiment">
+
     <section class="card" id="sec-window">
-      <h2><span class="n">1</span> Data window</h2>
-      <div class="sub" style="margin:0 0 6px">Market</div>
-      <div id="mkt" class="chips"></div>
-      <div class="sub" style="margin:10px 0 6px">Years</div>
-      <div id="years" class="chips"></div>
+      <h2><span class="n">1</span> Data</h2>
+      <div class="row-2">
+        <div><div class="sub">Market</div><div id="mkt" class="chips"></div></div>
+        <div><div class="sub">Years <span class="dim">(pooled)</span></div><div id="years" class="chips"></div></div>
+      </div>
       <p class="hint" id="years-hint"></p>
     </section>
+
     <section class="card" id="sec-base">
-      <h2><span class="n">2</span> Base trade <small>baseline for comparison</small></h2>
-      <p id="base-overview" class="base-overview"></p>
-      <p class="hint">A bullish pattern triggers an entry; structural support sets the stop and resistance sets the target.</p>
-      <details><summary>How the base trade works</summary><ul id="base-text" class="rule"></ul></details>
-      <details id="base-settings">
-        <summary>Adjust base settings</summary>
-        <div class="grid2">
-          <label>Day change ≥ % <input type="number" id="b-chg-min" step="0.5" min="0.5"></label>
-          <label>Day change ≤ % <input type="number" id="b-chg-max" step="0.5" min="1"></label>
-          <label>RVOL ≥ <input type="number" id="b-rvol" step="0.5" min="0"></label>
-          <label>Max entries / stock / day (0 = no limit) <input type="number" id="b-maxtr" step="1" min="0" max="20" title="0 = no limit"></label>
-          <label>Risk per trade <span class="g">₹</span> <input type="number" id="b-risk" step="50" min="50"></label>
-          <label>Max position <span class="g">₹</span> <input type="number" id="b-notional" step="5000" min="5000"></label>
-        </div>
-        <div class="presets" id="saved-bases">Saved bases:
-          <select id="b-saved" aria-label="Saved base settings"></select>
-          <button type="button" id="b-save" title="Save the settings above (band, RVOL, sizing, entry cap, patterns) under a name">Save as…</button>
-          <button type="button" id="b-default" title="Start the lab with this base">★ Make default</button>
-          <button type="button" id="b-delete" title="Delete this saved base">Delete</button>
-        </div>
-        <div class="presets">Presets:
-          <button type="button" data-preset="strict">Strict 4–8% · RVOL 3</button>
-          <button type="button" data-preset="wide">Wider 3–15% · RVOL 2</button>
-        </div>
-        <p class="hint">Changing the momentum band rebuilds the base data (about 20 s per year).</p>
-        <div class="sub">Candlestick patterns that can trigger a trade</div>
-        <div id="patterns" class="chips small"></div>
+      <h2><span class="n">2</span> Base trade <small>what every experiment is compared with</small></h2>
+      <div class="base-flow" id="base-flow" aria-label="The base trade, step by step"></div>
+      <details><summary>Full rule, in words</summary><ul id="base-text" class="rule"></ul></details>
+      <details id="base-settings" class="adjust">
+        <summary>Adjust base settings <span class="dim" id="base-changed"></span></summary>
+        <p class="hint warn-line">Any change here builds a separate set of base data (≈20–70 s per year, once) and the result is compared with that base, not the default one.</p>
+
+        <fieldset><legend>Which stocks</legend>
+          <div class="presets">Presets:
+            <button type="button" data-preset="strict">Strict 4–8% · RVOL 3</button>
+            <button type="button" data-preset="wide">Wider 3–15% · RVOL 2</button>
+          </div>
+          <div class="grid3">
+            <label>Day change from % <input type="number" id="b-chg-min" step="0.5" min="0.5"></label>
+            <label>Day change to % <input type="number" id="b-chg-max" step="0.5" min="1"></label>
+            <label title="Relative volume: today's volume so far ÷ the usual by this time of day">RVOL at least <input type="number" id="b-rvol" step="0.5" min="0"></label>
+          </div>
+        </fieldset>
+
+        <fieldset><legend>How a trade starts</legend>
+          <div class="grid2">
+            <label>Candles <select id="b-tf" title="The candles the trigger is read from and the bar the entry indicators are judged on">
+              <option value="5m">5-minute</option><option value="1m">1-minute</option></select></label>
+            <label>Entry trigger <select id="b-mode" title="What starts a trade">
+              <option value="pattern">Pattern (buy-stop over its high)</option>
+              <option value="hybrid">Patterns + doji / spinning top after a downtrend</option>
+              <option value="market">No pattern (market buy; an entry indicator decides)</option></select></label>
+          </div>
+          <p class="hint" id="b-mode-hint"></p>
+          <div class="sub" id="patterns-title">Candlestick patterns that can trigger a trade</div>
+          <div id="patterns" class="chips small"></div>
+        </fieldset>
+
+        <fieldset><legend>Stop</legend>
+          <label>Stop goes under <select id="b-stops" title="Which supports may be the stop">
+            <option value="all">Nearest structural support (default)</option>
+            <option value="local">Today's own levels only (skip previous days)</option></select></label>
+        </fieldset>
+
+        <fieldset><legend>Size and limits</legend>
+          <div class="grid2">
+            <label>Risk per trade <span class="g">₹</span> <input type="number" id="b-risk" step="50" min="50"></label>
+            <label>Max position size <span class="g">₹</span> <input type="number" id="b-notional" step="5000" min="5000"></label>
+            <label title="0 = no limit">Max entries per stock per day <small class="dim">0 = no limit</small><input type="number" id="b-maxtr" step="1" min="0" max="20"></label>
+            <label title="Positions open at the same time across all stocks. A candidate that would fill while this many are open is skipped. 0 = no limit">Max open positions, all stocks <small class="dim">0 = no limit</small><input type="number" id="b-maxpos" step="1" min="0" max="50"></label>
+          </div>
+        </fieldset>
+        <button type="button" class="ghost" id="btn-base-reset">Reset base to defaults</button>
       </details>
     </section>
-    <section class="card group-entry" id="sec-entry">
-      <h2><span class="n">3</span> Entry indicators <small>decide <b>which</b> base trades are taken</small></h2>
-      <label class="search-label" for="entry-search">Find an entry indicator</label>
-      <input type="search" id="entry-search" placeholder="Search by name or description…" aria-controls="entry-list">
-      <p class="hint" id="entry-count" role="status"></p>
-      <div id="entry-list"></div>
-      <button type="button" class="ghost" id="entry-more" aria-expanded="false" aria-controls="entry-list">Show all entry indicators</button>
-    </section>
-    <section class="card group-exit" id="sec-exit">
-      <h2><span class="n">4</span> Exit indicators <small>decide <b>how</b> a taken trade is closed</small></h2>
-      <label class="search-label" for="exit-search">Find an exit indicator</label>
-      <input type="search" id="exit-search" placeholder="Search by name or description…" aria-controls="exit-list">
-      <p class="hint" id="exit-count" role="status"></p>
-      <div id="exit-list"></div>
-      <button type="button" class="ghost" id="exit-more" aria-expanded="false" aria-controls="exit-list">Show all exit indicators</button>
-    </section>
-    <div class="actionbar" id="actionbar">
-      <div id="selsum">No indicators selected. Run the base trade to start.</div>
-      <div class="btns">
-        <button type="button" id="btn-clear" class="ghost">Clear indicators</button>
-        <button type="button" id="btn-scan" class="ghost" title="Runs every indicator on its own against the base">Test each indicator separately</button>
-        <button type="button" id="btn-apply" class="primary">Run experiment</button>
-      </div>
-    </div>
 
-  </section>
-  <main id="results" tabindex="-1">
-    <section id="result-card" class="card empty" tabindex="-1">
-      <h2>Result</h2>
-      <p class="hint">Run the base trade first, or select indicators to test a change. You can also open a saved summary or its trade charts below.</p>
-    </section>
-    <section id="scan-card" class="card" hidden></section>
-    <section id="compare-card" class="card" hidden></section>
-    <section class="card" id="history-card">
-      <h2>Saved runs <small id="hist-count" role="status"></small></h2><p class="hint">Open a summary, inspect trade charts, or reuse settings. Select two or more runs to compare. All figures below include real costs.</p>
-      <div class="bar">
-        <label class="search-label" for="h-q">Search saved runs</label><input id="h-q" type="search" placeholder="Filter — indicator, year, note…">
-        <label><input type="checkbox" id="h-star"> Favourites only</label>
-        <label>Show <select id="h-kind"><option value="">all runs</option><option value="base">base only</option>
-          <option value="entry">with entry indicators</option><option value="exit">with exit indicators</option></select></label>
-        <label>Base <select id="h-base" title="Show only the runs made on one base setting"></select></label>
-        <button type="button" id="btn-compare" class="ghost" disabled>Compare selected</button>
-        <button type="button" id="btn-del-sel" class="ghost" disabled>Delete selected</button>
+    <section class="card" id="sec-ind">
+      <h2><span class="n">3</span> Indicators <small>optional: none = run the base trade alone</small></h2>
+      <div class="seg" role="tablist" aria-label="Indicator type">
+        <button type="button" role="tab" data-g="entry" class="seg-entry">Entry <small>which trades</small> <span class="cnt" id="cnt-entry"></span></button>
+        <button type="button" role="tab" data-g="exit" class="seg-exit">Exit <small>how they close</small> <span class="cnt" id="cnt-exit"></span></button>
       </div>
-      <div class="scroll" tabindex="0" role="region" aria-label="Saved runs table"><table id="history"><caption class="sr-only">Saved experiments, with net results at real costs</caption><thead><tr>
-        <th><input type="checkbox" id="h-all" aria-label="Select all shown runs"></th><th><span class="sr-only">Favourite</span></th><th data-k="created_at">Saved</th><th data-k="name">Settings</th>
-        <th data-k="years">years</th><th data-k="n" class="num">trades</th>
-        <th data-k="win" class="num">win %</th><th data-k="mean" class="num"><span class="g">₹</span>/trade</th>
-        <th data-k="median" class="num">Median / trade</th><th data-k="net" class="num">net <span class="g">₹</span></th>
-        <th data-k="delta" class="num">Δ <span class="g">₹</span>/trade vs base</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
+      <div class="ind-tools">
+        <label class="search-label sr-only" for="ind-search">Find an indicator</label>
+        <input type="search" id="ind-search" placeholder="Search indicators… (e.g. vwap, news, stop)">
+        <label class="inline"><input type="checkbox" id="ind-onlysel"> Selected only</label>
+      </div>
+      <div id="ind-cats" class="chips small cats" aria-label="Categories"></div>
+      <p class="hint" id="ind-count" role="status"></p>
+      <div id="entry-list" class="ind-list group-entry"></div>
+      <div id="exit-list" class="ind-list group-exit" hidden></div>
     </section>
-  </main>
+  </section>
+
+  <aside class="recipe card" id="recipe" aria-label="Your experiment">
+    <h2>Your experiment</h2>
+    <div id="recipe-body"></div>
+    <ul id="checks" class="checks" aria-live="polite"></ul>
+    <div class="btns">
+      <button type="button" id="btn-apply" class="primary">Run experiment</button>
+      <button type="button" id="btn-scan" class="ghost" title="Runs every indicator on its own against the base, with its default settings">Test each indicator separately</button>
+      <button type="button" id="btn-clear" class="ghost">Clear indicators</button>
+    </div>
+    <p class="hint" id="recipe-foot"></p>
+  </aside>
 </div>
+
+<!-- ============================================================ RESULT -->
+<main class="panel" id="panel-result" role="tabpanel" aria-labelledby="tab-result" tabindex="-1" hidden>
+  <section id="result-card" class="card empty" tabindex="-1">
+    <h2>Result</h2>
+    <p class="hint">Nothing open yet. Run an experiment from <a href="#build" data-goto="build">Build experiment</a>, or open one from <a href="#runs" data-goto="runs">Saved runs</a>.</p>
+  </section>
+  <section id="compare-card" class="card" hidden></section>
+  <section id="scan-card" class="card" hidden></section>
+</main>
+
+<!-- ============================================================ SAVED RUNS -->
+<section class="panel" id="panel-runs" role="tabpanel" aria-labelledby="tab-runs" hidden>
+  <section class="card" id="history-card">
+    <h2>Saved runs <small id="hist-count" role="status"></small></h2>
+    <p class="hint">Click a row to open its result. Tick two or more to compare. All figures are after real costs; Δ is the change in ₹ per trade against the base it was run on.</p>
+    <div class="bar">
+      <label class="search-label sr-only" for="h-q">Search saved runs</label><input id="h-q" type="search" placeholder="Search — indicator, year, note…">
+      <label>Show <select id="h-kind"><option value="">all runs</option><option value="base">base trade only</option>
+        <option value="entry">with entry indicators</option><option value="exit">with exit indicators</option></select></label>
+      <label>Base <select id="h-base" title="Show only the runs made on one base setting"></select></label>
+      <label class="inline"><input type="checkbox" id="h-star"> ★ only</label>
+      <span class="spacer"></span>
+      <button type="button" id="btn-compare" class="ghost" disabled>Compare selected</button>
+      <button type="button" id="btn-del-sel" class="ghost danger" disabled>Delete selected</button>
+    </div>
+    <div class="scroll" tabindex="0" role="region" aria-label="Saved runs table"><table id="history"><caption class="sr-only">Saved experiments, with net results at real costs</caption><thead><tr>
+      <th><input type="checkbox" id="h-all" aria-label="Select all shown runs"></th><th><span class="sr-only">Favourite</span></th>
+      <th data-k="name">Experiment</th><th data-k="years">Years</th><th data-k="created_at">Saved</th>
+      <th data-k="n" class="num">Trades</th><th data-k="win" class="num">Win %</th>
+      <th data-k="mean" class="num"><span class="g">₹</span>/trade</th><th data-k="median" class="num">Median</th>
+      <th data-k="net" class="num">Net <span class="g">₹</span></th><th data-k="delta" class="num" title="Change in ₹ per trade vs the base trade on the same data">Δ vs base</th>
+      <th><span class="sr-only">Actions</span></th></tr></thead><tbody></tbody></table></div>
+  </section>
+</section>
 <script src="/lab/static/lab.js"></script>
 </body></html>

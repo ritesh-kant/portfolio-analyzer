@@ -22,7 +22,7 @@ def cand(**kw):
                 ema9_5=99.0, ema20_5=98.0, ema200_5=90.0, vwap5=99.5, macd5=0.3, macd5_prev=0.2,
                 macd1=0.2, macd1_prev=0.1, vol_ratio5=2.0, pullback_ord=1, atr_pct=2.0,
                 daily_uptrend=True, f1_uptrend=True, f2_chart=True, f3_surge=True, pv_rising=True,
-                dist_round_pct=0.4, vwap_cross_bars=1.0, news_move_pct=3.0, day_key=KEY)
+                dist_round_pct=0.4, vwap_cross_bars=1.0, news_move_pct=3.0, news_pullback_ord=1.0, news_pullback_ord_1m=1.0, news_in_pullback=True, news_in_pullback_1m=True, day_key=KEY)
     return {**base, **kw}
 
 
@@ -275,7 +275,7 @@ def test_news_reaction_measures_the_move_since_a_material_filing_as_of_the_decis
     arr["m1_o"][35] = 99.0                                                    # the 09:50 minute opens at 99
     df = pd.DataFrame([dict(symbol="AAA", date="2026-03-02", day_key=KEY, decision_min=600, prev_close=95.0, close5=101.0)])
     got = news.stamp_reaction(df, {KEY: arr}, 24, "material")
-    assert got[0] == pytest.approx((101 / 95 - 1) * 100)         # the overnight filing (ref = prev close) beats 09:50's +2.0%
+    assert got[0] == pytest.approx((101 / 98 - 1) * 100)         # the overnight filing (ref = first open, 98) beats 09:50's +2.0%
     none = news.stamp_reaction(df, {KEY: arr}, 0.5, "material")  # window only reaches back to 09:30: only the query + 09:50 filing
     assert none[0] == pytest.approx((101 / 99 - 1) * 100)        # in-session ref = the first post-filing minute open
     assert np.isnan(news.stamp_reaction(df.assign(decision_min=580), {KEY: arr}, 0.5, "material")[0])   # 09:40: only the query
@@ -299,6 +299,21 @@ def test_news_reaction_uses_the_post_filing_open_on_a_prior_trading_day(tmp_path
     assert news.stamp_reaction(df, {key: arr}, 72, "material")[0] == pytest.approx(5.0)
 
 
+def test_pre_open_filing_is_measured_from_the_open_not_the_prior_close(tmp_path, monkeypatch):
+    import numpy as np
+    from btlab import news
+    monkeypatch.setattr(news, "CACHE", tmp_path)
+    (tmp_path / "AAA.json").write_text(json.dumps({"covered": [], "rows": [
+        {"t": "2026-03-02T08:28:40+05:30", "h": "AAA: Bagging/Receiving of orders/contracts"}]}))
+    arr = {"m1_min": np.arange(555, 605), "m1_o": np.full(50, 100.0)}     # opens at 100, gapped up from 95
+    df = pd.DataFrame([dict(symbol="AAA", date="2026-03-02", day_key=KEY,
+                            decision_min=600, prev_close=95.0, close5=100.0)])
+    assert news.stamp_reaction(df, {KEY: arr}, 24, "material")[0] == pytest.approx(0.0)     # a pure gap, then flat
+    faded = df.assign(close5=97.0)
+    assert news.stamp_reaction(faded, {KEY: arr}, 24, "material")[0] == pytest.approx(-3.0)  # gap that fades is negative
+    assert np.isnan(news.stamp_reaction(df.assign(decision_min=555), {KEY: arr}, 24, "material")[0])  # no tape yet
+
+
 def test_news_reaction_excludes_the_price_move_before_an_intrabar_filing(tmp_path, monkeypatch):
     import json
     import numpy as np
@@ -320,6 +335,23 @@ def test_news_reaction_plugin_needs_move_and_rvol():
     p = P.REGISTRY["news_reaction"]
     got = p.entry(df, P.resolve_params(p, None)).tolist()
     assert got == [True, False, False, False]
+
+
+def test_news_and_market_reaction_are_separate_indicators():
+    df = pd.DataFrame([cand(news_move_pct=3.0, rvol=4.0), cand(news_move_pct=1.0, rvol=4.0),
+                       cand(news_move_pct=float("nan"), rvol=4.0), cand(news_move_pct=3.0, rvol=2.0)])
+    only_news = P.entry_mask(df, P.normalise([{"id": "news"}])).tolist()
+    assert only_news == [True, True, False, True]                       # a filing exists; no price test
+    both = P.entry_mask(df, P.normalise([{"id": "news"}, {"id": "market_reaction"}])).tolist()
+    legacy = P.entry_mask(df, P.normalise([{"id": "news_reaction"}])).tolist()
+    assert both == legacy == [True, False, False, False]
+    with pytest.raises(P.PluginError):
+        P.normalise([{"id": "market_reaction"}])                       # needs the filing to measure from
+    assert "news_reaction" not in {c["id"] for c in P.catalog()}
+    sel = P.normalise([{"id": "news", "params": {"lookback_h": 12}},
+                       {"id": "market_reaction", "params": {"volume_mode": "post_news", "min_rvol": 5}}])
+    assert P.news_params(sel) == {"lookback_h": 12.0, "scope": "material", "trigger": "pattern",
+                                  "volume_mode": "post_news", "min_rvol": 5.0}
 
 
 def test_sec_tiers_separate_catalysts_from_dilution_and_paperwork():
@@ -354,7 +386,7 @@ def test_news_reaction_on_the_us_tape_reads_the_edgar_cache_in_new_york_time(tmp
     arr = {"m1_min": m1, "m1_o": o}
     df = pd.DataFrame([dict(symbol="AAA", date="2026-03-02", day_key=KEY, decision_min=620, prev_close=10.0, close5=13.0)])
     got = news.stamp_reaction(df, {KEY: arr}, 24, "material", "US")
-    assert got[0] == pytest.approx(30.0)                                            # 13 vs the previous close of 10 (pre-market news)
+    assert got[0] == pytest.approx((13 / 11 - 1) * 100)                              # 13 vs the 09:30 open of 11 (pre-market news)
     assert np.isnan(news.stamp_reaction(df, {KEY: arr}, 1.5, "material", "US")[0])  # the 07:30 release is outside a 1.5 h window ending 10:20
     loose = news.stamp_reaction(df, {KEY: arr}, 1.5, "material+unclear", "US")
     assert loose[0] == pytest.approx((13.0 / 12.0 - 1) * 100)                       # the 5.02 at 10:10 counts: reference = first open at or after it
@@ -393,3 +425,94 @@ def test_entry_status_badges_a_trade_from_the_cache_and_stays_silent_when_not_fe
     assert st["status"] == "news" and "1.01 Material agreement" in st["items"][0]
     assert news.entry_status("MEDS", "2026-04-10", "13:09", "US", hours=10)["status"] == "none"   # 21:35 is 15.5 h earlier
     assert news.entry_status("ZZZ", "2026-04-10", "13:09", "US") is None                          # never fetched: no false 'no filing'
+
+
+def _tap_day():
+    """A 5-minute tape with a 110 spike, then 101.9 / 102.0 / 102.0 rejections (BT61's LATENTVIEW shape)."""
+    h = [95, 110, 101.9, 101.0, 102.0, 101.0, 102.0, 101.3, 101.0, 101.0, 101.0, 101.0]
+    c = [95, 100, 101.0, 100.5, 101.0, 100.5, 101.5, 101.0, 100.5, 100.5, 100.5, 100.5]
+    return mk([FLAT] * 60, m5_h=h, m5_c=c, m5_v=[1000.0] * 12)
+
+
+def test_tap_high_ceiling_caps_the_target_at_a_triple_top_the_pivot_test_missed():
+    arr = _tap_day()
+    c = next(pd.DataFrame([cand(decision_min=640, fill_min=642, fill_k=42, target=103.0,
+                                resistance=103.5)]).itertuples(index=False))
+    rule = run_cfg().rule
+    from btlab.sim import ExitCfg
+    assert runner.with_tap_ceiling(c, arr, ExitCfg(), rule) is c                       # off = untouched
+    got = runner.with_tap_ceiling(c, arr, ExitCfg(tap_touches=3), rule)
+    assert (got.resistance_kind, got.resistance) == ("tap_high", 102.0)
+    assert got.target == pytest.approx(101.80)                                         # 0.15% under 102.0, floored to the tick
+    assert got.target < c.target
+    # a ceiling nearer than the tap leaves it alone
+    near = next(pd.DataFrame([cand(decision_min=640, fill_min=642, fill_k=42, target=101.0,
+                                   resistance=101.2)]).itertuples(index=False))
+    assert runner.with_tap_ceiling(near, arr, ExitCfg(tap_touches=3), rule) is near
+
+
+def test_tap_high_ceiling_reads_only_bars_up_to_the_decision_bar_and_needs_enough_taps():
+    from btlab.sim import ExitCfg
+    arr = _tap_day()
+    rule = run_cfg().rule
+    early = next(pd.DataFrame([cand(decision_min=620, fill_min=622, fill_k=22, target=103.0,
+                                    resistance=103.5)]).itertuples(index=False))     # decision after bar 3: 1 tap only
+    assert runner.with_tap_ceiling(early, arr, ExitCfg(tap_touches=2), rule) is early
+    two = next(pd.DataFrame([cand(decision_min=630, fill_min=632, fill_k=32, target=103.0,
+                                  resistance=103.5)]).itertuples(index=False))       # taps at bars 2 and 4
+    assert runner.with_tap_ceiling(two, arr, ExitCfg(tap_touches=3), rule) is two
+    assert runner.with_tap_ceiling(two, arr, ExitCfg(tap_touches=2), rule).resistance_kind == "tap_high"
+
+
+def test_tap_high_plugin_is_registered_runs_end_to_end_and_the_row_names_the_ceiling():
+    plugins = [{"id": "tap_high_ceiling", "params": {"touches": "3"}}]
+    assert P.normalise(plugins)[0]["params"] == {"touches": "3"}
+    assert "tap_high_ceiling" in {x["id"] for x in P.catalog()}
+    row = cand(decision_min=640, fill_min=642, fill_k=42, target=103.0, resistance=103.5)
+    tr = runner.run(run_cfg(plugins=plugins), pd.DataFrame([row]), {KEY: _tap_day()})
+    assert tr["structural_resistance_kind"].iloc[0] == "tap_high"
+    assert tr["target"].iloc[0] == pytest.approx(101.80)
+    off = runner.run(run_cfg(), pd.DataFrame([row]), {KEY: _tap_day()})
+    assert off["structural_resistance_kind"].iloc[0] == "round"
+
+
+# ------------------------------------------------------------------ max open positions across stocks
+
+def _three_stocks():
+    """Three stocks, one candidate each, fill minutes 605 / 610 / 615; flat bars, so each runs to the end of the day."""
+    rows, days = [], {}
+    for sym, fm in (("AAA", 605), ("BBB", 610), ("CCC", 615)):
+        key = f"{sym}|2026-03-02"
+        rows.append(cand(symbol=sym, day_key=key, fill_min=fm, fill_k=fm - 600, pattern="p"))
+        days[key] = day(60)
+    return pd.DataFrame(rows), days
+
+
+def test_max_positions_zero_is_unlimited_and_changes_nothing():
+    df, days = _three_stocks()
+    assert len(runner.run(run_cfg(patterns=["p"]), df, days)) == 3
+    assert len(runner.run(run_cfg(patterns=["p"], max_positions=0), df, days)) == 3
+
+
+def test_max_positions_skips_a_fill_while_that_many_are_open():
+    df, days = _three_stocks()
+    tr = runner.run(run_cfg(patterns=["p"], max_positions=2), df, days)
+    assert list(tr["symbol"]) == ["AAA", "BBB"]               # CCC would be the third open position
+    tr = runner.run(run_cfg(patterns=["p"], max_positions=1), df, days)
+    assert list(tr["symbol"]) == ["AAA"]
+
+
+def test_a_position_that_has_closed_frees_its_slot():
+    df, days = _three_stocks()
+    days["AAA|2026-03-02"] = mk([FLAT] * 6 + [(100.0, 100.0, 90.0, 91.0)] + [FLAT] * 53)     # AAA stops out at 606
+    tr = runner.run(run_cfg(patterns=["p"], max_positions=1), df, days)
+    assert list(tr["symbol"]) == ["AAA", "BBB"]                 # BBB (610) takes the freed slot; CCC (615) finds BBB open
+
+
+def test_max_positions_joins_the_saved_key_only_when_set():
+    from btlab import store
+    base_cfg = {"years": [2026], "base": {"day_chg_min": 4.0}, "patterns": ["hammer"], "risk_inr": 500,
+                "max_notional_inr": 50000, "max_trades": 1, "plugins": []}
+    k0 = store.config_key(base_cfg)
+    assert store.config_key({**base_cfg, "max_positions": 0}) == k0          # old saved runs keep their key
+    assert store.config_key({**base_cfg, "max_positions": 3}) != k0

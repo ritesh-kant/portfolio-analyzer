@@ -1,0 +1,169 @@
+{
+ "id": "20261012-171155-296d20",
+ "key": "296d20b883a6",
+ "window": "2ae9d7d996d2",
+ "created_at": "2026-10-12T17:11:55",
+ "name": "Entry: Market reaction + News \u00b7 Exit: Checkpoint stop",
+ "notes": "",
+ "starred": false,
+ "is_base": false,
+ "base_id": "20261012-155205-9f56ba",
+ "config": {
+  "years": [
+   2026
+  ],
+  "base": {
+   "day_chg_max": 500.0,
+   "day_chg_min": 1.0,
+   "entry_cutoff_min": 870,
+   "entry_mode": "hybrid",
+   "entry_slip_pct": 0.03,
+   "fill_valid_minutes": 15,
+   "pattern_tf": "1m",
+   "rvol_min": 1.5,
+   "session_level_sessions": 10,
+   "stop_buffer_pct": 0.1,
+   "target_buffer_pct": 0.15
+  },
+  "patterns": [
+   "bullish_engulfing",
+   "dragonfly_doji",
+   "hammer",
+   "inverted_hammer",
+   "morning_doji_star",
+   "morning_star",
+   "rising_three",
+   "three_white_soldiers",
+   "tweezer_bottom"
+  ],
+  "risk_inr": 500.0,
+  "max_notional_inr": 100000.0,
+  "max_trades": 0,
+  "plugins": [
+   {
+    "id": "checkpoint_stop",
+    "params": {}
+   },
+   {
+    "id": "market_reaction",
+    "params": {
+     "min_move_pct": 1.0,
+     "min_rvol": 1.5,
+     "volume_mode": "post_news"
+    }
+   },
+   {
+    "id": "news",
+    "params": {
+     "lookback_h": 2.0,
+     "scope": "material",
+     "trigger": "pattern"
+    }
+   }
+  ],
+  "indicator_revisions": {
+   "market_reaction": 4,
+   "news": 4
+  },
+  "news_data_key": "685aadb680447953",
+  "lab_version": "lab-1"
+ },
+ "git": {
+  "sha": "3afcb07",
+  "dirty": true
+ },
+ "metrics": {
+  "n": 19,
+  "symbols": 13,
+  "days": 13,
+  "win_pct": 26.3,
+  "gross_pct_mean": -0.4343,
+  "net_real_pct_mean": -0.6339,
+  "net_stress_pct_mean": -1.4322,
+  "net_real_inr": -4245.0,
+  "net_stress_inr": -11689.0,
+  "gross_inr": -2439.0,
+  "costs_inr": 1806.0,
+  "mean_inr": -223.43,
+  "median_inr": -335.91,
+  "mean_ex_top5_inr": -421.77,
+  "top5_share_pct": null,
+  "profit_factor": 0.28,
+  "avg_win_inr": 331.9,
+  "avg_loss_inr": -421.8,
+  "max_drawdown_inr": -4575.0,
+  "deployed_inr": 931717.0,
+  "return_on_deployed_pct": -0.456,
+  "mean_r": -0.516,
+  "target_hit_pct": 5.3,
+  "stop_pct": 78.9,
+  "exit_mix": {
+   "checkpoint_stop": 8,
+   "stop": 7,
+   "eod": 3,
+   "target": 1
+  },
+  "stop_source_mix": {
+   "support": 19
+  },
+  "by_year": [
+   {
+    "year": 2026,
+    "n": 19,
+    "net_real_inr": -4245.0,
+    "mean_inr": -223.4,
+    "win_pct": 26.3
+   }
+  ],
+  "curve": [
+   -600.0,
+   -1121.7,
+   -1652.9,
+   -1040.3,
+   -1635.4,
+   -1593.3,
+   -2007.3,
+   -2047.8,
+   -2627.9,
+   -3051.1,
+   -3661.0,
+   -3996.9,
+   -4575.3,
+   -4474.5,
+   -3574.9,
+   -3593.2,
+   -3588.7,
+   -3917.0,
+   -4245.2
+  ]
+ },
+ "vs_base": {
+  "base_id": "20261012-155205-9f56ba",
+  "overlap": {
+   "base_n": 6246,
+   "run_n": 19,
+   "same": 17,
+   "dropped": 6229,
+   "new": 2
+  },
+  "removed": {
+   "n": 6229,
+   "mean_inr": -151.69,
+   "median_inr": -79.53,
+   "net_real_inr": -944882.0
+  },
+  "kept_vs_removed": {
+   "z": -0.21,
+   "p": 0.833
+  },
+  "paired": {
+   "n": 17,
+   "mean_change_inr": -9.2,
+   "median_change_inr": 0.0,
+   "changed": 9,
+   "z": -0.21,
+   "p": 0.837
+  }
+ },
+ "trial_n": 7
+}

@@ -6,7 +6,7 @@ becomes incomparable, so a change means a new `LAB_VERSION`):
   universe   momentum stocks: day change +4..+8% at the decision bar, time-of-day
              RVOL >= 3, price Rs60-2000, 20-day turnover Rs3-50cr (bt17's own bands)
   trigger    a bullish candlestick pattern from `candles.py` (the v3 detector,
-             unchanged) completes on a 5-minute bar
+             unchanged) completes on a 5-minute bar (`pattern_tf="1m"`: a 1-minute bar)
   entry      resting buy-stop one tick above the pattern's high, live for 15
              minutes, cancelled if price trades under the pattern's low first;
              fills at max(trigger, open) (+0.03% slip when it fills at the trigger)
@@ -15,6 +15,12 @@ becomes incomparable, so a change means a new `LAB_VERSION`):
   target     the nearest STRUCTURAL resistance above the trigger (prior sessions'
              highs included), 0.15% under it; no resistance means no trade
   time exit  the bar starting 15:14 closes the position at its close
+
+`entry_mode="hybrid"` adds the doji / spinning-top-after-a-downtrend candles on top of the nine patterns;
+that logic lives in `hybrid.py`, so everything above is untouched when it is off.
+`entry_mode="market"` drops the pattern: every closed decision bar that passes the momentum
+screen is a candidate, entered at the next minute's open, with no trigger or invalidation price.
+Both options default to the frozen base above, and a default rule keeps its old cache key.
 
 This module builds the CANDIDATE table: every pattern that completed on a
 momentum stock and could have been entered, with every indicator value stamped
@@ -44,7 +50,7 @@ import numpy as np
 import pandas as pd
 
 from . import LAB_VERSION
-from . import markets
+from . import hybrid, markets
 from .paths import LAB_CACHE, bar_file, cached_symbols
 
 from src.momentum_trader import quality  # noqa: E402
@@ -72,6 +78,7 @@ from src.momentum_trader.levels import (  # noqa: E402
 from src.momentum_trader.pullback import pullback_ordinal  # noqa: E402
 from src.momentum_trader.risk import MAX_STOP_PCT, MIN_STOP_PCT  # noqa: E402
 
+MARKET_SETUP = "market_entry"          # the `pattern` value of a no-pattern candidate
 MIN_PROFILE_DAYS = 10
 PROFILE_DAYS = 20
 WARM_SESSIONS = 5                      # prior sessions that warm up EMA200 / MACD
@@ -95,8 +102,10 @@ class BaseRule:
     target_buffer_pct: float = TARGET_BUFFER_PCT
     session_level_sessions: int = SESSION_LEVEL_SESSIONS
     entry_cutoff_min: int = 14 * 60 + 30
-    pattern_tf: str = "5m"
+    pattern_tf: str = "5m"                 # decision-bar timeframe: "5m" | "1m"
     market: str = "NSE"
+    entry_mode: str = "pattern"            # "pattern" (buy-stop over the pattern high) | "market" (no pattern) | "hybrid"
+    stop_levels: str = "all"               # which supports may be the stop: "all" | "local" (today's own levels only)
 
     @classmethod
     def for_market(cls, market: str, **given) -> "BaseRule":
@@ -113,8 +122,30 @@ class BaseRule:
         d = asdict(self)
         if self.market == "NSE":
             del d["market"]            # keeps every NSE cache and saved run valid
+        if self.entry_mode == "pattern":
+            del d["entry_mode"]        # ditto: every cache built before the option existed
+        if self.stop_levels == "all":
+            del d["stop_levels"]       # ditto
         blob = json.dumps({**d, "v": LAB_VERSION, "patterns": PATTERN_RULES_VERSION}, sort_keys=True)
         return hashlib.sha1(blob.encode()).hexdigest()[:10]
+
+
+TIMEFRAMES = ("5m", "1m")
+ENTRY_MODES = ("pattern", "market", "hybrid")
+STOP_LEVELS = ("all", "local")
+# Earlier sessions' levels. The same price is often present under two names (a previous-day high is also a
+# prior-session high), so switching off one kind alone changes nothing; "local" drops all three.
+EARLIER_SESSION_KINDS = frozenset({"prev_day", "session_high", "session_pivot"})
+
+
+def last5_start(decision_min: int) -> int:
+    """Start minute of the last 5-minute bar that is CLOSED when a decision bar closes at `decision_min`.
+
+    A 5-minute decision bar closes on a multiple of 5, so this is `decision_min - 5` (the bar itself);
+    a 1-minute decision bar sees the 5-minute bar that closed at or before it. Both sessions open on a
+    multiple of 5 (09:15 IST, 09:30 ET), so 5-minute bars start on multiples of 5.
+    """
+    return ((int(decision_min) - 5) // 5) * 5
 
 
 def tick_up(x: float, tick: float = 0.05) -> float:
@@ -166,6 +197,16 @@ def find_fill(
     return "unfilled"
 
 
+def market_fill(o: np.ndarray, mins: np.ndarray, start: int, rule: BaseRule) -> tuple[int, float] | str:
+    """No-pattern entry: a market order at the open of the minute after the decision bar closed.
+
+    Gets the same `entry_slip_pct` a buy-stop fill at its trigger gets; refused from the entry cutoff.
+    """
+    if mins[start] >= rule.entry_cutoff_min or mins[start] >= rule.mk.eod_min:
+        return "cutoff"
+    return start, round(float(o[start]) * (1.0 + rule.entry_slip_pct / 100.0), 2)
+
+
 def support_stop(levels: list, trigger: float, rule: BaseRule) -> tuple[object | None, float]:
     """The nearest structural support that is a usable stop distance away.
 
@@ -173,8 +214,13 @@ def support_stop(levels: list, trigger: float, rule: BaseRule) -> tuple[object |
     floor), so the search walks down to the first structural support that clears
     it. Returns (support, stop price); (None, 0) when there is none at all. The
     caller still checks the 3% ceiling.
+
+    `rule.stop_levels == "local"` leaves out earlier sessions' levels (`EARLIER_SESSION_KINDS`), so the
+    stop sits under something today's tape made (pivots, opening range, round numbers, shelves). The
+    target search is unchanged.
     """
-    below = sorted((x for x in levels if x.price < trigger and is_structural(x)),
+    skip = EARLIER_SESSION_KINDS if rule.stop_levels == "local" else frozenset()
+    below = sorted((x for x in levels if x.price < trigger and is_structural(x) and x.kind not in skip),
                    key=lambda x: -x.price)
     for x in below:
         stop = tick_down(x.price * (1.0 - rule.stop_buffer_pct / 100.0), rule.mk.tick)
@@ -326,26 +372,64 @@ def _scan_day(sym: str, d: pd.Timestamp, i: int, days: list, groups: dict, daily
     cq = quality.chart_quality(hist)
 
     cands: list[dict] = []
-    for j in range(len(tf5)):
-        start5 = tf5.index[j]
-        last1 = pos1.get(int(start5.hour * 60 + start5.minute) + 4)
-        if last1 is None:
-            continue
-        chg = (float(tf5["close"].iloc[j]) / prev_close - 1.0) * 100.0
+    c1 = day_bars["close"].to_numpy(float)
+    pos5 = {int(v): j for j, v in enumerate(_mins(tf5.index))}
+    market_mode = rule.entry_mode == "market"
+    lv_cache: dict[int, list] = {}          # 5-minute levels, once per completed 5-minute bar
+    ft_cache: dict[int, tuple] = {}         # 5-minute quality features, ditto
+
+    def levels_at(j5: int) -> list:
+        if j5 not in lv_cache:
+            lv_cache[j5] = derive_levels(tf5.iloc[: j5 + 1], prev_day) + session_lv
+        return lv_cache[j5]
+
+    def features_at(j5: int) -> tuple:
+        if j5 not in ft_cache:
+            bars_now = tf5.iloc[: j5 + 1]
+            f1ok, _ = quality.uptrend_ok(bars_now, prev_close, sma20)
+            f3ok, _ = quality.surge_ok(bars_now)
+            ft_cache[j5] = (bool(f1ok), bool(f3ok), pullback_ordinal(bars_now) or 0)
+        return ft_cache[j5]
+
+    # One decision point per CLOSED decision bar: (5-minute index j5 of the last closed 5-minute bar,
+    # 1-minute index of the decision bar's last minute, decision minute, decision-bar close, bars the
+    # detector sees). A 5-minute decision bar is its own j5; a 1-minute one reads the 5-minute
+    # indicators/levels as of the last 5-minute bar that closed at or before it (never the open one).
+    def points():
+        if rule.pattern_tf == "1m":
+            for k1 in range(len(day_bars)):
+                dec = int(mins1[k1]) + 1
+                j5 = pos5.get(last5_start(dec))
+                if j5 is not None:
+                    yield j5, k1, dec, float(c1[k1]), day_bars.iloc[: k1 + 1]
+        else:
+            for j in range(len(tf5)):
+                start5 = tf5.index[j]
+                k1 = pos1.get(int(start5.hour * 60 + start5.minute) + 4)
+                if k1 is not None:
+                    yield j, k1, int(start5.hour * 60 + start5.minute) + 5, float(tf5["close"].iloc[j]), tf5.iloc[: j + 1]
+
+    for j5, last1, dec_min, close_dec, sig_bars in points():
+        chg = (close_dec / prev_close - 1.0) * 100.0
         rv = float(rvol1[last1])
         if not (rule.day_chg_min <= chg <= rule.day_chg_max) or not (rv >= rule.rvol_min):
             fn["bars_not_momentum"] += 1
             continue
-        matches = [x for x in completed_pattern_matches(tf5.iloc[: j + 1], rule.pattern_tf)
-                   if x.direction == "bullish"]
-        if not matches:
-            continue
-        bars_now = tf5.iloc[: j + 1]
-        levels = derive_levels(bars_now, prev_day) + session_lv
-        dec_min = int(start5.hour * 60 + start5.minute) + 5
-        for mt in matches:
-            fn["patterns"] += 1
-            trigger = tick_up(float(mt.confirmation) + tick, tick)
+        if market_mode:
+            entries: list = [None]
+        else:
+            entries = [x for x in completed_pattern_matches(sig_bars, rule.pattern_tf) if x.direction == "bullish"]
+            if rule.entry_mode == "hybrid":
+                entries += hybrid.indecision_matches(sig_bars, rule.pattern_tf)
+            if not entries:
+                continue
+        levels = levels_at(j5)
+        for mt in entries:
+            fn["decisions" if mt is None else "patterns"] += 1
+            if mt is None:
+                trigger = close_dec                  # reference price only: levels are searched around it
+            else:
+                trigger = tick_up(float(mt.confirmation) + tick, tick)
             sup, stop = support_stop(levels, trigger, rule)
             if sup is None:
                 fn["no_support"] += 1
@@ -362,7 +446,10 @@ def _scan_day(sym: str, d: pd.Timestamp, i: int, days: list, groups: dict, daily
             if start_k is None:
                 fn["no_next_bar"] += 1
                 continue
-            fill = find_fill(o1, h1, l1, mins1, start_k, trigger, float(mt.invalidation), rule)
+            if mt is None:
+                fill = market_fill(o1, mins1, start_k, rule)
+            else:
+                fill = find_fill(o1, h1, l1, mins1, start_k, trigger, float(mt.invalidation), rule)
             if isinstance(fill, str):
                 fn[f"fill_{fill}"] += 1
                 continue
@@ -371,32 +458,32 @@ def _scan_day(sym: str, d: pd.Timestamp, i: int, days: list, groups: dict, daily
                 fn["stop_not_sane_at_fill"] += 1
                 continue
             fn["candidates"] += 1
-            f1ok, _ = quality.uptrend_ok(bars_now, prev_close, sma20)
-            f3ok, _ = quality.surge_ok(bars_now)
+            f1ok, f3ok, pb_ord = features_at(j5)
             slopes = price_volume_slopes(day_bars.iloc[: last1 + 1], 4)
-            nearest_round = _dist_round(float(tf5["close"].iloc[j]))
+            nearest_round = _dist_round(float(tf5["close"].iloc[j5]))
             cands.append({
-                "symbol": sym, "date": str(d.date()), "pattern": mt.name,
-                "prior_trend": mt.prior_trend, "strength": float(mt.strength),
+                "symbol": sym, "date": str(d.date()), "pattern": mt.name if mt else MARKET_SETUP,
+                "prior_trend": mt.prior_trend if mt else "", "strength": float(mt.strength) if mt else float("nan"),
                 "decision_min": dec_min, "fill_min": int(mins1[k]), "fill_k": k,
-                "trigger": trigger, "invalidation": float(mt.invalidation), "fill": fill_px,
+                "trigger": trigger, "invalidation": float(mt.invalidation) if mt else float("nan"), "fill": fill_px,
                 "stop": stop, "support": float(sup.price), "support_kind": sup.kind,
                 "target": target, "resistance": float(res.price), "resistance_kind": res.kind,
                 "prev_close": prev_close,
                 "day_chg_pct": chg, "rvol": rv,
-                "close5": float(tf5["close"].iloc[j]),
-                "ema9_5": float(ind["ema9"][j]), "ema20_5": float(ind["ema20"][j]),
-                "ema200_5": float(ind["ema200"][j]), "vwap5": float(ind["vwap"][j]),
-                "macd5": float(ind["macd"][j]),
-                "macd5_prev": float(ind["macd"][j - 1]) if j else float("nan"),
+                "close_dec": close_dec,
+                "close5": float(tf5["close"].iloc[j5]),
+                "ema9_5": float(ind["ema9"][j5]), "ema20_5": float(ind["ema20"][j5]),
+                "ema200_5": float(ind["ema200"][j5]), "vwap5": float(ind["vwap"][j5]),
+                "macd5": float(ind["macd"][j5]),
+                "macd5_prev": float(ind["macd"][j5 - 1]) if j5 else float("nan"),
                 "macd1": float(m1h[last1]),
                 "macd1_prev": float(m1h[last1 - 1]) if last1 else float("nan"),
-                "vol_ratio5": float(ind["volratio"][j]),
-                "pullback_ord": pullback_ordinal(bars_now) or 0,
+                "vol_ratio5": float(ind["volratio"][j5]),
+                "pullback_ord": pb_ord,
                 "atr_pct": atr_pct,
                 "daily_uptrend": bool(sma20 is None or prev_close >= sma20),
-                "f1_uptrend": bool(f1ok), "f2_chart": bool(cq is not None and cq.ok),
-                "f3_surge": bool(f3ok),
+                "f1_uptrend": f1ok, "f2_chart": bool(cq is not None and cq.ok),
+                "f3_surge": f3ok,
                 "pv_rising": bool(slopes is not None and slopes[0] > 0 and slopes[1] > 0),
                 "dist_round_pct": nearest_round,
             })

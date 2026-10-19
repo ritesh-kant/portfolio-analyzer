@@ -85,5 +85,10 @@
     "bt": "BT60",
     "title": "Resistance-capped target vs checkpoint \u00b7 {rest}",
     "hypothesis": "research/hypotheses/2026-10-05-revert-to-resistance-cap.md"
+  },
+  "bt17_trades_bt61_tap_*": {
+    "bt": "BT61",
+    "title": "Tap-high levels \u00b7 {rest}",
+    "hypothesis": "research/hypotheses/2026-10-08-tap-high-levels.md"
   }
 }

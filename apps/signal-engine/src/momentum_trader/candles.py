@@ -37,8 +37,10 @@ well as one spanning 1.1%. The names stay correct; what a ratio cannot say is
 whether the candle was big enough to mean anything. ``PatternMatch.strength``
 reports that separately, as the signal candle's range over the ten-candle
 average range, and ``STRENGTH_WEAK_BELOW`` is the suggested display threshold.
-Detection is untouched and ``PATTERN_RULES_VERSION`` is deliberately NOT bumped:
-re-running any earlier census reproduces the identical set of matches.
+Detection was untouched by ``strength`` (``PATTERN_RULES_VERSION`` was not bumped
+for it). The hammer position tolerance was later widened (``HAMMER_NEAR_MULTIPLE``,
+v3.1, 2026-10-11), which does change matches: earlier censuses and Lab caches are
+keyed by the old version string.
 
     pattern              shape (on top of the terms above)      position / context
     -------------------  -------------------------------------  -----------------
@@ -93,7 +95,7 @@ from math import isfinite
 import numpy as np
 import pandas as pd
 
-PATTERN_RULES_VERSION = "candles-v3-20260912"
+PATTERN_RULES_VERSION = "candles-v3.1-20261011"
 BODY_LOOKBACK = 10
 TREND_LOOKBACK = 5
 NEAR_LOOKBACK = 5
@@ -105,6 +107,11 @@ SHORT_SHADOW_FRACTION = 0.10
 DOJI_LONG_SHADOW_FRACTION = 0.60
 EQUAL_RANGE_FRACTION = 0.05
 NEAR_RANGE_FRACTION = 0.20
+# A hammer's body must sit at or below the previous low plus ``near``. TA-Lib's
+# 0.20 x range rejected JBMA 2025-01-30 10:58 (body bottom 0.29 over the limit,
+# two bars of selling reversed by a 3.05 lower shadow); the hammer position
+# test alone uses 1.5x that tolerance. Hanging man keeps the plain tolerance.
+HAMMER_NEAR_MULTIPLE = 1.5
 FAR_RANGE_FRACTION = 0.60
 # Display-only significance threshold. A formation whose signal candle spans
 # less than this multiple of the ten-candle average range is *correctly named*
@@ -292,8 +299,10 @@ def is_spinning_top(bar: pd.Series) -> bool:
 
 
 def hammer_at_prior_low(prev: pd.Series, bar: pd.Series, near: float) -> bool:
-    """TA-Lib CDLHAMMER: body below or near the previous candle's low."""
-    return _body_bottom(bar) <= float(prev["low"]) + near
+    """TA-Lib CDLHAMMER: body below or near the previous candle's low.
+
+    "Near" is ``HAMMER_NEAR_MULTIPLE`` x TA-Lib's tolerance (see the constant)."""
+    return _body_bottom(bar) <= float(prev["low"]) + HAMMER_NEAR_MULTIPLE * near
 
 
 def hanging_man_at_prior_high(prev: pd.Series, bar: pd.Series, near: float) -> bool:
