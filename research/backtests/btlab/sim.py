@@ -39,8 +39,6 @@ CHECKPOINT_RR = 2.0              # BT52: the uncapped target stays at 2R
 class ExitCfg:
     target_mode: str = "resistance"          # resistance | rr | none | checkpoint
     target_rr: float = 2.0
-    ema9_exit: bool = False
-    ema20_exit: bool = False
     macd_fade_exit: bool = False
     vwap_exit: bool = False
     volume_climax_exit: bool = False
@@ -52,7 +50,6 @@ class ExitCfg:
     stale_exit: bool = False
     stale_minutes: int = 45
     stale_r: float = 0.5
-    stop_mode: str = "support"               # support | pattern_low
     stop_mult: float = 1.0                   # x the base stop distance (1.0 = unchanged)
     market: str = "NSE"                      # clock, tick and cost model of the tape being replayed
     notes: list[str] = field(default_factory=list)
@@ -157,12 +154,7 @@ def simulate(arr: dict[str, np.ndarray], k0: int, entry: float, stop0: float, ta
             close5 = float(arr["m5_c"][j])
             reason = None
             if armed:
-                e9, e20 = arr["m5_ema9"][j], arr["m5_ema20"][j]
-                if cfg.ema9_exit and not np.isnan(e9) and close5 < e9:
-                    reason = "ema9_break"
-                elif cfg.ema20_exit and not np.isnan(e20) and close5 < e20:
-                    reason = "ema20_break"
-                elif cfg.macd_fade_exit and j >= 1 and arr["m5_macd"][j - 1] > 0.0 >= arr["m5_macd"][j]:
+                if cfg.macd_fade_exit and j >= 1 and arr["m5_macd"][j - 1] > 0.0 >= arr["m5_macd"][j]:
                     reason = "macd_fade"
                 elif cfg.vwap_exit and not np.isnan(arr["m5_vwap"][j]) and close5 < arr["m5_vwap"][j]:
                     reason = "vwap_break"

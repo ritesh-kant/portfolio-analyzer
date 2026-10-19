@@ -158,7 +158,7 @@ function pluginRow(p) {
   const params = p.params.map((q) => {
     const v = (S.sel[p.id] || {})[q.key] ?? q.default;
     let input;
-    if (q.kind === "select") input = `<select data-p="${p.id}" data-k="${q.key}">${q.options.map((o) => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+    if (q.kind === "select") input = `<select data-p="${p.id}" data-k="${q.key}">${q.options.includes(v) ? "" : `<option value="${esc(v)}" selected disabled>Unsupported: ${esc(v)}</option>`}${q.options.map((o) => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
     else if (q.kind === "time") input = `<input type="time" data-p="${p.id}" data-k="${q.key}" value="${esc(v)}">`;
     else input = `<input type="number" data-p="${p.id}" data-k="${q.key}" value="${v}" ${q.min != null ? `min="${q.min}"` : ""} ${q.max != null ? `max="${q.max}"` : ""} step="${q.step ?? (q.kind === "int" ? 1 : "any")}">`;
     return `<label>${esc(q.label)}${input}</label>`;
@@ -180,7 +180,7 @@ function renderPlugins() {
 }
 
 const expandedPlugins = { entry: false, exit: false };
-const commonPlugins = new Set(["time_window", "above_vwap", "ema9_over_ema20", "macd5_positive", "min_reward_risk", "support_rule", "resistance_rule", "target_fixed_rr", "ema9_exit", "ema20_exit", "vwap_exit", "breakeven"]);
+const commonPlugins = new Set(["time_window", "above_vwap", "ema9_over_ema20", "macd5_positive", "min_reward_risk", "support_rule", "resistance_rule", "target_fixed_rr", "vwap_exit", "breakeven"]);
 function filterPlugins() {
   for (const g of ["entry", "exit"]) {
     const q = $(`#${g}-search`).value.trim().toLowerCase();
@@ -402,7 +402,7 @@ async function ensureNews(need, plugins) {
   for (;;) {
     const j = (await api(`/api/lab/news/prefetch/${key}`)).data || {};
     if (j.state === "done") {
-      if (j.unmapped?.length) { banner(`${j.unmapped.length} symbol(s) have no EDGAR CIK today (delisted or renamed) and count as 'no filing': ${j.unmapped.slice(0, 6).join(", ")}${j.unmapped.length > 6 ? "…" : ""}`, ""); await new Promise((res) => setTimeout(res, 4000)); }
+      if (j.unmapped?.length) { banner(`SEC coverage is unknown for ${j.unmapped.length} symbol(s): ${j.unmapped.slice(0, 6).join(", ")}${j.unmapped.length > 6 ? "…" : ""}. Supply their historical CIK mappings and fetch again before running.`, "err"); return false; }
       break;
     }
     if (j.state === "cancelled") { banner("News fetch cancelled — nothing was run.", "err"); setTimeout(() => banner(""), 3000); return false; }
@@ -490,8 +490,7 @@ function kpiRows(m, b) {
 }
 
 function changesSizing(rec) {
-  return rec.config.plugins.some((p) => p.id === "stop_pattern_low" ||
-    (p.id === "target_fixed_rr" && Number(p.params.stop_x ?? 1) !== 1));
+  return rec.config.plugins.some((p) => p.id === "target_fixed_rr" && Number(p.params.stop_x ?? 1) !== 1);
 }
 
 function verdict(rec) {
@@ -515,11 +514,6 @@ function verdict(rec) {
     }
     const p = changesSizing(rec) ? null : (vs.paired || vs.kept_vs_removed || {}).p;
     if (p != null && p > 0.1) { lines.push("Not statistically distinguishable from no change."); warn = true; }
-  }
-  if (rec.config.plugins.some((p) => p.id === "stop_pattern_low") && m.stop_source_mix) {
-    const fallback = Object.entries(m.stop_source_mix).filter(([source]) => source.startsWith("support"))
-      .reduce((n, [, count]) => n + count, 0);
-    lines.push(`Pattern-low stop was used on ${m.n - fallback} of ${m.n} trades; ${fallback} used the support stop because the pattern low was outside the allowed distance.`);
   }
   if (m.n < 100) { lines.push(`Small sample (${m.n} trades) — treat as a hint, not a result.`); warn = true; }
   if (m.mean_ex_top5_inr != null && Math.sign(m.mean_ex_top5_inr) !== Math.sign(m.mean_inr)) { lines.push("The mean flips sign once the 5 best trades are removed: a few trades carry this result."); warn = true; }
@@ -555,6 +549,9 @@ function renderResult(rec) {
     <h2 style="display:flex;align-items:center;gap:8px">Result <small>${esc(rec.name)}${rec.cached ? " · already run, loaded from the saved result" : " · saved"}</small>
       <button class="mini" type="button" aria-expanded="${!col}" aria-controls="result-body" data-act="rescollapse" style="margin-left:auto" title="Show or hide the result details">${col ? "▸ Expand" : "▾ Collapse"}</button></h2>
     <div class="tags">${tagsFor(rec)}</div>
+    ${rec.config.plugins.some((p) => p.id === "news_reaction") &&
+      (rec.config.indicator_revisions?.news_reaction || 1) !== S.meta.news_revision ?
+      `<p class="hint">Historical news result: these saved metrics use an earlier indicator revision. Applying settings now saves a separate experiment.</p>` : ""}
     ${m.n ? `<div class="kpis">${[["Net at real costs", m.net_real_inr, 0], ["Mean / trade", m.mean_inr, 1], ["Median / trade", m.median_inr, 1]].map(([l, x, d]) => `<div class="kpi"><div class="l">${l}</div><div class="v ${tone(x)}">${inr(x, d)}</div></div>`).join("")}<div class="kpi"><div class="l">Trades · win rate</div><div class="v">${m.n} · ${m.win_pct}%</div></div></div>` : ""}
     <div id="result-body" ${col ? "hidden" : ""}>
     <details><summary>Exact saved settings</summary><p class="hint">${esc(rec.describe)}</p></details>
@@ -760,6 +757,11 @@ function renderHistory() {
 
 function loadSettings(rec) {
   const c = rec.config;
+  const nr = c.plugins.find((p) => p.id === "news_reaction");
+  if (nr && ![undefined, "pattern"].includes(nr.params.trigger)) {
+    banner(`Saved news trigger '${nr.params.trigger}' has no implementation in this Lab. Its result is preserved. Configure a new experiment using the pattern trigger.`, "err");
+    return;
+  }
   S.years = new Set(c.years); S.base = { day_chg_min: c.base.day_chg_min, day_chg_max: c.base.day_chg_max, rvol_min: c.base.rvol_min };
   S.patterns = new Set(c.patterns); S.risk = c.risk_inr; S.notional = c.max_notional_inr; S.maxTrades = c.max_trades;
   S.sel = Object.fromEntries(c.plugins.map((x) => [x.id, x.params]));

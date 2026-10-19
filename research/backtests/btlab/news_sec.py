@@ -5,16 +5,15 @@ Same job as the NSE half in `news.py`, same shape: a per-symbol on-disk cache sh
 table and one per older submissions page when a window reaches back past the ~1,000 newest filings),
 read-only while a run is applied. Descriptive plumbing for the lab; it never feeds a live decision.
 
-Why EDGAR: it is the only legitimate free US source (see the 2026-09-24 sources audit). A small-cap's
-catalyst press release is attached to an 8-K (items 7.01 / 8.01 / 1.01 / 2.02, exhibit 99.1), so the
-filing's timestamp is the moment the wire release reached the public record.
+EDGAR supplies auditable company filings. We use SEC acceptance time, not the original press-release
+time: the release can precede the filing. This measures a filing-associated reaction, not all news.
 
 Limits, stated rather than hidden:
   * The 8-K item codes say what KIND of event it is, not what the release said. A 7.01 / 8.01 can be
     a contract win or a conference-call notice; both count as news (tier "material") and the price
     reaction is what separates them.
   * `company_tickers_exchange.json` is today's ticker list: a delisted or renamed symbol has no CIK
-    here and counts as "no filing" (reported by the fetch job as `unmapped`).
+    here has unknown coverage (reported by the fetch job as `unmapped`); it is never "no filing".
   * SEC requires a contact in the User-Agent: set `SEC_USER_AGENT` (environment or the repo `.env`),
     e.g. "Your Name you@example.com". Nothing is fetched without it.
 """
@@ -25,7 +24,7 @@ import json
 import os
 import re
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -168,10 +167,10 @@ def _rows_from(recent: dict, cik: int, lo: date) -> list[dict]:
 def fetch_symbol(client: httpx.Client, tickers: dict[str, int], symbol: str, lo: date, hi: date) -> dict:
     """Everything EDGAR holds for `symbol` from `lo` on, as the cache record (does not write it)."""
     d = load_sym(symbol)
-    cik = cik_of(tickers, symbol)
+    cik = d.get("cik") or cik_of(tickers, symbol)  # retain an established/historical issuer mapping
     d["cik"] = cik
     if cik is None:
-        d["covered"] = _merge_iso(d["covered"], lo, hi)         # known to be unmapped: nothing to fetch
+        d["covered"] = []  # no issuer means unknown coverage, not a successful empty fetch
         return d
     body = _get(client, _ctx.SUBMISSIONS_URL.format(cik=cik))
     rows = _rows_from(body["filings"]["recent"], cik, lo)

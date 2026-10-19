@@ -2,7 +2,7 @@
 
   cd research/backtests
   ../../apps/signal-engine/.venv/bin/python -m btlab build --years 2024,2025
-  ../../apps/signal-engine/.venv/bin/python -m btlab apply --years 2026 --with above_vwap,ema9_exit
+  ../../apps/signal-engine/.venv/bin/python -m btlab apply --years 2026 --with above_vwap,vwap_exit
   ../../apps/signal-engine/.venv/bin/python -m btlab runs
 
 `apply` saves the run exactly as the UI does (same store, same dedupe, same trial counter).

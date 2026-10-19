@@ -97,8 +97,7 @@ def run(cfg: RunConfig, cands: pd.DataFrame, days: dict) -> pd.DataFrame:
         df = df.assign(vwap_cross_bars=stamp_vwap_cross(df, days))
     if nr is not None:
         from . import news
-        df = df.assign(news_move_pct=news.stamp_reaction(df, days, nr["params"]["lookback_h"],
-                                                         nr["params"]["scope"], mk.id))
+        df = news.stamp_candidates(df, days, nr["params"], mk.id)
     df = df[P.entry_mask(df, selected)]
     rows: list[dict] = []
     for _, grp in df.sort_values(["date", "symbol", "fill_min", "decision_min"]).groupby(
@@ -125,16 +124,12 @@ def run(cfg: RunConfig, cands: pd.DataFrame, days: dict) -> pd.DataFrame:
 
 
 def exit_stop(c, ecfg, mk) -> tuple[float, str]:
-    """The stop this candidate trades with: base support (or pattern low), scaled by `stop_mult`.
+    """The stop this candidate trades with: base support, scaled by `stop_mult`.
 
     `stop_mult` multiplies the stop DISTANCE, so 1.0 is the frozen base stop and 2.0 puts it
     twice as far below the fill. R, the size and an R target all follow the scaled stop.
     """
     stop, source = c.stop, "support"
-    if ecfg.stop_mode == "pattern_low":
-        alt = base_mod.tick_down(c.invalidation - mk.tick, mk.tick)
-        if base_mod.stop_ok(c.fill, alt):
-            stop, source = alt, "pattern_low"
     if ecfg.stop_mult != 1.0:
         stop = base_mod.tick_down(c.fill - ecfg.stop_mult * (c.fill - stop), mk.tick)
         source += f"x{ecfg.stop_mult:g}"
@@ -181,4 +176,6 @@ def _trade_row(c, ex, qty: int, stop: float, stop_source: str, ecfg, cfg: RunCon
         "rr_geom": round(float((c.target - entry) / (entry - stop)), 2),
         "mfe_r": ex.mfe_r, "mae_r": ex.mae_r,
         "strength": round(c.strength, 2),
+        **{name: getattr(c, name) for name in ("news_move_pct", "news_rvol", "news_filing_at",
+                                              "news_headline", "news_reference") if hasattr(c, name)},
     }

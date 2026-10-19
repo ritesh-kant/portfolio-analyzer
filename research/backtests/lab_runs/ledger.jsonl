@@ -183,3 +183,13 @@
 {"id": "20261008-203546-c05675", "key": "c05675421d99", "window": "e1626e54c02c", "at": "2026-10-08T20:35:46", "plugins": []}
 {"id": "20261008-203548-c0e6f2", "key": "c0e6f27e003c", "window": "e1626e54c02c", "at": "2026-10-08T20:35:48", "plugins": ["news_reaction", "target_fixed_rr"]}
 {"id": "20261008-203550-712b01", "key": "712b01bde6c7", "window": "e1626e54c02c", "at": "2026-10-08T20:35:50", "plugins": ["news_reaction", "target_fixed_rr"]}
+{"id": "20261008-210500-2cabe2", "key": "2cabe29a4c79", "window": "af6d3c7c2d30", "at": "2026-10-08T21:05:00", "plugins": ["news_reaction", "resistance_rule", "target_fixed_rr"]}
+{"id": "20261008-212325-38e826", "key": "38e826c5f031", "window": "af6d3c7c2d30", "at": "2026-10-08T21:23:25", "plugins": ["news_reaction", "resistance_rule", "target_fixed_rr"]}
+{"id": "20261008-212404-bcfed5", "key": "bcfed5d88429", "window": "af6d3c7c2d30", "at": "2026-10-08T21:24:04", "plugins": ["macd_fade_exit", "news_reaction", "resistance_rule"]}
+{"id": "20261008-212511-58f809", "key": "58f809527e2b", "window": "af6d3c7c2d30", "at": "2026-10-08T21:25:11", "plugins": ["news_reaction", "resistance_rule", "target_none"]}
+{"id": "20261008-212629-2176bb", "key": "2176bb89b281", "window": "af6d3c7c2d30", "at": "2026-10-08T21:26:29", "plugins": ["checkpoint_stop", "news_reaction", "resistance_rule"]}
+{"id": "20261008-212800-809876", "key": "809876a931f0", "window": "af6d3c7c2d30", "at": "2026-10-08T21:28:00", "plugins": ["news_reaction", "resistance_rule", "stop_pattern_low"]}
+{"id": "20261008-212918-c9e5a0", "key": "c9e5a0531865", "window": "af6d3c7c2d30", "at": "2026-10-08T21:29:18", "plugins": ["ema9_exit", "news_reaction", "resistance_rule"]}
+{"id": "20261008-213835-1f2805", "key": "1f2805598f20", "window": "af6d3c7c2d30", "at": "2026-10-08T21:38:35", "plugins": ["news_reaction", "resistance_rule", "vwap_exit"]}
+{"id": "20261008-213851-4d209e", "key": "4d209ec56c11", "window": "af6d3c7c2d30", "at": "2026-10-08T21:38:51", "plugins": ["news_reaction", "resistance_rule", "target_fixed_rr", "vwap_exit"]}
+{"id": "20261008-214130-331280", "key": "33128044cdaa", "window": "af6d3c7c2d30", "at": "2026-10-08T21:41:30", "plugins": ["news_reaction", "resistance_rule", "target_fixed_rr"]}

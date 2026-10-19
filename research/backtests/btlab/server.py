@@ -55,7 +55,7 @@ def _rule_from(body: dict) -> base_mod.BaseRule:
 
 def describe_config(rec: dict) -> str:
     c = rec["config"]
-    ind = [f'{P.REGISTRY[x["id"]].name}'
+    ind = [f'{P.REGISTRY[x["id"]].name if x["id"] in P.REGISTRY else x["id"] + " (removed)"}'
            + (" (" + ", ".join(f"{k}={v}" for k, v in x["params"].items()) + ")" if x["params"] else "")
            for x in c["plugins"]]
     b = c["base"]

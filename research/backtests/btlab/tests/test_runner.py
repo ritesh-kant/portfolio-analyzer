@@ -79,20 +79,6 @@ def test_trade_row_has_the_dashboard_columns_and_stress_sits_on_top_of_real_cost
     assert r["net_real_inr"] == pytest.approx(r["gross_inr"] - r["costs_inr"], abs=0.01)
 
 
-def test_pattern_low_stop_changes_the_stop_and_the_size():
-    tr = runner.run(run_cfg(patterns=["hammer"], plugins=[{"id": "stop_pattern_low", "params": {}}]),
-                    pd.DataFrame([cand(invalidation=99.6)]), {KEY: day()})
-    assert tr.iloc[0]["stop"] == pytest.approx(99.55) and tr.iloc[0]["stop_source"] == "pattern_low"
-
-
-def test_pattern_low_stop_reports_support_fallback_when_outside_allowed_range():
-    from btlab import metrics
-    tr = runner.run(run_cfg(patterns=["hammer"], plugins=[{"id": "stop_pattern_low"}]),
-                    pd.DataFrame([cand(invalidation=90.0)]), {KEY: day()})
-    assert tr.iloc[0]["stop"] == pytest.approx(99.0)
-    assert tr.iloc[0]["stop_source"] == "support"
-    assert metrics.summarize(tr)["stop_source_mix"] == {"support": 1}
-
 
 # ------------------------------------------------------------------ plugins
 
@@ -159,7 +145,7 @@ def test_validation_rejects_unknown_duplicate_and_clashing_plugins():
     with pytest.raises(P.PluginError):
         P.normalise([{"id": "above_vwap"}, {"id": "above_vwap"}])
     with pytest.raises(P.PluginError):
-        P.normalise([{"id": "target_none"}, {"id": "checkpoint_stop"}])
+        P.normalise([{"id": "target_fixed_rr"}, {"id": "checkpoint_stop"}])
     out = P.normalise([{"id": "volume_surge", "params": {"min_ratio": 9999}}])
     assert out[0]["params"]["min_ratio"] == 20                           # clamped to the declared range
     with pytest.raises(P.PluginError):
@@ -185,7 +171,7 @@ def test_corrected_indicator_runs_get_new_config_keys():
     for indicator, params in (("news_reaction", {}), ("support_rule", {"kind": "swing"}),
                               ("resistance_rule", {"kind": "swing"})):
         canonical = store.canonical_config(cfg([{"id": indicator, "params": params}]))
-        assert canonical["indicator_revisions"] == {indicator: 2}
+        assert canonical["indicator_revisions"] == {indicator: store.NEWS_REVISION if indicator == "news_reaction" else 2}
     assert "indicator_revisions" not in store.canonical_config(cfg([{"id": "support_rule", "params": {"kind": "any"}}]))
 
 
@@ -205,13 +191,13 @@ def test_identical_config_is_not_saved_twice_and_ledger_counts_distinct_trials(t
 
 
 def test_run_json_records_exactly_what_was_applied(tmp_store):
-    plug = [{"id": "ema9_exit", "params": {}}, {"id": "volume_surge", "params": {"min_ratio": 3.0}}]
+    plug = [{"id": "vwap_exit", "params": {}}, {"id": "volume_surge", "params": {"min_ratio": 3.0}}]
     r = store.save_run(cfg(plug), pd.DataFrame([{"a": 1}]), {"n": 7}, {"base_id": "x"}, "x", notes="hello")
     saved = json.loads((tmp_store / r["id"] / "run.json").read_text())
-    assert sorted(p["id"] for p in saved["config"]["plugins"]) == ["ema9_exit", "volume_surge"]
+    assert sorted(p["id"] for p in saved["config"]["plugins"]) == ["volume_surge", "vwap_exit"]
     assert {p["id"]: p["params"] for p in saved["config"]["plugins"]}["volume_surge"] == {"min_ratio": 3.0}
     assert saved["notes"] == "hello" and saved["config"]["years"] == [2026] and saved["git"] is not None
-    assert "Entry: Volume surge" in saved["name"] and "Exit: EMA9 break" in saved["name"]
+    assert "Entry: Volume surge" in saved["name"] and "Exit: VWAP break" in saved["name"]
 
 
 def test_update_and_delete(tmp_store):

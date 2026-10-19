@@ -94,17 +94,6 @@ def test_breakeven_lift_never_applies_on_the_bar_that_arms_it():
     assert (ex.reason, ex.price, ex.k) == ("breakeven_stop", 100.0, 2)
 
 
-def test_ema9_exit_needs_the_trade_to_be_armed_first():
-    # 5m bar 0 closes under its EMA9. Not armed (never up half a risk): stay in.
-    ema9 = [101.0, 101.0]
-    cfg = ExitCfg(target_mode="none", ema9_exit=True)
-    ex = run([FLAT] * 10, cfg=cfg, m5={"m5_ema9": ema9})
-    assert ex.reason == "eod"
-    # up 0.6R on bar 1, then bar 4 closes the first 5m bar under EMA9 -> sold at that close
-    bars = [FLAT, (100, 100.7, 100, 100.5), FLAT, FLAT, (100, 100.1, 99.5, 99.8)] + [FLAT] * 5
-    ex = run(bars, cfg=cfg, m5={"m5_ema9": ema9})
-    assert (ex.reason, ex.price, ex.minute) == ("ema9_break", 99.8, 605)
-
 
 def test_swing_trail_lifts_the_stop_under_a_confirmed_pivot_low():
     n = 45

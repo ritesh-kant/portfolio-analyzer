@@ -14,7 +14,7 @@ description and, for the ones the repo already measured, the BT it came from.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
 import pandas as pd
@@ -192,13 +192,16 @@ ENTRY: tuple[Plugin, ...] = (
            history="BT24 entry location.",
            entry=lambda df, p: df["dist_round_pct"] >= p["min_pct"]),
     Plugin("news_reaction", "entry", "News + market reaction",
-           "Only take the trade if the stock had a MATERIAL filing (NSE announcements; US: SEC 8-K items, 6-K: results, order win, deal, rating, dividend, fund-raising, litigation…) in the look-back window AND the price has since moved up by at least the given % with the day's volume to match. Exchange queries about a move that already happened ('spurt in volume') and share offerings never count. Needs the filings fetched once (the lab asks).",
+           "A qualifying company filing followed by a price rise at the base candlestick decision. NSE uses subject categories; US uses SEC acceptance time, which can lag the press release. Queries and share offerings are excluded. Session RVOL includes volume before news; post_news measures only today's volume after the filing against the same minutes in prior sessions. The base RVOL floor still applies. Needs cached filings.",
            (Param("lookback_h", "News within last (h)", 24, "float", 1, 72, 1),
             Param("min_move_pct", "Price up since news ≥ %", 2.0, "float", 0, 30, 0.5),
             Param("min_rvol", "RVOL ≥", 3.0, "float", 0, 50, 0.5),
-            Param("scope", "Counts as news", "material", "select", options=("material", "material+unclear"))),
+            Param("scope", "Counts as news", "material", "select", options=("material", "material+unclear")),
+            Param("volume_mode", "Volume confirmation", "session", "select", options=("session", "post_news")),
+            Param("trigger", "Entry trigger", "pattern", "select", options=("pattern",))),
            history="news-trader (BT12) found no drift after news on a next-day basis; this asks the intraday question instead: news AND an on-the-tape reaction at the pattern.",
-           entry=lambda df, p: (df["news_move_pct"] >= p["min_move_pct"]) & (df["rvol"] >= p["min_rvol"])),
+           entry=lambda df, p: (df["news_move_pct"] >= p["min_move_pct"]) &
+                 (df["news_rvol"] if p["volume_mode"] == "post_news" else df["rvol"]).ge(p["min_rvol"])),
     Plugin("support_rule", "entry", "Support rule",
            "Only take trades whose structural support sits inside this distance below the fill; optionally a swing low, or anything but a round number.",
            (Param("min_pct", "Distance ≥ %", 0.3, "float", 0, 10, 0.1),
@@ -243,22 +246,10 @@ EXIT: tuple[Plugin, ...] = (
             Param("stop_x", "Stop distance × base (1 = unchanged)", 1.0, "float", 0.25, 5, 0.25)),
            exclusive="target",
            history="BT17 fixed 2R: 25% reach it.", exit=_target_rr),
-    Plugin("target_none", "exit", "No target (let it run)",
-           "Remove the target: only the stop, the other exits and the 15:14 close end the trade.",
-           exclusive="target", history="'No exits at all' looked +₹20.59/trade but the median was ₹0 and 5 trades made 44% of it (2026-09-20).",
-           exit=_set(target_mode="none")),
     Plugin("checkpoint_stop", "exit", "Checkpoint stop",
            "Target stays at 2R; touching the resistance lifts the stop to 0.15% under it instead of selling.",
            exclusive="target", history="BT52: KILLED, then shipped live 2026-09-29.",
            exit=_set(target_mode="checkpoint")),
-    Plugin("stop_pattern_low", "exit", "Stop at the pattern low",
-           "Use a stop one tick under the pattern low when it is 0.3–3% below entry; otherwise keep the support stop (see stop_source in the trade CSV).",
-           exclusive="stop", exit=_set(stop_mode="pattern_low")),
-    Plugin("ema9_exit", "exit", "EMA9 break",
-           "Sell at the close of a 5-minute bar that closes under its EMA9 (once up half a risk).",
-           history="BT59: removing it was measured (2026-10-04).", exit=_set(ema9_exit=True)),
-    Plugin("ema20_exit", "exit", "EMA20 break",
-           "Sell at the close of a 5-minute bar that closes under its EMA20 (once up half a risk).", exit=_set(ema20_exit=True)),
     Plugin("macd_fade_exit", "exit", "MACD fade",
            "Sell when the 5-minute MACD histogram rolls from positive to zero or below (once up half a risk).",
            exit=_set(macd_fade_exit=True)),
@@ -300,6 +291,13 @@ class PluginError(ValueError):
 def resolve_params(plugin: Plugin, given: dict | None) -> dict[str, Any]:
     """Defaults filled in, values coerced and clamped to the declared range."""
     given = given or {}
+    if plugin.id == "news_reaction":
+        unknown = set(given) - {p.key for p in plugin.params}
+        if unknown:
+            raise PluginError("news_reaction: unsupported parameter(s): " + ", ".join(sorted(unknown)))
+        if given.get("trigger", "pattern") != "pattern":
+            raise PluginError("News trigger '" + str(given["trigger"]) + "' has no implementation in this Lab. "
+                              "Choose 'pattern' for a new experiment; the historical saved result is preserved.")
     out: dict[str, Any] = {}
     for p in plugin.params:
         v = given.get(p.key, p.default)

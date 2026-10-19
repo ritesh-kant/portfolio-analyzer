@@ -85,6 +85,7 @@ def _uses_news(cfg: dict) -> bool:
 def news_spans(cfg: dict) -> dict:
     from . import news
     rc = _run_cfg(cfg)
+    cands, _days = runner.load_candidates(rc.years, rc.rule)
     return news.candidate_spans(cands[cands["pattern"].isin(rc.patterns)]) if not cands.empty else {}
 
 
@@ -94,12 +95,18 @@ def compute(cfg: dict) -> pd.DataFrame:
         raise NeedBuild(need)
     rc = _run_cfg(cfg)
     cands, days = runner.load_candidates(rc.years, rc.rule)
+    if _uses_news(cfg) and cfg.get("news_data_key"):
+        from . import news
+        spans = news.candidate_spans(cands[cands["pattern"].isin(rc.patterns)]) if not cands.empty else {}
+        if news.cache_key(spans, rc.rule.market) != cfg["news_data_key"]:
+            raise P.PluginError("The filing cache has changed since this run was saved. Restore its original "
+                                "trades.csv, or Apply as a new experiment; saved metrics are preserved.")
     return runner.run(rc, cands, days)
 
 
 def apply(body: dict, name: str = "", notes: str = "") -> dict:
     cfg = parse_request(body)
-    done = store.find_by_key(store.config_key(cfg))
+    done = None if _uses_news(cfg) else store.find_by_key(store.config_key(cfg))
     if done:
         return {**done, "cached": True, "base": _base_of(done)}
     need = missing_years(cfg)
@@ -110,9 +117,19 @@ def apply(body: dict, name: str = "", notes: str = "") -> dict:
         from . import news
         mid = cfg["base"].get("market", "NSE")
         spans = news_spans(cfg)
+        unknown = news.unmapped_symbols(spans, mid)
+        if unknown:
+            raise P.PluginError("SEC coverage is unknown for unmapped ticker(s): "
+                                + ", ".join(unknown[:10])
+                                + ". Supply their historical CIKs in the SEC cache and fetch again; "
+                                  "missing coverage cannot be treated as no news.")
         todo = news.missing_symbols(spans, mid)
         if todo:
             raise NeedNews(len(todo), len(spans), mid)
+        cfg["news_data_key"] = news.cache_key(spans, mid)
+        done = store.find_by_key(store.config_key(cfg))
+        if done:
+            return {**done, "cached": True, "base": _base_of(done)}
     if not cfg["plugins"]:
         tr = compute(base_cfg)
         return {**store.save_run(base_cfg, tr, metrics.summarize(tr), {}, None),
@@ -142,6 +159,9 @@ def ensure_trades(run_id: str) -> pd.DataFrame:
     path = store.trades_path(run_id)
     if path.exists():
         return pd.read_csv(path)
+    error = store.rebuild_error(rec)
+    if error:
+        raise P.PluginError(error)
     tr = compute(rec["config"])
     tr.to_csv(path, index=False)
     return tr
@@ -206,6 +226,7 @@ def meta(rule: base_mod.BaseRule) -> dict:
     eod = f"{mk.eod_min // 60:02d}:{mk.eod_min % 60:02d} " + ("ET" if mk.id == "US" else "IST")
     return {
         "lab_version": LAB_VERSION,
+        "news_revision": store.NEWS_REVISION,
         "market": {"id": mk.id, "glyph": mk.glyph, "currency": mk.currency, "risk": mk.risk,
                    "max_notional": mk.max_notional},
         "markets": [{"id": m.id, "label": m.label, "glyph": m.glyph} for m in markets.MARKETS.values()],

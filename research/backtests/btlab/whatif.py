@@ -17,10 +17,10 @@ from __future__ import annotations
 from dataclasses import replace
 
 import json
+from datetime import date, timedelta
 
 import pandas as pd
 
-from . import base as base_mod
 from . import plugins as P
 from . import runner, service, store
 
@@ -75,12 +75,13 @@ def evaluate(run_id: str, i: int, plugins: list[dict]) -> dict:
     if any(s["id"] == "vwap_cross" for s in selected):
         one = one.assign(vwap_cross_bars=runner.stamp_vwap_cross(one, days))
     nr = next((s for s in selected if s["id"] == "news_reaction"), None)
-    if nr is not None and rc.rule.mk.id != "NSE":
-        raise P.PluginError("News + market reaction needs NSE filings; it is not available for US runs")
     if nr is not None:                                 # reads the filings cache only (no NSE / EDGAR call)
         from . import news
-        one = one.assign(news_move_pct=news.stamp_reaction(one, days, nr["params"]["lookback_h"],
-                                                           nr["params"]["scope"], rc.rule.mk.id))
+        d = date.fromisoformat(str(row["date"])[:10])
+        spans = {str(row["symbol"]): (d - timedelta(days=news.PREFETCH_DAYS), d)}
+        if news.unmapped_symbols(spans, rc.rule.mk.id) or news.missing_symbols(spans, rc.rule.mk.id):
+            raise P.PluginError("News coverage is incomplete for this trade. Fetch its filings in the Lab first.")
+        one = news.stamp_candidates(one, days, nr["params"], rc.rule.mk.id)
     c = next(one.itertuples(index=False))
     entry_sel = [s for s in selected if P.REGISTRY[s["id"]].group == "entry"]
     exit_sel = [s for s in selected if P.REGISTRY[s["id"]].group == "exit"]

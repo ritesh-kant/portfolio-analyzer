@@ -1,6 +1,7 @@
 """'Check news' for a saved run: did each traded stock have an NSE filing in the 24h before its entry?
 
-Descriptive only. It reads NSE's corporate-announcements API and never feeds a trade decision.
+The news check is descriptive; the Lab's news_reaction entry gate uses the same cached filings.
+Neither feeds live trading.
 
 NSE is asked politely:
   * ONE request per symbol, not per trade: one `from_date..to_date` call covers all of a
@@ -12,7 +13,7 @@ NSE is asked politely:
     only asks for the dates not yet covered, so a symbol seen before costs no request.
   * a failed window is retried with back-off, then reported as "error" (never as "no news").
 
-NSE only: US runs have no equivalent here.
+The entry gate also supports SEC filings through news_sec; the descriptive check is NSE only.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ import pandas as pd
 
 from . import service, store  # noqa: F401  (service imports the engine path shim)
 from . import news_sec
-from .paths import BACKTESTS, RUNS_DIR, bar_file
+from .paths import BACKTESTS, RUNS_DIR
 
 from src.scrapers import nse  # noqa: E402  (signal-engine, on sys.path via btlab/__init__)
 
@@ -49,29 +50,33 @@ MAX_ITEMS = 8            # headlines kept per trade
 
 # NSE gives each filing a short generic subject ("Updates", "Press Release" say nothing about the content),
 # so this is a judgement on the SUBJECT only. Tiers: material = can move a price (results, orders,
-# deals, M&A, rating, dividend, fund-raising, litigation, UPSI); query = the exchange asking about a
+# deals, M&A, rating, dividend, litigation, UPSI); offering = share dilution; query = the exchange asking about a
 # move that already happened (reverse causality, not a catalyst); unclear = could be either;
 # routine = compliance paperwork. A trade is "news" only if it has a MATERIAL filing.
 _MATERIAL = re.compile(
     r"outcome of board meeting|financial results?|integrated filing- ?financial|acquisition|bagging|receiving of orders|"
     r"\border|agreements?\b|memorandum of understanding|\bmou\b|scheme of arrangement|amalgamation|merger|demerger|"
-    r"credit rating|^dividend( updates)?$|issue of securities|qualified institutional|preferential|rights issue|"
+    r"credit rating|^dividend( updates)?$|"
     r"buy ?back|capacity addition|commencement of commercial|sale or disposal|disposal|"
     r"other upsi|material event|material issue|pendency of litigation|action\(s\) (taken|initiated)|"
     r"guarantees/indemnity|redemption|incorporation|joint venture", re.I)
 _QUERY = re.compile(r"spurt in volume|price movement|news verification|rumou?r verification|clarification", re.I)
+_OFFERING = re.compile(r"issue of securities|qualified institutional|preferential|rights issue|"
+                       r"public (issue|offering)|allotment.*(shares|securities)", re.I)
 _UNCLEAR = re.compile(r"^(general )?updates?$|^press release|investor presentation|change in (management|director)|"
                       r"^appointment$|^resignation|^cessation|^retirement|amendment to|communication to shareholders|"
                       r"^corrigendum|memorandum", re.I)
-TIER_ORDER = {"material": 0, "unclear": 1, "query": 2, "routine": 3}
+TIER_ORDER = {"material": 0, "unclear": 1, "offering": 2, "query": 3, "routine": 4}
 
 
 def tier(headline: str) -> str:
-    """material | unclear | query | routine, judged on the filing's subject ("SYMBOL: subject")."""
+    """material | unclear | offering | query | routine, judged on the filing's subject."""
     subj = headline.split(": ", 1)[1] if ": " in headline else headline
     subj = subj.strip()
     if _QUERY.search(subj):
         return "query"
+    if _OFFERING.search(subj):
+        return "offering"
     if _MATERIAL.search(subj):
         return "material"
     if _UNCLEAR.search(subj):
@@ -390,6 +395,23 @@ def missing_symbols(spans: dict[str, tuple[date, date]], market: str = "NSE") ->
     return out
 
 
+def unmapped_symbols(spans: dict, market: str = "NSE") -> list[str]:
+    if market != "US":
+        return []
+    return sorted(s for s in spans if news_sec.sym_file(s).exists() and news_sec.load_sym(s)["cik"] is None)
+
+
+def cache_key(spans: dict, market: str = "NSE") -> str:
+    """Content identity for the filing inputs; future filings outside the run window don't change it."""
+    payload = []
+    for s, (a, b) in sorted(spans.items()):
+        d = news_sec.load_sym(s) if market == "US" else _load_sym(s)
+        rows = [x for x in d["rows"] if x.get("t") and
+                a <= datetime.fromisoformat(x["t"]).astimezone(news_sec.NY if market == "US" else _IST).date() <= b]
+        payload.append([s, d.get("cik"), sorted(rows, key=lambda x: json.dumps(x, sort_keys=True))])
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+
+
 def prefetch_key(spans: dict, market: str = "NSE") -> str:
     return hashlib.sha1(json.dumps({"m": market, **{k: [str(a), str(b)] for k, (a, b) in spans.items()}},
                                    sort_keys=True).encode()).hexdigest()[:12]
@@ -452,8 +474,20 @@ def filings_of(symbol: str, market: str = "NSE") -> list[tuple[datetime, str, st
 
 def _reaction_bars(symbol: str, year: int, market: str = "NSE") -> pd.DataFrame | None:
     """Only the prices needed to place a prior-day filing on the historical tape."""
-    path = bar_file(symbol, year, market)
-    return pd.read_parquet(path, columns=["open", "close"]).sort_index() if path is not None else None
+    from . import base
+    bars = base._load(symbol, year, market)
+    return bars[["open", "close"]].sort_index() if bars is not None else None
+
+
+def _volume_bars(symbol: str, year: int, market: str) -> pd.DataFrame | None:
+    from . import base
+    bars = base._load(symbol, year, market)
+    return bars[["volume"]] if bars is not None else None
+
+
+def stamp_candidates(df: pd.DataFrame, days: dict, params: dict, market: str = "NSE") -> pd.DataFrame:
+    return df.assign(**_stamp_reaction(df, days, params["lookback_h"], params["scope"], market,
+                                      params.get("volume_mode", "session"), params["min_rvol"]))
 
 
 def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str, market: str = "NSE") -> "np.ndarray":
@@ -472,15 +506,64 @@ def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str, 
     observed close before publication. The reaction price is the decision-bar close.
     Of several filings the largest move counts.
     """
-    import numpy as np
+    return _stamp_reaction(df, days, lookback_h, scope, market)["news_move_pct"]
+
+
+def _stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str, market: str,
+                    volume_mode: str = "session", min_rvol: float = 0) -> dict:
     out = np.full(len(df), np.nan)
+    rvol_out = np.full(len(df), np.nan)
+    refs = np.full(len(df), np.nan)
+    filing_at, headlines = [""] * len(df), [""] * len(df)
     ok_tier = {"material"} | ({"unclear"} if scope == "material+unclear" else set())
     tz = news_sec.NY if market == "US" else _IST
     open_min, close_min = (9 * 60 + 30, 16 * 60) if market == "US" else (9 * 60 + 15, 15 * 60 + 30)
     bars_for = _reaction_bars if market == "NSE" else (lambda sym, year: _reaction_bars(sym, year, market))
     cache: dict[str, list[tuple[datetime, str, str]]] = {}
     bar_cache: dict[tuple[str, int], pd.DataFrame | None] = {}
+    volume_cache: dict[tuple[str, int], pd.DataFrame | None] = {}
+    profiles: dict[tuple[str, str], tuple[pd.Series, pd.Series] | None] = {}
     window = timedelta(hours=lookback_h)
+
+    def post_rvol(sym: str, t: datetime, decision: datetime) -> float:
+        """Today's minutes after publication, relative to the same minutes in 10–20 PRIOR sessions."""
+        from . import base
+        key = (sym, str(decision.date()))
+        if key not in profiles:
+            frames = []
+            for year in (decision.year - 1, decision.year):
+                vk = (sym, year)
+                if vk not in volume_cache:
+                    volume_cache[vk] = _volume_bars(sym, year, market)
+                if volume_cache[vk] is not None:
+                    frames.append(volume_cache[vk])
+            profiles[key] = None
+            if frames:
+                bars = pd.concat(frames).sort_index()
+                bars = bars[~bars.index.duplicated(keep="last")].copy()
+                bars.index = bars.index.tz_convert(tz)
+                dates = bars.index.normalize()
+                day = pd.Timestamp(decision).normalize()
+                prior_dates = dates[dates < day].unique()[-base.PROFILE_DAYS:]
+                if len(prior_dates) >= base.MIN_PROFILE_DAYS:
+                    hist = bars[dates.isin(prior_dates)]
+                    hist = hist.assign(session=hist.index.normalize(), minute=base._mins(hist.index))
+                    panel = hist.pivot(index="session", columns="minute", values="volume")
+                    expected = panel.mean().where(panel.count() >= base.MIN_PROFILE_DAYS)
+                    today = bars[dates == day]
+                    actual = pd.Series(today["volume"].to_numpy(), index=base._mins(today.index))
+                    profiles[key] = (actual, expected)
+        profile = profiles[key]
+        if profile is None:
+            return np.nan
+        start = open_min
+        if t.date() == decision.date():
+            start = max(start, t.hour * 60 + t.minute + int(bool(t.second or t.microsecond)))
+        minutes = np.arange(start, decision.hour * 60 + decision.minute)
+        actual, expected = (x.reindex(minutes) for x in profile)
+        if not len(minutes) or actual.isna().any() or expected.isna().any() or expected.sum() <= 0:
+            return np.nan
+        return float(actual.sum() / expected.sum())
 
     def prior_reference(sym: str, t: datetime) -> float | None:
         key = (sym, t.year)
@@ -519,7 +602,7 @@ def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str, 
         t_dec = day.replace(hour=int(dec) // 60, minute=int(dec) % 60, tzinfo=tz)
         arr = days[key]
         best = np.nan
-        for t, _h, k in cache[sym]:
+        for t, headline, k in cache[sym]:
             if not (t_dec - window <= t <= t_dec) or k not in ok_tier:
                 continue
             ref = float(prev)
@@ -530,17 +613,28 @@ def stamp_reaction(df: pd.DataFrame, days: dict, lookback_h: float, scope: str, 
                     if j >= len(arr["m1_min"]) or int(arr["m1_min"][j]) >= int(dec):
                         continue
                     ref = float(arr["m1_o"][j])
+                elif tm >= open_min:
+                    continue  # missing post-filing tape must not fall back to the pre-news daily close
             elif t.date() < t_dec.date():
                 earlier = prior_reference(sym, t)
                 if earlier is None:
                     continue
                 ref = earlier
             if ref > 0:
+                if volume_mode == "post_news":
+                    rv = post_rvol(sym, t, t_dec)
+                else:
+                    rv = float(df["rvol"].iloc[i]) if "rvol" in df else np.nan
+                if volume_mode == "post_news" and not rv >= min_rvol:
+                    continue
                 mv = (float(close5) / ref - 1.0) * 100.0
                 if not best == best or mv > best:
                     best = mv
+                    rvol_out[i], refs[i] = rv, ref
+                    filing_at[i], headlines[i] = t.isoformat(), headline
         out[i] = best
-    return out
+    return {"news_move_pct": out, "news_rvol": rvol_out, "news_reference": refs,
+            "news_filing_at": filing_at, "news_headline": headlines}
 
 
 def entry_status(symbol: str, day: str, entry_time: str, market: str, hours: float = 24.0) -> dict | None:
@@ -552,6 +646,8 @@ def entry_status(symbol: str, day: str, entry_time: str, market: str, hours: flo
     d = date.fromisoformat(str(day)[:10])
     if market == "US":
         c = news_sec.load_sym(symbol)
+        if news_sec.sym_file(symbol).exists() and c["cik"] is None:
+            return {"status": "unknown", "items": ["SEC coverage unavailable: historical ticker has no CIK mapping."]}
         covered = news_sec.sym_file(symbol).exists() and not _gaps(c["covered"], d - timedelta(days=2), d)
         tz = news_sec.NY
     else:

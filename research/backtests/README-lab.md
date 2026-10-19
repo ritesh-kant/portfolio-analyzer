@@ -33,7 +33,8 @@ volume shelves, prior-session highs, and pivots touched at least twice.
 The **Market** switch at the top of step 1 flips the whole lab between NSE and US (NYSE/Nasdaq). Saved runs,
 base data, the trial counter and the form settings are kept per market, and a run from one market never mixes
 into the other. Everything not listed here is shared: the pattern detector, the structural levels, the 37
-indicators and the exit replay (News + market reaction is NSE only).
+indicators and the exit replay. News + market reaction supports both markets; the descriptive
+*Check news* / Ollama classifier remains NSE only.
 
 | | NSE | US |
 | --- | --- | --- |
@@ -70,21 +71,50 @@ restarts; star, rename, add a note, compare up to four runs, **Load** a run's se
 or export everything as CSV. *Open every trade on a candle chart* is the usual BT32 report (Group by exit
 reason, pattern, month …) for that run.
 
-Command line (same store): `pnpm bt:lab build --years 2024,2025`, `pnpm bt:lab apply --years 2026 --with above_vwap,ema9_exit`,
+Command line (same store): `pnpm bt:lab build --years 2024,2025`, `pnpm bt:lab apply --years 2026 --with above_vwap,vwap_exit`,
 `pnpm bt:lab runs`, `pnpm bt:lab indicators`.
 
-### News + market reaction (entry indicator, NSE only)
+### News + market reaction (entry indicator, NSE and US)
 
-Takes a trade only if the stock had a **material NSE filing** (results, orders, deals, rating, dividend,
-fund-raising, litigation… — `news.tier`) in the look-back window (default 24 h, max 72 h) **and** the price has
+Takes a trade only if the stock had a **material company filing** (NSE announcements or SEC EDGAR filings)
+in the look-back window (default 24 h, max 72 h) **and** the price has
 since risen by at least *min move %* (default 2) with RVOL ≥ *min* (default 3). Everything is as of the decision
 bar: the reference price is the first 1-minute open at or after an in-session filing, including one on a prior
 trading day. Off-session filings use the last observed close before publication. An in-session filing with no
 observable post-publication minute on its day before the decision is ignored. The reaction
 price is the decision bar's close. Exchange queries ("spurt in volume")
-never count (the move caused them). Several filings → the largest move counts.
-Filings come from the `.cache_nse_news/` cache shared with *Check news*; the first Apply that needs symbols
-not yet cached asks to fetch them (one polite request per symbol, ~2 s each, cached forever). Not available for US.
+never count (the move caused them). Share offerings (including NSE securities issues, QIPs, preferential
+and rights issues) are excluded even under `material+unclear`.
+
+* **Volume confirmation `session` (default):** cumulative time-of-day RVOL, including volume before
+  publication. The base RVOL floor still applies, so a lower plugin threshold cannot loosen the base.
+* **Volume confirmation `post_news` (optional):** today's complete 1-minute bars after publication and
+  before the decision, divided by the average volume for those same minutes in the preceding 20 sessions.
+  At least 10 prior observations per minute are required. For an overnight/prior-day filing, the window
+  starts at today's regular-session open. Missing tape/history rejects the candidate; it never falls back
+  to session RVOL. Both price and volume must qualify for the **same filing**; among qualifying filings,
+  the largest price move counts. This is a distinct exploratory setting, not a proven improvement.
+* **Trigger `pattern`:** the frozen base candlestick entry. Saved `pullback` / `breakout` modes have no
+  implementation in this checkout and are rejected explicitly, rather than silently ignored.
+
+NSE classification uses the subject only. Generic "Press Release" / "Updates" subjects remain unclear;
+the descriptive Ollama labels do not change the entry gate. This is a filing gate, not complete news coverage.
+US uses **SEC acceptance time**, which can lag the original press release (see
+[SEC Form 8-K](https://www.sec.gov/forms/form8-k.pdf)); it must not be presented as the original news timestamp.
+US reaction prices and volume use the regular session on the New York clock. Both Apply and single-trade
+What-if support US filings. A ticker without a historical CIK has **unknown coverage**, not "no filing",
+and blocks Apply. A historical `cik` in `.cache_sec_news/<SYMBOL>.json` is retained on subsequent fetches;
+set it to the verified issuer CIK and prefetch again to restore coverage.
+
+Filings come from `.cache_nse_news/` (shared with *Check news*) or `.cache_sec_news/`. The first Apply that
+needs uncached dates asks to fetch them; US fetching requires `SEC_USER_AGENT` with a contact.
+
+**Revision 3 (2026-10-08):** fixes the candidate-loading failure in Apply/prefetch; excludes NSE share
+offerings; adds optional post-news volume and trade-level audit fields (`news_filing_at`, `news_headline`,
+`news_reference`, `news_move_pct`, `news_rvol`); supports US What-if; separates unknown SEC coverage; and
+records a fingerprint of filing inputs in `run.json`. New runs have new keys. Historical metrics and CSVs
+remain intact. A missing historical trade CSV is not silently rebuilt with the new indicator, and a current
+run cannot be rebuilt if its filing inputs have changed: restore its original CSV or Apply a new experiment.
 
 ## How to read a result
 
@@ -128,7 +158,7 @@ Add one `Plugin(...)` to `ENTRY` or `EXIT` in `btlab/plugins.py`. The UI, valida
 
 * **Add-on / pyramiding** – BT44 killed adding to winners both ways; it also changes capital deployed, which
   needs per-rupee accounting rather than ₹ per trade. Say so if you want it.
-* Short side and 1-minute pattern triggers. Historical US runs have no news/catalyst gate.
+* Short side and 1-minute pattern triggers. Only US runs explicitly selecting the news plugin have a filing gate.
 * The live daily guardrails (3 strikes, size ladder): a pool replay walks one stock at a time and has no coherent
   day-level P&L to apply them to – same limitation as bt17.
 

@@ -58,11 +58,12 @@ function newsBadge(tr) {
   var map = { news: ["\u26A1 news", "material filing in the 24h before entry"],
               offering: ["\u26A1 offering", "only share-offering filings in the 24h before entry (dilution: not a catalyst)"], minor: ["routine", "only routine / unclear NSE filings in the 24h before entry"],
               none: ["no filing", "no NSE filing in the 24h before entry"],
+              unknown: ["news ?", "SEC coverage unavailable: historical ticker has no CIK mapping"],
               error: ["news ?", "could not be checked"], skipped: ["news ?", "not checked"] };
   var m = map[tr.news] || map.skipped, el = document.createElement("span");
   el.className = "newsb " + tr.news;
   el.textContent = m[0];
-  el.title = tr.news === "news" && tr.news_items ? tr.news_items.join("\n") : m[1];
+  el.title = (tr.news === "news" || tr.news === "unknown") && tr.news_items ? tr.news_items.join("\n") : m[1];
   return el;
 }
 /* ---------- What-if: indicators on ONE trade (lab runs) ---------- */
@@ -119,6 +120,10 @@ function toggleWhatIf(c) {
       .then(function (d) {
         if (d.error) { out.textContent = d.error; return; }
         var sv = d.saved, base = d.scenarios[0].trade;
+        c.wiMarks = d.scenarios.filter(function (s) { return s.kind === "exit" || s.kind === "combined"; })
+          .filter(function (s) { return !s.trade.error; })
+          .map(function (s) { return { label: s.label, exit_time: s.trade.exit_time, exit: s.trade.exit }; });
+        if (c.chart) setSeries(c);
         var html = "<table><thead><tr><th>Scenario</th><th>Entry</th><th>Out</th><th>Exit</th><th class='num'>Gross</th><th class='num'>Net</th><th class='num'>vs saved</th></tr></thead><tbody>"
           + "<tr class='wi-saved'><td>As saved in this run</td><td>taken</td><td>" + sv.exit_time + " @ " + Number(sv.exit).toFixed(2) + "</td><td>" + nice(sv.exit_reason)
           + "</td><td class='num " + cls(sv.gross_pct) + "'>" + pct(sv.gross_pct) + "</td><td class='num " + cls(sv.net_real_inr) + "'>" + G + Math.round(sv.net_real_inr) + "</td><td></td></tr>";
@@ -130,7 +135,7 @@ function toggleWhatIf(c) {
             + t.exit_time + " @ " + Number(t.exit).toFixed(2) + "</td><td>" + nice(t.exit_reason) + "</td><td class='num " + cls(t.gross_pct) + "'>" + pct(t.gross_pct)
             + "</td><td class='num " + cls(t.net_real_inr) + "'>" + G + Math.round(t.net_real_inr) + "</td><td class='num " + cls(diff) + "'>" + (diff >= 0 ? "+" : "") + G + Math.round(diff) + "</td></tr>";
         });
-        out.innerHTML = html + "</tbody></table><div class='wi-note'>" + d.note + " Scenarios are built from the plain base trade plus what is ticked. A vetoed trade shows what it would have done if it had been taken.</div>";
+        out.innerHTML = html + "</tbody></table><div class='wi-note'>Exits that differ from the saved SELL are drawn on the chart as orange WHAT-IF arrows. " + d.note + " Scenarios are built from the plain base trade plus what is ticked. A vetoed trade shows what it would have done if it had been taken.</div>";
       })
       .catch(function (e) { out.textContent = "Failed: " + e; });
   };
@@ -421,6 +426,18 @@ function setSeries(c) {
     { time: T[xIdx], position: "aboveBar", shape: "arrowDown", color: COL.sell, size: 2,
       text: "SELL " + tr.exit.toFixed(2) + " @ " + tr.exit_time + " · " + nice(tr.exit_reason) }
   ];
+  /* What-if exits: one orange arrow per distinct alternative exit (same bar+price merged) */
+  var wg = {};
+  (c.wiMarks || []).forEach(function (w) {
+    if (w.exit_time === tr.exit_time && Math.abs(w.exit - tr.exit) < 0.005) return;   // same as the saved SELL
+    var k = w.exit_time + "|" + w.exit.toFixed(2);
+    (wg[k] = wg[k] || { w: w, names: [] }).names.push(w.label);
+  });
+  Object.keys(wg).forEach(function (k) {
+    var g = wg[k], i = barIndex(data, g.w.exit_time);
+    mk.push({ time: T[i], position: "aboveBar", shape: "arrowDown", color: "#fb923c", size: 1.5,
+              text: "WHAT-IF " + g.w.exit.toFixed(2) + " @ " + g.w.exit_time + " · " + g.names.join(", ") });
+  });
   (tr.patterns || []).forEach(function (m) {
     if (m.timeframe !== tf) return;
     var i = barIndexExact(data, m.end);

@@ -31,13 +31,14 @@ from .paths import RUNS_DIR
 from . import plugins as P
 
 LEDGER = RUNS_DIR / "ledger.jsonl"
+NEWS_REVISION = 3
 _lock = threading.RLock()
 
 
 def canonical_config(cfg: dict) -> dict:
     """The part of a request that determines the trades, in a stable shape."""
     base = {k: v for k, v in cfg["base"].items() if not (k == "market" and v == "NSE")}   # NSE keys predate markets
-    revised = {x["id"]: 2 for x in cfg["plugins"]
+    revised = {x["id"]: NEWS_REVISION if x["id"] == "news_reaction" else 2 for x in cfg["plugins"]
                if x["id"] == "news_reaction" or
                (x["id"] in ("support_rule", "resistance_rule") and x["params"].get("kind") == "swing")}
     return {
@@ -49,8 +50,21 @@ def canonical_config(cfg: dict) -> dict:
         "plugins": [{"id": x["id"], "params": dict(sorted(x["params"].items()))}
                     for x in sorted(cfg["plugins"], key=lambda x: x["id"])],
         **({"indicator_revisions": revised} if revised else {}),
+        **({"news_data_key": cfg["news_data_key"]} if cfg.get("news_data_key") else {}),
         "lab_version": LAB_VERSION,
     }
+
+
+def rebuild_error(rec: dict) -> str | None:
+    """Never replace a historical result with trades from different indicator semantics."""
+    cfg = rec["config"]
+    if any(x["id"] == "news_reaction" for x in cfg["plugins"]):
+        rev = cfg.get("indicator_revisions", {}).get("news_reaction", 1)
+        if rev != NEWS_REVISION:
+            return ("This saved news run uses an older indicator revision and its original trades.csv "
+                    "is missing. Restore that CSV to view its original charts, or Apply the settings "
+                    "as a new experiment. Its saved metrics have been preserved.")
+    return None
 
 
 def config_key(cfg: dict) -> str:
@@ -68,8 +82,10 @@ def window_key(cfg: dict) -> str:
 def label_for(plugins: list[dict]) -> str:
     if not plugins:
         return "Base trade"
-    ent = [P.REGISTRY[x["id"]].name for x in plugins if P.REGISTRY[x["id"]].group == "entry"]
-    ext = [P.REGISTRY[x["id"]].name for x in plugins if P.REGISTRY[x["id"]].group == "exit"]
+    known = [x for x in plugins if x["id"] in P.REGISTRY]       # runs saved with a since-removed indicator
+    ent = [P.REGISTRY[x["id"]].name for x in known if P.REGISTRY[x["id"]].group == "entry"]
+    ext = [P.REGISTRY[x["id"]].name for x in known if P.REGISTRY[x["id"]].group == "exit"]
+    ext += [x["id"] + " (removed)" for x in plugins if x["id"] not in P.REGISTRY]
     parts = []
     if ent:
         parts.append("Entry: " + " + ".join(ent))
