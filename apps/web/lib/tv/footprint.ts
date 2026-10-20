@@ -60,7 +60,8 @@ function spread(bar: Bar, step: number, into: Map<number, FootprintLevel>) {
   // 70% of volume sits in the body rows, 30% in the wicks (all of it, if there are no wicks).
   const bodyShare = wickRows > 0 ? 0.7 : 1;
   const range = bar.high - bar.low;
-  const buyShare = range > 0 ? Math.min(0.95, Math.max(0.05, 0.5 + 0.45 * ((bar.close - bar.open) / range))) : 0.5;
+  const buyShare =
+    range > 0 ? Math.min(0.95, Math.max(0.05, 0.5 + 0.45 * ((bar.close - bar.open) / range))) : 0.5;
   for (let r = lo; r <= hi; r += 1) {
     const inBody = r >= bodyLo && r <= bodyHi;
     const weight = inBody ? bodyShare / bodyRows : wickRows > 0 ? (1 - bodyShare) / wickRows : 0;
@@ -90,7 +91,10 @@ export function buildFootprints(
   let s = 0;
   for (let i = 0; i < chartBars.length; i += 1) {
     const start = chartBars[i]!.time;
-    const end = i + 1 < chartBars.length ? Math.min(chartBars[i + 1]!.time, start + candleSecs) : start + candleSecs;
+    const end =
+      i + 1 < chartBars.length
+        ? Math.min(chartBars[i + 1]!.time, start + candleSecs)
+        : start + candleSecs;
     while (s < subBars.length && subBars[s]!.time < start) s += 1;
     const rows = new Map<number, FootprintLevel>();
     let e = s;

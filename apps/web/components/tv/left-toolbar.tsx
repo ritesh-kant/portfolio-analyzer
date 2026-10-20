@@ -111,7 +111,9 @@ export function LeftToolbar(p: Props) {
             </div>
             {multi && open === g.id ? (
               <div className="absolute left-[52px] top-0 z-50 w-52 rounded-md border border-[#363a45] bg-[#1e222d] py-1 shadow-xl">
-                <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[#787b86]">Lines</div>
+                <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[#787b86]">
+                  Lines
+                </div>
                 {g.tools.map((t) => {
                   const I = ICON[t];
                   return (
@@ -138,19 +140,44 @@ export function LeftToolbar(p: Props) {
         <Icons.zoom size={22} />
       </button>
       <div className="flex-1" />
-      <button type="button" title="Weak magnet — snap to OHLC" className={btn(p.magnet)} onClick={p.onMagnet}>
+      <button
+        type="button"
+        title="Weak magnet — snap to OHLC"
+        className={btn(p.magnet)}
+        onClick={p.onMagnet}
+      >
         <Icons.magnet size={22} />
       </button>
-      <button type="button" title="Stay in drawing mode" className={btn(p.keepDrawing)} onClick={p.onKeepDrawing}>
+      <button
+        type="button"
+        title="Stay in drawing mode"
+        className={btn(p.keepDrawing)}
+        onClick={p.onKeepDrawing}
+      >
         <Icons.keep size={22} />
       </button>
-      <button type="button" title="Lock all drawings" className={btn(p.lockAll)} onClick={p.onLockAll}>
+      <button
+        type="button"
+        title="Lock all drawings"
+        className={btn(p.lockAll)}
+        onClick={p.onLockAll}
+      >
         {p.lockAll ? <Icons.lock size={22} /> : <Icons.unlock size={22} />}
       </button>
-      <button type="button" title="Hide all drawings" className={btn(p.hideAll)} onClick={p.onHideAll}>
+      <button
+        type="button"
+        title="Hide all drawings"
+        className={btn(p.hideAll)}
+        onClick={p.onHideAll}
+      >
         {p.hideAll ? <Icons.eyeOff size={22} /> : <Icons.eye size={22} />}
       </button>
-      <button type="button" title="Remove all drawings" className={btn(false)} onClick={p.onRemoveAll}>
+      <button
+        type="button"
+        title="Remove all drawings"
+        className={btn(false)}
+        onClick={p.onRemoveAll}
+      >
         <Icons.trash size={22} />
       </button>
     </div>

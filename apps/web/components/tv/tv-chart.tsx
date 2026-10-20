@@ -63,9 +63,13 @@ import {
   wallClock,
 } from '../../lib/tv/timeframes';
 import type { Bar, BarsResponse, SymbolMeta } from '../../lib/tv/types';
+import { RightRail } from './right-rail';
+import { WatchlistPanel, type WatchItem } from './watchlist-panel';
 import { BottomBar, type RangeId } from './bottom-bar';
 import { DrawingsPrimitive } from './drawings-primitive';
 import { NewsPrimitive } from './news-primitive';
+import { ReplayBar } from './replay-bar';
+import { completedCount, endAfter, nextEnd } from '../../lib/tv/replay';
 import { groupByBar } from '../../lib/tv/news-markers';
 import type { NewsItem, NewsResponse } from '../../lib/tv/news-types';
 import { FootprintView, type FootprintData } from './footprint-series';
@@ -130,7 +134,14 @@ function computeIndicators(indicators: IndicatorCfg[], bars: Bar[], timeZone: st
         lines = [{ key: 'vol', color: VOL_UP, values: volumes, kind: 'hist' }];
         break;
       case 'rvol':
-        lines = [{ key: 'rvol', color: '#26a69a', values: relativeVolume(volumes, cfg.length), kind: 'hist' }];
+        lines = [
+          {
+            key: 'rvol',
+            color: '#26a69a',
+            values: relativeVolume(volumes, cfg.length),
+            kind: 'hist',
+          },
+        ];
         break;
       case 'ema':
         lines = [{ key: 'ema', color: cfg.color, values: ema(closes, cfg.length), kind: 'line' }];
@@ -139,7 +150,14 @@ function computeIndicators(indicators: IndicatorCfg[], bars: Bar[], timeZone: st
         lines = [{ key: 'sma', color: cfg.color, values: sma(closes, cfg.length), kind: 'line' }];
         break;
       case 'vwap':
-        lines = [{ key: 'vwap', color: cfg.color, values: vwap(bars, (t) => sessionDay(t, timeZone)), kind: 'line' }];
+        lines = [
+          {
+            key: 'vwap',
+            color: cfg.color,
+            values: vwap(bars, (t) => sessionDay(t, timeZone)),
+            kind: 'line',
+          },
+        ];
         break;
       case 'bb': {
         const bb = bollinger(closes, cfg.length, cfg.mult ?? 2);
@@ -171,10 +189,22 @@ function computeIndicators(indicators: IndicatorCfg[], bars: Bar[], timeZone: st
 }
 
 const fmtVolume = (v: number) =>
-  v >= 1e7 ? `${(v / 1e6).toFixed(2)}M` : v >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(2)}K` : `${Math.round(v)}`;
+  v >= 1e7
+    ? `${(v / 1e6).toFixed(2)}M`
+    : v >= 1e6
+      ? `${(v / 1e6).toFixed(2)}M`
+      : v >= 1e3
+        ? `${(v / 1e3).toFixed(2)}K`
+        : `${Math.round(v)}`;
 
 const histColor = (cur: number, prev: number | null) =>
-  cur >= 0 ? (prev != null && cur >= prev ? '#26a69a' : '#b2dfdb') : prev != null && cur <= prev ? '#ff5252' : '#ffcdd2';
+  cur >= 0
+    ? prev != null && cur >= prev
+      ? '#26a69a'
+      : '#b2dfdb'
+    : prev != null && cur <= prev
+      ? '#ff5252'
+      : '#ffcdd2';
 
 // ── main component ───────────────────────────────────────────────────────
 
@@ -190,7 +220,14 @@ interface Latest {
 
 type Drag =
   | { mode: 'create'; startX: number; startY: number; moved: boolean }
-  | { mode: 'move'; id: string; orig: Drawing; startLogical: number; startPrice: number; moved: boolean }
+  | {
+      mode: 'move';
+      id: string;
+      orig: Drawing;
+      startLogical: number;
+      startPrice: number;
+      moved: boolean;
+    }
   | { mode: 'handle'; id: string; handle: number; moved: boolean };
 
 export function TvChart() {
@@ -203,7 +240,10 @@ export function TvChart() {
   const footViewRef = useRef<FootprintView | null>(null);
   const primRef = useRef<DrawingsPrimitive | null>(null);
   const newsPrimRef = useRef<NewsPrimitive | null>(null);
-  const indStructRef = useRef<{ key: string; entries: { line: Line; cfgId: string; series: ISeriesApi<SeriesType, Time> }[] }>({
+  const indStructRef = useRef<{
+    key: string;
+    entries: { line: Line; cfgId: string; series: ISeriesApi<SeriesType, Time> }[];
+  }>({
     key: '',
     entries: [],
   });
@@ -223,6 +263,17 @@ export function TvChart() {
   const [newsPinned, setNewsPinned] = useState<number | null>(null);
   const [newsExpanded, setNewsExpanded] = useState(false);
 
+  // replay: `replayEnd` is the cut-off instant (unix s); null = live chart
+  const [replayEnd, setReplayEnd] = useState<number | null>(null);
+  const [replayPick, setReplayPick] = useState(false);
+  const [replayPlaying, setReplayPlaying] = useState(false);
+  const [replaySpeed, setReplaySpeed] = useState(3);
+  const [replayStartTick, setReplayStartTick] = useState(0);
+  const replayEndRef = useRef<number | null>(null);
+  const replayPickRef = useRef(false);
+  const fullTimesRef = useRef<number[]>([]);
+  const tfSecsRef = useRef(300);
+
   // scale
   const [log, setLog] = useState(false);
   const [percent, setPercent] = useState(false);
@@ -241,7 +292,10 @@ export function TvChart() {
   const [keep, setKeep] = useState(false);
   const [lockAll, setLockAll] = useState(false);
   const [hideAll, setHideAll] = useState(false);
-  const [drawState, setDrawState] = useState<{ symbol: string; list: Drawing[] }>({ symbol: '', list: [] });
+  const [drawState, setDrawState] = useState<{ symbol: string; list: Drawing[] }>({
+    symbol: '',
+    list: [],
+  });
   const [draft, setDraft] = useState<Drawing | null>(null);
   const [measure, setMeasure] = useState<Drawing | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -250,7 +304,13 @@ export function TvChart() {
   const history = useRef<{ past: Drawing[][]; future: Drawing[][] }>({ past: [], future: [] });
 
   // dialogs / panes
-  const [showSearch, setShowSearch] = useState(false);
+  const [showSearch, setShowSearch] = useState<false | 'chart' | 'watchlist'>(false);
+  const [watchOpen, setWatchOpen] = useState(true);
+  const [pendingWatch, setPendingWatch] = useState<WatchItem | null>(null);
+  const clearPendingWatch = useCallback(() => setPendingWatch(null), []);
+  useEffect(() => {
+    setWatchOpen(load<boolean>('tv:watchOpen', true));
+  }, []);
   const [showIndicators, setShowIndicators] = useState(false);
   const [settingsId, setSettingsId] = useState<string | null>(null);
   const [paneEls, setPaneEls] = useState<(HTMLElement | null)[]>([]);
@@ -260,11 +320,34 @@ export function TvChart() {
   intradayRef.current = tf.intraday;
 
   // ── derived data ──────────────────────────────────────────────────────
-  const bars = useMemo(
+  const fullBars = useMemo(
     () => (tf.aggregateSecs ? aggregateBars(raw.bars, tf.aggregateSecs, timeZone) : raw.bars),
     [raw.bars, tf.aggregateSecs, timeZone],
   );
-  const wall = useMemo(() => bars.map((b) => wallClock(b.time, timeZone) as UTCTimestamp), [bars, timeZone]);
+  // Replay: only candles complete at the cut-off exist as far as every indicator, drawing and badge is concerned.
+  const bars = useMemo(
+    () =>
+      replayEnd == null
+        ? fullBars
+        : fullBars.slice(
+            0,
+            completedCount(
+              fullBars.map((b) => b.time),
+              tf.secs,
+              replayEnd,
+            ),
+          ),
+    [fullBars, replayEnd, tf.secs],
+  );
+  fullTimesRef.current = useMemo(() => fullBars.map((b) => b.time), [fullBars]);
+  tfSecsRef.current = tf.secs;
+  replayEndRef.current = replayEnd;
+  replayPickRef.current = replayPick;
+  const replayAtEnd = replayEnd != null && bars.length >= fullBars.length;
+  const wall = useMemo(
+    () => bars.map((b) => wallClock(b.time, timeZone) as UTCTimestamp),
+    [bars, timeZone],
+  );
   const decimals = pricePrecision(bars[bars.length - 1]?.close ?? meta?.price ?? 0);
   const subBars = tf.source === '1m' ? raw.bars : subRaw;
   const effectiveStep = fp.auto ? autoStep(bars) : fp.step;
@@ -272,10 +355,24 @@ export function TvChart() {
     () => (fp.on ? buildFootprints(bars, subBars, tf.secs, effectiveStep) : []),
     [fp.on, bars, subBars, tf.secs, effectiveStep],
   );
-  const computed = useMemo(() => computeIndicators(indicators, bars, timeZone), [indicators, bars, timeZone]);
-  const axis = useMemo(() => makeTimeAxis(bars.map((b) => b.time), tf.secs), [bars, tf.secs]);
-  const drawings = useMemo(() => (drawState.symbol === symbol ? drawState.list : []), [drawState, symbol]);
-  const footprintCoverage = fp.on && footprints.length ? footprints.filter(Boolean).length / footprints.length : 1;
+  const computed = useMemo(
+    () => computeIndicators(indicators, bars, timeZone),
+    [indicators, bars, timeZone],
+  );
+  const axis = useMemo(
+    () =>
+      makeTimeAxis(
+        bars.map((b) => b.time),
+        tf.secs,
+      ),
+    [bars, tf.secs],
+  );
+  const drawings = useMemo(
+    () => (drawState.symbol === symbol ? drawState.list : []),
+    [drawState, symbol],
+  );
+  const footprintCoverage =
+    fp.on && footprints.length ? footprints.filter(Boolean).length / footprints.length : 1;
 
   const latest = useRef<Latest>({ tool, magnet, keep, lockAll, drawings, selectedId, bars });
   latest.current = { tool, magnet, keep, lockAll, drawings, selectedId, bars };
@@ -309,23 +406,21 @@ export function TvChart() {
   }, [ready, symbol]);
 
   useEffect(() => {
-    if (drawState.symbol && drawState.symbol === symbol) save(`tv:drawings:${symbol}`, drawState.list);
+    if (drawState.symbol && drawState.symbol === symbol)
+      save(`tv:drawings:${symbol}`, drawState.list);
   }, [drawState, symbol]);
 
-  const setDrawings = useCallback(
-    (next: Drawing[], record = true) => {
-      setDrawState((cur) => {
-        if (record) {
-          history.current.past.push(cur.list);
-          if (history.current.past.length > 100) history.current.past.shift();
-          history.current.future = [];
-        }
-        return { symbol: cur.symbol, list: next };
-      });
-      setHistTick((n) => n + 1);
-    },
-    [],
-  );
+  const setDrawings = useCallback((next: Drawing[], record = true) => {
+    setDrawState((cur) => {
+      if (record) {
+        history.current.past.push(cur.list);
+        if (history.current.past.length > 100) history.current.past.shift();
+        history.current.future = [];
+      }
+      return { symbol: cur.symbol, list: next };
+    });
+    setHistTick((n) => n + 1);
+  }, []);
 
   const undo = useCallback(() => {
     const prev = history.current.past.pop();
@@ -350,15 +445,18 @@ export function TvChart() {
   }, []);
 
   // ── data fetching ─────────────────────────────────────────────────────
-  const fetchBars = useCallback(async (sym: string, interval: string, range: string, signal?: AbortSignal) => {
-    const res = await fetch(
-      `/api/chart/bars?symbol=${encodeURIComponent(sym)}&interval=${interval}&range=${range}`,
-      { signal, cache: 'no-store' },
-    );
-    const body = (await res.json()) as BarsResponse & { error?: string };
-    if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-    return body;
-  }, []);
+  const fetchBars = useCallback(
+    async (sym: string, interval: string, range: string, signal?: AbortSignal) => {
+      const res = await fetch(
+        `/api/chart/bars?symbol=${encodeURIComponent(sym)}&interval=${interval}&range=${range}`,
+        { signal, cache: 'no-store' },
+      );
+      const body = (await res.json()) as BarsResponse & { error?: string };
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      return body;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!ready) return;
@@ -370,6 +468,7 @@ export function TvChart() {
         setRaw({ key: `${symbol}|${tf.source}|${tf.range}`, bars: res.bars });
         setMeta(res.meta);
         setStatus('ok');
+        setUpdatedAt(Date.now());
       })
       .catch((e: unknown) => {
         if (ctl.signal.aborted) return;
@@ -389,25 +488,49 @@ export function TvChart() {
     return () => ctl.abort();
   }, [ready, fp.on, symbol, tf.source, fetchBars]);
 
-  // Live: re-pull the tail every 15 s and merge it in.
+  // Live: re-pull the tail and merge it in. Yahoo caches each reply ~10 s, so polling faster than
+  // every few seconds gains nothing; intraday polls at 3 s, longer timeframes at 30 s.
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || replayEnd != null) return;
     let stopped = false;
-    const timer = setInterval(async () => {
-      if (document.hidden) return;
-      try {
-        const res = await fetchBars(symbol, tf.source, tf.intraday ? '1d' : '5d');
-        if (stopped) return;
-        setRaw((cur) => (cur.key.startsWith(`${symbol}|`) ? { key: cur.key, bars: mergeBars(cur.bars, res.bars) } : cur));
-      } catch {
-        // transient — next tick retries
-      }
-    }, 15000);
+    let busy = false;
+    const timer = setInterval(
+      async () => {
+        if (document.hidden || busy) return;
+        busy = true;
+        try {
+          const res = await fetchBars(symbol, tf.source, tf.intraday ? '1d' : '5d');
+          if (stopped) return;
+          setUpdatedAt(Date.now());
+          setRaw((cur) => {
+            if (!cur.key.startsWith(`${symbol}|`)) return cur;
+            const merged = mergeBars(cur.bars, res.bars);
+            const a = merged[merged.length - 1];
+            const b = cur.bars[cur.bars.length - 1];
+            // Nothing new: keep the same array so no indicator or series is rebuilt.
+            const same =
+              merged.length === cur.bars.length &&
+              a?.time === b?.time &&
+              a?.close === b?.close &&
+              a?.high === b?.high &&
+              a?.low === b?.low &&
+              a?.volume === b?.volume;
+            return same ? cur : { key: cur.key, bars: merged };
+          });
+        } catch {
+          // transient — next tick retries
+        } finally {
+          busy = false;
+        }
+      },
+      tf.intraday ? 3000 : 30000,
+    );
     return () => {
       stopped = true;
       clearInterval(timer);
     };
-  }, [ready, symbol, tf.source, tf.intraday, fetchBars]);
+  }, [ready, replayEnd, symbol, tf.source, tf.intraday, fetchBars]);
 
   // Company filings (NSE announcements / SEC EDGAR) across the loaded history.
   const firstBarTime = bars[0]?.time;
@@ -418,11 +541,18 @@ export function TvChart() {
     const cap = Date.now() / 1000 - 3 * 365 * 86400;
     const from = day(Math.max(firstBarTime - 86400, cap));
     const to = day(Date.now() / 1000 + 86400);
-    fetch(`/api/chart/news?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}`, { signal: ctl.signal, cache: 'no-store' })
+    fetch(`/api/chart/news?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}`, {
+      signal: ctl.signal,
+      cache: 'no-store',
+    })
       .then((r) => r.json() as Promise<NewsResponse>)
       .then((res) => setNews({ symbol, res }))
       .catch(() => {
-        if (!ctl.signal.aborted) setNews({ symbol, res: { source: 'none', supported: false, reason: 'news request failed', items: [] } });
+        if (!ctl.signal.aborted)
+          setNews({
+            symbol,
+            res: { source: 'none', supported: false, reason: 'news request failed', items: [] },
+          });
       });
     return () => ctl.abort();
   }, [ready, newsOn, symbol, firstBarTime, status]);
@@ -430,9 +560,73 @@ export function TvChart() {
   // Routine paperwork (trading-window notices, investor-call schedules) is not a catalyst: only news and offerings get a badge.
   const newsByBar = useMemo(() => {
     if (!newsOn || !news || news.symbol !== symbol) return new Map<number, NewsItem[]>();
-    const items = news.res.items.filter((i) => i.kind !== 'filing');
-    return groupByBar(items, bars.map((b) => b.time), tf.secs);
-  }, [newsOn, news, symbol, bars, tf.secs]);
+    const cutoff = replayEnd == null ? Infinity : replayEnd * 1000;
+    const items = news.res.items.filter(
+      (i) => i.kind !== 'filing' && Date.parse(i.published_at) <= cutoff,
+    );
+    return groupByBar(
+      items,
+      bars.map((b) => b.time),
+      tf.secs,
+    );
+  }, [newsOn, news, symbol, bars, tf.secs, replayEnd]);
+
+  // ── replay controls ───────────────────────────────────────────────────
+  const exitReplay = useCallback(() => {
+    setReplayPick(false);
+    setReplayPlaying(false);
+    setReplayEnd(null);
+  }, []);
+
+  const startReplayAt = useCallback((index: number) => {
+    const times = fullTimesRef.current;
+    if (!times.length) return;
+    setReplayEnd(endAfter(times, tfSecsRef.current, index));
+    setReplayPick(false);
+    setReplayPlaying(false);
+    setSelectedId(null);
+    setNewsPinned(null);
+    setReplayStartTick((n) => n + 1);
+  }, []);
+
+  const stepReplay = useCallback(() => {
+    const cur = replayEndRef.current;
+    if (cur == null) return false;
+    const next = nextEnd(fullTimesRef.current, tfSecsRef.current, cur);
+    if (next == null) {
+      setReplayPlaying(false);
+      return false;
+    }
+    setReplayEnd(next);
+    return true;
+  }, []);
+
+  const beginPick = () => {
+    setReplayPlaying(false);
+    setReplayPick(true);
+    setTool('cursor');
+  };
+
+  const randomBar = () => {
+    const n = fullTimesRef.current.length;
+    if (n < 30) return;
+    startReplayAt(Math.floor(20 + Math.random() * (n - 40)));
+  };
+
+  // Playback timer: one candle per tick.
+  const replayActive = replayEnd != null;
+  useEffect(() => {
+    if (!replayPlaying || !replayActive) return;
+    const timer = setInterval(() => {
+      stepReplay();
+    }, 1000 / replaySpeed);
+    return () => clearInterval(timer);
+  }, [replayPlaying, replayActive, replaySpeed, stepReplay]);
+
+  // A different symbol is a different history: leave replay.
+  useEffect(() => {
+    exitReplay();
+  }, [symbol, exitReplay]);
 
   // ── chart lifecycle ───────────────────────────────────────────────────
   useEffect(() => {
@@ -445,15 +639,36 @@ export function TvChart() {
         textColor: '#b2b5be',
         fontFamily: FONT,
         fontSize: 12,
-        panes: { separatorColor: '#2a2e39', separatorHoverColor: 'rgba(41,98,255,0.3)', enableResize: true },
+        panes: {
+          separatorColor: '#2a2e39',
+          separatorHoverColor: 'rgba(41,98,255,0.3)',
+          enableResize: true,
+        },
       },
-      grid: { vertLines: { color: 'rgba(42,46,57,0.6)' }, horzLines: { color: 'rgba(42,46,57,0.6)' } },
+      grid: {
+        vertLines: { color: 'rgba(42,46,57,0.6)' },
+        horzLines: { color: 'rgba(42,46,57,0.6)' },
+      },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: '#9598a1', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#363a45' },
-        horzLine: { color: '#9598a1', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#363a45' },
+        vertLine: {
+          color: '#9598a1',
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: '#363a45',
+        },
+        horzLine: {
+          color: '#9598a1',
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: '#363a45',
+        },
       },
-      rightPriceScale: { borderColor: '#2a2e39', scaleMargins: { top: 0.08, bottom: 0.08 }, minimumWidth: 72 },
+      rightPriceScale: {
+        borderColor: '#2a2e39',
+        scaleMargins: { top: 0.08, bottom: 0.08 },
+        minimumWidth: 72,
+      },
       timeScale: {
         borderColor: '#2a2e39',
         timeVisible: true,
@@ -470,7 +685,11 @@ export function TvChart() {
 
     const view = new FootprintView();
     footViewRef.current = view;
-    footRef.current = chart.addCustomSeries(view, { priceLineVisible: false, lastValueVisible: false }, 0);
+    footRef.current = chart.addCustomSeries(
+      view,
+      { priceLineVisible: false, lastValueVisible: false },
+      0,
+    );
     primRef.current = new DrawingsPrimitive();
     newsPrimRef.current = new NewsPrimitive();
 
@@ -496,14 +715,25 @@ export function TvChart() {
     const key = `${effective}|${fp.on}`;
     if (mainRef.current?.key !== key) {
       if (mainRef.current) chart.removeSeries(mainRef.current.series);
-      const common = { lastValueVisible: true, priceLineVisible: true, priceLineColor: '#787b86', priceLineStyle: LineStyle.Dotted };
+      const common = {
+        lastValueVisible: true,
+        priceLineVisible: true,
+        priceLineColor: '#787b86',
+        priceLineStyle: LineStyle.Dotted,
+      };
       let series: ISeriesApi<SeriesType, Time>;
       if (effective === 'line') {
         series = chart.addSeries(LineSeries, { ...common, color: '#2962ff', lineWidth: 2 }, 0);
       } else if (effective === 'area') {
         series = chart.addSeries(
           AreaSeries,
-          { ...common, lineColor: '#2962ff', topColor: 'rgba(41,98,255,0.35)', bottomColor: 'rgba(41,98,255,0.02)', lineWidth: 2 },
+          {
+            ...common,
+            lineColor: '#2962ff',
+            topColor: 'rgba(41,98,255,0.35)',
+            bottomColor: 'rgba(41,98,255,0.02)',
+            lineWidth: 2,
+          },
           0,
         );
       } else if (effective === 'bars') {
@@ -539,7 +769,9 @@ export function TvChart() {
     const shown = chartType === 'ha' && !fp.on ? heikinAshi(bars) : bars;
     const isValue = chartType === 'line' || chartType === 'area';
     const data = shown.map((b, i) =>
-      isValue ? { time: wall[i]!, value: b.close } : { time: wall[i]!, open: b.open, high: b.high, low: b.low, close: b.close },
+      isValue
+        ? { time: wall[i]!, value: b.close }
+        : { time: wall[i]!, open: b.open, high: b.high, low: b.low, close: b.close },
     );
     main.series.applyOptions({
       priceFormat: { type: 'price', precision: decimals, minMove: 1 / 10 ** decimals },
@@ -555,13 +787,38 @@ export function TvChart() {
     }
   }, [bars, wall, chartType, fp.on, decimals, symbol, raw.key, tfId]);
 
+  // Replay: recentre when a replay starts; follow the newest candle while stepping; show the live edge on exit.
+  const wasReplaying = useRef(false);
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || replayStartTick === 0) return;
+    const n = bars.length;
+    chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, n - 120), to: n + 8 });
+    chart.priceScale('right').applyOptions({ autoScale: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replayStartTick]);
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    if (replayEnd == null) {
+      if (wasReplaying.current) chart.timeScale().scrollToRealTime();
+      wasReplaying.current = false;
+      return;
+    }
+    wasReplaying.current = true;
+    const range = chart.timeScale().getVisibleLogicalRange();
+    if (range && range.to >= bars.length - 2) chart.timeScale().scrollToRealTime();
+  }, [replayEnd, bars.length]);
+
   // Footprint series.
   useEffect(() => {
     const series = footRef.current;
     const view = footViewRef.current;
     if (!series || !view) return;
     view.setSettings({ imbalance: fp.imbalance, showDelta: fp.showDelta });
-    series.applyOptions({ priceFormat: { type: 'price', precision: decimals, minMove: 1 / 10 ** decimals } } as never);
+    series.applyOptions({
+      priceFormat: { type: 'price', precision: decimals, minMove: 1 / 10 ** decimals },
+    } as never);
     if (!fp.on || !bars.length) {
       series.setData([]);
       return;
@@ -586,21 +843,38 @@ export function TvChart() {
     if (st.key === structKey) return;
     for (const entry of st.entries) chart.removeSeries(entry.series);
     const entries: typeof st.entries = [];
-    const flags = { lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false };
+    const flags = {
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+    };
     for (const c of computed) {
       for (const line of c.lines) {
         let series: ISeriesApi<SeriesType, Time>;
         if (c.cfg.type === 'volume') {
           series = chart.addSeries(
             HistogramSeries,
-            { priceFormat: { type: 'volume' }, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false },
+            {
+              priceFormat: { type: 'volume' },
+              priceScaleId: 'vol',
+              lastValueVisible: false,
+              priceLineVisible: false,
+            },
             0,
           );
           series.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
         } else if (line.kind === 'hist') {
           series = chart.addSeries(
             HistogramSeries,
-            { priceFormat: { type: 'price', precision: c.cfg.type === 'rvol' ? 2 : 3, minMove: 0.001 }, lastValueVisible: false, priceLineVisible: false },
+            {
+              priceFormat: {
+                type: 'price',
+                precision: c.cfg.type === 'rvol' ? 2 : 3,
+                minMove: 0.001,
+              },
+              lastValueVisible: false,
+              priceLineVisible: false,
+            },
             c.pane,
           );
         } else {
@@ -611,18 +885,33 @@ export function TvChart() {
               color: line.color,
               lineWidth: 1,
               lastValueVisible: c.pane > 0,
-              priceFormat: c.pane > 0 ? { type: 'price', precision: c.cfg.type === 'rsi' ? 2 : 3, minMove: 0.001 } : undefined,
+              priceFormat:
+                c.pane > 0
+                  ? { type: 'price', precision: c.cfg.type === 'rsi' ? 2 : 3, minMove: 0.001 }
+                  : undefined,
             },
             c.pane,
           );
         }
         if (c.cfg.type === 'rsi') {
           for (const level of [70, 50, 30]) {
-            series.createPriceLine({ price: level, color: '#363a45', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
+            series.createPriceLine({
+              price: level,
+              color: '#363a45',
+              lineWidth: 1,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: false,
+            });
           }
         }
         if (c.cfg.type === 'rvol') {
-          series.createPriceLine({ price: 1, color: '#363a45', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
+          series.createPriceLine({
+            price: 1,
+            color: '#363a45',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: false,
+          });
         }
         entries.push({ line, cfgId: c.cfg.id, series });
       }
@@ -635,13 +924,26 @@ export function TvChart() {
       const live = chartRef.current;
       if (!live) return;
       const els = live.panes().map((pane) => pane.getHTMLElement());
-      if (els.some((node) => !node) && attempts < 20) {
+      if (els.some((node) => !node) && attempts < 150) {
         attempts += 1;
-        window.setTimeout(syncPanes, 50);
+        window.setTimeout(syncPanes, 100);
         return;
       }
-      for (const node of els) if (node) node.style.position = 'relative';
-      setPaneEls(els);
+      // The chart library rebuilds a pane's cells, but keeps the pane row itself. React validates portals
+      // against their container's tag, so each pane gets a plain <div> host rather than portaling into the row.
+      const hosts = els.map((node) => {
+        if (!node) return null;
+        node.style.position = 'relative';
+        let host = node.querySelector<HTMLElement>(':scope > [data-tv-legend-host]');
+        if (!host) {
+          host = document.createElement('div');
+          host.dataset.tvLegendHost = '';
+          host.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:3';
+          node.appendChild(host);
+        }
+        return host;
+      });
+      setPaneEls(hosts);
     };
     syncPanes();
   }, [structKey, computed]);
@@ -657,7 +959,11 @@ export function TvChart() {
         if (!entry || entry.cfgId !== c.cfg.id) continue;
         if (c.cfg.type === 'volume') {
           entry.series.setData(
-            bars.map((b, idx) => ({ time: wall[idx]!, value: b.volume, color: b.close >= b.open ? VOL_UP : VOL_DOWN })) as never,
+            bars.map((b, idx) => ({
+              time: wall[idx]!,
+              value: b.volume,
+              color: b.close >= b.open ? VOL_UP : VOL_DOWN,
+            })) as never,
           );
         } else if (c.cfg.type === 'rvol') {
           const out: { time: UTCTimestamp; value: number; color: string }[] = [];
@@ -690,7 +996,11 @@ export function TvChart() {
   // Price scale mode.
   useEffect(() => {
     chartRef.current?.priceScale('right').applyOptions({
-      mode: percent ? PriceScaleMode.Percentage : log ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
+      mode: percent
+        ? PriceScaleMode.Percentage
+        : log
+          ? PriceScaleMode.Logarithmic
+          : PriceScaleMode.Normal,
     });
   }, [percent, log]);
 
@@ -702,7 +1012,14 @@ export function TvChart() {
   // Drawings → primitive.
   useEffect(() => {
     const all = measure ? [...drawings, measure] : drawings;
-    primRef.current?.setState({ drawings: all, draft, selectedId, hidden: hideAll, axis, decimals });
+    primRef.current?.setState({
+      drawings: all,
+      draft,
+      selectedId,
+      hidden: hideAll,
+      axis,
+      decimals,
+    });
   }, [drawings, measure, draft, selectedId, hideAll, axis, decimals]);
 
   // ── pointer interaction with drawings ─────────────────────────────────
@@ -773,6 +1090,17 @@ export function TvChart() {
       const L = latest.current;
       const prim = primRef.current;
 
+      if (replayPickRef.current) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        const logical = chartRef.current?.timeScale().coordinateToLogical(x);
+        if (logical != null) {
+          const last = fullTimesRef.current.length - 1;
+          startReplayAt(Math.max(0, Math.min(last, Math.round(logical))));
+        }
+        return;
+      }
+
       if (L.tool === 'cursor') {
         const bar = newsPrimRef.current?.findBar(x, y) ?? null;
         if (bar != null) {
@@ -841,7 +1169,14 @@ export function TvChart() {
         const logical = chart.timeScale().coordinateToLogical(x);
         const price = main.coordinateToPrice(y);
         if (logical == null || price == null) return;
-        drag = { mode: 'move', id: d.id, orig: d, startLogical: logical, startPrice: price, moved: false };
+        drag = {
+          mode: 'move',
+          id: d.id,
+          orig: d,
+          startLogical: logical,
+          startPrice: price,
+          moved: false,
+        };
       } else {
         drag = { mode: 'handle', id: d.id, handle: hit.handle, moved: false };
       }
@@ -856,7 +1191,8 @@ export function TvChart() {
           draftRef = { ...draftRef, pts: [draftRef.pts[0]!, pt] };
           setDraft(draftRef);
         }
-        if (drag?.mode === 'create' && Math.hypot(x - drag.startX, y - drag.startY) > 6) drag.moved = true;
+        if (drag?.mode === 'create' && Math.hypot(x - drag.startX, y - drag.startY) > 6)
+          drag.moved = true;
         return;
       }
       if (drag && (drag.mode === 'move' || drag.mode === 'handle')) {
@@ -878,7 +1214,10 @@ export function TvChart() {
             })),
           };
           const id = drag.id;
-          setDrawState((cur) => ({ symbol: cur.symbol, list: cur.list.map((v) => (v.id === id ? moved : v)) }));
+          setDrawState((cur) => ({
+            symbol: cur.symbol,
+            list: cur.list.map((v) => (v.id === id ? moved : v)),
+          }));
         } else {
           const pt = toPt(x, y, true);
           if (!pt) return;
@@ -897,7 +1236,7 @@ export function TvChart() {
       if (latest.current.tool === 'cursor') {
         const bar = inPlot(x, y) ? (newsPrimRef.current?.findBar(x, y) ?? null) : null;
         setNewsHover(bar);
-        const hit = inPlot(x, y) && bar == null ? prim?.findHit(x, y) ?? null : null;
+        const hit = inPlot(x, y) && bar == null ? (prim?.findHit(x, y) ?? null) : null;
         prim?.setState({ hoverId: hit?.drawingId ?? null });
         wrap.classList.toggle('tv-over-drawing', !!hit || bar != null);
       }
@@ -917,7 +1256,10 @@ export function TvChart() {
       if (drag && (drag.mode === 'move' || drag.mode === 'handle')) {
         if (drag.moved) {
           // The live edits were applied without history; record the pre-drag state once.
-          const before = drag.mode === 'move' ? drag.orig : latest.current.drawings.find((v) => v.id === (drag as Drag & { id: string }).id);
+          const before =
+            drag.mode === 'move'
+              ? drag.orig
+              : latest.current.drawings.find((v) => v.id === (drag as Drag & { id: string }).id);
           if (before) {
             const snapshot = latest.current.drawings.map((v) => (v.id === before.id ? before : v));
             history.current.past.push(snapshot);
@@ -939,12 +1281,28 @@ export function TvChart() {
       if (d?.kind !== 'text') return;
       const input = window.prompt('Text', d.text ?? '');
       if (input === null) return;
-      setDrawings(latest.current.drawings.map((v) => (v.id === d.id ? { ...v, text: input || v.text } : v)));
+      setDrawings(
+        latest.current.drawings.map((v) => (v.id === d.id ? { ...v, text: input || v.text } : v)),
+      );
     };
 
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.closest('input, textarea, select')) return;
+      if (e.shiftKey && e.key === 'ArrowRight' && replayEndRef.current != null) {
+        e.preventDefault();
+        stepReplay();
+        return;
+      }
+      if (e.shiftKey && e.key === 'ArrowDown' && replayEndRef.current != null) {
+        e.preventDefault();
+        setReplayPlaying((v) => !v);
+        return;
+      }
+      if (e.key === 'Escape' && replayPickRef.current) {
+        setReplayPick(false);
+        return;
+      }
       if (e.key === 'Escape') {
         setNewsPinned(null);
         cancelDraft();
@@ -982,7 +1340,7 @@ export function TvChart() {
       wrap.removeEventListener('dblclick', onDbl, true);
       window.removeEventListener('keydown', onKey);
     };
-  }, [axis, setDrawings, undo, redo]);
+  }, [axis, setDrawings, undo, redo, startReplayAt, stepReplay]);
 
   // Drop an unfinished draft when the tool changes.
   useEffect(() => {
@@ -1067,7 +1425,8 @@ export function TvChart() {
   };
 
   // ── legends ───────────────────────────────────────────────────────────
-  const idx = hoverIdx != null && hoverIdx >= 0 && hoverIdx < bars.length ? hoverIdx : bars.length - 1;
+  const idx =
+    hoverIdx != null && hoverIdx >= 0 && hoverIdx < bars.length ? hoverIdx : bars.length - 1;
   const bar = bars[idx];
   const prevClose = idx > 0 ? bars[idx - 1]!.close : (meta?.prevClose ?? bar?.open ?? 0);
   const change = bar ? bar.close - prevClose : 0;
@@ -1085,16 +1444,30 @@ export function TvChart() {
   };
 
   const legendRow = (c: Computed): ReactNode => (
-    <div key={c.cfg.id} className="group pointer-events-auto flex items-center gap-2 text-[12px] leading-5" data-tv-ui>
+    <div
+      key={c.cfg.id}
+      className="group pointer-events-auto flex items-center gap-2 text-[12px] leading-5"
+      data-tv-ui
+    >
       <span className="text-[#b2b5be]">{indicatorLabel(c.cfg)}</span>
       {c.lines.map((l) => (
-        <span key={l.key} style={{ color: c.cfg.type === 'volume' ? (bar && bar.close >= bar.open ? UP : DOWN) : l.color }}>
+        <span
+          key={l.key}
+          style={{
+            color: c.cfg.type === 'volume' ? (bar && bar.close >= bar.open ? UP : DOWN) : l.color,
+          }}
+        >
           {valueText(c, l)}
         </span>
       ))}
       <span className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         {c.cfg.type !== 'volume' && c.cfg.type !== 'vwap' ? (
-          <button type="button" title="Settings" onClick={() => setSettingsId(c.cfg.id)} className="text-[#787b86] hover:text-white">
+          <button
+            type="button"
+            title="Settings"
+            onClick={() => setSettingsId(c.cfg.id)}
+            className="text-[#787b86] hover:text-white"
+          >
             <Icons.gear size={14} />
           </button>
         ) : null}
@@ -1111,7 +1484,10 @@ export function TvChart() {
   );
 
   const priceLegend = (
-    <div className="pointer-events-none absolute left-2 top-1.5 z-10 select-none" style={{ fontFamily: FONT }}>
+    <div
+      className="pointer-events-none absolute left-2 top-1.5 z-10 select-none"
+      style={{ fontFamily: FONT }}
+    >
       <div className="flex flex-wrap items-center gap-x-2 text-[13px]">
         <span className="font-semibold text-[#d1d4dc]">{meta?.name ?? symbol}</span>
         <span className="text-[#787b86]">
@@ -1119,10 +1495,18 @@ export function TvChart() {
         </span>
         {bar ? (
           <span className="flex items-center gap-2 tabular-nums" style={{ color: candleColor }}>
-            <span>O<b className="ml-0.5 font-medium">{bar.open.toFixed(decimals)}</b></span>
-            <span>H<b className="ml-0.5 font-medium">{bar.high.toFixed(decimals)}</b></span>
-            <span>L<b className="ml-0.5 font-medium">{bar.low.toFixed(decimals)}</b></span>
-            <span>C<b className="ml-0.5 font-medium">{bar.close.toFixed(decimals)}</b></span>
+            <span>
+              O<b className="ml-0.5 font-medium">{bar.open.toFixed(decimals)}</b>
+            </span>
+            <span>
+              H<b className="ml-0.5 font-medium">{bar.high.toFixed(decimals)}</b>
+            </span>
+            <span>
+              L<b className="ml-0.5 font-medium">{bar.low.toFixed(decimals)}</b>
+            </span>
+            <span>
+              C<b className="ml-0.5 font-medium">{bar.close.toFixed(decimals)}</b>
+            </span>
             <span>
               {change >= 0 ? '+' : ''}
               {change.toFixed(decimals)} ({changePct >= 0 ? '+' : ''}
@@ -1140,7 +1524,10 @@ export function TvChart() {
     const rows = computed.filter((c) => c.pane === paneIdx);
     if (!rows.length) return null;
     return createPortal(
-      <div className="pointer-events-none absolute left-2 top-1 z-10 select-none" style={{ fontFamily: FONT }}>
+      <div
+        className="pointer-events-none absolute left-2 top-1 z-10 select-none"
+        style={{ fontFamily: FONT }}
+      >
         {rows.map(legendRow)}
       </div>,
       el,
@@ -1152,11 +1539,15 @@ export function TvChart() {
   const canRedo = histTick >= 0 && history.current.future.length > 0;
 
   return (
-    <div ref={rootRef} className="fixed inset-0 z-50 flex flex-col bg-[#131722] text-[#d1d4dc]" style={{ fontFamily: FONT }}>
+    <div
+      ref={rootRef}
+      className="fixed inset-0 z-50 flex flex-col bg-[#131722] text-[#d1d4dc]"
+      style={{ fontFamily: FONT }}
+    >
       <style>{`.tv-over-drawing, .tv-over-drawing * { cursor: pointer !important; } .tv-tool, .tv-tool * { cursor: crosshair !important; }`}</style>
       <TopBar
         symbol={symbol.replace(/\.(NS|BO)$/, '')}
-        onOpenSearch={() => setShowSearch(true)}
+        onOpenSearch={() => setShowSearch('chart')}
         tfId={tfId}
         onTf={setTfId}
         chartType={chartType}
@@ -1164,9 +1555,19 @@ export function TvChart() {
         onIndicators={() => setShowIndicators(true)}
         news={newsOn}
         onNews={() => setNewsOn((v) => !v)}
+        replay={replayActive || replayPick}
+        onReplay={() => (replayActive || replayPick ? exitReplay() : beginPick())}
         footprint={{ ...fp, step: effectiveStep }}
-        onFootprint={(patch) => setFp((cur) => ({ ...cur, ...patch, ...(patch.auto === false ? { step: effectiveStep } : {}) }))}
-        onFootprintStep={(dir) => setFp((cur) => ({ ...cur, auto: false, step: stepLadder(effectiveStep, dir) }))}
+        onFootprint={(patch) =>
+          setFp((cur) => ({
+            ...cur,
+            ...patch,
+            ...(patch.auto === false ? { step: effectiveStep } : {}),
+          }))
+        }
+        onFootprintStep={(dir) =>
+          setFp((cur) => ({ ...cur, auto: false, step: stepLadder(effectiveStep, dir) }))
+        }
         canUndo={canUndo}
         canRedo={canRedo}
         onUndo={undo}
@@ -1193,7 +1594,10 @@ export function TvChart() {
           onZoomIn={zoomIn}
         />
         <div className="flex min-w-0 flex-1 flex-col">
-          <div ref={wrapRef} className={`relative min-h-0 flex-1 ${tool !== 'cursor' ? 'tv-tool' : ''}`}>
+          <div
+            ref={wrapRef}
+            className={`relative min-h-0 flex-1 ${tool !== 'cursor' || replayPick ? 'tv-tool' : ''}`}
+          >
             <div ref={containerRef} className="absolute inset-0" />
             {priceLegend}
             {portals}
@@ -1203,10 +1607,17 @@ export function TvChart() {
               </div>
             ) : null}
             {status === 'error' ? (
-              <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[#363a45] bg-[#1e222d] px-6 py-5 text-center" data-tv-ui>
+              <div
+                className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[#363a45] bg-[#1e222d] px-6 py-5 text-center"
+                data-tv-ui
+              >
                 <div className="text-sm font-semibold text-[#f23645]">Couldn’t load {symbol}</div>
                 <div className="mt-1 max-w-xs text-xs text-[#9598a1]">{error}</div>
-                <button type="button" onClick={() => setShowSearch(true)} className="mt-3 rounded bg-[#2962ff] px-3 py-1 text-xs font-semibold text-white">
+                <button
+                  type="button"
+                  onClick={() => setShowSearch('chart')}
+                  className="mt-3 rounded bg-[#2962ff] px-3 py-1 text-xs font-semibold text-white"
+                >
                   Pick another symbol
                 </button>
               </div>
@@ -1219,8 +1630,10 @@ export function TvChart() {
             {fp.on && bars.length && footprintCoverage < 1 ? (
               <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-sm rounded bg-[#1e222d]/90 px-3 py-1.5 text-[11px] text-[#b2b5be]">
                 Footprint is estimated from 1-minute bars and only exists for the last ~7 sessions
-                {tf.source !== '1m' && !subRaw.length ? ' — loading…' : ` (${Math.round(footprintCoverage * 100)}% of candles covered)`}.
-                Zoom in on a recent candle to read the rows.
+                {tf.source !== '1m' && !subRaw.length
+                  ? ' — loading…'
+                  : ` (${Math.round(footprintCoverage * 100)}% of candles covered)`}
+                . Zoom in on a recent candle to read the rows.
               </div>
             ) : null}
             {(() => {
@@ -1232,13 +1645,26 @@ export function TvChart() {
               const latestFirst = [...items].reverse();
               const shown = pinned && newsExpanded ? latestFirst : latestFirst.slice(0, 1);
               const fmt = (iso: string) =>
-                new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone }).format(new Date(iso));
+                new Intl.DateTimeFormat('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  timeZone,
+                }).format(new Date(iso));
               const width = 320;
-              const left = Math.max(8, Math.min(pos.x - 24, (wrapRef.current?.clientWidth ?? 800) - width - 90));
+              const left = Math.max(
+                8,
+                Math.min(pos.x - 24, (wrapRef.current?.clientWidth ?? 800) - width - 90),
+              );
               return (
                 <div
                   className={`absolute z-30 rounded-xl border-l-4 border-[#9c27b0] bg-[#1e222d] p-4 shadow-2xl ${pinned ? '' : 'pointer-events-none'}`}
-                  style={{ left, bottom: (wrapRef.current?.clientHeight ?? 600) - pos.y + 16, width, maxHeight: '60%', overflowY: 'auto' }}
+                  style={{
+                    left,
+                    bottom: (wrapRef.current?.clientHeight ?? 600) - pos.y + 16,
+                    width,
+                    maxHeight: '60%',
+                    overflowY: 'auto',
+                  }}
                   data-tv-ui
                 >
                   <div className="mb-3 flex items-center gap-2 text-[16px] font-semibold text-[#d1d4dc]">
@@ -1251,23 +1677,40 @@ export function TvChart() {
                     <div key={`${item.published_at}-${item.headline}`} className="mb-3 last:mb-0">
                       <div className="text-[12px] text-[#787b86]">
                         {fmt(item.published_at)} · {item.publisher}
-                        {item.kind === 'offering' ? <span className="ml-2 rounded bg-[#f23645]/20 px-1.5 text-[#ff8a96]">share offering</span> : null}
+                        {item.kind === 'offering' ? (
+                          <span className="ml-2 rounded bg-[#f23645]/20 px-1.5 text-[#ff8a96]">
+                            share offering
+                          </span>
+                        ) : null}
                       </div>
                       {pinned && item.url ? (
-                        <a href={item.url} target="_blank" rel="noreferrer" className="mt-0.5 block text-[14px] font-medium leading-snug text-[#d1d4dc] hover:text-[#7ea4ff]">
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-0.5 block text-[14px] font-medium leading-snug text-[#d1d4dc] hover:text-[#7ea4ff]"
+                        >
                           {item.headline}
                         </a>
                       ) : (
-                        <div className="mt-0.5 line-clamp-4 text-[14px] font-medium leading-snug text-[#d1d4dc]">{item.headline}</div>
+                        <div className="mt-0.5 line-clamp-4 text-[14px] font-medium leading-snug text-[#d1d4dc]">
+                          {item.headline}
+                        </div>
                       )}
                     </div>
                   ))}
                   {pinned && !newsExpanded && items.length > 1 ? (
-                    <button type="button" onClick={() => setNewsExpanded(true)} className="text-[13px] text-[#b2b5be] hover:text-white">
+                    <button
+                      type="button"
+                      onClick={() => setNewsExpanded(true)}
+                      className="text-[13px] text-[#b2b5be] hover:text-white"
+                    >
                       See all ({items.length}) ›
                     </button>
                   ) : null}
-                  {!pinned && items.length > 1 ? <div className="text-[13px] text-[#b2b5be]">See all ({items.length}) ›</div> : null}
+                  {!pinned && items.length > 1 ? (
+                    <div className="text-[13px] text-[#b2b5be]">See all ({items.length}) ›</div>
+                  ) : null}
                 </div>
               );
             })()}
@@ -1276,21 +1719,38 @@ export function TvChart() {
                 News unavailable: {news.res.reason}
               </div>
             ) : null}
+            {replayActive || replayPick ? (
+              <ReplayBar
+                picking={replayPick}
+                playing={replayPlaying}
+                speed={replaySpeed}
+                label={wall.length ? formatCrosshairTime(wall[wall.length - 1]!, tf.intraday) : ''}
+                atEnd={replayAtEnd}
+                onPlay={() => setReplayPlaying((v) => !v)}
+                onStep={() => stepReplay()}
+                onSpeed={setReplaySpeed}
+                onSelect={beginPick}
+                onRandom={randomBar}
+                onExit={exitReplay}
+              />
+            ) : null}
             {selected ? (
               <div
                 className="absolute left-1/2 top-2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-md border border-[#363a45] bg-[#1e222d] px-2 py-1 shadow-lg"
                 data-tv-ui
               >
-                {selected.kind === 'fib' || selected.kind === 'measure' ? null : SWATCHES.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    aria-label={`Colour ${c}`}
-                    onClick={() => patchSelected({ color: c })}
-                    className={`h-4 w-4 rounded-full ${selected.color === c ? 'ring-2 ring-white ring-offset-1 ring-offset-[#1e222d]' : ''}`}
-                    style={{ background: c }}
-                  />
-                ))}
+                {selected.kind === 'fib' || selected.kind === 'measure'
+                  ? null
+                  : SWATCHES.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        aria-label={`Colour ${c}`}
+                        onClick={() => patchSelected({ color: c })}
+                        className={`h-4 w-4 rounded-full ${selected.color === c ? 'ring-2 ring-white ring-offset-1 ring-offset-[#1e222d]' : ''}`}
+                        style={{ background: c }}
+                      />
+                    ))}
                 {[1, 2, 3, 4].map((w) => (
                   <button
                     key={w}
@@ -1302,14 +1762,28 @@ export function TvChart() {
                     <span className="block w-3.5 bg-[#d1d4dc]" style={{ height: w }} />
                   </button>
                 ))}
-                <button type="button" title="Clone" className="rounded p-1 text-[#b2b5be] hover:bg-[#2a2e39]" onClick={() => {
-                  const copy = { ...translate(selected, 0, 0), id: newId(), pts: selected.pts.map((p) => ({ t: p.t + tf.secs * 3, p: p.p })) };
-                  setDrawings([...drawings, copy]);
-                  setSelectedId(copy.id);
-                }}>
+                <button
+                  type="button"
+                  title="Clone"
+                  className="rounded p-1 text-[#b2b5be] hover:bg-[#2a2e39]"
+                  onClick={() => {
+                    const copy = {
+                      ...translate(selected, 0, 0),
+                      id: newId(),
+                      pts: selected.pts.map((p) => ({ t: p.t + tf.secs * 3, p: p.p })),
+                    };
+                    setDrawings([...drawings, copy]);
+                    setSelectedId(copy.id);
+                  }}
+                >
                   <Icons.copy size={16} />
                 </button>
-                <button type="button" title={selected.locked ? 'Unlock' : 'Lock'} className="rounded p-1 text-[#b2b5be] hover:bg-[#2a2e39]" onClick={() => patchSelected({ locked: !selected.locked })}>
+                <button
+                  type="button"
+                  title={selected.locked ? 'Unlock' : 'Lock'}
+                  className="rounded p-1 text-[#b2b5be] hover:bg-[#2a2e39]"
+                  onClick={() => patchSelected({ locked: !selected.locked })}
+                >
                   {selected.locked ? <Icons.lock size={16} /> : <Icons.unlock size={16} />}
                 </button>
                 <button
@@ -1328,6 +1802,9 @@ export function TvChart() {
           </div>
           <BottomBar
             onRange={rangeTo}
+            lastBarEnd={bars.length ? bars[bars.length - 1]!.time + tf.secs : null}
+            updatedAt={updatedAt}
+            live={replayEnd == null}
             timeZone={timeZone}
             percent={percent}
             log={log}
@@ -1346,8 +1823,35 @@ export function TvChart() {
             }}
           />
         </div>
+        {watchOpen ? (
+          <WatchlistPanel
+            active={symbol}
+            onSelect={setSymbol}
+            onAdd={() => setShowSearch('watchlist')}
+            pending={pendingWatch}
+            onPendingHandled={clearPendingWatch}
+          />
+        ) : null}
+        <RightRail
+          watchlistOpen={watchOpen}
+          onWatchlist={() =>
+            setWatchOpen((v) => {
+              save('tv:watchOpen', !v);
+              return !v;
+            })
+          }
+        />
       </div>
-      {showSearch ? <SymbolSearch onPick={setSymbol} onClose={() => setShowSearch(false)} /> : null}
+      {showSearch ? (
+        <SymbolSearch
+          onPick={(sym, name) =>
+            showSearch === 'watchlist'
+              ? setPendingWatch({ symbol: sym, name: name ?? sym })
+              : setSymbol(sym)
+          }
+          onClose={() => setShowSearch(false)}
+        />
+      ) : null}
       {showIndicators ? (
         <IndicatorPicker
           active={indicators}
@@ -1362,7 +1866,9 @@ export function TvChart() {
       {settingsId && indicators.find((i) => i.id === settingsId) ? (
         <IndicatorSettings
           cfg={indicators.find((i) => i.id === settingsId)!}
-          onChange={(next) => setIndicators((list) => list.map((i) => (i.id === next.id ? next : i)))}
+          onChange={(next) =>
+            setIndicators((list) => list.map((i) => (i.id === next.id ? next : i)))
+          }
           onClose={() => setSettingsId(null)}
         />
       ) : null}

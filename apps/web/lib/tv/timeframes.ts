@@ -16,12 +16,28 @@ export interface Timeframe {
 
 export const TIMEFRAMES: Timeframe[] = [
   { id: '1m', label: '1m', secs: 60, source: '1m', range: '7d', intraday: true },
-  { id: '3m', label: '3m', secs: 180, source: '1m', range: '7d', aggregateSecs: 180, intraday: true },
+  {
+    id: '3m',
+    label: '3m',
+    secs: 180,
+    source: '1m',
+    range: '7d',
+    aggregateSecs: 180,
+    intraday: true,
+  },
   { id: '5m', label: '5m', secs: 300, source: '5m', range: '60d', intraday: true },
   { id: '15m', label: '15m', secs: 900, source: '15m', range: '60d', intraday: true },
   { id: '30m', label: '30m', secs: 1800, source: '30m', range: '60d', intraday: true },
   { id: '1h', label: '1h', secs: 3600, source: '60m', range: '2y', intraday: true },
-  { id: '4h', label: '4h', secs: 14400, source: '60m', range: '2y', aggregateSecs: 14400, intraday: true },
+  {
+    id: '4h',
+    label: '4h',
+    secs: 14400,
+    source: '60m',
+    range: '2y',
+    aggregateSecs: 14400,
+    intraday: true,
+  },
   { id: '1D', label: 'D', secs: 86400, source: '1d', range: '10y', intraday: false },
   { id: '1W', label: 'W', secs: 604800, source: '1wk', range: 'max', intraday: false },
   { id: '1M', label: 'M', secs: 2592000, source: '1mo', range: 'max', intraday: false },
@@ -55,14 +71,24 @@ function partsFormatter(timeZone: string): Intl.DateTimeFormat {
  * exchange's wall-clock time (as if UTC) makes the axis read 09:15 for an NSE
  * open on any viewer's machine.
  */
+const wallCache = new Map<string, number>();
+
 export function wallClock(sec: number, timeZone: string): number {
+  // Every poll re-derives the clock for thousands of unchanged bars; Intl is the slow part.
+  const cacheKey = `${timeZone}|${sec}`;
+  const hit = wallCache.get(cacheKey);
+  if (hit !== undefined) return hit;
+  if (wallCache.size > 200_000) wallCache.clear();
   const parts: Record<string, number> = {};
   for (const p of partsFormatter(timeZone).formatToParts(new Date(sec * 1000))) {
     if (p.type !== 'literal') parts[p.type] = Number(p.value);
   }
-  return Math.floor(
-    Date.UTC(parts.year!, parts.month! - 1, parts.day!, parts.hour!, parts.minute!, parts.second!) / 1000,
+  const wall = Math.floor(
+    Date.UTC(parts.year!, parts.month! - 1, parts.day!, parts.hour!, parts.minute!, parts.second!) /
+      1000,
   );
+  wallCache.set(cacheKey, wall);
+  return wall;
 }
 
 /** YYYY-MM-DD of an instant in the exchange's zone. */
@@ -135,7 +161,20 @@ export function heikinAshi(bars: Bar[]): Bar[] {
 }
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_NAMES = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
 
 /** TradingView's crosshair time label: "Thu 15 Oct '26  19:00". `wall` is already exchange wall-clock. */
 export function formatCrosshairTime(wall: number, intraday: boolean): string {

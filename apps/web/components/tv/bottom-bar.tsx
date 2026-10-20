@@ -8,6 +8,11 @@ export type RangeId = (typeof RANGES)[number];
 interface Props {
   onRange: (r: RangeId) => void;
   timeZone: string;
+  /** Unix seconds when the latest candle closes. */
+  lastBarEnd: number | null;
+  /** ms epoch of the last successful data pull. */
+  updatedAt: number | null;
+  live: boolean;
   percent: boolean;
   log: boolean;
   auto: boolean;
@@ -37,7 +42,13 @@ export function BottomBar(p: Props) {
   useEffect(() => {
     const tick = () => {
       try {
-        setNow(new Intl.DateTimeFormat('en-GB', { timeZone: p.timeZone, hour12: false, timeStyle: 'medium' }).format(new Date()));
+        setNow(
+          new Intl.DateTimeFormat('en-GB', {
+            timeZone: p.timeZone,
+            hour12: false,
+            timeStyle: 'medium',
+          }).format(new Date()),
+        );
       } catch {
         setNow('');
       }
@@ -55,7 +66,10 @@ export function BottomBar(p: Props) {
         </button>
       ))}
       <div className="flex-1" />
-      <span className="mr-3 text-[12px] tabular-nums text-[#b2b5be]">
+      {p.live && p.updatedAt ? (
+        <Freshness lastBarEnd={p.lastBarEnd} updatedAt={p.updatedAt} />
+      ) : null}
+      <span className="mr-3 shrink-0 whitespace-nowrap text-[12px] tabular-nums text-[#b2b5be]">
         {now} {offsetLabel(p.timeZone)}
       </span>
       <button type="button" className={b(p.percent)} onClick={p.onPercent} title="Percentage scale">
@@ -68,5 +82,37 @@ export function BottomBar(p: Props) {
         auto
       </button>
     </div>
+  );
+}
+
+const ago = (secs: number) =>
+  secs < 90
+    ? `${Math.max(0, Math.round(secs))}s`
+    : secs < 5400
+      ? `${Math.round(secs / 60)}m`
+      : `${(secs / 3600).toFixed(1)}h`;
+
+/** How fresh the data is: when we last pulled, and how old the newest candle is (that gap is the data source's lag, or a closed market). */
+function Freshness({ lastBarEnd, updatedAt }: { lastBarEnd: number | null; updatedAt: number }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const pulled = (Date.now() - updatedAt) / 1000;
+  const barAge = lastBarEnd ? Date.now() / 1000 - lastBarEnd : 0;
+  const stale = barAge > 300;
+  return (
+    <span
+      className={`mr-4 min-w-0 shrink truncate text-[12px] tabular-nums ${stale ? 'text-[#ffb74d]' : 'text-[#b2b5be]'}`}
+      title={
+        stale
+          ? 'The newest candle closed a while ago: the market is closed, or the data source (Yahoo) is behind.'
+          : 'Pulled from Yahoo every few seconds; Yahoo itself caches replies ~10 s.'
+      }
+    >
+      <span className={stale ? 'text-[#ffb74d]' : 'text-[#089981]'}>●</span> pulled {ago(pulled)}{' '}
+      ago · newest candle closed {ago(Math.max(0, barAge))} ago
+    </span>
   );
 }

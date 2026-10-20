@@ -140,7 +140,13 @@ export function atr(bars: Bar[], length = 14): Series {
   const out: Series = new Array(bars.length).fill(null);
   if (length < 1 || bars.length < length) return out;
   const tr = bars.map((b, i) =>
-    i === 0 ? b.high - b.low : Math.max(b.high - b.low, Math.abs(b.high - bars[i - 1]!.close), Math.abs(b.low - bars[i - 1]!.close)),
+    i === 0
+      ? b.high - b.low
+      : Math.max(
+          b.high - b.low,
+          Math.abs(b.high - bars[i - 1]!.close),
+          Math.abs(b.low - bars[i - 1]!.close),
+        ),
   );
   let prev = 0;
   for (let i = 0; i < length; i += 1) prev += tr[i]!;

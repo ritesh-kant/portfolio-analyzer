@@ -4,12 +4,22 @@ import { aggregateBars, heikinAshi, mergeBars, sessionDay, wallClock } from './t
 import { atr, ema, macd, relativeVolume, rsi, sma, vwap } from './indicators.ts';
 import { autoStep, buildFootprints, niceStep, stepLadder } from './footprint.ts';
 import { makeTimeAxis } from './drawings.ts';
+import { aliasHits } from './aliases.ts';
+import { completedCount, endAfter, nextEnd } from './replay.ts';
+import { matchScore, rankHits, searchQueries } from './search-rank.ts';
 import { groupByBar } from './news-markers.ts';
 
 const IST = 'Asia/Kolkata';
 // 2026-10-19 09:15 IST
 const open = Date.parse('2026-10-19T09:15:00+05:30') / 1000;
-const minute = (i, o, h, l, c, v) => ({ time: open + i * 60, open: o, high: h, low: l, close: c, volume: v });
+const minute = (i, o, h, l, c, v) => ({
+  time: open + i * 60,
+  open: o,
+  high: h,
+  low: l,
+  close: c,
+  volume: v,
+});
 
 test('wallClock renders the exchange clock as if it were UTC', () => {
   const wall = wallClock(open, IST);
@@ -17,7 +27,9 @@ test('wallClock renders the exchange clock as if it were UTC', () => {
 });
 
 test('aggregateBars anchors buckets to the session open and sums volume', () => {
-  const bars = Array.from({ length: 7 }, (_, i) => minute(i, 100 + i, 102 + i, 99 + i, 101 + i, 10));
+  const bars = Array.from({ length: 7 }, (_, i) =>
+    minute(i, 100 + i, 102 + i, 99 + i, 101 + i, 10),
+  );
   const out = aggregateBars(bars, 180, IST);
   assert.equal(out.length, 3);
   assert.equal(out[0].time, open);
@@ -31,7 +43,10 @@ test('aggregateBars anchors buckets to the session open and sums volume', () => 
 
 test('aggregateBars restarts at each session day', () => {
   const day2 = open + 86400;
-  const bars = [minute(0, 1, 1, 1, 1, 1), { time: day2, open: 2, high: 2, low: 2, close: 2, volume: 1 }];
+  const bars = [
+    minute(0, 1, 1, 1, 1, 1),
+    { time: day2, open: 2, high: 2, low: 2, close: 2, volume: 1 },
+  ];
   assert.equal(aggregateBars(bars, 3600, IST).length, 2);
 });
 
@@ -39,7 +54,10 @@ test('mergeBars replaces the overlapping tail and appends newer bars', () => {
   const a = [minute(0, 1, 1, 1, 1, 1), minute(1, 2, 2, 2, 2, 2)];
   const fresh = [minute(1, 9, 9, 9, 9, 9), minute(2, 3, 3, 3, 3, 3)];
   const merged = mergeBars(a, fresh);
-  assert.deepEqual(merged.map((b) => b.open), [1, 9, 3]);
+  assert.deepEqual(
+    merged.map((b) => b.open),
+    [1, 9, 3],
+  );
 });
 
 test('heikinAshi first candle averages open/close', () => {
@@ -73,7 +91,10 @@ test('macd histogram is macd minus signal and starts after the slow window', () 
 });
 
 test('vwap resets at the session boundary', () => {
-  const bars = [minute(0, 10, 10, 10, 10, 100), { time: open + 86400, open: 20, high: 20, low: 20, close: 20, volume: 50 }];
+  const bars = [
+    minute(0, 10, 10, 10, 10, 100),
+    { time: open + 86400, open: 20, high: 20, low: 20, close: 20, volume: 50 },
+  ];
   const v = vwap(bars, (t) => sessionDay(t, IST));
   assert.equal(v[0], 10);
   assert.equal(v[1], 20);
@@ -93,7 +114,7 @@ test('niceStep and stepLadder stay on 1-2-2.5-5 rungs', () => {
   assert.ok(autoStep([minute(0, 100, 101, 99, 100, 1)]) > 0);
 });
 
-test('footprint conserves each candle\'s volume and sums delta correctly', () => {
+test("footprint conserves each candle's volume and sums delta correctly", () => {
   const subs = [
     minute(0, 100, 100.4, 99.8, 100.3, 1000),
     minute(1, 100.3, 100.6, 100.1, 100.5, 500),
@@ -106,7 +127,10 @@ test('footprint conserves each candle\'s volume and sums delta correctly', () =>
   const asks = fp.levels.reduce((s, l) => s + l.ask, 0);
   const bids = fp.levels.reduce((s, l) => s + l.bid, 0);
   assert.ok(Math.abs(fp.delta - (asks - bids)) < 1e-6);
-  assert.ok(fp.levels[fp.poc].ask + fp.levels[fp.poc].bid >= Math.max(...fp.levels.map((l) => l.ask + l.bid)) - 1e-9);
+  assert.ok(
+    fp.levels[fp.poc].ask + fp.levels[fp.poc].bid >=
+      Math.max(...fp.levels.map((l) => l.ask + l.bid)) - 1e-9,
+  );
 });
 
 test('footprint candles with no sub-bars are null', () => {
@@ -134,9 +158,67 @@ test('atr uses true range incl. gaps and Wilder smoothing', () => {
 
 test('news attaches to the containing candle, else the next one', () => {
   const times = [1000, 1300, 1600, 5000]; // 5-minute candles with an overnight gap
-  const at = (t) => ({ headline: 'h', publisher: 'p', url: null, published_at: new Date(t * 1000).toISOString(), kind: 'news', text: null });
+  const at = (t) => ({
+    headline: 'h',
+    publisher: 'p',
+    url: null,
+    published_at: new Date(t * 1000).toISOString(),
+    kind: 'news',
+    text: null,
+  });
   const m = groupByBar([at(1350), at(1950), at(3000), at(5100), at(900)], times, 300);
   assert.equal(m.get(1).length, 1); // inside candle 1
   assert.equal(m.get(3).length, 3); // 1950 + 3000 fall in the gap -> next candle; 5100 is inside the last
   assert.equal(m.has(0), false); // older than first candle is dropped
+});
+
+test('TradingView-style tickers map to the closest Yahoo series', () => {
+  assert.equal(aliasHits('XAUUSD')[0].symbol, 'GC=F');
+  assert.equal(aliasHits('oanda:xauusd')[0].symbol, 'GC=F');
+  assert.equal(aliasHits('EURUSD')[0].symbol, 'EURUSD=X');
+  assert.equal(aliasHits('btcusdt')[0].symbol, 'BTC-USD');
+  assert.deepEqual(aliasHits('RELIANCE'), []);
+  assert.deepEqual(aliasHits('USDUSD'), []);
+});
+
+test('replay shows only candles complete at the cut-off', () => {
+  const times = [0, 300, 600, 900];
+  assert.equal(completedCount(times, 300, 600), 2); // 0 and 300 are done, 600 is just starting
+  assert.equal(completedCount(times, 300, 899), 2);
+  assert.equal(completedCount(times, 300, 900), 3);
+  assert.equal(completedCount(times, 300, 5000), 4);
+  assert.equal(completedCount(times, 300, -1), 0);
+});
+
+test('replay on a coarser timeframe hides the unfinished candle', () => {
+  const hourly = [0, 3600, 7200];
+  assert.equal(completedCount(hourly, 3600, 5400), 1); // cut-off 90 min in: the 2nd hour is incomplete
+  assert.equal(completedCount(hourly, 3600, 7200), 2);
+});
+
+test('a session-final candle shorter than the interval completes once the next session starts', () => {
+  const times = [0, 3600, 100000]; // 2nd candle is the last of its day
+  assert.equal(completedCount(times, 14400, 3700), 1); // candle 0 ended early: candle 1 has begun
+  assert.equal(completedCount(times, 14400, 3599), 0);
+  assert.equal(completedCount(times, 14400, 100000), 2);
+});
+
+test('replay steps one candle at a time and ends', () => {
+  const times = [0, 300, 600];
+  const start = endAfter(times, 300, 0);
+  assert.equal(start, 300);
+  assert.equal(nextEnd(times, 300, start), 600);
+  assert.equal(nextEnd(times, 300, 600), 900);
+  assert.equal(nextEnd(times, 300, 900), null);
+  assert.equal(endAfter(times, 300, 99), 900); // clamps
+});
+
+test('multi-word search ranks hits by words matched, expanding exchange nicknames', () => {
+  const gc = { symbol: 'GC=F', name: 'Gold Dec 26', exchange: 'New York Commodity Exchange', type: 'FUTURE' };
+  const gld = { symbol: 'GLD', name: 'SPDR Gold Shares', exchange: 'NYSEArca', type: 'ETF' };
+  assert.deepEqual(searchQueries('gold comex'), ['gold comex', 'gold', 'comex']);
+  assert.deepEqual(searchQueries('infosys'), ['infosys']);
+  assert.equal(matchScore('gold comex', gc), 2);
+  assert.equal(matchScore('gold comex', gld), 1);
+  assert.deepEqual(rankHits('gold comex', [[gld], [gld, gc]]).map((h) => h.symbol), ['GC=F', 'GLD']);
 });

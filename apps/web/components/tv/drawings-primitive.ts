@@ -10,12 +10,7 @@ import type {
   SeriesType,
   Time,
 } from 'lightweight-charts';
-import {
-  type Drawing,
-  FIB_LEVELS,
-  type TimeAxis,
-  formatDuration,
-} from '../../lib/tv/drawings';
+import { type Drawing, FIB_LEVELS, type TimeAxis, formatDuration } from '../../lib/tv/drawings';
 
 const FONT = '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
 
@@ -213,12 +208,15 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         const x1 = Math.max(a.x, b!.x);
         const y0 = Math.min(a.y, b!.y);
         const y1 = Math.max(a.y, b!.y);
-        if (d.kind === 'measure') return p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol;
+        if (d.kind === 'measure')
+          return p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol;
         const inside = p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
         const nearEdge =
-          p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol && !(
-            p.x > x0 + tol && p.x < x1 - tol && p.y > y0 + tol && p.y < y1 - tol
-          );
+          p.x >= x0 - tol &&
+          p.x <= x1 + tol &&
+          p.y >= y0 - tol &&
+          p.y <= y1 + tol &&
+          !(p.x > x0 + tol && p.x < x1 - tol && p.y > y0 + tol && p.y < y1 - tol);
         return inside || nearEdge;
       }
       case 'fib': {
@@ -270,7 +268,13 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     }
   }
 
-  private paintOne(ctx: CanvasRenderingContext2D, d: Drawing, g: Geometry, selected: boolean, hovered: boolean) {
+  private paintOne(
+    ctx: CanvasRenderingContext2D,
+    d: Drawing,
+    g: Geometry,
+    selected: boolean,
+    hovered: boolean,
+  ) {
     const [a, b] = g.pts as [Px, Px | undefined];
     ctx.lineWidth = d.width + (hovered && !selected ? 0.5 : 0);
     ctx.strokeStyle = d.color;
@@ -358,7 +362,11 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
       ctx.lineTo(x1, y);
       ctx.stroke();
       ctx.fillStyle = level.color;
-      ctx.fillText(`${level.v} (${fibLevelPrice(d, level.v).toFixed(this.state.decimals)})`, x0 - 6, y);
+      ctx.fillText(
+        `${level.v} (${fibLevelPrice(d, level.v).toFixed(this.state.decimals)})`,
+        x0 - 6,
+        y,
+      );
     }
     ctx.textAlign = 'left';
     ctx.setLineDash([4, 4]);

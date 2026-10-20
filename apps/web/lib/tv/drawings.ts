@@ -1,4 +1,13 @@
-export type DrawingKind = 'trend' | 'ray' | 'hline' | 'hray' | 'vline' | 'rect' | 'fib' | 'measure' | 'text';
+export type DrawingKind =
+  | 'trend'
+  | 'ray'
+  | 'hline'
+  | 'hray'
+  | 'vline'
+  | 'rect'
+  | 'fib'
+  | 'measure'
+  | 'text';
 
 /** `t` is real unix seconds (may be fractional or in the future); `p` is price. */
 export interface Pt {
@@ -52,7 +61,17 @@ export const DEFAULT_COLOR: Record<DrawingKind, string> = {
   text: '#d1d4dc',
 };
 
-export const SWATCHES = ['#d1d4dc', '#f23645', '#ff9800', '#fbc02d', '#089981', '#00bcd4', '#2962ff', '#9c27b0', '#e91e63'];
+export const SWATCHES = [
+  '#d1d4dc',
+  '#f23645',
+  '#ff9800',
+  '#fbc02d',
+  '#089981',
+  '#00bcd4',
+  '#2962ff',
+  '#9c27b0',
+  '#e91e63',
+];
 
 /** TradingView's default retracement levels and their colours. */
 export const FIB_LEVELS: { v: number; color: string }[] = [

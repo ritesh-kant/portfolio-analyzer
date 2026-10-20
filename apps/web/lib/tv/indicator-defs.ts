@@ -1,4 +1,13 @@
-export type IndicatorType = 'volume' | 'rvol' | 'ema' | 'sma' | 'vwap' | 'bb' | 'macd' | 'rsi' | 'atr';
+export type IndicatorType =
+  | 'volume'
+  | 'rvol'
+  | 'ema'
+  | 'sma'
+  | 'vwap'
+  | 'bb'
+  | 'macd'
+  | 'rsi'
+  | 'atr';
 
 export interface IndicatorCfg {
   id: string;
@@ -24,28 +33,99 @@ export interface CatalogEntry {
 }
 
 export const CATALOG: CatalogEntry[] = [
-  { type: 'volume', name: 'Volume', description: 'Shares traded per candle', where: 'volume', defaults: { type: 'volume', length: 20 } },
-  { type: 'rvol', name: 'Relative Volume', description: 'Volume ÷ average of previous N candles', where: 'pane', defaults: { type: 'rvol', length: 20 } },
-  { type: 'ema', name: 'Moving Average Exponential', description: 'EMA of close', where: 'overlay', defaults: { type: 'ema', length: 9 } },
-  { type: 'sma', name: 'Moving Average', description: 'Simple moving average of close', where: 'overlay', defaults: { type: 'sma', length: 20 } },
-  { type: 'vwap', name: 'VWAP', description: 'Session volume-weighted average price', where: 'overlay', defaults: { type: 'vwap', length: 0 } },
-  { type: 'bb', name: 'Bollinger Bands', description: 'SMA ± N standard deviations', where: 'overlay', defaults: { type: 'bb', length: 20, mult: 2 } },
-  { type: 'macd', name: 'MACD', description: 'Moving Average Convergence Divergence', where: 'pane', defaults: { type: 'macd', length: 12, length2: 26, length3: 9 } },
-  { type: 'atr', name: 'Average True Range', description: 'Wilder-smoothed average of true range', where: 'pane', defaults: { type: 'atr', length: 14 } },
-  { type: 'rsi', name: 'Relative Strength Index', description: 'Wilder RSI of close', where: 'pane', defaults: { type: 'rsi', length: 14 } },
+  {
+    type: 'volume',
+    name: 'Volume',
+    description: 'Shares traded per candle',
+    where: 'volume',
+    defaults: { type: 'volume', length: 20 },
+  },
+  {
+    type: 'rvol',
+    name: 'Relative Volume',
+    description: 'Volume ÷ average of previous N candles',
+    where: 'pane',
+    defaults: { type: 'rvol', length: 20 },
+  },
+  {
+    type: 'ema',
+    name: 'Moving Average Exponential',
+    description: 'EMA of close',
+    where: 'overlay',
+    defaults: { type: 'ema', length: 9 },
+  },
+  {
+    type: 'sma',
+    name: 'Moving Average',
+    description: 'Simple moving average of close',
+    where: 'overlay',
+    defaults: { type: 'sma', length: 20 },
+  },
+  {
+    type: 'vwap',
+    name: 'VWAP',
+    description: 'Session volume-weighted average price',
+    where: 'overlay',
+    defaults: { type: 'vwap', length: 0 },
+  },
+  {
+    type: 'bb',
+    name: 'Bollinger Bands',
+    description: 'SMA ± N standard deviations',
+    where: 'overlay',
+    defaults: { type: 'bb', length: 20, mult: 2 },
+  },
+  {
+    type: 'macd',
+    name: 'MACD',
+    description: 'Moving Average Convergence Divergence',
+    where: 'pane',
+    defaults: { type: 'macd', length: 12, length2: 26, length3: 9 },
+  },
+  {
+    type: 'atr',
+    name: 'Average True Range',
+    description: 'Wilder-smoothed average of true range',
+    where: 'pane',
+    defaults: { type: 'atr', length: 14 },
+  },
+  {
+    type: 'rsi',
+    name: 'Relative Strength Index',
+    description: 'Wilder RSI of close',
+    where: 'pane',
+    defaults: { type: 'rsi', length: 14 },
+  },
 ];
 
-export const catalogOf = (type: IndicatorType): CatalogEntry => CATALOG.find((c) => c.type === type)!;
+export const catalogOf = (type: IndicatorType): CatalogEntry =>
+  CATALOG.find((c) => c.type === type)!;
 
-export const PALETTE = ['#2962ff', '#ff9800', '#ab47bc', '#089981', '#f23645', '#00bcd4', '#fbc02d', '#e91e63'];
+export const PALETTE = [
+  '#2962ff',
+  '#ff9800',
+  '#ab47bc',
+  '#089981',
+  '#f23645',
+  '#00bcd4',
+  '#fbc02d',
+  '#e91e63',
+];
 
-export const indicatorId = () => `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+export const indicatorId = () =>
+  `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 
 export function makeIndicator(type: IndicatorType, existing: IndicatorCfg[]): IndicatorCfg {
   const entry = catalogOf(type);
   const sameType = existing.filter((i) => i.type === type).length;
   const length =
-    type === 'ema' && sameType === 1 ? 20 : type === 'ema' && sameType === 2 ? 50 : type === 'ema' && sameType >= 3 ? 200 : entry.defaults.length;
+    type === 'ema' && sameType === 1
+      ? 20
+      : type === 'ema' && sameType === 2
+        ? 50
+        : type === 'ema' && sameType >= 3
+          ? 200
+          : entry.defaults.length;
   return {
     id: indicatorId(),
     ...entry.defaults,

@@ -19,7 +19,7 @@ const SUGGESTED: SearchHit[] = [
 ];
 
 interface Props {
-  onPick: (symbol: string) => void;
+  onPick: (symbol: string, name?: string) => void;
   onClose: () => void;
 }
 
@@ -43,7 +43,9 @@ export function SymbolSearch({ onPick, onClose }: Props) {
     setLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/chart/search?q=${encodeURIComponent(q)}`, { signal: ctl.signal });
+        const res = await fetch(`/api/chart/search?q=${encodeURIComponent(q)}`, {
+          signal: ctl.signal,
+        });
         const body = (await res.json()) as { hits: SearchHit[] };
         setHits(body.hits);
         setActive(0);
@@ -59,20 +61,28 @@ export function SymbolSearch({ onPick, onClose }: Props) {
     };
   }, [query]);
 
-  const choose = (symbol: string) => {
-    onPick(symbol.toUpperCase());
+  const choose = (symbol: string, name?: string) => {
+    onPick(symbol.toUpperCase(), name);
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/50 pt-[10vh]" onMouseDown={onClose}>
+    <div
+      className="fixed inset-0 z-[70] flex items-start justify-center bg-black/50 pt-[10vh]"
+      onMouseDown={onClose}
+    >
       <div
         className="flex max-h-[70vh] w-[min(640px,94vw)] flex-col overflow-hidden rounded-lg border border-[#363a45] bg-[#1e222d] shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-4 text-[18px] font-semibold text-[#d1d4dc]">
           Symbol Search
-          <button type="button" onClick={onClose} className="text-[#787b86] hover:text-white" aria-label="Close">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[#787b86] hover:text-white"
+            aria-label="Close"
+          >
             <Icons.close size={22} />
           </button>
         </div>
@@ -88,7 +98,7 @@ export function SymbolSearch({ onPick, onClose }: Props) {
               else if (e.key === 'ArrowUp') setActive((a) => Math.max(0, a - 1));
               else if (e.key === 'Enter') {
                 const pick = hits[active]?.symbol ?? query.trim();
-                if (pick) choose(pick);
+                if (pick) choose(pick, hits[active]?.name);
               }
             }}
             placeholder="Search — e.g. RELIANCE, TCS.NS, AAPL"
@@ -98,17 +108,21 @@ export function SymbolSearch({ onPick, onClose }: Props) {
         </div>
         <div className="overflow-y-auto">
           {hits.length === 0 ? (
-            <div className="px-5 py-10 text-center text-sm text-[#787b86]">No symbols match “{query}”.</div>
+            <div className="px-5 py-10 text-center text-sm text-[#787b86]">
+              No symbols match “{query}”.
+            </div>
           ) : (
             hits.map((h, i) => (
               <button
                 key={`${h.symbol}-${h.exchange}`}
                 type="button"
                 onMouseEnter={() => setActive(i)}
-                onClick={() => choose(h.symbol)}
+                onClick={() => choose(h.symbol, h.name)}
                 className={`flex w-full items-center gap-4 px-5 py-2 text-left ${i === active ? 'bg-[#2a2e39]' : ''}`}
               >
-                <span className="w-32 shrink-0 text-[14px] font-semibold text-[#d1d4dc]">{h.symbol}</span>
+                <span className="w-32 shrink-0 text-[14px] font-semibold text-[#d1d4dc]">
+                  {h.symbol}
+                </span>
                 <span className="min-w-0 flex-1 truncate text-[13px] text-[#9598a1]">{h.name}</span>
                 <span className="shrink-0 text-[12px] text-[#787b86]">
                   {h.type.toLowerCase()} · {h.exchange}

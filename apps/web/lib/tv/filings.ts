@@ -49,7 +49,12 @@ const ddmmyyyy = (date: string) => date.split('-').reverse().join('-');
 
 export function nseFilings(symbol: string, from: string, to: string): Promise<NewsItem[]> {
   return cached(`NSE:${symbol}:${from}:${to}`, async () => {
-    const params = new URLSearchParams({ index: 'equities', symbol, from_date: ddmmyyyy(from), to_date: ddmmyyyy(to) });
+    const params = new URLSearchParams({
+      index: 'equities',
+      symbol,
+      from_date: ddmmyyyy(from),
+      to_date: ddmmyyyy(to),
+    });
     const res = await fetch(`https://www.nseindia.com/api/corporate-announcements?${params}`, {
       headers: {
         'User-Agent': BROWSER_UA,
@@ -100,13 +105,18 @@ async function secGet(url: string, userAgent: string): Promise<Response> {
 
 async function cikOf(symbol: string, ua: string): Promise<number | null> {
   if (!secCiks || Date.now() - secCiks.at > DAY_MS) {
-    const body = (await (await secGet('https://www.sec.gov/files/company_tickers_exchange.json', ua)).json()) as {
+    const body = (await (
+      await secGet('https://www.sec.gov/files/company_tickers_exchange.json', ua)
+    ).json()) as {
       fields: string[];
       data: unknown[][];
     };
     const cik = body.fields.indexOf('cik');
     const ticker = body.fields.indexOf('ticker');
-    secCiks = { at: Date.now(), byTicker: new Map(body.data.map((row) => [String(row[ticker]), Number(row[cik])])) };
+    secCiks = {
+      at: Date.now(),
+      byTicker: new Map(body.data.map((row) => [String(row[ticker]), Number(row[cik])])),
+    };
   }
   const issuer = symbol.length >= 5 ? symbol.replace(/[.-]?(WS|W|U|R|RT)$/, '') : symbol;
   return secCiks.byTicker.get(symbol) ?? secCiks.byTicker.get(issuer) ?? null;
@@ -147,8 +157,23 @@ const decodeHtml = (value: string) =>
   value
     .replace(/&#x([0-9a-f]+);/gi, (_m, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
     .replace(/&#(\d+);/g, (_m, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/&(amp|lt|gt|quot|apos|nbsp|rsquo|lsquo|rdquo|ldquo|mdash|ndash);/gi, (_m, n: string) =>
-      ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', mdash: '—', ndash: '–' })[n.toLowerCase()] ?? _m,
+    .replace(
+      /&(amp|lt|gt|quot|apos|nbsp|rsquo|lsquo|rdquo|ldquo|mdash|ndash);/gi,
+      (_m, n: string) =>
+        ({
+          amp: '&',
+          lt: '<',
+          gt: '>',
+          quot: '"',
+          apos: "'",
+          nbsp: ' ',
+          rsquo: '’',
+          lsquo: '‘',
+          rdquo: '”',
+          ldquo: '“',
+          mdash: '—',
+          ndash: '–',
+        })[n.toLowerCase()] ?? _m,
     );
 
 const DATELINE =
@@ -183,8 +208,12 @@ export function pressReleaseTitle(html: string): string {
 
 async function exhibit99(cik: number, accession: string, ua: string): Promise<string | null> {
   const base = `https://www.sec.gov/Archives/edgar/data/${cik}/${accession.replace(/-/g, '')}`;
-  const index = (await (await secGet(`${base}/index.json`, ua)).json()) as { directory?: { item?: { name: string }[] } };
-  const names = (index.directory?.item ?? []).map((i) => i.name).filter((n) => /ex[-_]?99.*\.(htm|html|txt)$/i.test(n));
+  const index = (await (await secGet(`${base}/index.json`, ua)).json()) as {
+    directory?: { item?: { name: string }[] };
+  };
+  const names = (index.directory?.item ?? [])
+    .map((i) => i.name)
+    .filter((n) => /ex[-_]?99.*\.(htm|html|txt)$/i.test(n));
   const first = names.find((n) => /99[-_.]?0?1\b|991/i.test(n)) ?? names[0];
   return first ? `${base}/${first}` : null;
 }
@@ -192,12 +221,26 @@ async function exhibit99(cik: number, accession: string, ua: string): Promise<st
 /** Press-release headlines are fetched for only this many of the newest 8-K/6-Ks (2 requests each). */
 const MAX_EXHIBITS = 10;
 
-export function edgarFilings(symbol: string, from: string, to: string, ua: string): Promise<NewsItem[]> {
+export function edgarFilings(
+  symbol: string,
+  from: string,
+  to: string,
+  ua: string,
+): Promise<NewsItem[]> {
   return cached(`US:${symbol}:${from}:${to}`, async () => {
     const cik = await cikOf(symbol, ua);
     if (cik == null) throw new Error(`${symbol} is not in SEC's ticker list`);
-    const body = (await (await secGet(`https://data.sec.gov/submissions/CIK${String(cik).padStart(10, '0')}.json`, ua)).json()) as {
-      filings: { recent: { accessionNumber: string[]; acceptanceDateTime: string[]; form: string[]; items: string[] } };
+    const body = (await (
+      await secGet(`https://data.sec.gov/submissions/CIK${String(cik).padStart(10, '0')}.json`, ua)
+    ).json()) as {
+      filings: {
+        recent: {
+          accessionNumber: string[];
+          acceptanceDateTime: string[];
+          form: string[];
+          items: string[];
+        };
+      };
     };
     const recent = body.filings.recent;
     const lo = Date.parse(`${from}T00:00:00Z`);
@@ -205,7 +248,13 @@ export function edgarFilings(symbol: string, from: string, to: string, ua: strin
     const picked: { i: number; accepted: number }[] = [];
     for (let i = 0; i < recent.form.length; i += 1) {
       const accepted = Date.parse(recent.acceptanceDateTime[i]!);
-      if (!Number.isFinite(accepted) || accepted < lo || accepted >= hi || SKIP_FORMS.test(recent.form[i]!)) continue;
+      if (
+        !Number.isFinite(accepted) ||
+        accepted < lo ||
+        accepted >= hi ||
+        SKIP_FORMS.test(recent.form[i]!)
+      )
+        continue;
       picked.push({ i, accepted });
     }
     const items: NewsItem[] = [];
@@ -213,7 +262,10 @@ export function edgarFilings(symbol: string, from: string, to: string, ua: strin
     for (const { i, accepted } of picked) {
       const form = recent.form[i]!;
       const accession = recent.accessionNumber[i]!;
-      const codes = (recent.items[i] ?? '').split(',').map((c) => c.trim()).filter((c) => c && c !== '9.01');
+      const codes = (recent.items[i] ?? '')
+        .split(',')
+        .map((c) => c.trim())
+        .filter((c) => c && c !== '9.01');
       const baseForm = form.replace(/\/A$/, '');
       let url = `https://www.sec.gov/Archives/edgar/data/${cik}/${accession.replace(/-/g, '')}/${accession}-index.htm`;
       let headline = '';
@@ -228,7 +280,8 @@ export function edgarFilings(symbol: string, from: string, to: string, ua: strin
       const described = codes.length
         ? codes.map((c) => `${c} ${ITEM_NAMES[c] ?? ''}`.trim()).join(' · ')
         : (FORM_NAMES[baseForm] ?? form);
-      const dilution = DILUTION_FORMS.test(form) || codes.includes('3.02') || DILUTION_TITLE.test(headline);
+      const dilution =
+        DILUTION_FORMS.test(form) || codes.includes('3.02') || DILUTION_TITLE.test(headline);
       items.push({
         headline: headline || described,
         publisher: `SEC EDGAR · ${form}`,

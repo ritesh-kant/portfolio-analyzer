@@ -23,7 +23,9 @@ export class NewsPrimitive implements ISeriesPrimitive<Time> {
     zOrder: () => 'top',
     renderer: (): IPrimitivePaneRenderer => ({
       draw: (target) => {
-        target.useMediaCoordinateSpace(({ context, mediaSize }) => this.paint(context, mediaSize.height));
+        target.useMediaCoordinateSpace(({ context, mediaSize }) =>
+          this.paint(context, mediaSize.height),
+        );
       },
     }),
   };

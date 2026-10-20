@@ -7,7 +7,11 @@ import type { NewsItem } from './news-types';
  * Filings older than the first candle are dropped. Returns bar index → items,
  * oldest first.
  */
-export function groupByBar(items: NewsItem[], barTimes: number[], candleSecs: number): Map<number, NewsItem[]> {
+export function groupByBar(
+  items: NewsItem[],
+  barTimes: number[],
+  candleSecs: number,
+): Map<number, NewsItem[]> {
   const out = new Map<number, NewsItem[]>();
   const n = barTimes.length;
   if (!n) return out;
@@ -27,6 +31,7 @@ export function groupByBar(items: NewsItem[], barTimes: number[], candleSecs: nu
     list.push(item);
     out.set(idx, list);
   }
-  for (const list of out.values()) list.sort((a, b) => a.published_at.localeCompare(b.published_at));
+  for (const list of out.values())
+    list.sort((a, b) => a.published_at.localeCompare(b.published_at));
   return out;
 }

@@ -34,7 +34,13 @@ export interface FootprintSettings {
 type Target = Parameters<ICustomSeriesPaneRenderer['draw']>[0];
 
 const fmtVol = (v: number) =>
-  v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e4 ? `${(v / 1e3).toFixed(0)}K` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : `${Math.round(v)}`;
+  v >= 1e6
+    ? `${(v / 1e6).toFixed(1)}M`
+    : v >= 1e4
+      ? `${(v / 1e3).toFixed(0)}K`
+      : v >= 1e3
+        ? `${(v / 1e3).toFixed(1)}K`
+        : `${Math.round(v)}`;
 
 interface Rows {
   levels: FootprintCandle['levels'];
@@ -104,7 +110,12 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
     if (yh == null || yl == null || yo == null || yc == null) return;
     ctx.fillStyle = color;
     const wick = Math.max(1, Math.round(vr));
-    ctx.fillRect(Math.round(x - wick / 2), Math.round(yh * vr), wick, Math.max(1, Math.round((yl - yh) * vr)));
+    ctx.fillRect(
+      Math.round(x - wick / 2),
+      Math.round(yh * vr),
+      wick,
+      Math.max(1, Math.round((yl - yh) * vr)),
+    );
     const bw = Math.max(1, Math.floor(spacingPx * 0.7));
     const top = Math.round(Math.min(yo, yc) * vr);
     ctx.fillRect(Math.round(x - bw / 2), top, bw, Math.max(1, Math.round(Math.abs(yc - yo) * vr)));
@@ -162,8 +173,12 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
       if (showText) {
         const below = levels[idx - 1];
         const above = levels[idx + 1];
-        const askImb = below ? level.ask >= imbalance * Math.max(below.bid, 1) && level.ask > 0 : false;
-        const bidImb = above ? level.bid >= imbalance * Math.max(above.ask, 1) && level.bid > 0 : false;
+        const askImb = below
+          ? level.ask >= imbalance * Math.max(below.bid, 1) && level.ask > 0
+          : false;
+        const bidImb = above
+          ? level.bid >= imbalance * Math.max(above.ask, 1) && level.bid > 0
+          : false;
         const cy = top + h / 2;
         ctx.textBaseline = 'middle';
         const mid = Math.round(x);
@@ -202,8 +217,18 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
     if (yh != null && yl != null && yo != null && yc != null) {
       ctx.fillStyle = color;
       const bodyW = Math.max(3, Math.round(3 * hr));
-      ctx.fillRect(left - bodyW, Math.round(Math.min(yo, yc) * vr), bodyW, Math.max(1, Math.round(Math.abs(yc - yo) * vr)));
-      ctx.fillRect(left - Math.round(bodyW / 2) - Math.round(hr / 2), Math.round(yh * vr), Math.max(1, Math.round(hr)), Math.round((yl - yh) * vr));
+      ctx.fillRect(
+        left - bodyW,
+        Math.round(Math.min(yo, yc) * vr),
+        bodyW,
+        Math.max(1, Math.round(Math.abs(yc - yo) * vr)),
+      );
+      ctx.fillRect(
+        left - Math.round(bodyW / 2) - Math.round(hr / 2),
+        Math.round(yh * vr),
+        Math.max(1, Math.round(hr)),
+        Math.round((yl - yh) * vr),
+      );
     }
 
     // Delta and total volume under the candle.
@@ -213,7 +238,11 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
       ctx.font = `700 ${11 * vr}px ${FONT}`;
       ctx.fillStyle = fp.delta >= 0 ? '#5eead4' : '#ff8a96';
       const base = Math.round(yl * vr) + 4 * vr;
-      ctx.fillText(`Δ ${fp.delta >= 0 ? '+' : '−'}${fmtVol(Math.abs(fp.delta))}`, Math.round(x), base);
+      ctx.fillText(
+        `Δ ${fp.delta >= 0 ? '+' : '−'}${fmtVol(Math.abs(fp.delta))}`,
+        Math.round(x),
+        base,
+      );
       ctx.font = `${11 * vr}px ${FONT}`;
       ctx.fillStyle = '#b2b5be';
       ctx.fillText(fmtVol(fp.total), Math.round(x), base + 13 * vr);
@@ -221,7 +250,11 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
   }
 }
 
-export class FootprintView implements ICustomSeriesPaneView<Time, FootprintData, CustomSeriesOptions> {
+export class FootprintView implements ICustomSeriesPaneView<
+  Time,
+  FootprintData,
+  CustomSeriesOptions
+> {
   private readonly rend = new FootprintRenderer();
 
   setSettings(settings: FootprintSettings) {
@@ -240,7 +273,9 @@ export class FootprintView implements ICustomSeriesPaneView<Time, FootprintData,
     return [row.high, row.low, row.close];
   }
 
-  isWhitespace(row: FootprintData | CustomSeriesWhitespaceData<Time>): row is CustomSeriesWhitespaceData<Time> {
+  isWhitespace(
+    row: FootprintData | CustomSeriesWhitespaceData<Time>,
+  ): row is CustomSeriesWhitespaceData<Time> {
     return (row as FootprintData).close === undefined;
   }
 
