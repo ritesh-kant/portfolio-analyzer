@@ -66,6 +66,8 @@ interface Props {
   chartType: ChartType;
   onChartType: (t: ChartType) => void;
   onIndicators: () => void;
+  news: boolean;
+  onNews: () => void;
   footprint: FootprintUi;
   onFootprint: (patch: Partial<FootprintUi>) => void;
   onFootprintStep: (dir: 1 | -1) => void;
@@ -160,6 +162,10 @@ export function TopBar(p: Props) {
       <button type="button" className={tbtn()} onClick={p.onIndicators}>
         <Icons.indicators size={20} />
         Indicators
+      </button>
+      <button type="button" className={tbtn(p.news)} onClick={p.onNews} title="Company filings (NSE announcements / SEC EDGAR)">
+        <Icons.bolt size={20} />
+        News
       </button>
       <div className="flex items-center">
         <button

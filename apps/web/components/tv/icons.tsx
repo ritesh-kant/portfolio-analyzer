@@ -55,5 +55,6 @@ export const Icons = {
   chevron: ({ size }: IconProps) => wrap(<><path d="M6 8l4 4 4-4" /></>, size),
   close: ({ size }: IconProps) => wrap(<><path d="M5 5l10 10M15 5L5 15" /></>, size),
   home: ({ size }: IconProps) => wrap(<><path d="M3.5 10L10 4l6.5 6M5.5 9v7h9V9" /></>, size),
+  bolt: ({ size }: IconProps) => wrap(<><path d="M11 2.5L4.5 11h4.5l-1 6.5L15.5 9H11z" /></>, size),
   copy: ({ size }: IconProps) => wrap(<><rect x="7" y="7" width="9" height="9" rx="1" /><path d="M4 13V4h9" /></>, size),
 };

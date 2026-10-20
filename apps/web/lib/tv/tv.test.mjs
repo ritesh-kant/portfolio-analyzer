@@ -4,6 +4,7 @@ import { aggregateBars, heikinAshi, mergeBars, sessionDay, wallClock } from './t
 import { atr, ema, macd, relativeVolume, rsi, sma, vwap } from './indicators.ts';
 import { autoStep, buildFootprints, niceStep, stepLadder } from './footprint.ts';
 import { makeTimeAxis } from './drawings.ts';
+import { groupByBar } from './news-markers.ts';
 
 const IST = 'Asia/Kolkata';
 // 2026-10-19 09:15 IST
@@ -129,4 +130,13 @@ test('atr uses true range incl. gaps and Wilder smoothing', () => {
   assert.equal(out[0], null);
   assert.equal(out[1], 2); // mean(2, 2)
   assert.equal(out[2], 3.5); // (2*1 + 5)/2
+});
+
+test('news attaches to the containing candle, else the next one', () => {
+  const times = [1000, 1300, 1600, 5000]; // 5-minute candles with an overnight gap
+  const at = (t) => ({ headline: 'h', publisher: 'p', url: null, published_at: new Date(t * 1000).toISOString(), kind: 'news', text: null });
+  const m = groupByBar([at(1350), at(1950), at(3000), at(5100), at(900)], times, 300);
+  assert.equal(m.get(1).length, 1); // inside candle 1
+  assert.equal(m.get(3).length, 3); // 1950 + 3000 fall in the gap -> next candle; 5100 is inside the last
+  assert.equal(m.has(0), false); // older than first candle is dropped
 });

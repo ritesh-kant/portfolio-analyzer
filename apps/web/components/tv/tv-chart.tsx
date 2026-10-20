@@ -65,6 +65,9 @@ import {
 import type { Bar, BarsResponse, SymbolMeta } from '../../lib/tv/types';
 import { BottomBar, type RangeId } from './bottom-bar';
 import { DrawingsPrimitive } from './drawings-primitive';
+import { NewsPrimitive } from './news-primitive';
+import { groupByBar } from '../../lib/tv/news-markers';
+import type { NewsItem, NewsResponse } from '../../lib/tv/news-types';
 import { FootprintView, type FootprintData } from './footprint-series';
 import { Icons } from './icons';
 import { IndicatorPicker, IndicatorSettings } from './indicator-dialog';
@@ -85,6 +88,7 @@ interface Settings {
   chartType: ChartType;
   indicators: IndicatorCfg[];
   fp: FootprintUi;
+  news: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -93,6 +97,7 @@ const DEFAULT_SETTINGS: Settings = {
   chartType: 'candles',
   indicators: DEFAULT_INDICATORS,
   fp: { on: false, auto: true, step: 0.05, imbalance: 3, showDelta: true },
+  news: true,
 };
 
 // ── indicator computation ────────────────────────────────────────────────
@@ -197,6 +202,7 @@ export function TvChart() {
   const footRef = useRef<ISeriesApi<'Custom', Time> | null>(null);
   const footViewRef = useRef<FootprintView | null>(null);
   const primRef = useRef<DrawingsPrimitive | null>(null);
+  const newsPrimRef = useRef<NewsPrimitive | null>(null);
   const indStructRef = useRef<{ key: string; entries: { line: Line; cfgId: string; series: ISeriesApi<SeriesType, Time> }[] }>({
     key: '',
     entries: [],
@@ -211,6 +217,11 @@ export function TvChart() {
   const [chartType, setChartType] = useState<ChartType>(DEFAULT_SETTINGS.chartType);
   const [indicators, setIndicators] = useState<IndicatorCfg[]>(DEFAULT_SETTINGS.indicators);
   const [fp, setFp] = useState<FootprintUi>(DEFAULT_SETTINGS.fp);
+  const [newsOn, setNewsOn] = useState(DEFAULT_SETTINGS.news);
+  const [news, setNews] = useState<{ symbol: string; res: NewsResponse } | null>(null);
+  const [newsHover, setNewsHover] = useState<number | null>(null);
+  const [newsPinned, setNewsPinned] = useState<number | null>(null);
+  const [newsExpanded, setNewsExpanded] = useState(false);
 
   // scale
   const [log, setLog] = useState(false);
@@ -278,12 +289,13 @@ export function TvChart() {
     if (saved.chartType) setChartType(saved.chartType);
     if (saved.indicators) setIndicators(saved.indicators);
     if (saved.fp) setFp({ ...DEFAULT_SETTINGS.fp, ...saved.fp, on: false });
+    if (typeof saved.news === 'boolean') setNewsOn(saved.news);
     setReady(true);
   }, []);
 
   useEffect(() => {
-    if (ready) save('tv:settings', { symbol, tfId, chartType, indicators, fp });
-  }, [ready, symbol, tfId, chartType, indicators, fp]);
+    if (ready) save('tv:settings', { symbol, tfId, chartType, indicators, fp, news: newsOn });
+  }, [ready, symbol, tfId, chartType, indicators, fp, newsOn]);
 
   // Drawings are stored per symbol.
   useEffect(() => {
@@ -397,6 +409,31 @@ export function TvChart() {
     };
   }, [ready, symbol, tf.source, tf.intraday, fetchBars]);
 
+  // Company filings (NSE announcements / SEC EDGAR) across the loaded history.
+  const firstBarTime = bars[0]?.time;
+  useEffect(() => {
+    if (!ready || !newsOn || !firstBarTime || status !== 'ok') return;
+    const ctl = new AbortController();
+    const day = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10);
+    const cap = Date.now() / 1000 - 3 * 365 * 86400;
+    const from = day(Math.max(firstBarTime - 86400, cap));
+    const to = day(Date.now() / 1000 + 86400);
+    fetch(`/api/chart/news?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}`, { signal: ctl.signal, cache: 'no-store' })
+      .then((r) => r.json() as Promise<NewsResponse>)
+      .then((res) => setNews({ symbol, res }))
+      .catch(() => {
+        if (!ctl.signal.aborted) setNews({ symbol, res: { source: 'none', supported: false, reason: 'news request failed', items: [] } });
+      });
+    return () => ctl.abort();
+  }, [ready, newsOn, symbol, firstBarTime, status]);
+
+  // Routine paperwork (trading-window notices, investor-call schedules) is not a catalyst: only news and offerings get a badge.
+  const newsByBar = useMemo(() => {
+    if (!newsOn || !news || news.symbol !== symbol) return new Map<number, NewsItem[]>();
+    const items = news.res.items.filter((i) => i.kind !== 'filing');
+    return groupByBar(items, bars.map((b) => b.time), tf.secs);
+  }, [newsOn, news, symbol, bars, tf.secs]);
+
   // ── chart lifecycle ───────────────────────────────────────────────────
   useEffect(() => {
     const el = containerRef.current;
@@ -435,6 +472,7 @@ export function TvChart() {
     footViewRef.current = view;
     footRef.current = chart.addCustomSeries(view, { priceLineVisible: false, lastValueVisible: false }, 0);
     primRef.current = new DrawingsPrimitive();
+    newsPrimRef.current = new NewsPrimitive();
 
     chart.subscribeCrosshairMove((param) => {
       setHoverIdx(param.logical == null ? null : Math.round(param.logical));
@@ -488,6 +526,7 @@ export function TvChart() {
         );
       }
       series.attachPrimitive(prim);
+      if (newsPrimRef.current) series.attachPrimitive(newsPrimRef.current);
       mainRef.current = { key, series };
     }
   }, [chartType, fp.on]);
@@ -655,6 +694,11 @@ export function TvChart() {
     });
   }, [percent, log]);
 
+  // News badges → primitive.
+  useEffect(() => {
+    newsPrimRef.current?.setState([...newsByBar.keys()], newsPinned ?? newsHover);
+  }, [newsByBar, newsPinned, newsHover, chartType, fp.on]);
+
   // Drawings → primitive.
   useEffect(() => {
     const all = measure ? [...drawings, measure] : drawings;
@@ -728,6 +772,18 @@ export function TvChart() {
       if (!inPlot(x, y)) return;
       const L = latest.current;
       const prim = primRef.current;
+
+      if (L.tool === 'cursor') {
+        const bar = newsPrimRef.current?.findBar(x, y) ?? null;
+        if (bar != null) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          setNewsExpanded(false);
+          setNewsPinned((cur) => (cur === bar ? null : bar));
+          return;
+        }
+        setNewsPinned(null);
+      }
 
       if (L.tool !== 'cursor') {
         e.stopImmediatePropagation();
@@ -839,9 +895,11 @@ export function TvChart() {
         return;
       }
       if (latest.current.tool === 'cursor') {
-        const hit = inPlot(x, y) ? prim?.findHit(x, y) ?? null : null;
+        const bar = inPlot(x, y) ? (newsPrimRef.current?.findBar(x, y) ?? null) : null;
+        setNewsHover(bar);
+        const hit = inPlot(x, y) && bar == null ? prim?.findHit(x, y) ?? null : null;
         prim?.setState({ hoverId: hit?.drawingId ?? null });
-        wrap.classList.toggle('tv-over-drawing', !!hit);
+        wrap.classList.toggle('tv-over-drawing', !!hit || bar != null);
       }
     };
 
@@ -888,6 +946,7 @@ export function TvChart() {
       const target = e.target as HTMLElement;
       if (target.closest('input, textarea, select')) return;
       if (e.key === 'Escape') {
+        setNewsPinned(null);
         cancelDraft();
         setTool('cursor');
         setSelectedId(null);
@@ -1103,6 +1162,8 @@ export function TvChart() {
         chartType={chartType}
         onChartType={setChartType}
         onIndicators={() => setShowIndicators(true)}
+        news={newsOn}
+        onNews={() => setNewsOn((v) => !v)}
         footprint={{ ...fp, step: effectiveStep }}
         onFootprint={(patch) => setFp((cur) => ({ ...cur, ...patch, ...(patch.auto === false ? { step: effectiveStep } : {}) }))}
         onFootprintStep={(dir) => setFp((cur) => ({ ...cur, auto: false, step: stepLadder(effectiveStep, dir) }))}
@@ -1160,6 +1221,59 @@ export function TvChart() {
                 Footprint is estimated from 1-minute bars and only exists for the last ~7 sessions
                 {tf.source !== '1m' && !subRaw.length ? ' — loading…' : ` (${Math.round(footprintCoverage * 100)}% of candles covered)`}.
                 Zoom in on a recent candle to read the rows.
+              </div>
+            ) : null}
+            {(() => {
+              const idx = newsPinned ?? newsHover;
+              const items = idx != null ? newsByBar.get(idx) : undefined;
+              const pos = idx != null ? newsPrimRef.current?.position(idx) : null;
+              if (!items?.length || !pos) return null;
+              const pinned = newsPinned != null;
+              const latestFirst = [...items].reverse();
+              const shown = pinned && newsExpanded ? latestFirst : latestFirst.slice(0, 1);
+              const fmt = (iso: string) =>
+                new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone }).format(new Date(iso));
+              const width = 320;
+              const left = Math.max(8, Math.min(pos.x - 24, (wrapRef.current?.clientWidth ?? 800) - width - 90));
+              return (
+                <div
+                  className={`absolute z-30 rounded-xl border-l-4 border-[#9c27b0] bg-[#1e222d] p-4 shadow-2xl ${pinned ? '' : 'pointer-events-none'}`}
+                  style={{ left, bottom: (wrapRef.current?.clientHeight ?? 600) - pos.y + 16, width, maxHeight: '60%', overflowY: 'auto' }}
+                  data-tv-ui
+                >
+                  <div className="mb-3 flex items-center gap-2 text-[16px] font-semibold text-[#d1d4dc]">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#9c27b0] text-white">
+                      <Icons.bolt size={16} />
+                    </span>
+                    Latest updates
+                  </div>
+                  {shown.map((item) => (
+                    <div key={`${item.published_at}-${item.headline}`} className="mb-3 last:mb-0">
+                      <div className="text-[12px] text-[#787b86]">
+                        {fmt(item.published_at)} · {item.publisher}
+                        {item.kind === 'offering' ? <span className="ml-2 rounded bg-[#f23645]/20 px-1.5 text-[#ff8a96]">share offering</span> : null}
+                      </div>
+                      {pinned && item.url ? (
+                        <a href={item.url} target="_blank" rel="noreferrer" className="mt-0.5 block text-[14px] font-medium leading-snug text-[#d1d4dc] hover:text-[#7ea4ff]">
+                          {item.headline}
+                        </a>
+                      ) : (
+                        <div className="mt-0.5 line-clamp-4 text-[14px] font-medium leading-snug text-[#d1d4dc]">{item.headline}</div>
+                      )}
+                    </div>
+                  ))}
+                  {pinned && !newsExpanded && items.length > 1 ? (
+                    <button type="button" onClick={() => setNewsExpanded(true)} className="text-[13px] text-[#b2b5be] hover:text-white">
+                      See all ({items.length}) ›
+                    </button>
+                  ) : null}
+                  {!pinned && items.length > 1 ? <div className="text-[13px] text-[#b2b5be]">See all ({items.length}) ›</div> : null}
+                </div>
+              );
+            })()}
+            {newsOn && news && news.symbol === symbol && !news.res.supported ? (
+              <div className="pointer-events-none absolute bottom-12 right-20 z-10 max-w-xs rounded bg-[#1e222d]/90 px-3 py-1.5 text-[11px] text-[#b2b5be]">
+                News unavailable: {news.res.reason}
               </div>
             ) : null}
             {selected ? (
