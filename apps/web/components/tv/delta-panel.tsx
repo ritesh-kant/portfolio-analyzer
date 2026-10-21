@@ -172,15 +172,29 @@ export function DeltaPanel({
       </div>
       <div className="space-y-2 border-b border-[#2a2e39] px-3 py-2.5">
         <p className="text-[11px] leading-snug text-[#787b86]">
-          Absorption on 15-minute candles, as in the order-flow video: a candle with a long wick
-          whose delta points into it (upper wick + positive delta = buyers trapped; lower wick +
-          negative delta = sellers trapped), then a later candle that breaks its low (short) or high
-          (long) with a matching body and delta. Solid badge = confirmed, hollow = waiting. The
-          delta is the footprint's, which is{' '}
-          <span className="text-[#ffb74d]">estimated from 1-minute bars</span>, not from trades, and
-          only reaches back about 7 sessions. Check the location yourself (order block, value-area
-          edge, POC).
+          Long wick + delta pointing into it, then a candle that breaks the other way. Solid badge =
+          confirmed, hollow = waiting.
         </p>
+        <details className="text-[11px] leading-snug text-[#787b86]">
+          <summary className="cursor-pointer select-none text-[#b2b5be] hover:text-white">
+            How it works
+          </summary>
+          <div className="mt-1 space-y-1">
+            <p>
+              <span className="text-[#f23645]">Buyers trapped</span>: long upper wick, positive
+              delta, then a red candle breaks the low (short).
+            </p>
+            <p>
+              <span className="text-[#089981]">Sellers trapped</span>: long lower wick, negative
+              delta, then a green candle breaks the high (long).
+            </p>
+            <p>
+              Delta is <span className="text-[#ffb74d]">estimated from 1-minute bars</span>, not
+              trades, and reaches back about 7 sessions. Check the location yourself (order block,
+              value-area edge, POC).
+            </p>
+          </div>
+        </details>
         <label className="flex items-center justify-between gap-2 text-[12px] text-[#b2b5be]">
           <span>Mark on chart</span>
           <input
@@ -190,51 +204,56 @@ export function DeltaPanel({
             className="h-3.5 w-3.5 accent-[#e879f9]"
           />
         </label>
-        <NumberField
-          label="Wick % of range ≥"
-          title="The dominant wick (upper for buyers trapped, lower for sellers trapped) must be at least this share of the candle's high-low range, and at least as big as its body"
-          value={cfg.wick}
-          min={0}
-          max={100}
-          step={5}
-          onChange={(wick) => onCfg({ wick })}
-        />
-        <NumberField
-          label="|Δ| % of volume ≥"
-          title="Skip candles whose footprint delta is smaller than this share of the candle's volume (0 keeps every disagreement, however small)"
-          value={cfg.delta}
-          min={0}
-          max={100}
-          step={1}
-          onChange={(delta) => onCfg({ delta })}
-        />
-        <NumberField
-          label="Candle RVOL ≥"
-          title="Volume over the mean of the 20 candles before it; 0 keeps every setup"
-          value={cfg.rvol}
-          min={0}
-          max={10}
-          step={0.5}
-          onChange={(rvol) => onCfg({ rvol })}
-        />
-        <NumberField
-          label="Confirm within (candles)"
-          title="How many 15-minute candles after the signal candle may break its low/high before the setup counts as having no follow-through"
-          value={cfg.within}
-          min={1}
-          max={12}
-          step={1}
-          onChange={(within) => onCfg({ within })}
-        />
-        <label className="flex items-center justify-between gap-2 text-[12px] text-[#b2b5be]">
-          <span>Show no follow-through</span>
-          <input
-            type="checkbox"
-            checked={cfg.missed}
-            onChange={(e) => onCfg({ missed: e.target.checked })}
-            className="h-3.5 w-3.5 accent-[#e879f9]"
-          />
-        </label>
+        <details className="text-[12px] text-[#b2b5be]">
+          <summary className="cursor-pointer select-none hover:text-white">Settings</summary>
+          <div className="mt-2 space-y-2">
+            <NumberField
+              label="Wick % of range ≥"
+              title="The dominant wick (upper for buyers trapped, lower for sellers trapped) must be at least this share of the candle's high-low range, and at least as big as its body"
+              value={cfg.wick}
+              min={0}
+              max={100}
+              step={5}
+              onChange={(wick) => onCfg({ wick })}
+            />
+            <NumberField
+              label="|Δ| % of volume ≥"
+              title="Skip candles whose footprint delta is smaller than this share of the candle's volume (0 keeps every disagreement, however small)"
+              value={cfg.delta}
+              min={0}
+              max={100}
+              step={1}
+              onChange={(delta) => onCfg({ delta })}
+            />
+            <NumberField
+              label="Candle RVOL ≥"
+              title="Volume over the mean of the 20 candles before it; 0 keeps every setup"
+              value={cfg.rvol}
+              min={0}
+              max={10}
+              step={0.5}
+              onChange={(rvol) => onCfg({ rvol })}
+            />
+            <NumberField
+              label="Confirm within (candles)"
+              title="How many 15-minute candles after the signal candle may break its low/high before the setup counts as having no follow-through"
+              value={cfg.within}
+              min={1}
+              max={12}
+              step={1}
+              onChange={(within) => onCfg({ within })}
+            />
+            <label className="flex items-center justify-between gap-2 text-[12px] text-[#b2b5be]">
+              <span>Show no follow-through</span>
+              <input
+                type="checkbox"
+                checked={cfg.missed}
+                onChange={(e) => onCfg({ missed: e.target.checked })}
+                className="h-3.5 w-3.5 accent-[#e879f9]"
+              />
+            </label>
+          </div>
+        </details>
       </div>
       <div className="border-b border-[#2a2e39] px-3 py-1.5 text-[11px] text-[#787b86]">
         {symbol} · {items.length} setup{items.length === 1 ? '' : 's'} on 15m candles
