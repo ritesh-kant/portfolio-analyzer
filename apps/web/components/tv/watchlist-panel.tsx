@@ -40,9 +40,20 @@ interface Props {
   /** Symbols to add from the search dialog arrive here (set by the parent). */
   pending: WatchItem | null;
   onPendingHandled: () => void;
+  /** Phones: a drawer over the chart instead of a docked, resizable column. */
+  overlay?: boolean;
+  onClose?: () => void;
 }
 
-export function WatchlistPanel({ active, onSelect, onAdd, pending, onPendingHandled }: Props) {
+export function WatchlistPanel({
+  active,
+  onSelect,
+  onAdd,
+  pending,
+  onPendingHandled,
+  overlay = false,
+  onClose,
+}: Props) {
   const [items, setItems] = useState<WatchItem[]>(DEFAULT_WATCHLIST);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [failed, setFailed] = useState(false);
@@ -120,11 +131,16 @@ export function WatchlistPanel({ active, onSelect, onAdd, pending, onPendingHand
 
   return (
     <div
-      className="relative flex shrink-0 flex-col border-l border-[#2a2e39] bg-[#131722]"
-      style={{ width }}
+      className={
+        overlay
+          ? 'fixed bottom-0 right-0 top-11 z-40 flex flex-col border-l border-[#2a2e39] bg-[#131722] shadow-2xl'
+          : 'relative flex shrink-0 flex-col border-l border-[#2a2e39] bg-[#131722]'
+      }
+      style={{ width: overlay ? 'min(88vw, 340px)' : width }}
       data-tv-ui
     >
       <div
+        hidden={overlay}
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize watchlist"
@@ -141,6 +157,16 @@ export function WatchlistPanel({ active, onSelect, onAdd, pending, onPendingHand
       {dragging ? <div className="fixed inset-0 z-50 cursor-col-resize" /> : null}
       <div className="flex h-11 items-center justify-between border-b border-[#2a2e39] px-3">
         <span className="text-[14px] font-semibold text-[#d1d4dc]">Watchlist</span>
+        {overlay ? (
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close watchlist"
+            className="ml-auto mr-1 flex h-7 w-7 items-center justify-center rounded text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white"
+          >
+            <Icons.close size={18} />
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onAdd}

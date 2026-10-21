@@ -7,7 +7,8 @@ export type IndicatorType =
   | 'bb'
   | 'macd'
   | 'rsi'
-  | 'atr';
+  | 'atr'
+  | 'svp';
 
 export interface IndicatorCfg {
   id: string;
@@ -18,6 +19,10 @@ export interface IndicatorCfg {
   length2?: number;
   /** MACD signal. */
   length3?: number;
+  /** Session volume profile: widest bar as a percentage of the session's width. */
+  width?: number;
+  /** Session volume profile colouring: up/down volume split, or total with a grey value area. */
+  style?: 'split' | 'total';
   /** Bollinger std-dev multiplier. */
   mult?: number;
   color: string;
@@ -96,6 +101,13 @@ export const CATALOG: CatalogEntry[] = [
     where: 'pane',
     defaults: { type: 'rsi', length: 14 },
   },
+  {
+    type: 'svp',
+    name: 'Session Volume Profile',
+    description: 'Volume by price for every trading day, with POC and value area',
+    where: 'overlay',
+    defaults: { type: 'svp', length: 0, width: 30, style: 'total' },
+  },
 ];
 
 export const catalogOf = (type: IndicatorType): CatalogEntry =>
@@ -162,5 +174,7 @@ export function indicatorLabel(i: IndicatorCfg): string {
       return `ATR ${i.length}`;
     case 'rsi':
       return `RSI ${i.length} close`;
+    case 'svp':
+      return `SVP ${i.length > 0 ? i.length : 'auto'}`;
   }
 }

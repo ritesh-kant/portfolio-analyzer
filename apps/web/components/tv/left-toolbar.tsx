@@ -13,6 +13,7 @@ const GROUPS: { id: string; tools: Tool[] }[] = [
   { id: 'shapes', tools: ['rect'] },
   { id: 'text', tools: ['text'] },
   { id: 'measure', tools: ['measure'] },
+  { id: 'volume', tools: ['vprofile'] },
 ];
 
 const ICON: Record<Tool, (p: { size?: number }) => ReactNode> = {
@@ -25,6 +26,7 @@ const ICON: Record<Tool, (p: { size?: number }) => ReactNode> = {
   rect: Icons.rect,
   fib: Icons.fib,
   measure: Icons.measure,
+  vprofile: Icons.vprofile,
   text: Icons.text,
 };
 
@@ -46,7 +48,7 @@ interface Props {
 }
 
 const btn = (active: boolean) =>
-  `relative flex h-[38px] w-[44px] items-center justify-center rounded-md transition-colors ${
+  `relative flex h-[34px] w-[38px] items-center justify-center rounded-md md:h-[38px] md:w-[44px] transition-colors ${
     active ? 'bg-[#2a2e39] text-[#2962ff]' : 'text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white'
   }`;
 
@@ -58,6 +60,9 @@ export function LeftToolbar(p: Props) {
   // The visible tool of a multi-tool group is the last one picked from it.
   const [picked, setPicked] = useState<Record<string, Tool>>({ lines: 'trend' });
   const [open, setOpen] = useState<string | null>(null);
+  // The toolbar scrolls, which would clip an absolutely positioned flyout, so it is placed in viewport coordinates.
+  const [flyTop, setFlyTop] = useState(0);
+  const [flyLeft, setFlyLeft] = useState(52);
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -77,7 +82,7 @@ export function LeftToolbar(p: Props) {
   return (
     <div
       ref={root}
-      className="flex w-[52px] shrink-0 flex-col items-center overflow-y-auto border-r border-[#2a2e39] bg-[#131722] py-1.5 scrollbar-none"
+      className="flex w-[42px] shrink-0 flex-col items-center overflow-y-auto md:w-[52px] border-r border-[#2a2e39] bg-[#131722] py-1.5 scrollbar-none"
     >
       {GROUPS.map((g, gi) => {
         const current = picked[g.id] ?? g.tools[0]!;
@@ -86,7 +91,7 @@ export function LeftToolbar(p: Props) {
         const active = g.tools.includes(p.tool);
         return (
           <div key={g.id} className="relative">
-            {gi === 2 || gi === 5 ? <Sep /> : null}
+            {gi === 2 || gi === 5 || gi === 6 ? <Sep /> : null}
             <div className="flex items-center">
               <button
                 type="button"
@@ -101,7 +106,11 @@ export function LeftToolbar(p: Props) {
                   type="button"
                   aria-label={`${g.id} tools`}
                   className="absolute -right-1 top-1/2 h-5 w-3 -translate-y-1/2 rounded-sm text-[#787b86] hover:bg-[#2a2e39] hover:text-white"
-                  onClick={() => setOpen(open === g.id ? null : g.id)}
+                  onClick={(e) => {
+                    setFlyTop(e.currentTarget.getBoundingClientRect().top - 6);
+                    setFlyLeft(root.current?.getBoundingClientRect().right ?? 52);
+                    setOpen(open === g.id ? null : g.id);
+                  }}
                 >
                   <span className="block -rotate-90 scale-50">
                     <Icons.chevron size={16} />
@@ -110,7 +119,10 @@ export function LeftToolbar(p: Props) {
               ) : null}
             </div>
             {multi && open === g.id ? (
-              <div className="absolute left-[52px] top-0 z-50 w-52 rounded-md border border-[#363a45] bg-[#1e222d] py-1 shadow-xl">
+              <div
+                className="fixed z-50 w-60 max-w-[calc(100vw-60px)] rounded-md border border-[#363a45] bg-[#1e222d] py-1 shadow-xl"
+                style={{ left: flyLeft, top: flyTop }}
+              >
                 <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[#787b86]">
                   Lines
                 </div>

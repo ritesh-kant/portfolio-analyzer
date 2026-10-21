@@ -5,23 +5,34 @@ import { Icons } from './icons';
 interface Props {
   watchlistOpen: boolean;
   onWatchlist: () => void;
+  deltaOpen: boolean;
+  onDelta: () => void;
 }
 
-/** TradingView's right-hand icon rail; the watchlist is the only panel for now. */
-export function RightRail({ watchlistOpen, onWatchlist }: Props) {
+const button = (open: boolean) =>
+  `flex h-[38px] w-[38px] items-center justify-center rounded-md transition-colors ${
+    open ? 'bg-[#2a2e39] text-[#2962ff]' : 'text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white'
+  }`;
+
+/** TradingView's right-hand icon rail: the watchlist and the delta-divergence panel share the one docked slot. */
+export function RightRail({ watchlistOpen, onWatchlist, deltaOpen, onDelta }: Props) {
   return (
-    <div className="flex w-[48px] shrink-0 flex-col items-center border-l border-[#2a2e39] bg-[#131722] py-1.5">
+    <div className="flex w-[48px] shrink-0 flex-col items-center gap-1 border-l border-[#2a2e39] bg-[#131722] py-1.5">
       <button
         type="button"
         title="Watchlist"
         onClick={onWatchlist}
-        className={`flex h-[38px] w-[38px] items-center justify-center rounded-md transition-colors ${
-          watchlistOpen
-            ? 'bg-[#2a2e39] text-[#2962ff]'
-            : 'text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white'
-        }`}
+        className={button(watchlistOpen)}
       >
         <Icons.list size={22} />
+      </button>
+      <button
+        type="button"
+        title="Delta divergence (estimated)"
+        onClick={onDelta}
+        className={button(deltaOpen)}
+      >
+        <Icons.delta size={22} />
       </button>
     </div>
   );

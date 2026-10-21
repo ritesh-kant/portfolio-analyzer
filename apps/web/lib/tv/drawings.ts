@@ -7,6 +7,7 @@ export type DrawingKind =
   | 'rect'
   | 'fib'
   | 'measure'
+  | 'vprofile'
   | 'text';
 
 /** `t` is real unix seconds (may be fractional or in the future); `p` is price. */
@@ -22,6 +23,8 @@ export interface Drawing {
   color: string;
   width: number;
   text?: string;
+  /** Fixed range volume profile: number of price rows. */
+  rows?: number;
   locked?: boolean;
 }
 
@@ -34,6 +37,7 @@ export const POINTS_NEEDED: Record<DrawingKind, number> = {
   rect: 2,
   fib: 2,
   measure: 2,
+  vprofile: 2,
   text: 1,
 };
 
@@ -46,6 +50,7 @@ export const KIND_LABEL: Record<DrawingKind, string> = {
   rect: 'Rectangle',
   fib: 'Fib retracement',
   measure: 'Measure',
+  vprofile: 'Fixed range volume profile',
   text: 'Text',
 };
 
@@ -58,6 +63,7 @@ export const DEFAULT_COLOR: Record<DrawingKind, string> = {
   rect: '#2962ff',
   fib: '#787b86',
   measure: '#2962ff',
+  vprofile: '#2962ff',
   text: '#d1d4dc',
 };
 

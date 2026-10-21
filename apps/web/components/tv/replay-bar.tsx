@@ -25,7 +25,7 @@ const btn =
 export function ReplayBar(p: Props) {
   return (
     <div
-      className="absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-[#363a45] bg-[#1e222d] px-2 py-1.5 shadow-2xl"
+      className="scrollbar-none absolute bottom-2 left-1/2 z-30 flex max-w-[calc(100%-16px)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-lg md:bottom-4 [&>*]:shrink-0 border border-[#363a45] bg-[#1e222d] px-2 py-1.5 shadow-2xl"
       data-tv-ui
     >
       <span className="mr-1 flex items-center gap-1.5 px-1 text-[12px] font-semibold uppercase tracking-wide text-[#2962ff]">

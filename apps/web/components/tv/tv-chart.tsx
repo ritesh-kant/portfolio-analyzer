@@ -65,10 +65,31 @@ import {
 import type { Bar, BarsResponse, SymbolMeta } from '../../lib/tv/types';
 import { RightRail } from './right-rail';
 import { WatchlistPanel, type WatchItem } from './watchlist-panel';
+import { useCompact } from '../../lib/tv/use-compact';
 import { BottomBar, type RangeId } from './bottom-bar';
 import { DrawingsPrimitive } from './drawings-primitive';
 import { NewsPrimitive } from './news-primitive';
+import { foldTrailingTick, intervalSecs } from '../../lib/tv/clean-bars';
+import { DeltaPrimitive, type DeltaMark } from './delta-primitive';
+import { DeltaPanel } from './delta-panel';
+import {
+  DELTA_DEFAULTS,
+  type DeltaConfig,
+  type PlacedDivergence,
+  barContaining,
+  findDeltaDivergences,
+} from '../../lib/tv/delta-divergence';
+import { SessionsPrimitive } from './sessions-primitive';
+import { SessionProfilePrimitive } from './session-profile-primitive';
+import {
+  extendedMask,
+  hasExtendedBars,
+  runs,
+  sessionBreaks,
+  sessionFor,
+} from '../../lib/tv/sessions';
 import { ReplayBar } from './replay-bar';
+import { DEFAULT_ROWS } from '../../lib/tv/volume-profile';
 import { completedCount, endAfter, nextEnd } from '../../lib/tv/replay';
 import { groupByBar } from '../../lib/tv/news-markers';
 import type { NewsItem, NewsResponse } from '../../lib/tv/news-types';
@@ -93,6 +114,7 @@ interface Settings {
   indicators: IndicatorCfg[];
   fp: FootprintUi;
   news: boolean;
+  sessions: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -102,6 +124,7 @@ const DEFAULT_SETTINGS: Settings = {
   indicators: DEFAULT_INDICATORS,
   fp: { on: false, auto: true, step: 0.05, imbalance: 3, showDelta: true },
   news: true,
+  sessions: true,
 };
 
 // ── indicator computation ────────────────────────────────────────────────
@@ -183,6 +206,10 @@ function computeIndicators(indicators: IndicatorCfg[], bars: Bar[], timeZone: st
       case 'rsi':
         lines = [{ key: 'rsi', color: '#7e57c2', values: rsi(closes, cfg.length), kind: 'line' }];
         break;
+      case 'svp':
+        // Drawn by SessionProfilePrimitive, not as a series.
+        lines = [];
+        break;
     }
     return { cfg, pane, lines };
   });
@@ -240,6 +267,9 @@ export function TvChart() {
   const footViewRef = useRef<FootprintView | null>(null);
   const primRef = useRef<DrawingsPrimitive | null>(null);
   const newsPrimRef = useRef<NewsPrimitive | null>(null);
+  const sessionsPrimRef = useRef<SessionsPrimitive | null>(null);
+  const svpPrimRef = useRef<SessionProfilePrimitive | null>(null);
+  const deltaPrimRef = useRef<DeltaPrimitive | null>(null);
   const indStructRef = useRef<{
     key: string;
     entries: { line: Line; cfgId: string; series: ISeriesApi<SeriesType, Time> }[];
@@ -258,6 +288,7 @@ export function TvChart() {
   const [indicators, setIndicators] = useState<IndicatorCfg[]>(DEFAULT_SETTINGS.indicators);
   const [fp, setFp] = useState<FootprintUi>(DEFAULT_SETTINGS.fp);
   const [newsOn, setNewsOn] = useState(DEFAULT_SETTINGS.news);
+  const [sessionsOn, setSessionsOn] = useState(DEFAULT_SETTINGS.sessions);
   const [news, setNews] = useState<{ symbol: string; res: NewsResponse } | null>(null);
   const [newsHover, setNewsHover] = useState<number | null>(null);
   const [newsPinned, setNewsPinned] = useState<number | null>(null);
@@ -282,6 +313,7 @@ export function TvChart() {
   // data
   const [raw, setRaw] = useState<{ key: string; bars: Bar[] }>({ key: '', bars: [] });
   const [subRaw, setSubRaw] = useState<Bar[]>([]);
+  const [subSym, setSubSym] = useState('');
   const [meta, setMeta] = useState<SymbolMeta | null>(null);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [error, setError] = useState('');
@@ -305,11 +337,31 @@ export function TvChart() {
 
   // dialogs / panes
   const [showSearch, setShowSearch] = useState<false | 'chart' | 'watchlist'>(false);
+  const compact = useCompact();
   const [watchOpen, setWatchOpen] = useState(true);
   const [pendingWatch, setPendingWatch] = useState<WatchItem | null>(null);
   const clearPendingWatch = useCallback(() => setPendingWatch(null), []);
   useEffect(() => {
-    setWatchOpen(load<boolean>('tv:watchOpen', true));
+    // A docked watchlist would swallow a phone screen; there it is an on-demand drawer, closed to start.
+    const phone = window.matchMedia('(max-width: 767px)').matches;
+    setWatchOpen(phone ? false : load<boolean>('tv:watchOpen', true));
+  }, []);
+  // Delta divergence shares the docked right slot with the watchlist (one open at a time).
+  const [deltaOpen, setDeltaOpen] = useState(false);
+  const [deltaCfg, setDeltaCfg] = useState<DeltaConfig>(DELTA_DEFAULTS);
+  const [deltaMarks, setDeltaMarks] = useState(true);
+  const [deltaPick, setDeltaPick] = useState<number | null>(null);
+  useEffect(() => {
+    const saved = load<Partial<DeltaConfig>>('tv:deltaCfg', {});
+    setDeltaCfg({
+      delta: saved.delta ?? DELTA_DEFAULTS.delta,
+      wick: saved.wick ?? DELTA_DEFAULTS.wick,
+      rvol: saved.rvol ?? DELTA_DEFAULTS.rvol,
+      within: saved.within ?? DELTA_DEFAULTS.within,
+      missed: saved.missed ?? DELTA_DEFAULTS.missed,
+    });
+    setDeltaMarks(load<boolean>('tv:deltaMarks', true));
+    setDeltaOpen(load<boolean>('tv:deltaOpen', false));
   }, []);
   const [showIndicators, setShowIndicators] = useState(false);
   const [settingsId, setSettingsId] = useState<string | null>(null);
@@ -351,6 +403,30 @@ export function TvChart() {
   const decimals = pricePrecision(bars[bars.length - 1]?.close ?? meta?.price ?? 0);
   const subBars = tf.source === '1m' ? raw.bars : subRaw;
   const effectiveStep = fp.auto ? autoStep(bars) : fp.step;
+  // Delta divergences on 15-minute candles, using the footprint's own delta for each. 1-minute bars under the
+  // candles are needed, so this stays empty until they load (and never uses another symbol's).
+  const divergences = useMemo<PlacedDivergence[]>(() => {
+    const sub = tf.source === '1m' ? raw.bars : subSym === symbol ? subRaw : [];
+    if (!sub.length) return [];
+    // the chart's own candles when it is on 15m, otherwise 15m candles built from the 1-minute bars
+    const all = tf.id === '15m' ? bars : aggregateBars(sub, 900, timeZone);
+    // only candles whose last minute is known (and, in replay, already played)
+    const known = sub[sub.length - 1]!.time + 60;
+    const until = replayEnd == null ? known : Math.min(known, replayEnd);
+    const candles = all.filter((c) => c.time + 900 <= until);
+    const deltas = buildFootprints(candles, sub, 900, autoStep(candles)).map((f) => f?.delta ?? null);
+    const times = bars.map((b) => b.time);
+    return findDeltaDivergences(candles, deltas, deltaCfg).flatMap((d) => {
+      if (d.status === 'missed' && !deltaCfg.missed) return [];
+      // the chart bar that holds a candle's last minute: when that candle was known
+      const chartIndex = barContaining(times, d.time + 840, tf.secs);
+      const confirmChartIndex =
+        d.confirmTime == null ? null : barContaining(times, d.confirmTime + 840, tf.secs);
+      return chartIndex < 0
+        ? []
+        : [{ ...d, chartIndex, confirmChartIndex: confirmChartIndex === -1 ? null : confirmChartIndex }];
+    });
+  }, [tf.source, tf.id, tf.secs, raw.bars, subSym, symbol, subRaw, bars, timeZone, replayEnd, deltaCfg]);
   const footprints = useMemo(
     () => (fp.on ? buildFootprints(bars, subBars, tf.secs, effectiveStep) : []),
     [fp.on, bars, subBars, tf.secs, effectiveStep],
@@ -385,14 +461,24 @@ export function TvChart() {
     if (saved.tfId && TIMEFRAMES.some((t) => t.id === saved.tfId)) setTfId(saved.tfId);
     if (saved.chartType) setChartType(saved.chartType);
     if (saved.indicators) setIndicators(saved.indicators);
-    if (saved.fp) setFp({ ...DEFAULT_SETTINGS.fp, ...saved.fp, on: false });
+    if (saved.fp) setFp({ ...DEFAULT_SETTINGS.fp, ...saved.fp });
     if (typeof saved.news === 'boolean') setNewsOn(saved.news);
+    if (typeof saved.sessions === 'boolean') setSessionsOn(saved.sessions);
     setReady(true);
   }, []);
 
   useEffect(() => {
-    if (ready) save('tv:settings', { symbol, tfId, chartType, indicators, fp, news: newsOn });
-  }, [ready, symbol, tfId, chartType, indicators, fp, newsOn]);
+    if (ready)
+      save('tv:settings', {
+        symbol,
+        tfId,
+        chartType,
+        indicators,
+        fp,
+        news: newsOn,
+        sessions: sessionsOn,
+      });
+  }, [ready, symbol, tfId, chartType, indicators, fp, newsOn, sessionsOn]);
 
   // Drawings are stored per symbol.
   useEffect(() => {
@@ -444,16 +530,24 @@ export function TvChart() {
     setHistTick((n) => n + 1);
   }, []);
 
+  // ── sessions ──────────────────────────────────────────────────────────
+  const sessionInfo = useMemo(
+    () => (meta ? { symbol, instrumentType: meta.instrumentType, timezone: meta.timezone } : null),
+    [meta, symbol],
+  );
+  // US stocks only have pre/post-market bars to shade when asked for them.
+  const wantPrepost = sessionsOn && !!sessionInfo && hasExtendedBars(sessionInfo);
+
   // ── data fetching ─────────────────────────────────────────────────────
   const fetchBars = useCallback(
-    async (sym: string, interval: string, range: string, signal?: AbortSignal) => {
+    async (sym: string, interval: string, range: string, signal?: AbortSignal, prepost = false) => {
       const res = await fetch(
-        `/api/chart/bars?symbol=${encodeURIComponent(sym)}&interval=${interval}&range=${range}`,
+        `/api/chart/bars?symbol=${encodeURIComponent(sym)}&interval=${interval}&range=${range}${prepost ? '&prepost=1' : ''}`,
         { signal, cache: 'no-store' },
       );
       const body = (await res.json()) as BarsResponse & { error?: string };
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-      return body;
+      return { ...body, bars: foldTrailingTick(body.bars, intervalSecs(interval)) };
     },
     [],
   );
@@ -463,7 +557,7 @@ export function TvChart() {
     const ctl = new AbortController();
     setStatus('loading');
     setError('');
-    fetchBars(symbol, tf.source, tf.range, ctl.signal)
+    fetchBars(symbol, tf.source, tf.range, ctl.signal, wantPrepost)
       .then((res) => {
         setRaw({ key: `${symbol}|${tf.source}|${tf.range}`, bars: res.bars });
         setMeta(res.meta);
@@ -476,17 +570,21 @@ export function TvChart() {
         setError(e instanceof Error ? e.message : 'Failed to load');
       });
     return () => ctl.abort();
-  }, [ready, symbol, tf.source, tf.range, fetchBars]);
+  }, [ready, symbol, tf.source, tf.range, wantPrepost, fetchBars]);
 
   // Footprint needs 1-minute bars underneath coarser candles.
+  const svpOn = indicators.some((i) => i.type === 'svp');
   useEffect(() => {
-    if (!ready || !fp.on || tf.source === '1m') return;
+    if (!ready || (!fp.on && !svpOn && !deltaOpen) || tf.source === '1m') return;
     const ctl = new AbortController();
-    fetchBars(symbol, '1m', '7d', ctl.signal)
-      .then((res) => setSubRaw(res.bars))
+    fetchBars(symbol, '1m', '7d', ctl.signal, wantPrepost)
+      .then((res) => {
+        setSubRaw(res.bars);
+        setSubSym(symbol);
+      })
       .catch(() => setSubRaw([]));
     return () => ctl.abort();
-  }, [ready, fp.on, symbol, tf.source, fetchBars]);
+  }, [ready, fp.on, svpOn, deltaOpen, symbol, tf.source, wantPrepost, fetchBars]);
 
   // Live: re-pull the tail and merge it in. Yahoo caches each reply ~10 s, so polling faster than
   // every few seconds gains nothing; intraday polls at 3 s, longer timeframes at 30 s.
@@ -500,7 +598,13 @@ export function TvChart() {
         if (document.hidden || busy) return;
         busy = true;
         try {
-          const res = await fetchBars(symbol, tf.source, tf.intraday ? '1d' : '5d');
+          const res = await fetchBars(
+            symbol,
+            tf.source,
+            tf.intraday ? '1d' : '5d',
+            undefined,
+            wantPrepost,
+          );
           if (stopped) return;
           setUpdatedAt(Date.now());
           setRaw((cur) => {
@@ -530,7 +634,7 @@ export function TvChart() {
       stopped = true;
       clearInterval(timer);
     };
-  }, [ready, replayEnd, symbol, tf.source, tf.intraday, fetchBars]);
+  }, [ready, replayEnd, symbol, tf.source, tf.intraday, wantPrepost, fetchBars]);
 
   // Company filings (NSE announcements / SEC EDGAR) across the loaded history.
   const firstBarTime = bars[0]?.time;
@@ -692,6 +796,9 @@ export function TvChart() {
     );
     primRef.current = new DrawingsPrimitive();
     newsPrimRef.current = new NewsPrimitive();
+    deltaPrimRef.current = new DeltaPrimitive();
+    sessionsPrimRef.current = new SessionsPrimitive();
+    svpPrimRef.current = new SessionProfilePrimitive();
 
     chart.subscribeCrosshairMove((param) => {
       setHoverIdx(param.logical == null ? null : Math.round(param.logical));
@@ -757,6 +864,9 @@ export function TvChart() {
       }
       series.attachPrimitive(prim);
       if (newsPrimRef.current) series.attachPrimitive(newsPrimRef.current);
+      if (deltaPrimRef.current) series.attachPrimitive(deltaPrimRef.current);
+      if (sessionsPrimRef.current) series.attachPrimitive(sessionsPrimRef.current);
+      if (svpPrimRef.current) series.attachPrimitive(svpPrimRef.current);
       mainRef.current = { key, series };
     }
   }, [chartType, fp.on]);
@@ -1004,10 +1114,87 @@ export function TvChart() {
     });
   }, [percent, log]);
 
+  // Session volume profile indicator → primitive: one candle range per trading session (intraday only).
+  useEffect(() => {
+    const prim = svpPrimRef.current;
+    if (!prim) return;
+    const cfg = indicators.find((i) => i.type === 'svp');
+    if (!cfg || !tf.intraday || !bars.length) {
+      prim.setState([], []);
+      return;
+    }
+    const starts = [
+      0,
+      ...sessionBreaks(
+        bars.map((b) => b.time),
+        tf.secs,
+      ),
+    ];
+    const sessions = starts.map((s, i): [number, number] => [
+      s,
+      (starts[i + 1] ?? bars.length) - 1,
+    ]);
+    // Never let minutes after the replay cut-off into a profile.
+    const fine =
+      tf.secs <= 60
+        ? null
+        : replayEnd == null
+          ? subBars
+          : subBars.filter((b) => b.time < replayEnd);
+    prim.setState(bars, sessions, {
+      rows: cfg.length,
+      width: (cfg.width ?? 30) / 100,
+      style: cfg.style ?? 'split',
+      secs: tf.secs,
+      fine: fine && fine.length ? fine : null,
+    });
+  }, [indicators, tf.intraday, tf.secs, bars, subBars, replayEnd, chartType, fp.on]);
+
+  // Session shading + day-start lines → primitive (intraday charts of instruments with a defined session).
+  useEffect(() => {
+    const prim = sessionsPrimRef.current;
+    if (!prim) return;
+    if (!sessionsOn || !tf.intraday || !bars.length) {
+      prim.setState([], []);
+      return;
+    }
+    const def = sessionInfo ? sessionFor(sessionInfo) : null;
+    const shade = def ? runs(extendedMask(wall as number[], def)) : [];
+    prim.setState(
+      shade,
+      sessionBreaks(
+        bars.map((b) => b.time),
+        tf.secs,
+      ),
+    );
+  }, [sessionsOn, tf.intraday, tf.secs, bars, wall, sessionInfo, chartType, fp.on]);
+
   // News badges → primitive.
   useEffect(() => {
     newsPrimRef.current?.setState([...newsByBar.keys()], newsPinned ?? newsHover);
   }, [newsByBar, newsPinned, newsHover, chartType, fp.on]);
+
+  // Absorption setups → badges on the candles (hidden while the panel's "Mark on chart" is off).
+  const deltaMark = useCallback(
+    (d: PlacedDivergence): DeltaMark => ({
+      index: d.chartIndex,
+      high: bars[d.chartIndex]!.high,
+      low: bars[d.chartIndex]!.low,
+      kind: d.kind,
+      confirmed: d.status === 'confirmed',
+      confirmIndex: d.confirmChartIndex,
+      // buyers trapped → the signal candle's low is what gets broken; sellers trapped → its high
+      level: d.status === 'confirmed' ? (d.kind === 'buyers' ? d.low : d.high) : null,
+    }),
+    [bars],
+  );
+  useEffect(() => {
+    deltaPrimRef.current?.setState(
+      deltaMarks ? divergences.map(deltaMark) : [],
+      fp.on && fp.showDelta,
+    );
+  }, [divergences, deltaMarks, deltaMark, bars, chartType, fp.on, fp.showDelta]);
+  useEffect(() => setDeltaPick(null), [symbol, tfId]);
 
   // Drawings → primitive.
   useEffect(() => {
@@ -1019,8 +1206,9 @@ export function TvChart() {
       hidden: hideAll,
       axis,
       decimals,
+      bars,
     });
-  }, [drawings, measure, draft, selectedId, hideAll, axis, decimals]);
+  }, [drawings, measure, draft, selectedId, hideAll, axis, decimals, bars]);
 
   // ── pointer interaction with drawings ─────────────────────────────────
   useEffect(() => {
@@ -1135,6 +1323,7 @@ export function TvChart() {
           color: DEFAULT_COLOR[kind],
           width: 2,
           text: kind === 'text' ? 'Text' : undefined,
+          rows: kind === 'vprofile' ? DEFAULT_ROWS : undefined,
         };
         if (kind === 'text') {
           const input = window.prompt('Text', 'Text');
@@ -1226,7 +1415,10 @@ export function TvChart() {
             symbol: cur.symbol,
             list: cur.list.map((v) => {
               if (v.id !== id) return v;
-              const pts = v.pts.map((q, i) => (i === handle ? pt : q));
+              // A volume profile's lines only move in time; its price anchors are irrelevant.
+              const pts = v.pts.map((q, i) =>
+                i === handle ? (v.kind === 'vprofile' ? { t: pt.t, p: q.p } : pt) : q,
+              );
               return { ...v, pts };
             }),
           }));
@@ -1326,6 +1518,43 @@ export function TvChart() {
       }
     };
 
+    // Touch: the same handlers, fed by the first finger. A touch that grabs a drawing, or any touch
+    // while a drawing tool is active, is claimed (so the chart does not pan under it); otherwise the
+    // chart's own touch pan / pinch / long-press crosshair run untouched.
+    const asMouse = (t: TouchEvent): MouseEvent | null => {
+      const touch = t.changedTouches[0];
+      if (!touch) return null;
+      return {
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        button: 0,
+        target: t.target,
+        stopImmediatePropagation: () => t.stopImmediatePropagation(),
+        preventDefault: () => {
+          if (t.cancelable) t.preventDefault();
+        },
+      } as unknown as MouseEvent;
+    };
+    const onTouchStart = (t: TouchEvent) => {
+      if (t.touches.length !== 1) return;
+      const m = asMouse(t);
+      if (m) onDown(m);
+    };
+    const onTouchMove = (t: TouchEvent) => {
+      if (!draftRef && !(drag && (drag.mode === 'move' || drag.mode === 'handle'))) return;
+      const m = asMouse(t);
+      if (!m) return;
+      t.stopImmediatePropagation();
+      if (t.cancelable) t.preventDefault();
+      onMove(m);
+    };
+    const onTouchEnd = (t: TouchEvent) => {
+      const m = asMouse(t);
+      if (m) onUp(m);
+    };
+    wrap.addEventListener('touchstart', onTouchStart, { capture: true, passive: false });
+    wrap.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
+    wrap.addEventListener('touchend', onTouchEnd, true);
     wrap.addEventListener('mousedown', onDown, true);
     wrap.addEventListener('mousemove', onMove, true);
     window.addEventListener('mousemove', onMove);
@@ -1333,6 +1562,9 @@ export function TvChart() {
     wrap.addEventListener('dblclick', onDbl, true);
     window.addEventListener('keydown', onKey);
     return () => {
+      wrap.removeEventListener('touchstart', onTouchStart, true);
+      wrap.removeEventListener('touchmove', onTouchMove, true);
+      wrap.removeEventListener('touchend', onTouchEnd, true);
       wrap.removeEventListener('mousedown', onDown, true);
       wrap.removeEventListener('mousemove', onMove, true);
       window.removeEventListener('mousemove', onMove);
@@ -1383,6 +1615,18 @@ export function TvChart() {
     fromTime = wall[n - 1]! - days * 86400;
     const idx = wall.findIndex((t) => t >= fromTime);
     chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, idx - 1), to: n + 5 });
+  };
+
+  /** Centre the chart on a bar, keeping the current zoom, and pulse its badge for a moment so it is easy to spot. */
+  const jumpToBar = (index: number) => {
+    const ts = chartRef.current?.timeScale();
+    const range = ts?.getVisibleLogicalRange();
+    if (!ts || !range) return;
+    const half = (range.to - range.from) / 2;
+    ts.setVisibleLogicalRange({ from: index - half, to: index + half });
+    setDeltaPick(index);
+    const d = divergences.find((x) => x.chartIndex === index);
+    if (d && bars[index]) deltaPrimRef.current?.focus(deltaMark(d));
   };
 
   const zoomIn = () => {
@@ -1546,7 +1790,7 @@ export function TvChart() {
     >
       <style>{`.tv-over-drawing, .tv-over-drawing * { cursor: pointer !important; } .tv-tool, .tv-tool * { cursor: crosshair !important; }`}</style>
       <TopBar
-        symbol={symbol.replace(/\.(NS|BO)$/, '')}
+        symbol={symbol.replace(/\.(NS|BO)$|=[FX]$/, '')}
         onOpenSearch={() => setShowSearch('chart')}
         tfId={tfId}
         onTf={setTfId}
@@ -1555,6 +1799,8 @@ export function TvChart() {
         onIndicators={() => setShowIndicators(true)}
         news={newsOn}
         onNews={() => setNewsOn((v) => !v)}
+        sessions={sessionsOn}
+        onSessions={() => setSessionsOn((v) => !v)}
         replay={replayActive || replayPick}
         onReplay={() => (replayActive || replayPick ? exitReplay() : beginPick())}
         footprint={{ ...fp, step: effectiveStep }}
@@ -1574,6 +1820,8 @@ export function TvChart() {
         onRedo={redo}
         onScreenshot={screenshot}
         onFullscreen={fullscreen}
+        watchlistOpen={watchOpen}
+        onWatchlist={() => setWatchOpen((v) => !v)}
       />
       <div className="flex min-h-0 flex-1">
         <LeftToolbar
@@ -1602,7 +1850,7 @@ export function TvChart() {
             {priceLegend}
             {portals}
             {status === 'loading' ? (
-              <div className="pointer-events-none absolute right-20 top-2 z-10 rounded bg-[#1e222d] px-2 py-1 text-xs text-[#b2b5be]">
+              <div className="pointer-events-none absolute right-16 top-2 z-10 rounded bg-[#1e222d] px-2 py-1 text-xs text-[#b2b5be]">
                 Loading {symbol}…
               </div>
             ) : null}
@@ -1650,10 +1898,10 @@ export function TvChart() {
                   day: 'numeric',
                   timeZone,
                 }).format(new Date(iso));
-              const width = 320;
+              const width = Math.min(320, (wrapRef.current?.clientWidth ?? 800) - 16);
               const left = Math.max(
                 8,
-                Math.min(pos.x - 24, (wrapRef.current?.clientWidth ?? 800) - width - 90),
+                Math.min(pos.x - 24, (wrapRef.current?.clientWidth ?? 800) - width - 64),
               );
               return (
                 <div
@@ -1715,7 +1963,7 @@ export function TvChart() {
               );
             })()}
             {newsOn && news && news.symbol === symbol && !news.res.supported ? (
-              <div className="pointer-events-none absolute bottom-12 right-20 z-10 max-w-xs rounded bg-[#1e222d]/90 px-3 py-1.5 text-[11px] text-[#b2b5be]">
+              <div className="pointer-events-none absolute bottom-12 right-2 z-10 max-w-[calc(100%-16px)] md:right-20 md:max-w-xs rounded bg-[#1e222d]/90 px-3 py-1.5 text-[11px] text-[#b2b5be]">
                 News unavailable: {news.res.reason}
               </div>
             ) : null}
@@ -1736,10 +1984,12 @@ export function TvChart() {
             ) : null}
             {selected ? (
               <div
-                className="absolute left-1/2 top-2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-md border border-[#363a45] bg-[#1e222d] px-2 py-1 shadow-lg"
+                className="scrollbar-none absolute left-1/2 top-2 z-20 flex max-w-[calc(100%-16px)] -translate-x-1/2 items-center gap-1.5 overflow-x-auto rounded-md border border-[#363a45] bg-[#1e222d] px-2 py-1 shadow-lg"
                 data-tv-ui
               >
-                {selected.kind === 'fib' || selected.kind === 'measure'
+                {selected.kind === 'fib' ||
+                selected.kind === 'measure' ||
+                selected.kind === 'vprofile'
                   ? null
                   : SWATCHES.map((c) => (
                       <button
@@ -1751,17 +2001,34 @@ export function TvChart() {
                         style={{ background: c }}
                       />
                     ))}
-                {[1, 2, 3, 4].map((w) => (
-                  <button
-                    key={w}
-                    type="button"
-                    onClick={() => patchSelected({ width: w })}
-                    title={`${w}px`}
-                    className={`flex h-6 w-6 items-center justify-center rounded hover:bg-[#2a2e39] ${selected.width === w ? 'bg-[#2a2e39]' : ''}`}
-                  >
-                    <span className="block w-3.5 bg-[#d1d4dc]" style={{ height: w }} />
-                  </button>
-                ))}
+                {selected.kind === 'vprofile' ? (
+                  <label className="flex items-center gap-1.5 px-1 text-[12px] text-[#b2b5be]">
+                    Rows
+                    <select
+                      value={selected.rows ?? DEFAULT_ROWS}
+                      onChange={(e) => patchSelected({ rows: Number(e.target.value) })}
+                      className="rounded border border-[#363a45] bg-[#131722] px-1.5 py-0.5 text-[#d1d4dc] outline-none"
+                    >
+                      {[12, 24, 48, 96].map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  [1, 2, 3, 4].map((w) => (
+                    <button
+                      key={w}
+                      type="button"
+                      onClick={() => patchSelected({ width: w })}
+                      title={`${w}px`}
+                      className={`flex h-6 w-6 items-center justify-center rounded hover:bg-[#2a2e39] ${selected.width === w ? 'bg-[#2a2e39]' : ''}`}
+                    >
+                      <span className="block w-3.5 bg-[#d1d4dc]" style={{ height: w }} />
+                    </button>
+                  ))
+                )}
                 <button
                   type="button"
                   title="Clone"
@@ -1823,24 +2090,64 @@ export function TvChart() {
             }}
           />
         </div>
-        {watchOpen ? (
+        {deltaOpen && !compact ? (
+          <DeltaPanel
+            symbol={meta?.symbol ?? symbol}
+            items={divergences}
+            hasData={(tf.source === '1m' ? raw.bars.length : subSym === symbol ? subRaw.length : 0) > 0}
+            cfg={deltaCfg}
+            onCfg={(patch) =>
+              setDeltaCfg((cur) => {
+                const next = { ...cur, ...patch };
+                save('tv:deltaCfg', next);
+                return next;
+              })
+            }
+            marksOn={deltaMarks}
+            onMarks={(on) => {
+              setDeltaMarks(on);
+              save('tv:deltaMarks', on);
+            }}
+            intraday={tf.intraday}
+            timeZone={timeZone}
+            active={deltaPick}
+            onJump={jumpToBar}
+          />
+        ) : null}
+        {watchOpen && !(deltaOpen && !compact) ? (
           <WatchlistPanel
             active={symbol}
-            onSelect={setSymbol}
+            overlay={compact}
+            onClose={() => setWatchOpen(false)}
+            onSelect={(sym) => {
+              setSymbol(sym);
+              if (compact) setWatchOpen(false);
+            }}
             onAdd={() => setShowSearch('watchlist')}
             pending={pendingWatch}
             onPendingHandled={clearPendingWatch}
           />
         ) : null}
-        <RightRail
-          watchlistOpen={watchOpen}
-          onWatchlist={() =>
-            setWatchOpen((v) => {
-              save('tv:watchOpen', !v);
-              return !v;
-            })
-          }
-        />
+        {compact ? null : (
+          <RightRail
+            watchlistOpen={watchOpen && !deltaOpen}
+            deltaOpen={deltaOpen}
+            onWatchlist={() => {
+              const next = !(watchOpen && !deltaOpen);
+              setWatchOpen(next);
+              save('tv:watchOpen', next);
+              if (next) {
+                setDeltaOpen(false);
+                save('tv:deltaOpen', false);
+              }
+            }}
+            onDelta={() => {
+              const next = !deltaOpen;
+              setDeltaOpen(next);
+              save('tv:deltaOpen', next);
+            }}
+          />
+        )}
       </div>
       {showSearch ? (
         <SymbolSearch

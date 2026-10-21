@@ -41,10 +41,15 @@ interface YahooResult {
   indicators: { quote: Array<Record<string, Array<number | null>>> };
 }
 
-async function fetchYahoo(symbol: string, interval: string, range: string): Promise<YahooResult> {
+async function fetchYahoo(
+  symbol: string,
+  interval: string,
+  range: string,
+  prepost: boolean,
+): Promise<YahooResult> {
   let lastError = 'upstream unavailable';
   for (const host of HOSTS) {
-    const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=false`;
+    const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=${prepost}`;
     try {
       const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, cache: 'no-store' });
       const body = (await res.json()) as {
@@ -66,12 +71,13 @@ export async function GET(req: Request) {
   const symbol = (searchParams.get('symbol') ?? '').trim();
   const interval = searchParams.get('interval') ?? '5m';
   const range = searchParams.get('range') ?? '5d';
+  const prepost = searchParams.get('prepost') === '1';
   if (!SYMBOL.test(symbol)) return NextResponse.json({ error: 'bad symbol' }, { status: 400 });
   if (!INTERVALS.has(interval) || !RANGES.has(range)) {
     return NextResponse.json({ error: 'bad interval or range' }, { status: 400 });
   }
   try {
-    const result = await fetchYahoo(symbol, interval, range);
+    const result = await fetchYahoo(symbol, interval, range, prepost);
     const quote = result.indicators.quote[0] ?? {};
     const bars: Bar[] = [];
     (result.timestamp ?? []).forEach((time, i) => {
@@ -92,6 +98,7 @@ export async function GET(req: Request) {
         currency: String(m.currency ?? ''),
         exchange: String(m.fullExchangeName ?? m.exchangeName ?? ''),
         timezone: String(m.exchangeTimezoneName ?? 'UTC'),
+        instrumentType: String(m.instrumentType ?? ''),
         prevClose: typeof m.chartPreviousClose === 'number' ? m.chartPreviousClose : null,
         price: typeof m.regularMarketPrice === 'number' ? m.regularMarketPrice : null,
       },

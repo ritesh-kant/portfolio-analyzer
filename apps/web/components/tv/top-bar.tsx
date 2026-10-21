@@ -7,8 +7,11 @@ import { Icons } from './icons';
 
 export type ChartType = 'candles' | 'hollow' | 'bars' | 'line' | 'area' | 'ha';
 
+/** Chart-type menu entries: the plain types plus Volume footprint (a mode of the candles, with its own settings). */
+export type ChartMenuId = ChartType | 'footprint';
+
 export const CHART_TYPES: {
-  id: ChartType;
+  id: ChartMenuId;
   label: string;
   icon: (p: { size?: number }) => ReactNode;
 }[] = [
@@ -18,6 +21,7 @@ export const CHART_TYPES: {
   { id: 'bars', label: 'Bars', icon: Icons.bars },
   { id: 'line', label: 'Line', icon: Icons.line },
   { id: 'area', label: 'Area', icon: Icons.area },
+  { id: 'footprint', label: 'Volume footprint', icon: Icons.footprint },
 ];
 
 export interface FootprintUi {
@@ -38,30 +42,47 @@ const tbtn = (active = false) =>
 function Menu({
   trigger,
   children,
-  align = 'left',
 }: {
   trigger: (open: boolean) => ReactNode;
   children: (close: () => void) => ReactNode;
-  align?: 'left' | 'right';
 }) {
-  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const open = pos != null;
   useEffect(() => {
     if (!open) return;
-    const off = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    const off = (e: Event) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setPos(null);
     };
     window.addEventListener('mousedown', off);
-    return () => window.removeEventListener('mousedown', off);
+    window.addEventListener('touchstart', off);
+    return () => {
+      window.removeEventListener('mousedown', off);
+      window.removeEventListener('touchstart', off);
+    };
   }, [open]);
   return (
-    <div ref={ref} className="relative">
-      <div onClick={() => setOpen((o) => !o)}>{trigger(open)}</div>
-      {open ? (
+    <div ref={ref} className="relative shrink-0">
+      <div
+        onClick={(e) => {
+          if (open) return setPos(null);
+          // The bar scrolls sideways on phones, which would clip an absolutely positioned menu,
+          // so the menu is placed in viewport coordinates and kept on screen.
+          const rect = e.currentTarget.getBoundingClientRect();
+          setPos({
+            left: Math.max(8, Math.min(rect.left, window.innerWidth - 272)),
+            top: rect.bottom + 4,
+          });
+        }}
+      >
+        {trigger(open)}
+      </div>
+      {pos ? (
         <div
-          className={`absolute top-9 z-50 min-w-44 rounded-md border border-[#363a45] bg-[#1e222d] py-1 shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
+          className="fixed z-50 max-h-[70vh] min-w-44 overflow-y-auto rounded-md border border-[#363a45] bg-[#1e222d] py-1 shadow-xl"
+          style={{ left: pos.left, top: pos.top }}
         >
-          {children(() => setOpen(false))}
+          {children(() => setPos(null))}
         </div>
       ) : null}
     </div>
@@ -79,6 +100,8 @@ interface Props {
   onChartType: (t: ChartType) => void;
   onIndicators: () => void;
   news: boolean;
+  sessions: boolean;
+  onSessions: () => void;
   onNews: () => void;
   replay: boolean;
   onReplay: () => void;
@@ -91,15 +114,19 @@ interface Props {
   onRedo: () => void;
   onScreenshot: () => void;
   onFullscreen: () => void;
+  /** Phones have no right rail, so the watchlist opens from here. */
+  watchlistOpen?: boolean;
+  onWatchlist?: () => void;
 }
 
 export function TopBar(p: Props) {
-  const currentType = CHART_TYPES.find((c) => c.id === p.chartType)!;
+  const activeId: ChartMenuId = p.footprint.on ? 'footprint' : p.chartType;
+  const currentType = CHART_TYPES.find((c) => c.id === activeId)!;
   const TypeIcon = currentType.icon;
   const favs = TIMEFRAMES.filter((t) => FAVORITES.includes(t.id));
   const extra = !FAVORITES.includes(p.tfId) ? TIMEFRAMES.find((t) => t.id === p.tfId) : undefined;
   return (
-    <div className="flex h-11 shrink-0 items-center gap-0.5 border-b border-[#2a2e39] bg-[#131722] px-2 text-[#d1d4dc]">
+    <div className="scrollbar-none flex h-11 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-[#2a2e39] bg-[#131722] px-2 text-[#d1d4dc] [&>*]:shrink-0">
       <Link
         href="/dashboard"
         title="Back to dashboard"
@@ -109,7 +136,7 @@ export function TopBar(p: Props) {
       </Link>
       <button
         type="button"
-        className={`${tbtn()} min-w-[110px] font-semibold`}
+        className={`${tbtn()} font-semibold md:min-w-[110px]`}
         onClick={p.onOpenSearch}
         title="Symbol search"
       >
@@ -180,10 +207,15 @@ export function TopBar(p: Props) {
                 key={c.id}
                 type="button"
                 onClick={() => {
-                  p.onChartType(c.id);
+                  if (c.id === 'footprint') {
+                    p.onFootprint({ on: true });
+                  } else {
+                    p.onChartType(c.id);
+                    p.onFootprint({ on: false });
+                  }
                   close();
                 }}
-                className={`flex w-full items-center gap-3 px-4 py-1.5 text-left text-[13px] hover:bg-[#2a2e39] ${p.chartType === c.id ? 'text-[#2962ff]' : ''}`}
+                className={`flex w-full items-center gap-3 px-4 py-1.5 text-left text-[13px] hover:bg-[#2a2e39] ${activeId === c.id ? 'text-[#2962ff]' : ''}`}
               >
                 <I size={18} />
                 {c.label}
@@ -195,7 +227,7 @@ export function TopBar(p: Props) {
       <Sep />
       <button type="button" className={tbtn()} onClick={p.onIndicators}>
         <Icons.indicators size={20} />
-        Indicators
+        <span className="hidden md:inline">Indicators</span>
       </button>
       <button
         type="button"
@@ -204,7 +236,16 @@ export function TopBar(p: Props) {
         title="Company filings (NSE announcements / SEC EDGAR)"
       >
         <Icons.bolt size={20} />
-        News
+        <span className="hidden md:inline">News</span>
+      </button>
+      <button
+        type="button"
+        className={tbtn(p.sessions)}
+        onClick={p.onSessions}
+        title="Session shading: tint hours outside regular trading, dash each trading-day start"
+      >
+        <Icons.sessions size={20} />
+        <span className="hidden md:inline">Sessions</span>
       </button>
       <button
         type="button"
@@ -213,26 +254,14 @@ export function TopBar(p: Props) {
         title="Replay: step through history candle by candle"
       >
         <Icons.replay size={20} />
-        Replay
+        <span className="hidden md:inline">Replay</span>
       </button>
-      <div className="flex items-center">
-        <button
-          type="button"
-          className={`${tbtn(p.footprint.on)} rounded-r-none`}
-          onClick={() => p.onFootprint({ on: !p.footprint.on })}
-          title="Volume footprint (bid × ask per price level)"
-        >
-          <Icons.footprint size={20} />
-          Footprint
-        </button>
+      {p.footprint.on ? (
         <Menu
           trigger={() => (
-            <button
-              type="button"
-              className={`${tbtn(p.footprint.on)} rounded-l-none px-1`}
-              title="Footprint settings"
-            >
-              <Icons.chevron size={16} />
+            <button type="button" className={tbtn(true)} title="Volume footprint settings">
+              <Icons.gear size={18} />
+              <span className="hidden md:inline">Footprint</span>
             </button>
           )}
         >
@@ -300,7 +329,7 @@ export function TopBar(p: Props) {
             </div>
           )}
         </Menu>
-      </div>
+      ) : null}
       <Sep />
       <button
         type="button"
@@ -321,6 +350,16 @@ export function TopBar(p: Props) {
         <Icons.redo size={20} />
       </button>
       <div className="flex-1" />
+      {p.onWatchlist ? (
+        <button
+          type="button"
+          className={`${tbtn(!!p.watchlistOpen)} md:hidden`}
+          onClick={p.onWatchlist}
+          title="Watchlist"
+        >
+          <Icons.list size={20} />
+        </button>
+      ) : null}
       <button type="button" className={tbtn()} onClick={p.onFullscreen} title="Fullscreen">
         <Icons.fullscreen size={20} />
       </button>

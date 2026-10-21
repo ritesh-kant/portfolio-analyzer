@@ -15,7 +15,7 @@ import type { FootprintCandle } from '../../lib/tv/types';
 const FONT = '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
 const UP = '#089981';
 const DOWN = '#f23645';
-const POC = '#fbc02d';
+const POC_FILL = '#d1d4dc';
 
 export interface FootprintData extends CustomData<Time> {
   open: number;
@@ -135,7 +135,15 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
   ) {
     const w = Math.max(6, Math.floor(spacingPx * 0.94));
     const left = Math.round(x - w / 2);
+    const mid = Math.round(x);
     const imbalance = this.settings.imbalance;
+    // The candle runs down the middle; bid cells sit on its left, ask cells on its right.
+    // About 16% of the footprint's width, between 8 and 14 css px: TradingView's body is a solid block, not a sliver.
+    const bodyW = Math.round(Math.min(14 * hr, Math.max(8 * hr, w * 0.16)));
+    const half = Math.floor(bodyW / 2);
+    const leftW = Math.max(1, mid - half - left);
+    const rightX = mid + half;
+    const rightW = Math.max(1, left + w - rightX);
 
     // How tall is one base row on screen? Merge rows until each is ~12px.
     const base = fp.levels[0]!;
@@ -145,7 +153,7 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
     const k = baseH > 0 ? Math.max(1, Math.ceil(12 / baseH)) : 1;
     const rows = coarsen(fp, k);
     const levels = rows.levels;
-    const maxLevel = Math.max(...levels.map((l) => l.ask + l.bid), 1);
+    const maxSide = Math.max(...levels.map((l) => Math.max(l.ask, l.bid)), 1);
 
     // Row geometry: a row spans [price, price + step].
     const rowTop = (price: number) => priceToY(price + rows.step);
@@ -164,88 +172,111 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
       if (yt == null || yb == null) return;
       const top = Math.round(yt * vr);
       const h = Math.max(1, Math.round((yb - yt) * vr) - (rowH > 4 ? 1 : 0));
-      const total = level.ask + level.bid;
-      const intensity = 0.1 + 0.5 * (total / maxLevel);
-      const buyDominant = level.ask >= level.bid;
-      ctx.fillStyle = buyDominant ? `rgba(8,153,129,${intensity})` : `rgba(242,54,69,${intensity})`;
-      ctx.fillRect(left, top, w, h);
+      const isPoc = idx === rows.poc;
+      const below = levels[idx - 1];
+      const above = levels[idx + 1];
+      // Diagonal imbalance: asks against the bids one row down, bids against the asks one row up.
+      const askImb = below ? level.ask > 0 && level.ask >= imbalance * Math.max(below.bid, 1) : false;
+      const bidImb = above ? level.bid > 0 && level.bid >= imbalance * Math.max(above.ask, 1) : false;
+      const tint = (side: number) => 0.1 + 0.42 * (side / maxSide);
+
+      ctx.fillStyle = bidImb ? DOWN : isPoc ? POC_FILL : `rgba(242,54,69,${tint(level.bid)})`;
+      ctx.fillRect(left, top, leftW, h);
+      ctx.fillStyle = askImb ? UP : isPoc ? POC_FILL : `rgba(8,153,129,${tint(level.ask)})`;
+      ctx.fillRect(rightX, top, rightW, h);
 
       if (showText) {
-        const below = levels[idx - 1];
-        const above = levels[idx + 1];
-        const askImb = below
-          ? level.ask >= imbalance * Math.max(below.bid, 1) && level.ask > 0
-          : false;
-        const bidImb = above
-          ? level.bid >= imbalance * Math.max(above.ask, 1) && level.bid > 0
-          : false;
         const cy = top + h / 2;
         ctx.textBaseline = 'middle';
-        const mid = Math.round(x);
         const gap = 4 * hr;
         ctx.font = `${bidImb ? '700 ' : ''}${fontPx * vr}px ${FONT}`;
         ctx.textAlign = 'right';
-        ctx.fillStyle = bidImb ? '#ff8a96' : '#d1d4dc';
-        ctx.fillText(fmtVol(level.bid), mid - gap, cy);
+        ctx.fillStyle = bidImb ? '#ffffff' : isPoc ? '#131722' : '#d1d4dc';
+        ctx.fillText(fmtVol(level.bid), mid - half - gap, cy);
         ctx.font = `${askImb ? '700 ' : ''}${fontPx * vr}px ${FONT}`;
         ctx.textAlign = 'left';
-        ctx.fillStyle = askImb ? '#5eead4' : '#d1d4dc';
-        ctx.fillText(fmtVol(level.ask), mid + gap, cy);
-        if (bidImb || askImb) {
-          ctx.lineWidth = Math.max(1, hr);
-          ctx.strokeStyle = bidImb ? DOWN : UP;
-          ctx.strokeRect(left + 0.5, top + 0.5, w - 1, h - 1);
-        }
+        ctx.fillStyle = askImb ? '#ffffff' : isPoc ? '#131722' : '#d1d4dc';
+        ctx.fillText(fmtVol(level.ask), rightX + gap, cy);
       }
     });
 
-    // Point of control.
-    const poc = levels[rows.poc]!;
-    const pyt = rowTop(poc.price);
-    const pyb = rowBottom(poc.price);
-    if (pyt != null && pyb != null) {
-      ctx.lineWidth = Math.max(1, Math.round(hr * 1.5));
-      ctx.strokeStyle = POC;
-      ctx.strokeRect(left, Math.round(pyt * vr), w, Math.max(1, Math.round((pyb - pyt) * vr)));
-    }
-
-    // Candle body + wick down the left edge, so open/close read at a glance.
+    // Candle through the middle: wick high to low, body open to close.
     const yh = priceToY(d.high);
     const yl = priceToY(d.low);
     const yo = priceToY(d.open);
     const yc = priceToY(d.close);
     if (yh != null && yl != null && yo != null && yc != null) {
+      const wick = Math.max(2, Math.round(1.5 * hr));
       ctx.fillStyle = color;
-      const bodyW = Math.max(3, Math.round(3 * hr));
-      ctx.fillRect(
-        left - bodyW,
-        Math.round(Math.min(yo, yc) * vr),
-        bodyW,
-        Math.max(1, Math.round(Math.abs(yc - yo) * vr)),
-      );
-      ctx.fillRect(
-        left - Math.round(bodyW / 2) - Math.round(hr / 2),
-        Math.round(yh * vr),
-        Math.max(1, Math.round(hr)),
-        Math.round((yl - yh) * vr),
-      );
+      ctx.fillRect(mid - Math.floor(wick / 2), Math.round(yh * vr), wick, Math.max(1, Math.round((yl - yh) * vr)));
+      const bodyTop = Math.round(Math.min(yo, yc) * vr);
+      const bodyH = Math.max(1, Math.round(Math.abs(yc - yo) * vr));
+      ctx.fillRect(mid - half, bodyTop, bodyW, bodyH);
+      ctx.lineWidth = Math.max(1, Math.round(hr * 0.8));
+      ctx.strokeStyle = '#131722';
+      ctx.strokeRect(mid - half + 0.5, bodyTop + 0.5, bodyW - 1, Math.max(1, bodyH - 1));
     }
 
-    // Delta and total volume under the candle.
+    // Bid / ask totals and the Delta / Total box under the candle.
     if (this.settings.showDelta && spacing >= 30 && yl != null) {
-      ctx.textAlign = 'center';
+      // Rows span [price, price + step], so the bottom row reaches below the candle's low: start under it.
+      const bottomEdge = priceToY(levels[0]!.price);
+      const baseY = Math.round(Math.max(yl, bottomEdge ?? yl) * vr) + 4 * vr;
+      const deltaText = `${fp.delta >= 0 ? '+' : '−'}${fmtVol(Math.abs(fp.delta))}`;
+      const deltaColor = fp.delta >= 0 ? '#5eead4' : '#ff8a96';
       ctx.textBaseline = 'top';
-      ctx.font = `700 ${11 * vr}px ${FONT}`;
-      ctx.fillStyle = fp.delta >= 0 ? '#5eead4' : '#ff8a96';
-      const base = Math.round(yl * vr) + 4 * vr;
-      ctx.fillText(
-        `Δ ${fp.delta >= 0 ? '+' : '−'}${fmtVol(Math.abs(fp.delta))}`,
-        Math.round(x),
-        base,
-      );
+      if (w < 64 * hr) {
+        // Narrow candle: two plain lines.
+        ctx.textAlign = 'center';
+        ctx.font = `700 ${11 * vr}px ${FONT}`;
+        ctx.fillStyle = deltaColor;
+        ctx.fillText(`Δ ${deltaText}`, mid, baseY);
+        ctx.font = `${11 * vr}px ${FONT}`;
+        ctx.fillStyle = '#b2b5be';
+        ctx.fillText(fmtVol(fp.total), mid, baseY + 13 * vr);
+        return;
+      }
+      let bidSum = 0;
+      let askSum = 0;
+      for (const l of fp.levels) {
+        bidSum += l.bid;
+        askSum += l.ask;
+      }
+      ctx.font = `${10.5 * vr}px ${FONT}`;
+      ctx.textAlign = 'right';
+      ctx.fillStyle = DOWN;
+      ctx.fillText(fmtVol(bidSum), mid - half - 4 * hr, baseY);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = UP;
+      ctx.fillText(fmtVol(askSum), rightX + 4 * hr, baseY);
+
+      const boxY = baseY + 15 * vr;
+      const boxH = 36 * vr;
+      const pad = 7 * hr;
+      ctx.beginPath();
+      const r = 4 * Math.min(hr, vr);
+      ctx.moveTo(left + r, boxY);
+      ctx.arcTo(left + w, boxY, left + w, boxY + boxH, r);
+      ctx.arcTo(left + w, boxY + boxH, left, boxY + boxH, r);
+      ctx.arcTo(left, boxY + boxH, left, boxY, r);
+      ctx.arcTo(left, boxY, left + w, boxY, r);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(19,23,34,0.94)';
+      ctx.fill();
+      ctx.lineWidth = Math.max(1, hr);
+      ctx.strokeStyle = '#2a2e39';
+      ctx.stroke();
       ctx.font = `${11 * vr}px ${FONT}`;
-      ctx.fillStyle = '#b2b5be';
-      ctx.fillText(fmtVol(fp.total), Math.round(x), base + 13 * vr);
+      ctx.fillStyle = '#d1d4dc';
+      ctx.textAlign = 'left';
+      ctx.fillText('Delta', left + pad, boxY + 5 * vr);
+      ctx.fillText('Total', left + pad, boxY + 20 * vr);
+      ctx.font = `700 ${12 * vr}px ${FONT}`;
+      ctx.textAlign = 'right';
+      ctx.fillStyle = deltaColor;
+      ctx.fillText(deltaText, left + w - pad, boxY + 4.5 * vr);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(fmtVol(fp.total), left + w - pad, boxY + 19.5 * vr);
     }
   }
 }

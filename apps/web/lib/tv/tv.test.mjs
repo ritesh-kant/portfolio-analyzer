@@ -7,7 +7,12 @@ import { makeTimeAxis } from './drawings.ts';
 import { aliasHits } from './aliases.ts';
 import { completedCount, endAfter, nextEnd } from './replay.ts';
 import { matchScore, rankHits, searchQueries } from './search-rank.ts';
+import { extendedMask, runs, sessionBreaks, sessionFor } from './sessions.ts';
+import { buildProfile } from './volume-profile.ts';
+import { cotItems, metalRoot, parseBlsCalendar, parseFedRss, zonedInstant } from './macro.ts';
 import { groupByBar } from './news-markers.ts';
+import { barContaining, findDeltaDivergences } from './delta-divergence.ts';
+import { foldTrailingTick, intervalSecs } from './clean-bars.ts';
 
 const IST = 'Asia/Kolkata';
 // 2026-10-19 09:15 IST
@@ -214,11 +219,287 @@ test('replay steps one candle at a time and ends', () => {
 });
 
 test('multi-word search ranks hits by words matched, expanding exchange nicknames', () => {
-  const gc = { symbol: 'GC=F', name: 'Gold Dec 26', exchange: 'New York Commodity Exchange', type: 'FUTURE' };
+  const gc = {
+    symbol: 'GC=F',
+    name: 'Gold Dec 26',
+    exchange: 'New York Commodity Exchange',
+    type: 'FUTURE',
+  };
   const gld = { symbol: 'GLD', name: 'SPDR Gold Shares', exchange: 'NYSEArca', type: 'ETF' };
   assert.deepEqual(searchQueries('gold comex'), ['gold comex', 'gold', 'comex']);
   assert.deepEqual(searchQueries('infosys'), ['infosys']);
   assert.equal(matchScore('gold comex', gc), 2);
   assert.equal(matchScore('gold comex', gld), 1);
-  assert.deepEqual(rankHits('gold comex', [[gld], [gld, gc]]).map((h) => h.symbol), ['GC=F', 'GLD']);
+  assert.deepEqual(
+    rankHits('gold comex', [[gld], [gld, gc]]).map((h) => h.symbol),
+    ['GC=F', 'GLD'],
+  );
+});
+
+test('futures roots resolve like TradingView lists them', () => {
+  const gc = aliasHits('GC')[0];
+  assert.equal(gc.symbol, 'GC=F');
+  assert.equal(gc.display, 'GC');
+  assert.equal(gc.name, 'Gold Futures');
+  assert.equal(gc.exchange, 'COMEX');
+  assert.equal(aliasHits('gc1!')[0].symbol, 'GC=F');
+  assert.equal(aliasHits('CL')[0].symbol, 'CL=F');
+  assert.deepEqual(
+    aliasHits('GCT').filter((h) => h.symbol === 'GC=F'),
+    [],
+  );
+});
+
+test('regular-hours windows: gold futures use COMEX RTH, NSE has none', () => {
+  const gc = sessionFor({ symbol: 'GC=F', instrumentType: 'FUTURE', timezone: 'America/New_York' });
+  assert.deepEqual(gc, { start: 8 * 60 + 20, end: 13 * 60 + 30 });
+  assert.deepEqual(
+    sessionFor({ symbol: 'AAPL', instrumentType: 'EQUITY', timezone: 'America/New_York' }),
+    { start: 570, end: 960 },
+  );
+  assert.equal(
+    sessionFor({ symbol: 'TCS.NS', instrumentType: 'EQUITY', timezone: 'Asia/Kolkata' }),
+    null,
+  );
+  assert.equal(
+    sessionFor({ symbol: 'ZZ=F', instrumentType: 'FUTURE', timezone: 'America/New_York' }),
+    null,
+  );
+});
+
+test('extended-hours mask and runs', () => {
+  const day = 86400 * 20000;
+  const at = (h, m = 0) => day + h * 3600 + m * 60; // wall-clock seconds
+  const wall = [at(7), at(8, 10), at(8, 20), at(12), at(13, 30), at(15)];
+  const mask = extendedMask(wall, { start: 8 * 60 + 20, end: 13 * 60 + 30 });
+  assert.deepEqual(mask, [true, true, false, false, true, true]);
+  assert.deepEqual(runs(mask), [
+    [0, 1],
+    [4, 5],
+  ]);
+  assert.deepEqual(runs([false, false]), []);
+});
+
+test('session breaks sit on the first candle after a gap', () => {
+  const t = [0, 300, 600, 4200, 4500, 100000];
+  assert.deepEqual(sessionBreaks(t, 300), [3, 5]);
+});
+
+test('volume profile conserves volume and finds the point of control', () => {
+  const b = (o, h, l, c, v) => ({ time: 0, open: o, high: h, low: l, close: c, volume: v });
+  // heavy volume tightly around 100, light volume spread up to 110
+  const bars = [
+    b(100, 101, 99, 100.5, 9000),
+    b(100.5, 110, 100, 109, 1000),
+    b(100, 100.5, 99.5, 100, 5000),
+  ];
+  const p = buildProfile(bars, 0, 2, 11);
+  assert.ok(Math.abs(p.total - 15000) < 1e-6);
+  assert.equal(p.rows.length, 11);
+  assert.ok(p.pocPrice > 99 && p.pocPrice < 101.5);
+  assert.equal(p.lo, 99);
+  assert.equal(p.hi, 110);
+  const held = p.rows.slice(p.vaLo, p.vaHi + 1).reduce((s, r) => s + r.up + r.down, 0);
+  assert.ok(held >= 0.7 * p.total - 1e-6);
+  assert.ok(p.vaLo <= p.poc && p.poc <= p.vaHi);
+  assert.ok(p.vah > p.val);
+});
+
+test('volume profile splits up/down volume and clamps the range', () => {
+  const b = (o, c, v) => ({
+    time: 0,
+    open: o,
+    high: Math.max(o, c) + 1,
+    low: Math.min(o, c) - 1,
+    close: c,
+    volume: v,
+  });
+  const bars = [b(100, 102, 100), b(102, 100, 300)];
+  const p = buildProfile(bars, -5, 99, 4);
+  const up = p.rows.reduce((s, r) => s + r.up, 0);
+  const down = p.rows.reduce((s, r) => s + r.down, 0);
+  assert.ok(Math.abs(up - 100) < 1e-9 && Math.abs(down - 300) < 1e-9);
+  assert.equal(buildProfile([], 0, 1), null);
+});
+
+test('volume profile of one flat candle is a single row', () => {
+  const p = buildProfile([{ time: 0, open: 50, high: 50, low: 50, close: 50, volume: 70 }], 0, 0);
+  assert.equal(p.rows.length, 1);
+  assert.equal(p.total, 70);
+});
+
+test('macro news applies to precious-metal futures only', () => {
+  assert.equal(metalRoot('GC=F'), 'GC');
+  assert.equal(metalRoot('si=f'), 'SI');
+  assert.equal(metalRoot('CL=F'), null);
+  assert.equal(metalRoot('GLD'), null);
+});
+
+test('zonedInstant is DST-aware', () => {
+  assert.equal(
+    new Date(zonedInstant('2026-07-10', '08:30', 'America/New_York')).toISOString(),
+    '2026-07-10T12:30:00.000Z',
+  );
+  assert.equal(
+    new Date(zonedInstant('2026-12-04', '08:30', 'America/New_York')).toISOString(),
+    '2026-12-04T13:30:00.000Z',
+  );
+});
+
+test('Fed RSS parses titles, links and publish times', () => {
+  const xml = `<rss><channel><item><title><![CDATA[Federal Reserve issues FOMC statement]]></title>
+    <link><![CDATA[https://www.federalreserve.gov/x.htm]]></link><pubDate><![CDATA[Wed, 16 Sep 2026 18:00:00 GMT]]></pubDate></item>
+    <item><title>Minutes of the Board&#39;s meetings</title><link>https://f/y</link><pubDate>Tue, 13 Oct 2026 18:00:00 GMT</pubDate></item></channel></rss>`;
+  const items = parseFedRss(xml);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].headline, 'Federal Reserve issues FOMC statement');
+  assert.equal(items[0].published_at, '2026-09-16T18:00:00.000Z');
+  assert.equal(items[1].headline, "Minutes of the Board's meetings");
+});
+
+test('BLS calendar keeps jobs, CPI and PPI at their Eastern release time', () => {
+  const ics = [
+    'BEGIN:VEVENT',
+    'DTSTART;TZID=US-Eastern:20261014T083000',
+    'SUMMARY:Consumer Price Index',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    'DTSTART;TZID=US-Eastern:20261002T083000',
+    'SUMMARY:Employment Situation',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    'DTSTART;TZID=US-Eastern:20260428T100000',
+    'SUMMARY:Employment Situation of Veterans',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    'DTSTART;TZID=US-Eastern:20260107T100000',
+    'SUMMARY:Job Openings and Labor Turnover Survey',
+    'END:VEVENT',
+  ].join('\r\n');
+  const items = parseBlsCalendar(ics);
+  assert.deepEqual(
+    items.map((i) => i.headline),
+    ['Jobs report (Employment Situation) released', 'Consumer Price Index (CPI) released'],
+  );
+  assert.equal(items[1].published_at, '2026-10-14T12:30:00.000Z');
+});
+
+test('COT item reports net positioning and is stamped at Friday 15:30 ET', () => {
+  const [item] = cotItems(
+    [
+      {
+        report_date_as_yyyy_mm_dd: '2026-10-13T00:00:00.000',
+        m_money_positions_long_all: '124747',
+        m_money_positions_short_all: '17658',
+        change_in_m_money_long_all: '-2354',
+        change_in_m_money_short_all: '1544',
+      },
+    ],
+    'gold',
+    'https://cftc/x',
+  );
+  assert.match(item.headline, /net long in gold: 107,089 contracts \(−3,898 on the week\)/);
+  assert.equal(item.published_at, '2026-10-16T19:30:00.000Z');
+});
+
+const cndl = (i, o, h, l, c, v) => minute(i * 15, o, h, l, c, v);
+const quiet = (n) => Array.from({ length: n }, (_, i) => cndl(i, 100, 100.4, 99.6, 100.1, 1000));
+const cfgD = { wick: 40, delta: 5, rvol: 1, within: 3, missed: false };
+
+test('absorption: upper wick + positive delta, then a red candle with negative delta breaking the low', () => {
+  const c = quiet(12);
+  c.push(cndl(12, 100, 102, 99.8, 100.2, 3000)); // upper wick 1.8 of 2.2 (82%), delta +
+  c.push(cndl(13, 100.1, 100.3, 99.0, 99.2, 2000)); // red, low 99.0 < 99.8, delta -
+  const d = [...Array(12).fill(0), 600, -300];
+  const got = findDeltaDivergences(c, d, cfgD);
+  assert.equal(got.length, 1);
+  assert.deepEqual([got[0].index, got[0].kind, got[0].status, got[0].confirmIndex], [12, 'buyers', 'confirmed', 13]);
+  assert.ok(Math.abs(got[0].wick - (1.8 / 2.2) * 100) < 1e-6);
+  assert.equal(got[0].high, 102);
+  assert.equal(got[0].low, 99.8);
+});
+
+test('absorption: lower wick + negative delta, then a green candle with positive delta breaking the high', () => {
+  const c = quiet(12);
+  c.push(cndl(12, 100, 100.2, 98, 99.9, 3000)); // lower wick 1.9 of 2.2, delta -
+  c.push(cndl(13, 99.9, 101, 99.8, 100.9, 2500)); // green, high 101 > 100.2, delta +
+  const got = findDeltaDivergences(c, [...Array(12).fill(0), -700, 500], cfgD);
+  assert.deepEqual([got[0].kind, got[0].status, got[0].confirmIndex], ['sellers', 'confirmed', 13]);
+});
+
+test('absorption: delta on the wrong side, small wicks, thin delta and quiet volume do not qualify', () => {
+  const base = quiet(12);
+  const zero = Array(12).fill(0);
+  // upper wick but NEGATIVE delta: aggressive sellers, nothing trapped
+  assert.deepEqual(findDeltaDivergences([...base, cndl(12, 100, 102, 99.8, 100.2, 3000)], [...zero, -600], cfgD), []);
+  // red candle with positive delta but no dominant wick (the old body-vs-delta rule would have flagged it)
+  assert.deepEqual(findDeltaDivergences([...base, cndl(12, 101, 101.05, 99, 99.1, 3000)], [...zero, 600], cfgD), []);
+  // wick too small a share of the range
+  assert.deepEqual(findDeltaDivergences([...base, cndl(12, 100, 101.1, 99.0, 100.7, 3000)], [...zero, 600], cfgD), []);
+  // |delta| only 0.1% of volume
+  assert.deepEqual(findDeltaDivergences([...base, cndl(12, 100, 102, 99.8, 100.2, 3000)], [...zero, 3], cfgD), []);
+  // volume no higher than usual
+  assert.deepEqual(findDeltaDivergences([...base, cndl(12, 100, 102, 99.8, 100.2, 900)], [...zero, 50], cfgD), []);
+  // no footprint under it
+  assert.deepEqual(findDeltaDivergences([...base, cndl(12, 100, 102, 99.8, 100.2, 3000)], [...zero, null], cfgD), []);
+});
+
+test('absorption: waiting, no follow-through, and failed setups', () => {
+  const sig = () => [...quiet(12), cndl(12, 100, 102, 99.8, 100.2, 3000)];
+  const z = Array(12).fill(0);
+  // the signal is the newest candle: still waiting
+  assert.equal(findDeltaDivergences(sig(), [...z, 600], cfgD)[0].status, 'pending');
+  // three further candles that never break the low: no follow-through
+  const calm = [...sig(), cndl(13, 100.2, 100.5, 100, 100.3, 1000), cndl(14, 100.3, 100.5, 100, 100.2, 1000), cndl(15, 100.2, 100.5, 100, 100.4, 1000)];
+  assert.equal(findDeltaDivergences(calm, [...z, 600, 0, 0, 0], cfgD)[0].status, 'missed');
+  // breaks the low but with a green body or positive delta: not a confirmation
+  const weak = [...sig(), cndl(13, 99.5, 100.4, 99.0, 100.3, 1000)];
+  assert.equal(findDeltaDivergences(weak, [...z, 600, 200], cfgD)[0].status, 'pending');
+  // closes above the wick tip first: the trapped buyers were right after all
+  const failed = [...sig(), cndl(13, 100.2, 102.6, 100.1, 102.4, 2000), cndl(14, 102.4, 102.5, 98.0, 98.5, 2000)];
+  const got = findDeltaDivergences(failed, [...z, 600, 400, -900], cfgD)[0];
+  assert.deepEqual([got.status, got.confirmIndex], ['missed', null]);
+  // only candles up to the confirmation matter: later ones never change an earlier verdict
+  const conf = [...sig(), cndl(13, 100.1, 100.3, 99.0, 99.2, 2000)];
+  const dd = [...z, 600, -300];
+  const before = findDeltaDivergences(conf, dd, cfgD);
+  const after = findDeltaDivergences([...conf, cndl(14, 99.2, 105, 99, 105, 9e9)], [...dd, 5000], cfgD);
+  assert.deepEqual(after, before);
+});
+
+test('barContaining finds the chart bar that holds an instant', () => {
+  const times = [0, 900, 1800, 7200];
+  assert.equal(barContaining(times, 840, 900), 0);
+  assert.equal(barContaining(times, 900, 900), 1);
+  assert.equal(barContaining(times, 2699, 900), 2);
+  assert.equal(barContaining(times, 2700, 900), -1); // in the gap after the 1800 bar
+  assert.equal(barContaining(times, 3600, 3600), 2); // a 1h chart holds the 15m candle's last minute
+  assert.equal(barContaining(times, -1, 900), -1);
+});
+
+test('autoStep follows ATR(14): steady 1.4 ranges give 14 rows of 0.1, and volatility scales it', () => {
+  const calm = Array.from({ length: 30 }, (_, i) => minute(i, 100, 100.7, 99.3, 100, 1000));
+  assert.equal(autoStep(calm), 0.1);
+  const wild = Array.from({ length: 30 }, (_, i) => minute(i, 100, 107, 93, 100, 1000));
+  assert.equal(autoStep(wild), 1);
+});
+
+test('foldTrailingTick folds Yahoo\'s zero-volume last-trade bar into the forming candle', () => {
+  const b = (t, o, h, l, c, v) => ({ time: t, open: o, high: h, low: l, close: c, volume: v });
+  const real = [b(0, 10, 11, 9, 10, 100), b(900, 10, 12, 10, 11, 50)];
+  const tick = b(900 + 704, 12.5, 12.5, 12.5, 12.5, 0);
+  const got = foldTrailingTick([...real, tick], 900);
+  assert.equal(got.length, 2);
+  assert.deepEqual(got[1], b(900, 10, 12.5, 10, 12.5, 50));
+  // the tick's own timestamp no longer matters: two polls give identical bars
+  assert.deepEqual(foldTrailingTick([...real, { ...tick, time: 900 + 790 }], 900), got);
+  // a real next candle (starts a full interval later) and daily data are untouched
+  const next = [...real, b(1800, 11, 11, 11, 11, 5)];
+  assert.equal(foldTrailingTick(next, 900), next);
+  assert.equal(foldTrailingTick([...real, tick], null).length, 3);
+  assert.equal(intervalSecs('15m'), 900);
+  assert.equal(intervalSecs('60m'), 3600);
+  assert.equal(intervalSecs('1h'), 3600);
+  assert.equal(intervalSecs('1d'), null);
+  assert.equal(intervalSecs('1wk'), null);
 });

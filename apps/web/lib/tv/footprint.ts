@@ -21,10 +21,35 @@ export function niceStep(raw: number): number {
   return Number((pick * base).toFixed(Math.max(0, 6 - exp)));
 }
 
-/** Row height that gives a typical candle ~`rows` rows. */
+/** Wilder ATR of the last bar (same maths as indicators.atr), null until `length` bars exist. */
+function wilderAtr(bars: Bar[], length: number): number | null {
+  if (bars.length < length) return null;
+  const tr = bars.map((b, i) =>
+    i === 0
+      ? b.high - b.low
+      : Math.max(
+          b.high - b.low,
+          Math.abs(b.high - bars[i - 1]!.close),
+          Math.abs(b.low - bars[i - 1]!.close),
+        ),
+  );
+  let atr = 0;
+  for (let i = 0; i < length; i += 1) atr += tr[i]!;
+  atr /= length;
+  for (let i = length; i < bars.length; i += 1) atr = (atr * (length - 1) + tr[i]!) / length;
+  return atr;
+}
+
+/**
+ * Row height from ATR(14), like TradingView's "ATR 14" row size: one candle's typical range spans about `rows`
+ * rows, and the size follows volatility smoothly instead of jumping with the median. Short series fall back
+ * to the median candle range.
+ */
 export function autoStep(bars: Bar[], rows = 14): number {
-  const ranges = bars
-    .slice(-200)
+  const recent = bars.slice(-200);
+  const last = wilderAtr(recent, 14);
+  if (last != null && last > 0) return Math.max(0.01, niceStep(last / rows));
+  const ranges = recent
     .map((b) => b.high - b.low)
     .filter((r) => r > 0)
     .sort((a, b) => a - b);

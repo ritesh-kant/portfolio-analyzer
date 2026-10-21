@@ -59,7 +59,7 @@ export function BottomBar(p: Props) {
   }, [p.timeZone]);
 
   return (
-    <div className="flex h-9 shrink-0 items-center gap-0.5 border-t border-[#2a2e39] bg-[#131722] px-2">
+    <div className="scrollbar-none flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto border-t border-[#2a2e39] bg-[#131722] px-2 [&>*]:shrink-0">
       {RANGES.map((r) => (
         <button key={r} type="button" className={b()} onClick={() => p.onRange(r)}>
           {r}
@@ -69,7 +69,7 @@ export function BottomBar(p: Props) {
       {p.live && p.updatedAt ? (
         <Freshness lastBarEnd={p.lastBarEnd} updatedAt={p.updatedAt} />
       ) : null}
-      <span className="mr-3 shrink-0 whitespace-nowrap text-[12px] tabular-nums text-[#b2b5be]">
+      <span className="mx-3 hidden shrink-0 whitespace-nowrap text-[12px] tabular-nums text-[#b2b5be] sm:inline">
         {now} {offsetLabel(p.timeZone)}
       </span>
       <button type="button" className={b(p.percent)} onClick={p.onPercent} title="Percentage scale">
@@ -104,7 +104,7 @@ function Freshness({ lastBarEnd, updatedAt }: { lastBarEnd: number | null; updat
   const stale = barAge > 300;
   return (
     <span
-      className={`mr-4 min-w-0 shrink truncate text-[12px] tabular-nums ${stale ? 'text-[#ffb74d]' : 'text-[#b2b5be]'}`}
+      className={`mr-4 hidden min-w-0 shrink truncate text-[12px] tabular-nums md:inline ${stale ? 'text-[#ffb74d]' : 'text-[#b2b5be]'}`}
       title={
         stale
           ? 'The newest candle closed a while ago: the market is closed, or the data source (Yahoo) is behind.'

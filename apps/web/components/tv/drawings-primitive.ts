@@ -5,11 +5,13 @@ import type {
   ISeriesApi,
   ISeriesPrimitive,
   ISeriesPrimitiveAxisView,
-  Logical,
   SeriesAttachedParameter,
   SeriesType,
   Time,
 } from 'lightweight-charts';
+import { logicalX } from './coords';
+import type { Bar } from '../../lib/tv/types';
+import { DEFAULT_ROWS, type VolumeProfile, buildProfile } from '../../lib/tv/volume-profile';
 import { type Drawing, FIB_LEVELS, type TimeAxis, formatDuration } from '../../lib/tv/drawings';
 
 const FONT = '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
@@ -22,6 +24,8 @@ export interface DrawingsState {
   hidden: boolean;
   axis: TimeAxis;
   decimals: number;
+  /** The candles on screen, for volume profiles. */
+  bars: Bar[];
 }
 
 interface Px {
@@ -74,6 +78,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     hidden: false,
     axis: { count: 0, toLogical: () => 0, toTime: () => 0 },
     decimals: 2,
+    bars: [],
   };
   private axisViews: ISeriesPrimitiveAxisView[] = [];
   private view: IPrimitivePaneView = {
@@ -140,9 +145,27 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
 
   private px(t: number, p: number): Px | null {
     if (!this.chart || !this.series) return null;
-    const x = this.chart.timeScale().logicalToCoordinate(this.state.axis.toLogical(t) as Logical);
+    const x = logicalX(this.chart, this.state.axis.toLogical(t));
     const y = this.series.priceToCoordinate(p);
     return x == null || y == null ? null : { x, y };
+  }
+
+  private profiles = new Map<string, { key: string; profile: VolumeProfile | null }>();
+
+  /** Volume profile over the candles between a profile drawing's two anchors (cached until the data or range changes). */
+  private profileOf(d: Drawing): VolumeProfile | null {
+    const bars = this.state.bars;
+    if (!bars.length || d.pts.length < 2) return null;
+    const a = Math.round(this.state.axis.toLogical(d.pts[0]!.t));
+    const b = Math.round(this.state.axis.toLogical(d.pts[1]!.t));
+    const rows = d.rows ?? DEFAULT_ROWS;
+    const last = bars[bars.length - 1]!;
+    const key = `${a}|${b}|${rows}|${bars.length}|${last.volume}|${last.high}|${last.low}`;
+    const hit = this.profiles.get(d.id);
+    if (hit?.key === key) return hit.profile;
+    const profile = buildProfile(bars, a, b, rows);
+    this.profiles.set(d.id, { key, profile });
+    return profile;
   }
 
   private geometry(d: Drawing, w: number, h: number): Geometry | null {
@@ -151,6 +174,12 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
       const px = this.px(pt.t, pt.p);
       if (!px) return null;
       pts.push(px);
+    }
+    if (d.kind === 'vprofile') {
+      // Anchors sit on the top edge of the profile, whatever price the cursor was at.
+      const profile = this.profileOf(d);
+      const top = profile ? this.series?.priceToCoordinate(profile.hi) : null;
+      if (top != null) for (const p of pts) p.y = top;
     }
     return { pts, w, h };
   }
@@ -177,6 +206,12 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         for (let i = 0; i < handles.length; i += 1) {
           if (handles[i] && dist2(p, handles[i]!) <= 10 * 10) return { drawingId: d.id, handle: i };
         }
+      }
+      if (d.kind === 'vprofile' && !d.locked) {
+        // Either boundary line can be grabbed anywhere along its length and dragged sideways.
+        const dx = [Math.abs(p.x - g.pts[0]!.x), Math.abs(p.x - g.pts[1]!.x)];
+        const nearest = dx[0]! <= dx[1]! ? 0 : 1;
+        if (dx[nearest]! <= tol) return { drawingId: d.id, handle: nearest };
       }
       if (this.bodyHit(d, g, p, tol)) return { drawingId: d.id, handle: 'body' };
     }
@@ -228,6 +263,14 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
           const y = this.series?.priceToCoordinate(fibLevelPrice(d, l.v));
           return y != null && Math.abs(p.y - y) <= tol;
         });
+      }
+      case 'vprofile': {
+        const profile = this.profileOf(d);
+        const bottom = profile ? this.series?.priceToCoordinate(profile.lo) : null;
+        if (!profile || bottom == null) return false;
+        const x0 = Math.min(a.x, b!.x);
+        const x1 = Math.max(a.x, b!.x);
+        return p.x >= x0 - tol && p.x <= x1 + tol && p.y >= a.y - tol && p.y <= bottom + tol;
       }
       case 'text':
         return Math.abs(p.x - a.x) < 60 && p.y > a.y - 16 && p.y < a.y + 6;
@@ -320,6 +363,9 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
       case 'measure':
         this.paintMeasure(ctx, d, a, b!);
         break;
+      case 'vprofile':
+        this.paintProfile(ctx, d, a, b!, g.h, selected || hovered);
+        break;
       case 'text': {
         ctx.font = `600 13px ${FONT}`;
         ctx.textBaseline = 'alphabetic';
@@ -335,6 +381,82 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         break;
       }
     }
+  }
+
+  private paintProfile(
+    ctx: CanvasRenderingContext2D,
+    d: Drawing,
+    a: Px,
+    b: Px,
+    paneH: number,
+    emphasis: boolean,
+  ) {
+    const series = this.series;
+    const profile = this.profileOf(d);
+    if (!series || !profile) return;
+    const x0 = Math.min(a.x, b.x);
+    const x1 = Math.max(a.x, b.x);
+    const y = (price: number) => series.priceToCoordinate(price);
+    const yTop = y(profile.hi);
+    const yBottom = y(profile.lo);
+    if (yTop == null || yBottom == null) return;
+
+    // The span of candles the profile covers.
+    ctx.fillStyle = 'rgba(41, 98, 255, 0.06)';
+    ctx.fillRect(x0, yTop, x1 - x0, yBottom - yTop);
+    ctx.strokeStyle = emphasis ? 'rgba(41, 98, 255, 0.95)' : 'rgba(120, 123, 134, 0.7)';
+    ctx.lineWidth = emphasis ? 2 : 1;
+    ctx.setLineDash(emphasis ? [] : [4, 4]);
+    ctx.beginPath();
+    for (const x of [x0, x1]) {
+      ctx.moveTo(Math.round(x) + 0.5, 0);
+      ctx.lineTo(Math.round(x) + 0.5, paneH);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Histogram grows rightward from the left anchor; up volume then down volume, value area stronger.
+    const maxLen = (x1 - x0) * 0.7;
+    profile.rows.forEach((row, i) => {
+      const top = y(row.price + profile.step);
+      const bottom = y(row.price);
+      if (top == null || bottom == null) return;
+      const total = row.up + row.down;
+      if (total <= 0 || profile.maxRow <= 0) return;
+      const h = Math.max(1, Math.abs(bottom - top) - 1);
+      const len = (maxLen * total) / profile.maxRow;
+      const upLen = (len * row.up) / total;
+      const inValue = i >= profile.vaLo && i <= profile.vaHi;
+      ctx.fillStyle = inValue ? 'rgba(41, 98, 255, 0.55)' : 'rgba(41, 98, 255, 0.28)';
+      ctx.fillRect(x0, Math.min(top, bottom), upLen, h);
+      ctx.fillStyle = inValue ? 'rgba(251, 192, 45, 0.6)' : 'rgba(251, 192, 45, 0.3)';
+      ctx.fillRect(x0 + upLen, Math.min(top, bottom), len - upLen, h);
+    });
+
+    // Point of control and value-area edges, labelled at the right end.
+    const decimals = this.state.decimals;
+    ctx.font = `10px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    const level = (price: number, label: string, color: string, dashed: boolean) => {
+      const ly = y(price);
+      if (ly == null) return;
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = dashed ? 1 : 1.5;
+      ctx.setLineDash(dashed ? [4, 3] : []);
+      ctx.beginPath();
+      ctx.moveTo(x0, ly);
+      ctx.lineTo(x1, ly);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillText(`${label} ${price.toFixed(decimals)}`, x1 - 4, ly - 2);
+    };
+    level(profile.vah, 'VAH', 'rgba(41, 98, 255, 0.95)', true);
+    level(profile.val, 'VAL', 'rgba(41, 98, 255, 0.95)', true);
+    level(profile.pocPrice, 'POC', '#f23645', false);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
   }
 
   private paintFib(ctx: CanvasRenderingContext2D, d: Drawing, a: Px, b: Px) {

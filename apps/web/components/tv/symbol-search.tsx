@@ -120,8 +120,17 @@ export function SymbolSearch({ onPick, onClose }: Props) {
                 onClick={() => choose(h.symbol, h.name)}
                 className={`flex w-full items-center gap-4 px-5 py-2 text-left ${i === active ? 'bg-[#2a2e39]' : ''}`}
               >
-                <span className="w-32 shrink-0 text-[14px] font-semibold text-[#d1d4dc]">
-                  {h.symbol}
+                <span
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                  style={{ background: h.color ?? '#363a45' }}
+                >
+                  {(h.display ?? h.symbol)
+                    .replace(/[^A-Za-z]/g, '')
+                    .slice(0, 2)
+                    .toUpperCase()}
+                </span>
+                <span className="w-28 shrink-0 text-[14px] font-semibold text-[#d1d4dc]">
+                  {h.display ?? h.symbol}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-[13px] text-[#9598a1]">{h.name}</span>
                 <span className="shrink-0 text-[12px] text-[#787b86]">

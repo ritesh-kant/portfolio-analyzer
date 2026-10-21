@@ -54,6 +54,29 @@ const METALS: Record<string, SearchHit> = {
   SENSEX: { symbol: '^BSESN', name: 'S&P BSE SENSEX', exchange: 'BSE', type: 'INDEX' },
 };
 
+/** Futures roots as TradingView lists them: `GC` is "Gold Futures · COMEX". Yahoo's `GC=F` is the front month. */
+const GOLD = '#d4a017';
+const FUTURES: Record<string, { name: string; exchange: string; color: string }> = {
+  GC: { name: 'Gold Futures', exchange: 'COMEX', color: GOLD },
+  MGC: { name: 'Micro Gold Futures', exchange: 'COMEX', color: GOLD },
+  SI: { name: 'Silver Futures', exchange: 'COMEX', color: '#9aa4b2' },
+  HG: { name: 'Copper Futures', exchange: 'COMEX', color: '#c8643c' },
+  PL: { name: 'Platinum Futures', exchange: 'NYMEX', color: '#9aa4b2' },
+  PA: { name: 'Palladium Futures', exchange: 'NYMEX', color: '#9aa4b2' },
+  CL: { name: 'Crude Oil WTI Futures', exchange: 'NYMEX', color: '#4b5563' },
+  BZ: { name: 'Brent Crude Oil Futures', exchange: 'NYMEX', color: '#4b5563' },
+  NG: { name: 'Natural Gas Futures', exchange: 'NYMEX', color: '#2f80ed' },
+  ES: { name: 'E-mini S&P 500 Futures', exchange: 'CME', color: '#2962ff' },
+  NQ: { name: 'E-mini Nasdaq-100 Futures', exchange: 'CME', color: '#2962ff' },
+  YM: { name: 'E-mini Dow Futures', exchange: 'CBOT', color: '#2962ff' },
+  RTY: { name: 'E-mini Russell 2000 Futures', exchange: 'CME', color: '#2962ff' },
+  ZB: { name: 'U.S. Treasury Bond Futures', exchange: 'CBOT', color: '#089981' },
+  ZN: { name: '10-Year T-Note Futures', exchange: 'CBOT', color: '#089981' },
+  ZC: { name: 'Corn Futures', exchange: 'CBOT', color: '#d4a017' },
+  ZS: { name: 'Soybean Futures', exchange: 'CBOT', color: '#7c9a3a' },
+  ZW: { name: 'Wheat Futures', exchange: 'CBOT', color: '#d4a017' },
+};
+
 const CRYPTO = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ADA', 'BNB', 'LTC'];
 const FX = ['USD', 'EUR', 'GBP', 'JPY', 'INR', 'AUD', 'CAD', 'CHF', 'NZD', 'CNY', 'SGD', 'AED'];
 
@@ -65,6 +88,18 @@ export function aliasHits(query: string): SearchHit[] {
     .replace(/[\s/:_-]/g, '')
     .replace(/^(OANDA|FX|FOREX|TVC|CAPITALCOM|FXCM)/, '');
   const hits: SearchHit[] = [];
+  const root = q.replace(/=F$/, '1!').replace(/1!$/, '');
+  const fut = FUTURES[root];
+  if (fut && /^[A-Z]{1,3}(=F|1!)?$/.test(q)) {
+    hits.push({
+      symbol: `${root}=F`,
+      display: root,
+      name: fut.name,
+      exchange: fut.exchange,
+      type: 'futures',
+      color: fut.color,
+    });
+  }
   const metal = METALS[q];
   if (metal) hits.push(metal);
   // BTCUSD / BTCUSDT → BTC-USD

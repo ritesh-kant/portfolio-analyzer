@@ -15,6 +15,8 @@ export interface SymbolMeta {
   exchange: string;
   /** IANA zone the exchange's clock is drawn in. */
   timezone: string;
+  /** Yahoo's instrumentType: EQUITY, ETF, FUTURE, CURRENCY, … */
+  instrumentType: string;
   prevClose: number | null;
   /** Last regular-market price, for the header when bars are stale. */
   price: number | null;
@@ -27,7 +29,12 @@ export interface BarsResponse {
 }
 
 export interface SearchHit {
+  /** Ticker as the chart loads it (Yahoo). */
   symbol: string;
+  /** Ticker as people say it (GC for GC=F). Falls back to `symbol`. */
+  display?: string;
+  /** Avatar colour in the search list. */
+  color?: string;
   name: string;
   exchange: string;
   type: string;

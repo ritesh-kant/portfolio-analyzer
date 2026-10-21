@@ -251,6 +251,14 @@ export const Icons = {
       </>,
       size,
     ),
+  delta: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M10 3.5L16.5 15.5H3.5L10 3.5Z" />
+        <path d="M10 8.5v3.5" />
+      </>,
+      size,
+    ),
   gear: ({ size }: IconProps) =>
     wrap(
       <>
@@ -322,6 +330,21 @@ export const Icons = {
     wrap(
       <>
         <path d="M5 4.5v11l8-5.5zM15.5 4.5v11" />
+      </>,
+      size,
+    ),
+  sessions: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <rect x="3" y="4" width="5" height="12" fill="currentColor" fillOpacity="0.25" />
+        <path d="M10 3v14M3 4h14M3 16h14" strokeDasharray="2 2" />
+      </>,
+      size,
+    ),
+  vprofile: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M4 3v14M4 5h8M4 8h5M4 11h10M4 14h6" />
       </>,
       size,
     ),

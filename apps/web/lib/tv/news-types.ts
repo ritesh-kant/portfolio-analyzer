@@ -12,7 +12,7 @@ export interface NewsItem {
 }
 
 export interface NewsResponse {
-  source: 'nse_filings' | 'sec_edgar' | 'none';
+  source: 'nse_filings' | 'sec_edgar' | 'macro' | 'none';
   supported: boolean;
   /** Why there is no news: unsupported symbol, missing config, upstream error. */
   reason?: string;
