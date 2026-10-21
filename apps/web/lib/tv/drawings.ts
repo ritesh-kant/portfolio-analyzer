@@ -8,6 +8,8 @@ export type DrawingKind =
   | 'fib'
   | 'measure'
   | 'vprofile'
+  | 'long'
+  | 'short'
   | 'text';
 
 /** `t` is real unix seconds (may be fractional or in the future); `p` is price. */
@@ -25,6 +27,10 @@ export interface Drawing {
   text?: string;
   /** Fixed range volume profile: number of price rows. */
   rows?: number;
+  /** Long / short position: account size, lot size and the share of the account risked (percent). */
+  account?: number;
+  lot?: number;
+  riskPct?: number;
   locked?: boolean;
 }
 
@@ -38,6 +44,8 @@ export const POINTS_NEEDED: Record<DrawingKind, number> = {
   fib: 2,
   measure: 2,
   vprofile: 2,
+  long: 1,
+  short: 1,
   text: 1,
 };
 
@@ -51,6 +59,8 @@ export const KIND_LABEL: Record<DrawingKind, string> = {
   fib: 'Fib retracement',
   measure: 'Measure',
   vprofile: 'Fixed range volume profile',
+  long: 'Long position',
+  short: 'Short position',
   text: 'Text',
 };
 
@@ -64,6 +74,8 @@ export const DEFAULT_COLOR: Record<DrawingKind, string> = {
   fib: '#787b86',
   measure: '#2962ff',
   vprofile: '#2962ff',
+  long: '#089981',
+  short: '#f23645',
   text: '#d1d4dc',
 };
 

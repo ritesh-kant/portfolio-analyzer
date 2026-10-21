@@ -28,7 +28,8 @@ const FOOTPRINT_LABEL_SPACING = 30;
 const FOOTPRINT_BOX_SPACING = 68;
 
 export interface DeltaMark {
-  /** Chart bar of the signal candle (where the badge goes). */
+  /** Chart bars of the 15-minute signal candle: its first and last. On a 5m chart a candle spans three bars. */
+  startIndex: number;
   index: number;
   high: number;
   low: number;
@@ -125,10 +126,14 @@ export class DeltaPrimitive implements ISeriesPrimitive<Time> {
     ctx.fillText('Δ', cx, cy + 0.5);
   }
 
-  private pos(m: DeltaMark): { cx: number; cy: number } | null {
-    const cx = this.chart?.timeScale().logicalToCoordinate(m.index as Logical);
+  private pos(m: DeltaMark): { cx: number; cy: number; x0: number; x1: number } | null {
+    const xEnd = this.chart?.timeScale().logicalToCoordinate(m.index as Logical);
+    const xStart = this.chart?.timeScale().logicalToCoordinate(m.startIndex as Logical);
     const py = this.series?.priceToCoordinate(m.kind === 'buyers' ? m.high : m.low);
-    if (cx == null || py == null || !this.chart) return null;
+    if (xEnd == null || py == null || !this.chart) return null;
+    const x1 = xEnd;
+    const x0 = xStart ?? xEnd;
+    const cx = (x0 + x1) / 2; // the middle of the candle: on a 5m chart, the middle of its three bars
     const spacing = this.chart.timeScale().options().barSpacing;
     const clear = !this.footprintLabels || spacing < FOOTPRINT_LABEL_SPACING
       ? 0
@@ -137,6 +142,8 @@ export class DeltaPrimitive implements ISeriesPrimitive<Time> {
         : FOOTPRINT_LABELS_LINES;
     return {
       cx,
+      x0,
+      x1,
       cy: m.kind === 'buyers' ? py - GAP - RADIUS : py + GAP + RADIUS + clear,
     };
   }
@@ -170,6 +177,29 @@ export class DeltaPrimitive implements ISeriesPrimitive<Time> {
     ctx.restore();
   }
 
+  /** When the candle spans several chart bars, a bracket at the badge's height shows exactly which ones. */
+  private bracket(
+    ctx: CanvasRenderingContext2D,
+    p: { cy: number; x0: number; x1: number },
+    m: DeltaMark,
+    alpha: number,
+  ) {
+    if (!this.chart || p.x1 - p.x0 < 2) return;
+    const hw = this.chart.timeScale().options().barSpacing * 0.45;
+    const tick = m.kind === 'buyers' ? 5 : -5; // ends point toward the candle
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = COLOR;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(p.x0 - hw, p.cy + tick);
+    ctx.lineTo(p.x0 - hw, p.cy);
+    ctx.lineTo(p.x1 + hw, p.cy);
+    ctx.lineTo(p.x1 + hw, p.cy + tick);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   private paint(ctx: CanvasRenderingContext2D, height: number) {
     if (!this.chart || !this.series) return;
     const f = this.focused;
@@ -178,6 +208,7 @@ export class DeltaPrimitive implements ISeriesPrimitive<Time> {
       const p = this.pos(m);
       if (!p) continue;
       this.confirmation(ctx, m, 0.85);
+      this.bracket(ctx, p, m, 0.7);
       this.badge(ctx, p.cx, p.cy, RADIUS, m.confirmed);
     }
     if (!f) return;
@@ -188,9 +219,10 @@ export class DeltaPrimitive implements ISeriesPrimitive<Time> {
     // a soft column through the whole pane at the candle, so it can be found on a busy chart
     const half = Math.max(6, this.chart.timeScale().options().barSpacing * 0.75);
     ctx.fillStyle = `rgba(232, 121, 249, ${(0.22 * fade).toFixed(3)})`;
-    ctx.fillRect(p.cx - half, 0, half * 2, height);
+    ctx.fillRect(p.x0 - half, 0, p.x1 - p.x0 + half * 2, height);
     ctx.fillStyle = `rgba(232, 121, 249, ${(0.7 * fade).toFixed(3)})`;
-    ctx.fillRect(p.cx - 0.5, 0, 1, height);
+    ctx.fillRect(p.x0 - half, 0, 1, height);
+    ctx.fillRect(p.x1 + half - 1, 0, 1, height);
     // rings spreading out from the badge
     for (let k = 0; k < 2; k += 1) {
       const phase = ((t + k * (RING_MS / 2)) % RING_MS) / RING_MS;
@@ -201,6 +233,7 @@ export class DeltaPrimitive implements ISeriesPrimitive<Time> {
       ctx.stroke();
     }
     this.confirmation(ctx, f, 1);
+    this.bracket(ctx, p, f, 1);
     this.badge(ctx, p.cx, p.cy, RADIUS * (1 + 0.45 * fade), f.confirmed);
   }
 }

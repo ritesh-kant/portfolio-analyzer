@@ -4,6 +4,7 @@ import { aggregateBars, heikinAshi, mergeBars, sessionDay, wallClock } from './t
 import { atr, ema, macd, relativeVolume, rsi, sma, vwap } from './indicators.ts';
 import { autoStep, buildFootprints, niceStep, stepLadder } from './footprint.ts';
 import { makeTimeAxis } from './drawings.ts';
+import { dragPositionHandle, editPositionLevels, positionPts, positionStats } from './position.ts';
 import { aliasHits } from './aliases.ts';
 import { completedCount, endAfter, nextEnd } from './replay.ts';
 import { matchScore, rankHits, searchQueries } from './search-rank.ts';
@@ -11,7 +12,7 @@ import { extendedMask, runs, sessionBreaks, sessionFor } from './sessions.ts';
 import { buildProfile } from './volume-profile.ts';
 import { cotItems, metalRoot, parseBlsCalendar, parseFedRss, zonedInstant } from './macro.ts';
 import { groupByBar } from './news-markers.ts';
-import { barContaining, findDeltaDivergences } from './delta-divergence.ts';
+import { barContaining, deltaDepthDays, findDeltaDivergences, inDeltaView, DELTA_VIEW_DEFAULTS } from './delta-divergence.ts';
 import { foldTrailingTick, intervalSecs } from './clean-bars.ts';
 
 const IST = 'Asia/Kolkata';
@@ -404,7 +405,7 @@ test('COT item reports net positioning and is stamped at Friday 15:30 ET', () =>
 
 const cndl = (i, o, h, l, c, v) => minute(i * 15, o, h, l, c, v);
 const quiet = (n) => Array.from({ length: n }, (_, i) => cndl(i, 100, 100.4, 99.6, 100.1, 1000));
-const cfgD = { wick: 40, delta: 5, rvol: 1, within: 3, missed: false };
+const cfgD = { wick: 40, dominance: 2, delta: 5, rvol: 1, within: 3, missed: false, closeBreak: true };
 
 test('absorption: upper wick + positive delta, then a red candle with negative delta breaking the low', () => {
   const c = quiet(12);
@@ -416,6 +417,11 @@ test('absorption: upper wick + positive delta, then a red candle with negative d
   assert.deepEqual([got[0].index, got[0].kind, got[0].status, got[0].confirmIndex], [12, 'buyers', 'confirmed', 13]);
   assert.ok(Math.abs(got[0].wick - (1.8 / 2.2) * 100) < 1e-6);
   assert.equal(got[0].high, 102);
+  assert.equal(got[0].coarse, false);
+  // a coarse delta on either the signal or the confirming candle is carried through
+  const coarseSig = findDeltaDivergences(c, d, cfgD, [...Array(12).fill(false), true, false]);
+  const coarseConf = findDeltaDivergences(c, d, cfgD, [...Array(13).fill(false), true]);
+  assert.deepEqual([coarseSig[0].coarse, coarseConf[0].coarse], [true, true]);
   assert.equal(got[0].low, 99.8);
 });
 
@@ -434,6 +440,10 @@ test('absorption: delta on the wrong side, small wicks, thin delta and quiet vol
   assert.deepEqual(findDeltaDivergences([...base, cndl(12, 100, 102, 99.8, 100.2, 3000)], [...zero, -600], cfgD), []);
   // red candle with positive delta but no dominant wick (the old body-vs-delta rule would have flagged it)
   assert.deepEqual(findDeltaDivergences([...base, cndl(12, 101, 101.05, 99, 99.1, 3000)], [...zero, 600], cfgD), []);
+  // wicks at both ends: 42% above, 31% below, 27% body (the 21 Oct 07:15 gold candle) is not one-sided
+  const twoSided = cndl(12, 100.5, 102.3, 99.7, 101.2, 3000);
+  assert.deepEqual(findDeltaDivergences([...base, twoSided], [...zero, 600], cfgD), []);
+  assert.equal(findDeltaDivergences([...base, twoSided], [...zero, 600], { ...cfgD, dominance: 1 }).length, 1);
   // wick too small a share of the range
   assert.deepEqual(findDeltaDivergences([...base, cndl(12, 100, 101.1, 99.0, 100.7, 3000)], [...zero, 600], cfgD), []);
   // |delta| only 0.1% of volume
@@ -442,6 +452,21 @@ test('absorption: delta on the wrong side, small wicks, thin delta and quiet vol
   assert.deepEqual(findDeltaDivergences([...base, cndl(12, 100, 102, 99.8, 100.2, 900)], [...zero, 50], cfgD), []);
   // no footprint under it
   assert.deepEqual(findDeltaDivergences([...base, cndl(12, 100, 102, 99.8, 100.2, 3000)], [...zero, null], cfgD), []);
+});
+
+test('absorption: a wick through the level is not a break unless closeBreak is off', () => {
+  const c = quiet(12);
+  c.push(cndl(12, 100, 102, 99.8, 100.2, 3000)); // upper wick, low 99.8
+  c.push(cndl(13, 100.3, 100.4, 99.0, 100.0, 2000)); // red, wicks to 99.0 but CLOSES at 100.0, back above 99.8
+  c.push(cndl(14, 100.0, 100.2, 99.9, 100.1, 1000));
+  c.push(cndl(15, 100.1, 100.2, 99.9, 100.0, 1000));
+  const d = [...Array(12).fill(0), 600, -300, 0, 0];
+  const first = (cfg) => findDeltaDivergences(c, d, cfg).filter((x) => x.index === 12).map((x) => [x.status, x.confirmIndex]);
+  assert.deepEqual(first(cfgD), [['missed', null]]);
+  assert.deepEqual(first({ ...cfgD, closeBreak: false }), [['confirmed', 13]]);
+  // the same candle closing below the level does confirm
+  const closed = c.map((x, i) => (i === 13 ? cndl(13, 100.3, 100.4, 99.0, 99.2, 2000) : x));
+  assert.equal(findDeltaDivergences(closed, d, cfgD).find((x) => x.index === 12).status, 'confirmed');
 });
 
 test('absorption: waiting, no follow-through, and failed setups', () => {
@@ -502,4 +527,133 @@ test('foldTrailingTick folds Yahoo\'s zero-volume last-trade bar into the formin
   assert.equal(intervalSecs('1h'), 3600);
   assert.equal(intervalSecs('1d'), null);
   assert.equal(intervalSecs('1wk'), null);
+});
+
+test('inDeltaView: range presets, custom dates and the minimum delta', () => {
+  const day = 86400;
+  const newest = 100 * day;
+  const dayOf = (t) => new Date(t * 1000).toISOString().slice(0, 10);
+  const at = (daysAgo, delta = 500) => ({ time: newest - daysAgo * day, delta });
+  const v = (o) => ({ ...DELTA_VIEW_DEFAULTS, ...o });
+  assert.ok(inDeltaView(at(3), v({ range: '1w' }), newest, dayOf));
+  assert.ok(!inDeltaView(at(9), v({ range: '1w' }), newest, dayOf));
+  assert.ok(inDeltaView(at(9), v({ range: '2w' }), newest, dayOf));
+  assert.ok(!inDeltaView(at(20), v({ range: '2w' }), newest, dayOf));
+  assert.ok(inDeltaView(at(28), v({ range: '1m' }), newest, dayOf));
+  assert.ok(!inDeltaView(at(45), v({ range: '1m' }), newest, dayOf));
+  assert.ok(inDeltaView(at(45), v({ range: '2m' }), newest, dayOf));
+  assert.ok(!inDeltaView(at(70), v({ range: '2m' }), newest, dayOf));
+  assert.ok(inDeltaView(at(80), v({ range: '3m' }), newest, dayOf));
+  assert.ok(!inDeltaView(at(95), v({ range: '3m' }), newest, dayOf));
+  assert.ok(inDeltaView(at(95), v({ range: '6m' }), newest, dayOf));
+  // |delta| counts either sign; the bound itself is allowed
+  assert.ok(inDeltaView(at(1, -500), v({ minDelta: 500 }), newest, dayOf));
+  assert.ok(!inDeltaView(at(1, -499), v({ minDelta: 500 }), newest, dayOf));
+  assert.ok(inDeltaView(at(1, 80), v({ minDelta: 0 }), newest, dayOf));
+  // custom: inclusive on both ends, and either end may be left open
+  const a = at(10), b = at(5), c = at(1);
+  const custom = v({ range: 'custom', from: dayOf(a.time), to: dayOf(b.time) });
+  assert.deepEqual([a, b, c].map((x) => inDeltaView(x, custom, newest, dayOf)), [true, true, false]);
+  assert.ok(inDeltaView(c, v({ range: 'custom', from: dayOf(b.time) }), newest, dayOf));
+  assert.ok(inDeltaView(a, v({ range: 'custom', to: dayOf(b.time) }), newest, dayOf));
+  assert.ok(inDeltaView(a, v({ range: 'custom' }), newest, dayOf));
+});
+
+test('deltaDepthDays: 3 months at least, then 6 months or a year, custom reaches its start date', () => {
+  const now = Date.UTC(2026, 9, 21) / 1000;
+  const v = (o) => ({ ...DELTA_VIEW_DEFAULTS, ...o });
+  assert.equal(DELTA_VIEW_DEFAULTS.range, '3m');
+  for (const range of ['1w', '2w', '1m', '2m', '3m']) assert.equal(deltaDepthDays(v({ range }), now), 93);
+  assert.equal(deltaDepthDays(v({ range: '6m' }), now), 186);
+  assert.equal(deltaDepthDays(v({ range: 'custom' }), now), 93);
+  assert.equal(deltaDepthDays(v({ range: 'custom', from: '2026-09-01' }), now), 93);
+  assert.equal(deltaDepthDays(v({ range: 'custom', from: '2026-05-01' }), now), 186);
+  assert.equal(deltaDepthDays(v({ range: 'custom', from: '2025-12-01' }), now), 366);
+});
+
+// ── long / short position tool ──────────────────────────────────────────
+
+const pos = (kind, extra = {}) => ({
+  id: 'p',
+  kind,
+  color: '#fff',
+  width: 2,
+  pts: positionPts(kind, { t: open, p: 100 }, 600, 5, 10),
+  ...extra,
+});
+const pbar = (i, h, l, c) => minute(i, c, h, l, c, 1);
+
+test('positionPts puts target and stop on the correct side', () => {
+  const long = pos('long').pts.map((p) => p.p);
+  assert.deepEqual(long, [100, 100, 110, 95]);
+  const short = pos('short').pts.map((p) => p.p);
+  assert.deepEqual(short, [100, 100, 90, 105]);
+});
+
+test('positionStats: risk model, ticks and percent', () => {
+  const st = positionStats(pos('long'), [], 0.1);
+  assert.equal(st.reward, 10);
+  assert.equal(st.risk, 5);
+  assert.equal(st.rr, 2);
+  assert.equal(st.targetTicks, 100);
+  assert.equal(st.stopTicks, 50);
+  assert.equal(st.targetPct, 10);
+  // 1000 account x 25% risk / 5 per unit = 50 units
+  assert.equal(st.qty, 50);
+  assert.equal(st.status, 'open');
+  assert.equal(st.pnl, 0);
+  assert.equal(positionStats(pos('long', { account: 10000, lot: 10 }), [], 0.1).qty, 500);
+});
+
+test('positionStats: first touch closes the trade; the entry candle itself is ignored', () => {
+  const bars = [
+    pbar(0, 120, 80, 100), // entry candle: its own extremes do not count
+    pbar(1, 104, 99, 103),
+    pbar(2, 111, 102, 110), // target
+    pbar(3, 100, 90, 92), // later stop is irrelevant
+  ];
+  const st = positionStats(pos('long'), bars, 0.1);
+  assert.equal(st.status, 'target');
+  assert.equal(st.pnl, 10 * 50);
+  const short = positionStats(pos('short'), bars, 0.1);
+  assert.equal(short.status, 'stop'); // bar 2 high 111 >= 105
+  assert.equal(short.pnl, -5 * 50);
+});
+
+test('positionStats: a candle spanning both levels counts as the stop; open P&L marks to the last close', () => {
+  const both = positionStats(pos('long'), [pbar(0, 100, 100, 100), pbar(1, 111, 94, 100)], 0.1);
+  assert.equal(both.status, 'stop');
+  const open = positionStats(pos('long'), [pbar(0, 100, 100, 100), pbar(1, 103, 99, 102)], 0.1);
+  assert.equal(open.status, 'open');
+  assert.equal(open.pnl, 2 * 50);
+  // candles after the right edge of the box are not part of the trade
+  const late = positionStats(pos('long'), [pbar(0, 100, 100, 100), pbar(20, 130, 90, 100)], 0.1);
+  assert.equal(late.status, 'open');
+});
+
+test('dragPositionHandle keeps the levels on their own side of the entry', () => {
+  const d = pos('long');
+  const target = dragPositionHandle(d, 2, { t: open, p: 90 });
+  assert.ok(target.pts[2].p > 100);
+  const stop = dragPositionHandle(d, 3, { t: open, p: 120 });
+  assert.ok(stop.pts[3].p < 100);
+  const wide = dragPositionHandle(d, 1, { t: open + 5000, p: 777 });
+  assert.equal(wide.pts[1].t, open + 5000);
+  assert.equal(wide.pts[1].p, 100);
+  const entry = dragPositionHandle(d, 0, { t: open - 60, p: 102 });
+  assert.deepEqual(
+    entry.pts.map((p) => p.p),
+    [102, 102, 110, 95],
+  );
+  assert.equal(entry.pts[2].t, open - 60);
+  const shortStop = dragPositionHandle(pos('short'), 3, { t: open, p: 80 });
+  assert.ok(shortStop.pts[3].p > 100);
+});
+
+test('editPositionLevels rejects levels on the wrong side', () => {
+  const d = pos('long');
+  assert.equal(editPositionLevels(d, { target: 90 }), d);
+  assert.equal(editPositionLevels(d, { target: 120 }).pts[2].p, 120);
+  assert.equal(editPositionLevels(d, { stop: Number.NaN }), d);
+  assert.equal(editPositionLevels(pos('short'), { stop: 110 }).pts[3].p, 110);
 });

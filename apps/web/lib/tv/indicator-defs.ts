@@ -26,6 +26,10 @@ export interface IndicatorCfg {
   /** Bollinger std-dev multiplier. */
   mult?: number;
   color: string;
+  /** Hidden from the chart (still listed in the legend so it can be shown again). */
+  hidden?: boolean;
+  /** Own-pane indicators: pane shrunk to its legend row. */
+  collapsed?: boolean;
 }
 
 export interface CatalogEntry {

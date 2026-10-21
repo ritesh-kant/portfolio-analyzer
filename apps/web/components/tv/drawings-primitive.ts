@@ -12,7 +12,13 @@ import type {
 import { logicalX } from './coords';
 import type { Bar } from '../../lib/tv/types';
 import { DEFAULT_ROWS, type VolumeProfile, buildProfile } from '../../lib/tv/volume-profile';
-import { type Drawing, FIB_LEVELS, type TimeAxis, formatDuration } from '../../lib/tv/drawings';
+import { type Drawing, FIB_LEVELS, type Pt, type TimeAxis, formatDuration } from '../../lib/tv/drawings';
+import {
+  POSITION_PROFIT,
+  POSITION_STOP,
+  isPosition,
+  positionStats,
+} from '../../lib/tv/position';
 
 const FONT = '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
 
@@ -117,20 +123,23 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     if (this.state.hidden || !this.series) return;
     const all = this.state.draft ? [...this.state.drawings, this.state.draft] : this.state.drawings;
     for (const d of all) {
-      const prices: number[] =
-        d.kind === 'hline' || d.kind === 'hray'
-          ? [d.pts[0]!.p]
-          : d.id === this.state.selectedId && (d.kind === 'trend' || d.kind === 'ray')
-            ? d.pts.map((pt) => pt.p)
-            : [];
-      for (const price of prices) {
+      const levels: { price: number; color: string }[] = [];
+      if (d.kind === 'hline' || d.kind === 'hray') levels.push({ price: d.pts[0]!.p, color: d.color });
+      else if (d.id === this.state.selectedId && (d.kind === 'trend' || d.kind === 'ray'))
+        for (const pt of d.pts) levels.push({ price: pt.p, color: d.color });
+      else if (d.id === this.state.selectedId && isPosition(d.kind)) {
+        levels.push({ price: d.pts[2]!.p, color: POSITION_PROFIT });
+        levels.push({ price: d.pts[0]!.p, color: '#787b86' });
+        levels.push({ price: d.pts[3]!.p, color: POSITION_STOP });
+      }
+      for (const { price, color } of levels) {
         const y = this.series.priceToCoordinate(price);
         if (y == null) continue;
         this.axisViews.push({
           coordinate: () => y,
           text: () => price.toFixed(this.state.decimals),
           textColor: () => '#ffffff',
-          backColor: () => d.color,
+          backColor: () => color,
         });
       }
     }
@@ -169,6 +178,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   }
 
   private geometry(d: Drawing, w: number, h: number): Geometry | null {
+    if (isPosition(d.kind)) return this.positionGeometry(d, w, h);
     const pts: Px[] = [];
     for (const pt of d.pts) {
       const px = this.px(pt.t, pt.p);
@@ -182,6 +192,22 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
       if (top != null) for (const p of pts) p.y = top;
     }
     return { pts, w, h };
+  }
+
+  /** Handles in order: entry-left, entry-right, target (top-middle), stop (bottom-middle). */
+  private positionGeometry(d: Drawing, w: number, h: number): Geometry | null {
+    const [a, b, tp, sl] = d.pts as [Pt, Pt, Pt, Pt];
+    const left = this.px(a.t, a.p);
+    const right = this.px(b.t, b.p);
+    const yT = this.series?.priceToCoordinate(tp.p);
+    const yS = this.series?.priceToCoordinate(sl.p);
+    if (!left || !right || yT == null || yS == null) return null;
+    const xm = (left.x + right.x) / 2;
+    return {
+      pts: [left, right, { x: xm, y: yT }, { x: xm, y: yS }],
+      w,
+      h,
+    };
   }
 
   /** Paneside size, read from the chart. */
@@ -271,6 +297,15 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         const x0 = Math.min(a.x, b!.x);
         const x1 = Math.max(a.x, b!.x);
         return p.x >= x0 - tol && p.x <= x1 + tol && p.y >= a.y - tol && p.y <= bottom + tol;
+      }
+      case 'long':
+      case 'short': {
+        const [, r, t, st] = g.pts as [Px, Px, Px, Px];
+        const x0 = Math.min(a.x, r.x);
+        const x1 = Math.max(a.x, r.x);
+        const y0 = Math.min(t.y, st.y);
+        const y1 = Math.max(t.y, st.y);
+        return p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol;
       }
       case 'text':
         return Math.abs(p.x - a.x) < 60 && p.y > a.y - 16 && p.y < a.y + 6;
@@ -366,6 +401,10 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
       case 'vprofile':
         this.paintProfile(ctx, d, a, b!, g.h, selected || hovered);
         break;
+      case 'long':
+      case 'short':
+        this.paintPosition(ctx, d, g, selected || hovered);
+        break;
       case 'text': {
         ctx.font = `600 13px ${FONT}`;
         ctx.textBaseline = 'alphabetic';
@@ -381,6 +420,87 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         break;
       }
     }
+  }
+
+  /** TradingView's long / short position: profit and stop zones either side of the entry, three labels. */
+  private paintPosition(ctx: CanvasRenderingContext2D, d: Drawing, g: Geometry, emphasis: boolean) {
+    const [a, b, t, s] = g.pts as [Px, Px, Px, Px];
+    const decimals = this.state.decimals;
+    const st = positionStats(d, this.state.bars, 10 ** -decimals);
+    const x0 = Math.min(a.x, b.x);
+    const x1 = Math.max(a.x, b.x);
+    const yE = a.y;
+
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = POSITION_PROFIT;
+    ctx.fillRect(x0, Math.min(yE, t.y), x1 - x0, Math.abs(t.y - yE));
+    ctx.fillStyle = POSITION_STOP;
+    ctx.fillRect(x0, Math.min(yE, s.y), x1 - x0, Math.abs(s.y - yE));
+    ctx.globalAlpha = 1;
+
+    ctx.lineWidth = emphasis ? 2 : 1;
+    ctx.setLineDash([]);
+    const hline = (y: number, color: string) => {
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x1, y);
+      ctx.stroke();
+    };
+    hline(t.y, POSITION_PROFIT);
+    hline(s.y, POSITION_STOP);
+    hline(yE, '#9598a1');
+
+    // Labels stay readable when the box is partly scrolled off either edge.
+    const centre = (bw: number) => {
+      const lo = Math.max(x0, 0) + bw / 2;
+      const hi = Math.min(x1, g.w) - bw / 2;
+      return lo <= hi ? Math.min(hi, Math.max(lo, (x0 + x1) / 2)) : (x0 + x1) / 2;
+    };
+    const pill = (lines: string[], fill: string, y: number, border?: string) => {
+      ctx.font = `12px ${FONT}`;
+      const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;
+      const bh = lines.length * 15 + 8;
+      const cx = centre(bw);
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.roundRect(cx - bw / 2, y, bw, bh, 4);
+      ctx.fill();
+      if (border) {
+        ctx.strokeStyle = border;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      lines.forEach((l, i) => ctx.fillText(l, cx, y + 4 + 7.5 + i * 15));
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      return bh;
+    };
+    const money = (v: number) => String(Number(v.toFixed(2)));
+    const level = (name: string, dist: number, pct: number, ticks: number) =>
+      `${name}: ${dist.toFixed(decimals)} (${pct.toFixed(3)}%) ${ticks}, Amount: ${st.qty}`;
+
+    const tLines = [level('Target', st.reward, st.targetPct, st.targetTicks)];
+    const sLines = [level('Stop', st.risk, st.stopPct, st.stopTicks)];
+    // Outside the zones: above a long's target and below its stop, mirrored for a short.
+    pill(tLines, POSITION_PROFIT, st.isLong ? t.y - 26 : t.y + 2);
+    pill(sLines, POSITION_STOP, st.isLong ? s.y + 2 : s.y - 26);
+    // Result pill inside the profit zone, hugging the entry line.
+    const verb = st.status === 'open' ? 'Open' : 'Closed';
+    const centreLines = [
+      `${verb} PnL: ${money(st.pnl)}, Qty: ${st.qty}`,
+      `Risk/reward ratio: ${st.rr.toFixed(2)}`,
+    ];
+    const ph = centreLines.length * 15 + 8;
+    pill(
+      centreLines,
+      st.pnl >= 0 ? POSITION_PROFIT : POSITION_STOP,
+      st.isLong ? yE - ph - 6 : yE + 6,
+      '#ffffff',
+    );
   }
 
   private paintProfile(

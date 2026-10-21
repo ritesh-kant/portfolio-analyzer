@@ -20,6 +20,30 @@ const wrap = (children: ReactNode, size = 20) => (
   </svg>
 );
 
+const positionIcon = (letter: string, size?: number) =>
+  wrap(
+    <>
+      <path d="M5 4h10M5 16h10" />
+      <circle cx="3.5" cy="4" r="1.3" />
+      <circle cx="16.5" cy="4" r="1.3" />
+      <circle cx="3.5" cy="16" r="1.3" />
+      <circle cx="16.5" cy="16" r="1.3" />
+      <path d="M5 10h10" />
+      <text
+        x="10"
+        y="9"
+        fontSize="5.5"
+        fontWeight="700"
+        fill="currentColor"
+        stroke="none"
+        textAnchor="middle"
+      >
+        {letter}
+      </text>
+    </>,
+    size,
+  );
+
 export const Icons = {
   cross: ({ size }: IconProps) =>
     wrap(
@@ -274,6 +298,34 @@ export const Icons = {
       </>,
       size,
     ),
+  arrowUp: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M10 16V4M5 9l5-5 5 5" />
+      </>,
+      size,
+    ),
+  restore: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M7.5 3.5v4h-4M12.5 3.5v4h4M12.5 16.5v-4h4M7.5 16.5v-4h-4" />
+      </>,
+      size,
+    ),
+  collapse: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M6 4l4 4 4-4M6 16l4-4 4 4" />
+      </>,
+      size,
+    ),
+  expand: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M6 7l4-4 4 4M6 13l4 4 4-4" />
+      </>,
+      size,
+    ),
   close: ({ size }: IconProps) =>
     wrap(
       <>
@@ -348,6 +400,8 @@ export const Icons = {
       </>,
       size,
     ),
+  long: ({ size }: IconProps) => positionIcon('L', size),
+  short: ({ size }: IconProps) => positionIcon('S', size),
   copy: ({ size }: IconProps) =>
     wrap(
       <>

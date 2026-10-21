@@ -10,6 +10,7 @@ const GROUPS: { id: string; tools: Tool[] }[] = [
   { id: 'cursor', tools: ['cursor'] },
   { id: 'lines', tools: ['trend', 'ray', 'hline', 'hray', 'vline'] },
   { id: 'fib', tools: ['fib'] },
+  { id: 'forecast', tools: ['long', 'short'] },
   { id: 'shapes', tools: ['rect'] },
   { id: 'text', tools: ['text'] },
   { id: 'measure', tools: ['measure'] },
@@ -27,10 +28,17 @@ const ICON: Record<Tool, (p: { size?: number }) => ReactNode> = {
   fib: Icons.fib,
   measure: Icons.measure,
   vprofile: Icons.vprofile,
+  long: Icons.long,
+  short: Icons.short,
   text: Icons.text,
 };
 
 const LABEL: Record<Tool, string> = { cursor: 'Cross', ...KIND_LABEL };
+
+const GROUP_TITLE: Record<string, string> = { lines: 'Lines', forecast: 'Forecasting' };
+
+/** Groups that start below a separator. */
+const SEP_BEFORE = new Set(['fib', 'measure', 'volume']);
 
 interface Props {
   tool: Tool;
@@ -91,7 +99,7 @@ export function LeftToolbar(p: Props) {
         const active = g.tools.includes(p.tool);
         return (
           <div key={g.id} className="relative">
-            {gi === 2 || gi === 5 || gi === 6 ? <Sep /> : null}
+            {gi > 0 && SEP_BEFORE.has(g.id) ? <Sep /> : null}
             <div className="flex items-center">
               <button
                 type="button"
@@ -124,7 +132,7 @@ export function LeftToolbar(p: Props) {
                 style={{ left: flyLeft, top: flyTop }}
               >
                 <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[#787b86]">
-                  Lines
+                  {GROUP_TITLE[g.id] ?? 'Tools'}
                 </div>
                 {g.tools.map((t) => {
                   const I = ICON[t];

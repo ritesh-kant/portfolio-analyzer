@@ -30,6 +30,7 @@ import {
   newId,
   translate,
 } from '../../lib/tv/drawings';
+import { dragPositionHandle, isPosition, positionPts } from '../../lib/tv/position';
 import { autoStep, buildFootprints, stepLadder } from '../../lib/tv/footprint';
 import {
   CATALOG,
@@ -75,6 +76,10 @@ import { DeltaPanel } from './delta-panel';
 import {
   DELTA_DEFAULTS,
   type DeltaConfig,
+  type DeltaView,
+  DELTA_VIEW_DEFAULTS,
+  inDeltaView,
+  deltaDepthDays,
   type PlacedDivergence,
   barContaining,
   findDeltaDivergences,
@@ -97,6 +102,7 @@ import { FootprintView, type FootprintData } from './footprint-series';
 import { Icons } from './icons';
 import { IndicatorPicker, IndicatorSettings } from './indicator-dialog';
 import { LeftToolbar, type Tool } from './left-toolbar';
+import { PositionSettings } from './position-settings';
 import { SymbolSearch } from './symbol-search';
 import { type ChartType, type FootprintUi, TopBar } from './top-bar';
 
@@ -313,7 +319,16 @@ export function TvChart() {
   // data
   const [raw, setRaw] = useState<{ key: string; bars: Bar[] }>({ key: '', bars: [] });
   const [subRaw, setSubRaw] = useState<Bar[]>([]);
-  const [subSym, setSubSym] = useState('');
+  const firstWallRef = useRef<{ key: string; time: number } | null>(null);
+  // NSE stocks: chart bars older than Yahoo's intraday history (60 days), from Upstox, while the delta panel is open
+  const [older, setOlder] = useState<{ key: string; bars: Bar[] }>({ key: '', bars: [] });
+  // Bars under the delta panel's 15-minute candles, tagged with the symbol they belong to: 1-minute (four 7-day
+  // windows, ~4 weeks) and 5-minute (60 days, used where 1-minute bars do not reach)
+  const [deltaSub, setDeltaSub] = useState<{ symbol: string; bars: Bar[]; bars5: Bar[] }>({
+    symbol: '',
+    bars: [],
+    bars5: [],
+  });
   const [meta, setMeta] = useState<SymbolMeta | null>(null);
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [error, setError] = useState('');
@@ -331,6 +346,7 @@ export function TvChart() {
   const [draft, setDraft] = useState<Drawing | null>(null);
   const [measure, setMeasure] = useState<Drawing | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [posEditId, setPosEditId] = useState<string | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [histTick, setHistTick] = useState(0);
   const history = useRef<{ past: Drawing[][]; future: Drawing[][] }>({ past: [], future: [] });
@@ -350,21 +366,28 @@ export function TvChart() {
   const [deltaOpen, setDeltaOpen] = useState(false);
   const [deltaCfg, setDeltaCfg] = useState<DeltaConfig>(DELTA_DEFAULTS);
   const [deltaMarks, setDeltaMarks] = useState(true);
+  const [deltaView, setDeltaView] = useState<DeltaView>(DELTA_VIEW_DEFAULTS);
   const [deltaPick, setDeltaPick] = useState<number | null>(null);
   useEffect(() => {
     const saved = load<Partial<DeltaConfig>>('tv:deltaCfg', {});
     setDeltaCfg({
       delta: saved.delta ?? DELTA_DEFAULTS.delta,
       wick: saved.wick ?? DELTA_DEFAULTS.wick,
+      dominance: saved.dominance ?? DELTA_DEFAULTS.dominance,
       rvol: saved.rvol ?? DELTA_DEFAULTS.rvol,
       within: saved.within ?? DELTA_DEFAULTS.within,
+      closeBreak: saved.closeBreak ?? DELTA_DEFAULTS.closeBreak,
       missed: saved.missed ?? DELTA_DEFAULTS.missed,
     });
+    setDeltaView({ ...DELTA_VIEW_DEFAULTS, ...load<Partial<DeltaView>>('tv:deltaView', {}) });
     setDeltaMarks(load<boolean>('tv:deltaMarks', true));
     setDeltaOpen(load<boolean>('tv:deltaOpen', false));
   }, []);
   const [showIndicators, setShowIndicators] = useState(false);
   const [settingsId, setSettingsId] = useState<string | null>(null);
+  /** Indicator whose pane is maximized (every other pane shrunk to its legend row); not persisted. */
+  const [maxPaneId, setMaxPaneId] = useState<string | null>(null);
+  const [fpNoteClosed, setFpNoteClosed] = useState(false);
   const [paneEls, setPaneEls] = useState<(HTMLElement | null)[]>([]);
 
   const tf = timeframeById(tfId);
@@ -372,9 +395,22 @@ export function TvChart() {
   intradayRef.current = tf.intraday;
 
   // ── derived data ──────────────────────────────────────────────────────
+  const rawBars = useMemo(() => {
+    const first = raw.bars[0]?.time;
+    if (
+      !deltaOpen ||
+      first == null ||
+      older.key !== `${symbol}|${tf.source}` ||
+      !raw.key.startsWith(`${symbol}|${tf.source}|`)
+    ) {
+      return raw.bars;
+    }
+    const before = older.bars.filter((b) => b.time < first);
+    return before.length ? [...before, ...raw.bars] : raw.bars;
+  }, [raw.bars, raw.key, older, deltaOpen, symbol, tf.source]);
   const fullBars = useMemo(
-    () => (tf.aggregateSecs ? aggregateBars(raw.bars, tf.aggregateSecs, timeZone) : raw.bars),
-    [raw.bars, tf.aggregateSecs, timeZone],
+    () => (tf.aggregateSecs ? aggregateBars(rawBars, tf.aggregateSecs, timeZone) : rawBars),
+    [rawBars, tf.aggregateSecs, timeZone],
   );
   // Replay: only candles complete at the cut-off exist as far as every indicator, drawing and badge is concerned.
   const bars = useMemo(
@@ -401,32 +437,84 @@ export function TvChart() {
     [bars, timeZone],
   );
   const decimals = pricePrecision(bars[bars.length - 1]?.close ?? meta?.price ?? 0);
-  const subBars = tf.source === '1m' ? raw.bars : subRaw;
+  // The footprint's own 1-minute fetch reaches 7 days back; with the delta panel open its ~4-week 1-minute bars
+  // (same symbol) are used instead, so the footprint on the older candles the list jumps to is there too.
+  const subBars =
+    tf.source === '1m'
+      ? rawBars
+      : deltaOpen && deltaSub.symbol === symbol && deltaSub.bars.length > subRaw.length
+        ? deltaSub.bars
+        : subRaw;
   const effectiveStep = fp.auto ? autoStep(bars) : fp.step;
-  // Delta divergences on 15-minute candles, using the footprint's own delta for each. 1-minute bars under the
-  // candles are needed, so this stays empty until they load (and never uses another symbol's).
-  const divergences = useMemo<PlacedDivergence[]>(() => {
-    const sub = tf.source === '1m' ? raw.bars : subSym === symbol ? subRaw : [];
-    if (!sub.length) return [];
-    // the chart's own candles when it is on 15m, otherwise 15m candles built from the 1-minute bars
-    const all = tf.id === '15m' ? bars : aggregateBars(sub, 900, timeZone);
-    // only candles whose last minute is known (and, in replay, already played)
-    const known = sub[sub.length - 1]!.time + 60;
+  // Delta divergences on 15-minute candles, using the footprint's own delta for each. Where 1-minute bars cover a
+  // candle its delta is built from them; older candles (to ~60 days) fall back to 5-minute bars, flagged as
+  // coarser. Stays empty until the bars load, and never uses another symbol's.
+  const deltaOk = deltaSub.symbol === symbol;
+  const deltaFirst = deltaOk
+    ? Math.min(deltaSub.bars[0]?.time ?? Infinity, deltaSub.bars5[0]?.time ?? Infinity)
+    : Infinity;
+  const deltaLast = deltaOk
+    ? Math.max(
+        deltaSub.bars[deltaSub.bars.length - 1]?.time ?? 0,
+        deltaSub.bars5[deltaSub.bars5.length - 1]?.time ?? 0,
+      )
+    : 0;
+  const setups = useMemo<PlacedDivergence[]>(() => {
+    const fine = deltaSub.symbol === symbol ? deltaSub.bars : [];
+    const mid = deltaSub.symbol === symbol ? deltaSub.bars5 : [];
+    if (!fine.length && !mid.length) return [];
+    // the chart's own candles when it is on 15m, otherwise 15m candles built from the 5-minute bars
+    const all = tf.id === '15m' ? bars : aggregateBars(mid.length ? mid : fine, 900, timeZone);
+    // only candles whose last bar is known (and, in replay, already played)
+    const known = Math.max(
+      fine.length ? fine[fine.length - 1]!.time + 60 : 0,
+      mid.length ? mid[mid.length - 1]!.time + 300 : 0,
+    );
     const until = replayEnd == null ? known : Math.min(known, replayEnd);
     const candles = all.filter((c) => c.time + 900 <= until);
-    const deltas = buildFootprints(candles, sub, 900, autoStep(candles)).map((f) => f?.delta ?? null);
+    const step = autoStep(candles);
+    const fineFrom = fine.length ? fine[0]!.time : Infinity;
+    const fineFps = fine.length ? buildFootprints(candles, fine, 900, step) : [];
+    const midFps = mid.length ? buildFootprints(candles, mid, 900, step) : [];
+    const deltas: (number | null)[] = [];
+    const coarse: boolean[] = [];
+    candles.forEach((c, i) => {
+      const f = c.time >= fineFrom ? fineFps[i] : null; // a candle only partly covered by 1-minute bars is coarse
+      if (f) {
+        deltas.push(f.delta);
+        coarse.push(false);
+        return;
+      }
+      const m = midFps[i];
+      deltas.push(m ? m.delta : null);
+      coarse.push(!!m);
+    });
     const times = bars.map((b) => b.time);
-    return findDeltaDivergences(candles, deltas, deltaCfg).flatMap((d) => {
+    return findDeltaDivergences(candles, deltas, deltaCfg, coarse).flatMap((d) => {
       if (d.status === 'missed' && !deltaCfg.missed) return [];
       // the chart bar that holds a candle's last minute: when that candle was known
       const chartIndex = barContaining(times, d.time + 840, tf.secs);
+      // ...and the one holding its first minute (a 15-minute candle spans three bars on a 5m chart)
+      const startChartIndex = barContaining(times, d.time, tf.secs);
       const confirmChartIndex =
         d.confirmTime == null ? null : barContaining(times, d.confirmTime + 840, tf.secs);
       return chartIndex < 0
         ? []
-        : [{ ...d, chartIndex, confirmChartIndex: confirmChartIndex === -1 ? null : confirmChartIndex }];
+        : [
+            {
+              ...d,
+              chartIndex,
+              startChartIndex: startChartIndex < 0 ? chartIndex : startChartIndex,
+              confirmChartIndex: confirmChartIndex === -1 ? null : confirmChartIndex,
+            },
+          ];
     });
-  }, [tf.source, tf.id, tf.secs, raw.bars, subSym, symbol, subRaw, bars, timeZone, replayEnd, deltaCfg]);
+  }, [tf.id, tf.secs, deltaSub, symbol, bars, timeZone, replayEnd, deltaCfg]);
+  // What the list and the badges show: the chosen date range and minimum |delta| (relative to the newest candle).
+  const divergences = useMemo(() => {
+    const newest = bars[bars.length - 1]?.time ?? 0;
+    return setups.filter((d) => inDeltaView(d, deltaView, newest, (t) => sessionDay(t, timeZone)));
+  }, [setups, deltaView, bars, timeZone]);
   const footprints = useMemo(
     () => (fp.on ? buildFootprints(bars, subBars, tf.secs, effectiveStep) : []),
     [fp.on, bars, subBars, tf.secs, effectiveStep],
@@ -539,6 +627,19 @@ export function TvChart() {
   const wantPrepost = sessionsOn && !!sessionInfo && hasExtendedBars(sessionInfo);
 
   // ── data fetching ─────────────────────────────────────────────────────
+  // A date window rather than a named range (1-minute history older than 7 days).
+  const fetchWindow = useCallback(
+    async (sym: string, interval: string, from: number, to: number, signal?: AbortSignal, prepost = false) => {
+      const res = await fetch(
+        `/api/chart/bars?symbol=${encodeURIComponent(sym)}&interval=${interval}&period1=${from}&period2=${to}${prepost ? '&prepost=1' : ''}`,
+        { signal, cache: 'no-store' },
+      );
+      const body = (await res.json()) as BarsResponse & { error?: string };
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      return foldTrailingTick(body.bars, intervalSecs(interval));
+    },
+    [],
+  );
   const fetchBars = useCallback(
     async (sym: string, interval: string, range: string, signal?: AbortSignal, prepost = false) => {
       const res = await fetch(
@@ -548,6 +649,38 @@ export function TvChart() {
       const body = (await res.json()) as BarsResponse & { error?: string };
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
       return { ...body, bars: foldTrailingTick(body.bars, intervalSecs(interval)) };
+    },
+    [],
+  );
+
+  // NSE stocks: exchange candles from Upstox, one ≤28-day window per request, a few at a time.
+  const fetchUpstox = useCallback(
+    async (sym: string, interval: string, from: number, to: number, signal?: AbortSignal) => {
+      const step = 28 * 86400;
+      const spans: [number, number][] = [];
+      for (let end = to; end > from; end -= step) spans.push([Math.max(from, end - step), end]);
+      const byTime = new Map<number, Bar>();
+      let failed = 0;
+      let next = 0;
+      const worker = async () => {
+        while (next < spans.length && !signal?.aborted) {
+          const [a, b] = spans[next++]!;
+          try {
+            const res = await fetch(
+              `/api/chart/upstox?symbol=${encodeURIComponent(sym)}&interval=${interval}&from=${a}&to=${b}`,
+              { signal },
+            );
+            const body = (await res.json()) as { bars?: Bar[]; error?: string };
+            if (!res.ok || !body.bars) throw new Error(body.error ?? `HTTP ${res.status}`);
+            for (const bar of body.bars) byTime.set(bar.time, bar);
+          } catch {
+            failed += 1;
+          }
+        }
+      };
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      if (failed && !byTime.size) throw new Error('upstox unavailable');
+      return [...byTime.values()].sort((x, y) => x.time - y.time);
     },
     [],
   );
@@ -575,16 +708,81 @@ export function TvChart() {
   // Footprint needs 1-minute bars underneath coarser candles.
   const svpOn = indicators.some((i) => i.type === 'svp');
   useEffect(() => {
-    if (!ready || (!fp.on && !svpOn && !deltaOpen) || tf.source === '1m') return;
+    if (!ready || (!fp.on && !svpOn) || tf.source === '1m') return;
     const ctl = new AbortController();
     fetchBars(symbol, '1m', '7d', ctl.signal, wantPrepost)
-      .then((res) => {
-        setSubRaw(res.bars);
-        setSubSym(symbol);
-      })
+      .then((res) => setSubRaw(res.bars))
       .catch(() => setSubRaw([]));
     return () => ctl.abort();
-  }, [ready, fp.on, svpOn, deltaOpen, symbol, tf.source, wantPrepost, fetchBars]);
+  }, [ready, fp.on, svpOn, symbol, tf.source, wantPrepost, fetchBars]);
+
+  // Delta divergence reads 1-minute bars further back than the footprint does. NSE stocks: Upstox's exchange
+  // candles, as far back as the view needs (3 months at least). Everything else: Yahoo serves them ~4 weeks back,
+  // 7 days per request, so four date windows are stitched together, with 5-minute bars (60 days) behind them.
+  const nse = symbol.endsWith('.NS');
+  const deltaDays = deltaDepthDays(deltaView, Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    if (!ready || !deltaOpen) return;
+    const ctl = new AbortController();
+    const now = Math.floor(Date.now() / 1000);
+    const yahoo = () => {
+      const week = 7 * 86400;
+      const windows = Promise.allSettled(
+        [0, 1, 2, 3].map((k) =>
+          fetchWindow(symbol, '1m', now - week * (k + 1), now - week * k, ctl.signal, wantPrepost),
+        ),
+      );
+      // 5-minute bars reach 60 days: they carry the delta for candles older than the 1-minute bars
+      const mid = fetchBars(symbol, '5m', '60d', ctl.signal, wantPrepost)
+        .then((res) => res.bars)
+        .catch(() => [] as Bar[]);
+      void Promise.all([windows, mid]).then(([results, bars5]) => {
+        if (ctl.signal.aborted) return;
+        const byTime = new Map<number, Bar>();
+        for (const r of results) {
+          if (r.status === 'fulfilled') for (const b of r.value) byTime.set(b.time, b);
+        }
+        if (!byTime.size && !bars5.length) return;
+        setDeltaSub({
+          symbol,
+          bars: [...byTime.values()].sort((a, b) => a.time - b.time),
+          bars5,
+        });
+      });
+    };
+    if (!nse) {
+      yahoo();
+    } else {
+      fetchUpstox(symbol, '1m', now - deltaDays * 86400, now, ctl.signal)
+        .then((bars) => {
+          if (ctl.signal.aborted) return;
+          if (bars.length) setDeltaSub({ symbol, bars, bars5: [] });
+          else yahoo();
+        })
+        .catch(() => {
+          if (!ctl.signal.aborted) yahoo();
+        });
+    }
+    return () => ctl.abort();
+  }, [ready, deltaOpen, symbol, nse, deltaDays, wantPrepost, fetchWindow, fetchBars, fetchUpstox]);
+
+  // The chart's own bars only go back as far as Yahoo's intraday history (60 days for 5m/15m/30m, 7 days for
+  // 1m), so older setups would have nowhere to be drawn: fill in the earlier bars from Upstox.
+  const rawFirst = raw.bars[0]?.time;
+  useEffect(() => {
+    const upstoxInterval = ['1m', '5m', '15m', '30m'].includes(tf.source);
+    if (!ready || !deltaOpen || !nse || !upstoxInterval || rawFirst == null) return;
+    if (!raw.key.startsWith(`${symbol}|${tf.source}|`)) return;
+    const from = Math.floor(Date.now() / 1000) - deltaDays * 86400;
+    if (rawFirst <= from) return;
+    const ctl = new AbortController();
+    fetchUpstox(symbol, tf.source, from, rawFirst - 1, ctl.signal)
+      .then((bars) => {
+        if (!ctl.signal.aborted) setOlder({ key: `${symbol}|${tf.source}`, bars });
+      })
+      .catch(() => undefined);
+    return () => ctl.abort();
+  }, [ready, deltaOpen, nse, symbol, tf.source, deltaDays, rawFirst, raw.key, fetchUpstox]);
 
   // Live: re-pull the tail and merge it in. Yahoo caches each reply ~10 s, so polling faster than
   // every few seconds gains nothing; intraday polls at 3 s, longer timeframes at 30 s.
@@ -789,6 +987,7 @@ export function TvChart() {
 
     const view = new FootprintView();
     footViewRef.current = view;
+    view.setChart(chart);
     footRef.current = chart.addCustomSeries(
       view,
       { priceLineVisible: false, lastValueVisible: false },
@@ -887,8 +1086,19 @@ export function TvChart() {
       priceFormat: { type: 'price', precision: decimals, minMove: 1 / 10 ** decimals },
       title: symbol.replace(/\.(NS|BO)$/, ''),
     });
-    main.series.setData(data as never);
     const viewKey = `${raw.key}|${tfId}`;
+    // Earlier bars arriving in front of the same series shift every logical index: carry the view over by as many
+    // bars as now precede the old first bar, so it stays on the same candles.
+    const keptRange = viewKeyRef.current === viewKey ? chart.timeScale().getVisibleLogicalRange() : null;
+    const prevFirst = firstWallRef.current;
+    firstWallRef.current = { key: viewKey, time: wall[0]! };
+    main.series.setData(data as never);
+    if (keptRange && prevFirst && prevFirst.key === viewKey && wall[0]! < prevFirst.time) {
+      const shift = wall.findIndex((t) => t >= prevFirst.time);
+      if (shift > 0) {
+        chart.timeScale().setVisibleLogicalRange({ from: keptRange.from + shift, to: keptRange.to + shift });
+      }
+    }
     if (viewKeyRef.current !== viewKey) {
       viewKeyRef.current = viewKey;
       const n = bars.length;
@@ -945,7 +1155,7 @@ export function TvChart() {
   }, [fp.on, fp.imbalance, fp.showDelta, bars, wall, footprints, decimals]);
 
   // Indicator series structure: rebuilt only when the indicator set / params change.
-  const structKey = JSON.stringify(indicators);
+  const structKey = JSON.stringify(indicators.map((cfg) => ({ ...cfg, hidden: undefined, collapsed: undefined })));
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -1027,7 +1237,6 @@ export function TvChart() {
       }
     }
     indStructRef.current = { key: structKey, entries };
-    chart.panes().forEach((pane, i) => pane.setStretchFactor(i === 0 ? 4 : 1));
     // Pane DOM nodes host the per-pane legends; they exist only after the first layout, so retry briefly.
     let attempts = 0;
     const syncPanes = () => {
@@ -1057,6 +1266,43 @@ export function TvChart() {
     };
     syncPanes();
   }, [structKey, computed]);
+
+  // Pane heights: price pane 4 shares, indicator panes 1 each, a collapsed pane just its legend row.
+  // Stretch factors are relative, so a collapsed pane's factor is re-derived whenever the chart resizes.
+  const maxPane = computed.find((c) => c.cfg.id === maxPaneId && c.pane > 0)?.pane ?? null;
+  const collapsedKey = (
+    maxPane != null
+      ? [0, ...computed.map((c) => c.pane)].filter((i, k, all) => i !== maxPane && all.indexOf(i) === k)
+      : computed.filter((c) => c.pane > 0 && c.cfg.collapsed).map((c) => c.pane)
+  ).join(',');
+  useEffect(() => {
+    const chart = chartRef.current;
+    const el = containerRef.current;
+    if (!chart || !el) return;
+    const collapsed = new Set(collapsedKey ? collapsedKey.split(',').map(Number) : []);
+    const COLLAPSED_PX = 26;
+    const layout = () => {
+      const panes = chart.panes();
+      const open = panes.reduce((sum, _p, i) => sum + (collapsed.has(i) ? 0 : i === 0 ? 4 : 1), 0);
+      const total = panes.reduce((sum, p) => sum + p.getHeight(), 0);
+      const free = Math.max(1, total - COLLAPSED_PX * collapsed.size);
+      const tiny = (COLLAPSED_PX * open) / free;
+      panes.forEach((pane, i) => pane.setStretchFactor(collapsed.has(i) ? tiny : i === 0 ? 4 : 1));
+    };
+    layout();
+    if (!collapsed.size) return;
+    const ro = new ResizeObserver(layout);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [collapsedKey, structKey]);
+
+  // Indicator visibility (eye toggle in the legend); runs after the rebuild above on a structure change.
+  useEffect(() => {
+    for (const entry of indStructRef.current.entries) {
+      const cfg = indicators.find((i) => i.id === entry.cfgId);
+      entry.series.applyOptions({ visible: !cfg?.hidden });
+    }
+  }, [indicators, structKey]);
 
   // Indicator data.
   useEffect(() => {
@@ -1119,7 +1365,7 @@ export function TvChart() {
     const prim = svpPrimRef.current;
     if (!prim) return;
     const cfg = indicators.find((i) => i.type === 'svp');
-    if (!cfg || !tf.intraday || !bars.length) {
+    if (!cfg || cfg.hidden || !tf.intraday || !bars.length) {
       prim.setState([], []);
       return;
     }
@@ -1177,9 +1423,11 @@ export function TvChart() {
   // Absorption setups → badges on the candles (hidden while the panel's "Mark on chart" is off).
   const deltaMark = useCallback(
     (d: PlacedDivergence): DeltaMark => ({
+      startIndex: d.startChartIndex,
       index: d.chartIndex,
-      high: bars[d.chartIndex]!.high,
-      low: bars[d.chartIndex]!.low,
+      // the 15-minute candle's own extremes, so the badge sits at the wick tip even on a 5m or 1m chart
+      high: d.high,
+      low: d.low,
       kind: d.kind,
       confirmed: d.status === 'confirmed',
       confirmIndex: d.confirmChartIndex,
@@ -1316,10 +1564,23 @@ export function TvChart() {
           return;
         }
         const need = POINTS_NEEDED[kind];
+        let pts: Pt[] = need === 1 ? [pt] : [pt, pt];
+        if (isPosition(kind)) {
+          // One click drops the whole tool: ~1/5 of the screen wide, stop 55px away and a 2R target.
+          const chart = chartRef.current;
+          const main = mainRef.current?.series;
+          const range = chart?.timeScale().getVisibleLogicalRange();
+          const above = main?.coordinateToPrice(y - 55);
+          const spanBars = range ? Math.max(8, (range.to - range.from) * 0.2) : 20;
+          if (above == null) return;
+          const riskDist = Math.abs(above - pt.p);
+          const widthSecs = axis.toTime(axis.toLogical(pt.t) + spanBars) - pt.t;
+          pts = positionPts(kind, pt, widthSecs, riskDist, riskDist * 2);
+        }
         const d: Drawing = {
           id: kind === 'measure' ? 'm_live' : newId(),
           kind,
-          pts: need === 1 ? [pt] : [pt, pt],
+          pts,
           color: DEFAULT_COLOR[kind],
           width: 2,
           text: kind === 'text' ? 'Text' : undefined,
@@ -1415,6 +1676,7 @@ export function TvChart() {
             symbol: cur.symbol,
             list: cur.list.map((v) => {
               if (v.id !== id) return v;
+              if (isPosition(v.kind)) return dragPositionHandle(v, handle, pt);
               // A volume profile's lines only move in time; its price anchors are irrelevant.
               const pts = v.pts.map((q, i) =>
                 i === handle ? (v.kind === 'vprofile' ? { t: pt.t, p: q.p } : pt) : q,
@@ -1470,6 +1732,11 @@ export function TvChart() {
       const hit = primRef.current?.findHit(x, y);
       if (!hit) return;
       const d = latest.current.drawings.find((v) => v.id === hit.drawingId);
+      if (d && isPosition(d.kind)) {
+        setSelectedId(d.id);
+        setPosEditId(d.id);
+        return;
+      }
       if (d?.kind !== 'text') return;
       const input = window.prompt('Text', d.text ?? '');
       if (input === null) return;
@@ -1623,9 +1890,11 @@ export function TvChart() {
     const range = ts?.getVisibleLogicalRange();
     if (!ts || !range) return;
     const half = (range.to - range.from) / 2;
-    ts.setVisibleLogicalRange({ from: index - half, to: index + half });
-    setDeltaPick(index);
     const d = divergences.find((x) => x.chartIndex === index);
+    // centre on the middle of the 15-minute candle (several bars wide on a 5m or 1m chart)
+    const mid = d ? (d.startChartIndex + d.chartIndex) / 2 : index;
+    ts.setVisibleLogicalRange({ from: mid - half, to: mid + half });
+    setDeltaPick(index);
     if (d && bars[index]) deltaPrimRef.current?.focus(deltaMark(d));
   };
 
@@ -1690,11 +1959,13 @@ export function TvChart() {
   const legendRow = (c: Computed): ReactNode => (
     <div
       key={c.cfg.id}
-      className="group pointer-events-auto flex items-center gap-2 text-[12px] leading-5"
+      className="group pointer-events-auto flex w-fit max-w-full items-center gap-2 text-[12px] leading-5"
       data-tv-ui
     >
-      <span className="text-[#b2b5be]">{indicatorLabel(c.cfg)}</span>
-      {c.lines.map((l) => (
+      <span className={c.cfg.hidden ? 'text-[#5d606b]' : 'text-[#b2b5be]'}>
+        {indicatorLabel(c.cfg)}
+      </span>
+      {c.cfg.hidden ? null : c.lines.map((l) => (
         <span
           key={l.key}
           style={{
@@ -1704,7 +1975,21 @@ export function TvChart() {
           {valueText(c, l)}
         </span>
       ))}
-      <span className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+      <span
+        className={`flex gap-1 transition-opacity group-hover:opacity-100 ${c.cfg.hidden ? 'opacity-100' : 'opacity-0'}`}
+      >
+        <button
+          type="button"
+          title={c.cfg.hidden ? 'Show' : 'Hide'}
+          onClick={() =>
+            setIndicators((list) =>
+              list.map((i) => (i.id === c.cfg.id ? { ...i, hidden: !i.hidden } : i)),
+            )
+          }
+          className="text-[#787b86] hover:text-white"
+        >
+          {c.cfg.hidden ? <Icons.eyeOff size={14} /> : <Icons.eye size={14} />}
+        </button>
         {c.cfg.type !== 'volume' && c.cfg.type !== 'vwap' ? (
           <button
             type="button"
@@ -1759,7 +2044,7 @@ export function TvChart() {
           </span>
         ) : null}
       </div>
-      {computed.filter((c) => c.pane === 0).map(legendRow)}
+      {maxPane == null ? computed.filter((c) => c.pane === 0).map(legendRow) : null}
     </div>
   );
 
@@ -1767,13 +2052,72 @@ export function TvChart() {
     if (!el || paneIdx === 0) return null;
     const rows = computed.filter((c) => c.pane === paneIdx);
     if (!rows.length) return null;
+    const maximized = paneIdx === maxPane;
+    const collapsed = !maximized && rows.every((c) => c.cfg.collapsed);
+    const ids = new Set(rows.map((c) => c.cfg.id));
+    const paneBtn =
+      'flex h-5 w-5 items-center justify-center rounded border border-[#363a45] bg-[#1e222d] text-[#b2b5be] hover:text-white';
+    // Pane order follows the order of own-pane indicators in the list: swap with the pane above.
+    const above = computed.find((c) => c.pane === paneIdx - 1 && paneIdx > 1);
+    const moveUp = () =>
+      setIndicators((list) => {
+        if (!above) return list;
+        const a = list.findIndex((i) => i.id === above.cfg.id);
+        const b = list.findIndex((i) => ids.has(i.id));
+        if (a < 0 || b < 0) return list;
+        const next = [...list];
+        [next[a], next[b]] = [next[b]!, next[a]!];
+        return next;
+      });
     return createPortal(
-      <div
-        className="pointer-events-none absolute left-2 top-1 z-10 select-none"
-        style={{ fontFamily: FONT }}
-      >
-        {rows.map(legendRow)}
-      </div>,
+      <>
+        <div
+          className="pointer-events-none absolute left-2 top-1 z-10 select-none"
+          style={{ fontFamily: FONT }}
+        >
+          {rows.map(legendRow)}
+        </div>
+        <div
+          className="pointer-events-auto absolute top-0.5 z-10 flex gap-1 opacity-60 transition-opacity hover:opacity-100"
+          style={{ right: (chartRef.current?.priceScale('right').width() ?? 64) + 6 }}
+          data-tv-ui
+        >
+          {above ? (
+            <button type="button" title="Move pane up" onClick={moveUp} className={paneBtn}>
+              <Icons.arrowUp size={14} />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            title={collapsed ? 'Expand pane' : 'Collapse pane'}
+            onClick={() => {
+              if (maximized) setMaxPaneId(null);
+              setIndicators((list) =>
+                list.map((i) => (ids.has(i.id) ? { ...i, collapsed: !collapsed } : i)),
+              );
+            }}
+            className={paneBtn}
+          >
+            {collapsed ? <Icons.expand size={14} /> : <Icons.collapse size={14} />}
+          </button>
+          <button
+            type="button"
+            title={maximized ? 'Restore pane' : 'Maximize pane'}
+            onClick={() => setMaxPaneId(maximized ? null : rows[0]!.cfg.id)}
+            className={paneBtn}
+          >
+            {maximized ? <Icons.restore size={14} /> : <Icons.fullscreen size={14} />}
+          </button>
+          <button
+            type="button"
+            title="Delete pane"
+            onClick={() => setIndicators((list) => list.filter((i) => !ids.has(i.id)))}
+            className={`${paneBtn} hover:!text-[#f23645]`}
+          >
+            <Icons.trash size={14} />
+          </button>
+        </div>
+      </>,
       el,
       `pane-${paneIdx}`,
     );
@@ -1875,13 +2219,26 @@ export function TvChart() {
                 No data for {symbol} on {tf.label}.
               </div>
             ) : null}
-            {fp.on && bars.length && footprintCoverage < 1 ? (
-              <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-sm rounded bg-[#1e222d]/90 px-3 py-1.5 text-[11px] text-[#b2b5be]">
-                Footprint is estimated from 1-minute bars and only exists for the last ~7 sessions
-                {tf.source !== '1m' && !subRaw.length
+            {fp.on && bars.length && footprintCoverage < 1 && !fpNoteClosed ? (
+              <div
+                className="absolute bottom-3 left-3 z-10 flex max-w-sm items-start gap-2 rounded bg-[#1e222d]/90 py-1.5 pl-3 pr-1.5 text-[11px] text-[#b2b5be]"
+                data-tv-ui
+              >
+                <span>
+                Footprint is estimated from 1-minute bars and only exists for the last ~{subBars.length ? Math.max(1, Math.round((Date.now() / 1000 - subBars[0]!.time) / 86400)) : 7} days
+                {tf.source !== '1m' && !subBars.length
                   ? ' — loading…'
                   : ` (${Math.round(footprintCoverage * 100)}% of candles covered)`}
                 . Zoom in on a recent candle to read the rows.
+                </span>
+                <button
+                  type="button"
+                  title="Dismiss"
+                  onClick={() => setFpNoteClosed(true)}
+                  className="shrink-0 text-[#787b86] hover:text-white"
+                >
+                  <Icons.close size={14} />
+                </button>
               </div>
             ) : null}
             {(() => {
@@ -1989,7 +2346,8 @@ export function TvChart() {
               >
                 {selected.kind === 'fib' ||
                 selected.kind === 'measure' ||
-                selected.kind === 'vprofile'
+                selected.kind === 'vprofile' ||
+                isPosition(selected.kind)
                   ? null
                   : SWATCHES.map((c) => (
                       <button
@@ -2016,6 +2374,15 @@ export function TvChart() {
                       ))}
                     </select>
                   </label>
+                ) : isPosition(selected.kind) ? (
+                  <button
+                    type="button"
+                    title="Settings"
+                    className="rounded p-1 text-[#b2b5be] hover:bg-[#2a2e39]"
+                    onClick={() => setPosEditId(selected.id)}
+                  >
+                    <Icons.gear size={16} />
+                  </button>
                 ) : (
                   [1, 2, 3, 4].map((w) => (
                     <button
@@ -2094,8 +2461,21 @@ export function TvChart() {
           <DeltaPanel
             symbol={meta?.symbol ?? symbol}
             items={divergences}
-            hasData={(tf.source === '1m' ? raw.bars.length : subSym === symbol ? subRaw.length : 0) > 0}
+            chartTf={tf.label}
+            chartIs15m={tf.secs === 900}
+            hasData={deltaOk && (deltaSub.bars.length > 0 || deltaSub.bars5.length > 0)}
             cfg={deltaCfg}
+            view={deltaView}
+            onView={(patch) =>
+              setDeltaView((cur) => {
+                const next = { ...cur, ...patch };
+                save('tv:deltaView', next);
+                return next;
+              })
+            }
+            dataFrom={Number.isFinite(deltaFirst) ? deltaFirst : null}
+            dataTo={deltaLast > 0 ? deltaLast : null}
+            fineFrom={deltaOk ? (deltaSub.bars[0]?.time ?? null) : null}
             onCfg={(patch) =>
               setDeltaCfg((cur) => {
                 const next = { ...cur, ...patch };
@@ -2168,6 +2548,17 @@ export function TvChart() {
           }}
           onRemove={(id) => setIndicators((list) => list.filter((i) => i.id !== id))}
           onClose={() => setShowIndicators(false)}
+        />
+      ) : null}
+      {posEditId && drawings.find((d) => d.id === posEditId) ? (
+        <PositionSettings
+          drawing={drawings.find((d) => d.id === posEditId)!}
+          bars={bars}
+          decimals={decimals}
+          onChange={(next) =>
+            setDrawings(drawings.map((d) => (d.id === next.id ? next : d)))
+          }
+          onClose={() => setPosEditId(null)}
         />
       ) : null}
       {settingsId && indicators.find((i) => i.id === settingsId) ? (

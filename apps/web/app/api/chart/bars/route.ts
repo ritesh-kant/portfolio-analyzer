@@ -41,15 +41,24 @@ interface YahooResult {
   indicators: { quote: Array<Record<string, Array<number | null>>> };
 }
 
+/** A date window (unix seconds) instead of a named range: Yahoo serves 1-minute bars ~4 weeks back, 7 days at a time. */
+interface Window {
+  from: number;
+  to: number;
+}
+const MAX_WINDOW_SECS = 8 * 86400;
+
 async function fetchYahoo(
   symbol: string,
   interval: string,
   range: string,
   prepost: boolean,
+  window?: Window,
 ): Promise<YahooResult> {
   let lastError = 'upstream unavailable';
+  const span = window ? `period1=${window.from}&period2=${window.to}` : `range=${range}`;
   for (const host of HOSTS) {
-    const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=${prepost}`;
+    const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&${span}&includePrePost=${prepost}`;
     try {
       const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, cache: 'no-store' });
       const body = (await res.json()) as {
@@ -76,8 +85,23 @@ export async function GET(req: Request) {
   if (!INTERVALS.has(interval) || !RANGES.has(range)) {
     return NextResponse.json({ error: 'bad interval or range' }, { status: 400 });
   }
+  let window: Window | undefined;
+  if (searchParams.has('period1') || searchParams.has('period2')) {
+    const from = Number(searchParams.get('period1'));
+    const to = Number(searchParams.get('period2'));
+    if (
+      !Number.isInteger(from) ||
+      !Number.isInteger(to) ||
+      from <= 0 ||
+      to <= from ||
+      to - from > MAX_WINDOW_SECS
+    ) {
+      return NextResponse.json({ error: 'bad period' }, { status: 400 });
+    }
+    window = { from, to };
+  }
   try {
-    const result = await fetchYahoo(symbol, interval, range, prepost);
+    const result = await fetchYahoo(symbol, interval, range, prepost, window);
     const quote = result.indicators.quote[0] ?? {};
     const bars: Bar[] = [];
     (result.timestamp ?? []).forEach((time, i) => {

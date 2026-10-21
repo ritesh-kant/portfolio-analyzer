@@ -3,6 +3,8 @@ import {
   type CustomSeriesOptions,
   type CustomSeriesPricePlotValues,
   type CustomSeriesWhitespaceData,
+  type IChartApi,
+  type Logical,
   type ICustomSeriesPaneRenderer,
   type ICustomSeriesPaneView,
   type PaneRendererCustomData,
@@ -70,6 +72,7 @@ function coarsen(fp: FootprintCandle, k: number): Rows {
 class FootprintRenderer implements ICustomSeriesPaneRenderer {
   data: PaneRendererCustomData<Time, FootprintData> | null = null;
   settings: FootprintSettings = { imbalance: 3, showDelta: true };
+  chart: IChartApi | null = null;
 
   draw(target: Target, priceToY: PriceToCoordinateConverter) {
     target.useBitmapCoordinateSpace((scope) => {
@@ -83,7 +86,11 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
       for (let i = Math.max(0, from); i <= Math.min(data.bars.length - 1, to); i += 1) {
         const bar = data.bars[i]!;
         const d = bar.originalData;
-        const x = bar.x * hr;
+        // `bar.x` is only refreshed for bars on screen: one just past the edge of the visible range keeps the x it
+        // had in an earlier view and would be drawn there as a stray candle. The time scale always knows (`bar.time` is the index).
+        const tx = this.chart ? this.chart.timeScale().logicalToCoordinate(bar.time as unknown as Logical) : bar.x;
+        if (tx == null) continue;
+        const x = tx * hr;
         const color = d.close >= d.open ? UP : DOWN;
         if (!d.fp || spacing < 8) {
           this.plainCandle(ctx, d, x, spacing * hr, color, priceToY, vr);
@@ -290,6 +297,10 @@ export class FootprintView implements ICustomSeriesPaneView<
 
   setSettings(settings: FootprintSettings) {
     this.rend.settings = settings;
+  }
+
+  setChart(chart: IChartApi) {
+    this.rend.chart = chart;
   }
 
   renderer() {
