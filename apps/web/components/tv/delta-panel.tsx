@@ -378,7 +378,7 @@ export function DeltaPanel({
       {!chartIs15m ? (
         <div className="border-b border-[#2a2e39] px-3 py-1.5 text-[11px] leading-snug text-[#ffb74d]">
           The chart is on {chartTf}, the list is always 15-minute candles. A bracket marks the chart
-          bars of each 15-minute candle, so one bar's footprint delta will not match its row.
+          bars of each 15-minute candle, so one bar&apos;s footprint delta will not match its row.
         </div>
       ) : null}
       <div className="grid grid-cols-[1fr_auto] gap-x-3 border-b border-[#2a2e39] px-3 py-1.5 text-[11px] font-medium text-[#787b86]">
