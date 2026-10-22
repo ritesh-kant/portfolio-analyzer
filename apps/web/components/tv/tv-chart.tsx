@@ -24,6 +24,7 @@ import {
   type Drawing,
   type DrawingKind,
   POINTS_NEEDED,
+  PRICE_ONLY,
   type Pt,
   SWATCHES,
   makeTimeAxis,
@@ -280,12 +281,13 @@ type Drag =
   | {
       mode: 'move';
       id: string;
+      pane: string | null;
       orig: Drawing;
       startLogical: number;
       startPrice: number;
       moved: boolean;
     }
-  | { mode: 'handle'; id: string; handle: number; moved: boolean };
+  | { mode: 'handle'; id: string; pane: string | null; handle: number; moved: boolean };
 
 export function TvChart() {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -296,6 +298,10 @@ export function TvChart() {
   const footRef = useRef<ISeriesApi<'Custom', Time> | null>(null);
   const footViewRef = useRef<FootprintView | null>(null);
   const primRef = useRef<DrawingsPrimitive | null>(null);
+  /** Drawing layers of the indicator panes, by indicator id; rebuilt with the indicator series. */
+  const subPrimsRef = useRef<Map<string, { prim: DrawingsPrimitive; series: ISeriesApi<SeriesType, Time> }>>(
+    new Map(),
+  );
   const newsPrimRef = useRef<NewsPrimitive | null>(null);
   const sessionsPrimRef = useRef<SessionsPrimitive | null>(null);
   const svpPrimRef = useRef<SessionProfilePrimitive | null>(null);
@@ -1048,6 +1054,7 @@ export function TvChart() {
       mainRef.current = null;
       footRef.current = null;
       indStructRef.current = { key: '', entries: [] };
+      subPrimsRef.current = new Map();
     };
   }, []);
 
@@ -1292,6 +1299,17 @@ export function TvChart() {
       }
     }
     indStructRef.current = { key: structKey, entries };
+    // Each indicator pane gets its own drawing layer, attached to one of its series so it reads that pane's scale.
+    const subs: typeof subPrimsRef.current = new Map();
+    for (const c of computed) {
+      if (c.pane <= 0) continue;
+      const host = entries.find((e) => e.cfgId === c.cfg.id);
+      if (!host) continue;
+      const prim = new DrawingsPrimitive(c.cfg.id);
+      host.series.attachPrimitive(prim);
+      subs.set(c.cfg.id, { prim, series: host.series });
+    }
+    subPrimsRef.current = subs;
     // Pane DOM nodes host the per-pane legends; they exist only after the first layout, so retry briefly.
     let attempts = 0;
     const syncPanes = () => {
@@ -1511,16 +1529,10 @@ export function TvChart() {
   // Drawings → primitive.
   useEffect(() => {
     const all = measure ? [...drawings, measure] : drawings;
-    primRef.current?.setState({
-      drawings: all,
-      draft,
-      selectedId,
-      hidden: hideAll,
-      axis,
-      decimals,
-      bars,
-    });
-  }, [drawings, measure, draft, selectedId, hideAll, axis, decimals, bars]);
+    const next = { drawings: all, draft, selectedId, hidden: hideAll, axis, decimals, bars };
+    primRef.current?.setState(next);
+    for (const { prim } of subPrimsRef.current.values()) prim.setState(next);
+  }, [drawings, measure, draft, selectedId, hideAll, axis, decimals, bars, structKey]);
 
   // ── pointer interaction with drawings ─────────────────────────────────
   useEffect(() => {
@@ -1533,16 +1545,36 @@ export function TvChart() {
       const rect = wrap.getBoundingClientRect();
       return { x: e.clientX - rect.left, y: e.clientY - rect.top };
     };
-    const inPlot = (x: number, y: number) => {
-      const size = chartRef.current?.paneSize(0);
-      return !!size && x >= 0 && y >= 0 && x <= size.width && y <= size.height;
-    };
-    const toPt = (x: number, y: number, snap: boolean): Pt | null => {
+    /** A pane's plot area in wrap coordinates: `key` is null for the price pane, else the indicator's id. */
+    type Loc = { key: string | null; top: number; w: number; h: number };
+    const seriesFor = (key: string | null) =>
+      key == null ? mainRef.current?.series : subPrimsRef.current.get(key)?.series;
+    const primFor = (key: string | null) =>
+      key == null ? primRef.current : subPrimsRef.current.get(key)?.prim;
+    const paneLoc = (key: string | null): Loc | null => {
       const chart = chartRef.current;
-      const main = mainRef.current?.series;
-      if (!chart || !main) return null;
+      const series = seriesFor(key);
+      if (!chart || !series) return null;
+      const index = series.getPane().paneIndex();
+      const el = chart.panes()[index]?.getHTMLElement();
+      const size = chart.paneSize(index);
+      const top = el ? el.getBoundingClientRect().top - wrap.getBoundingClientRect().top : 0;
+      return { key, top, w: size.width, h: size.height };
+    };
+    const locate = (x: number, y: number): Loc | null => {
+      for (const key of [null, ...subPrimsRef.current.keys()]) {
+        const loc = paneLoc(key);
+        if (loc && x >= 0 && x <= loc.w && y >= loc.top && y <= loc.top + loc.h) return loc;
+      }
+      return null;
+    };
+    const toPt = (x: number, y: number, snap: boolean, loc: Loc): Pt | null => {
+      const chart = chartRef.current;
+      const series = seriesFor(loc.key);
+      if (!chart || !series) return null;
+      const yl = y - loc.top;
       const logical = chart.timeScale().coordinateToLogical(x);
-      const raw = main.coordinateToPrice(y);
+      const raw = series.coordinateToPrice(yl);
       if (logical == null || raw == null) return null;
       let price: number = raw;
       let t = axis.toTime(logical);
@@ -1550,14 +1582,19 @@ export function TvChart() {
         const idx = Math.max(0, Math.min(latest.current.bars.length - 1, Math.round(logical)));
         const b = latest.current.bars[idx];
         if (b) {
-          let best: { dy: number; p: number } = { dy: Infinity, p: price };
-          for (const v of [b.open, b.high, b.low, b.close]) {
-            const vy = main.priceToCoordinate(v);
-            if (vy != null && Math.abs(vy - y) < best.dy) best = { dy: Math.abs(vy - y), p: v };
-          }
-          if (best.dy < 30) {
-            price = best.p;
+          if (loc.key != null) {
+            // An indicator pane has no candle prices to snap to, only the candle's time.
             t = b.time;
+          } else {
+            let best: { dy: number; p: number } = { dy: Infinity, p: price };
+            for (const v of [b.open, b.high, b.low, b.close]) {
+              const vy = series.priceToCoordinate(v);
+              if (vy != null && Math.abs(vy - yl) < best.dy) best = { dy: Math.abs(vy - yl), p: v };
+            }
+            if (best.dy < 30) {
+              price = best.p;
+              t = b.time;
+            }
           }
         }
       }
@@ -1586,9 +1623,9 @@ export function TvChart() {
       if (e.button !== 0) return;
       if ((e.target as HTMLElement).closest('[data-tv-ui]')) return;
       const { x, y } = local(e);
-      if (!inPlot(x, y)) return;
+      const here = locate(x, y);
+      if (!here) return;
       const L = latest.current;
-      const prim = primRef.current;
 
       if (replayPickRef.current) {
         e.stopImmediatePropagation();
@@ -1601,7 +1638,7 @@ export function TvChart() {
         return;
       }
 
-      if (L.tool === 'cursor') {
+      if (L.tool === 'cursor' && here.key == null) {
         const bar = newsPrimRef.current?.findBar(x, y) ?? null;
         if (bar != null) {
           e.stopImmediatePropagation();
@@ -1616,9 +1653,12 @@ export function TvChart() {
       if (L.tool !== 'cursor') {
         e.stopImmediatePropagation();
         e.preventDefault();
-        const pt = toPt(x, y, true);
-        if (!pt) return;
         const kind = L.tool as DrawingKind;
+        // A second click stays in the pane the drawing started in, wherever the cursor has wandered.
+        const loc = (draftRef ? paneLoc(draftRef.pane ?? null) : null) ?? here;
+        if (!draftRef && loc.key != null && PRICE_ONLY.has(kind)) return;
+        const pt = toPt(x, y, true, loc);
+        if (!pt) return;
         setMeasure(null);
         if (draftRef) {
           // second click of a click-click drawing
@@ -1634,7 +1674,7 @@ export function TvChart() {
           const chart = chartRef.current;
           const main = mainRef.current?.series;
           const range = chart?.timeScale().getVisibleLogicalRange();
-          const above = main?.coordinateToPrice(y - 55);
+          const above = main?.coordinateToPrice(y - loc.top - 55);
           const spanBars = range ? Math.max(8, (range.to - range.from) * 0.2) : 20;
           if (above == null) return;
           const riskDist = Math.abs(above - pt.p);
@@ -1649,6 +1689,7 @@ export function TvChart() {
           width: 2,
           text: kind === 'text' ? 'Text' : undefined,
           rows: kind === 'vprofile' ? DEFAULT_ROWS : undefined,
+          pane: loc.key ?? undefined,
         };
         if (kind === 'text') {
           const input = window.prompt('Text', 'Text');
@@ -1666,7 +1707,7 @@ export function TvChart() {
       }
 
       setMeasure(null);
-      const hit = prim?.findHit(x, y) ?? null;
+      const hit = primFor(here.key)?.findHit(x, y - here.top) ?? null;
       if (!hit) {
         setSelectedId(null);
         return;
@@ -1677,30 +1718,31 @@ export function TvChart() {
       const d = L.drawings.find((v) => v.id === hit.drawingId);
       if (!d || d.locked || L.lockAll) return;
       const chart = chartRef.current;
-      const main = mainRef.current?.series;
-      if (!chart || !main) return;
+      const paneSeries = seriesFor(here.key);
+      if (!chart || !paneSeries) return;
       if (hit.handle === 'body') {
         const logical = chart.timeScale().coordinateToLogical(x);
-        const price = main.coordinateToPrice(y);
+        const price = paneSeries.coordinateToPrice(y - here.top);
         if (logical == null || price == null) return;
         drag = {
           mode: 'move',
           id: d.id,
+          pane: here.key,
           orig: d,
           startLogical: logical,
           startPrice: price,
           moved: false,
         };
       } else {
-        drag = { mode: 'handle', id: d.id, handle: hit.handle, moved: false };
+        drag = { mode: 'handle', id: d.id, pane: here.key, handle: hit.handle, moved: false };
       }
     };
 
     const onMove = (e: MouseEvent) => {
       const { x, y } = local(e);
-      const prim = primRef.current;
       if (draftRef) {
-        const pt = toPt(x, y, true);
+        const dloc = paneLoc(draftRef.pane ?? null);
+        const pt = dloc ? toPt(x, y, true, dloc) : null;
         if (pt) {
           draftRef = { ...draftRef, pts: [draftRef.pts[0]!, pt] };
           setDraft(draftRef);
@@ -1711,12 +1753,13 @@ export function TvChart() {
       }
       if (drag && (drag.mode === 'move' || drag.mode === 'handle')) {
         const chart = chartRef.current;
-        const main = mainRef.current?.series;
-        if (!chart || !main) return;
+        const dloc = paneLoc(drag.pane);
+        const paneSeries = seriesFor(drag.pane);
+        if (!chart || !dloc || !paneSeries) return;
         drag.moved = true;
         if (drag.mode === 'move') {
           const logical = chart.timeScale().coordinateToLogical(x);
-          const price = main.coordinateToPrice(y);
+          const price = paneSeries.coordinateToPrice(y - dloc.top);
           if (logical == null || price == null) return;
           const dl = logical - drag.startLogical;
           const dp = price - drag.startPrice;
@@ -1733,7 +1776,7 @@ export function TvChart() {
             list: cur.list.map((v) => (v.id === id ? moved : v)),
           }));
         } else {
-          const pt = toPt(x, y, true);
+          const pt = toPt(x, y, true, dloc);
           if (!pt) return;
           const { id, handle } = drag;
           setDrawState((cur) => ({
@@ -1752,10 +1795,18 @@ export function TvChart() {
         return;
       }
       if (latest.current.tool === 'cursor') {
-        const bar = inPlot(x, y) ? (newsPrimRef.current?.findBar(x, y) ?? null) : null;
+        const here = locate(x, y);
+        const bar = here?.key === null ? (newsPrimRef.current?.findBar(x, y) ?? null) : null;
         setNewsHover(bar);
-        const hit = inPlot(x, y) && bar == null ? (prim?.findHit(x, y) ?? null) : null;
-        prim?.setState({ hoverId: hit?.drawingId ?? null });
+        const hit = here && bar == null ? (primFor(here.key)?.findHit(x, y - here.top) ?? null) : null;
+        const layers: [string | null, DrawingsPrimitive | null][] = [
+          [null, primRef.current],
+          ...[...subPrimsRef.current].map(([k, v]): [string, DrawingsPrimitive] => [k, v.prim]),
+        ];
+        for (const [key, p] of layers) {
+          const next = hit && here?.key === key ? hit.drawingId : null;
+          if (p && p.hoverId !== next) p.setState({ hoverId: next });
+        }
         wrap.classList.toggle('tv-over-drawing', !!hit || bar != null);
       }
     };
@@ -1764,7 +1815,8 @@ export function TvChart() {
       if (draftRef && drag?.mode === 'create') {
         if (drag.moved) {
           const { x, y } = local(e);
-          const pt = toPt(x, y, true);
+          const uloc = paneLoc(draftRef.pane ?? null);
+          const pt = uloc ? toPt(x, y, true, uloc) : null;
           if (pt) draftRef = { ...draftRef, pts: [draftRef.pts[0]!, pt] };
           finishDraft();
         }
@@ -1793,7 +1845,8 @@ export function TvChart() {
 
     const onDbl = (e: MouseEvent) => {
       const { x, y } = local(e);
-      const hit = primRef.current?.findHit(x, y);
+      const here = locate(x, y);
+      const hit = here ? primFor(here.key)?.findHit(x, y - here.top) : null;
       if (!hit) return;
       const d = latest.current.drawings.find((v) => v.id === hit.drawingId);
       if (d && isPosition(d.kind)) {

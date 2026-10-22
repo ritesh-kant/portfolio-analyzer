@@ -32,7 +32,16 @@ export interface Drawing {
   lot?: number;
   riskPct?: number;
   locked?: boolean;
+  /** Id of the indicator pane the drawing lives in (its `p` values are on that pane's scale); absent = price pane. */
+  pane?: string;
 }
+
+/** Kinds that only make sense against price: they read the candles' prices, so they stay on the price pane. */
+export const PRICE_ONLY: ReadonlySet<DrawingKind> = new Set<DrawingKind>([
+  'long',
+  'short',
+  'vprofile',
+]);
 
 export const POINTS_NEEDED: Record<DrawingKind, number> = {
   trend: 2,

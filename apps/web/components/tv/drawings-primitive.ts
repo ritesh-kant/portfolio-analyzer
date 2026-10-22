@@ -72,7 +72,14 @@ function fibLevelPrice(d: Drawing, v: number): number {
   return b.p + (a.p - b.p) * v;
 }
 
+/**
+ * One instance per pane: the price pane's (`paneKey` null) or an indicator pane's (its indicator id). Each is
+ * attached to a series of its own pane, so prices are read against that pane's scale, and it only draws and
+ * hit-tests the drawings that belong to it.
+ */
 export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
+  constructor(private readonly paneKey: string | null = null) {}
+
   private chart: IChartApi | null = null;
   private series: ISeriesApi<SeriesType, Time> | null = null;
   private requestUpdate: (() => void) | null = null;
@@ -98,6 +105,24 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     }),
   };
 
+  get hoverId() {
+    return this.state.hoverId;
+  }
+
+  /** The drawings (and the draft) that live in this primitive's pane. */
+  private mine(): Drawing[] {
+    const own = (d: Drawing) => (d.pane ?? null) === this.paneKey;
+    const list = this.state.drawings.filter(own);
+    return this.state.draft && own(this.state.draft) ? [...list, this.state.draft] : list;
+  }
+
+  /** A value on this pane's scale: the price pane keeps its fixed decimals, an indicator pane uses its own format. */
+  private fmt(v: number): string {
+    return this.paneKey == null || !this.series
+      ? v.toFixed(this.state.decimals)
+      : this.series.priceFormatter().format(v);
+  }
+
   attached(param: SeriesAttachedParameter<Time>) {
     this.chart = param.chart as IChartApi;
     this.series = param.series as ISeriesApi<SeriesType, Time>;
@@ -121,8 +146,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   updateAllViews() {
     this.axisViews = [];
     if (this.state.hidden || !this.series) return;
-    const all = this.state.draft ? [...this.state.drawings, this.state.draft] : this.state.drawings;
-    for (const d of all) {
+    for (const d of this.mine()) {
       const levels: { price: number; color: string }[] = [];
       if (d.kind === 'hline' || d.kind === 'hray') levels.push({ price: d.pts[0]!.p, color: d.color });
       else if (d.id === this.state.selectedId && (d.kind === 'trend' || d.kind === 'ray'))
@@ -137,7 +161,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         if (y == null) continue;
         this.axisViews.push({
           coordinate: () => y,
-          text: () => price.toFixed(this.state.decimals),
+          text: () => this.fmt(price),
           textColor: () => '#ffffff',
           backColor: () => color,
         });
@@ -212,7 +236,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
 
   /** Paneside size, read from the chart. */
   private paneSize() {
-    const size = this.chart?.paneSize(0);
+    const size = this.chart?.paneSize(this.series?.getPane().paneIndex() ?? 0);
     return { w: size?.width ?? 0, h: size?.height ?? 0 };
   }
 
@@ -221,8 +245,9 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     const { w, h } = this.paneSize();
     const p = { x, y };
     // Topmost (latest) drawing first; the selected one wins ties via handles.
-    const order = [...this.state.drawings].reverse();
-    const sel = this.state.drawings.find((d) => d.id === this.state.selectedId);
+    const own = this.mine();
+    const order = [...own].reverse();
+    const sel = own.find((d) => d.id === this.state.selectedId);
     if (sel) order.unshift(sel);
     for (const d of order) {
       const g = this.geometry(d, w, h);
@@ -320,8 +345,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     ctx.beginPath();
     ctx.rect(0, 0, w, h);
     ctx.clip();
-    const all = this.state.draft ? [...this.state.drawings, this.state.draft] : this.state.drawings;
-    for (const d of all) {
+    for (const d of this.mine()) {
       const g = this.geometry(d, w, h);
       if (!g) continue;
       const selected = d.id === this.state.selectedId;
@@ -605,7 +629,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
       ctx.stroke();
       ctx.fillStyle = level.color;
       ctx.fillText(
-        `${level.v} (${fibLevelPrice(d, level.v).toFixed(this.state.decimals)})`,
+        `${level.v} (${this.fmt(fibLevelPrice(d, level.v))})`,
         x0 - 6,
         y,
       );
@@ -658,7 +682,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     const pct = p0.p ? (dp / p0.p) * 100 : 0;
     const bars = Math.round(this.state.axis.toLogical(p1.t) - this.state.axis.toLogical(p0.t));
     const lines = [
-      `${dp >= 0 ? '+' : ''}${dp.toFixed(this.state.decimals)} (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)`,
+      `${dp >= 0 ? '+' : ''}${this.fmt(dp)} (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)`,
       `${Math.abs(bars)} bars, ${formatDuration(p1.t - p0.t)}`,
     ];
     ctx.font = `12px ${FONT}`;

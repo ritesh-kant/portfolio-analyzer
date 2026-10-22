@@ -18,6 +18,9 @@ const FONT = '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu,
 const UP = '#089981';
 const DOWN = '#f23645';
 const POC_FILL = '#d1d4dc';
+const VA_LINE = 'rgba(255, 255, 255, 0.85)';
+/** Share of a candle's volume the value area holds. */
+const VALUE_AREA = 0.7;
 
 export interface FootprintData extends CustomData<Time> {
   open: number;
@@ -67,6 +70,35 @@ function coarsen(fp: FootprintCandle, k: number): Rows {
     if (l.ask + l.bid > levels[poc]!.ask + levels[poc]!.bid) poc = i;
   });
   return { levels, step: fp.step * k, poc };
+}
+
+/**
+ * The candle's value area: rows around the POC, taking the busier neighbour each time, until they hold
+ * `VALUE_AREA` of the candle's volume. Returns the lowest and highest row index, or null when there are
+ * too few rows for it to say anything.
+ */
+function valueArea(rows: Rows): { lo: number; hi: number } | null {
+  const { levels, poc } = rows;
+  if (levels.length < 3) return null;
+  const vol = (i: number) => levels[i]!.bid + levels[i]!.ask;
+  let total = 0;
+  for (let i = 0; i < levels.length; i += 1) total += vol(i);
+  if (!(total > 0)) return null;
+  let lo = poc;
+  let hi = poc;
+  let held = vol(poc);
+  while (held < VALUE_AREA * total && (lo > 0 || hi < levels.length - 1)) {
+    const up = hi < levels.length - 1 ? vol(hi + 1) : -1;
+    const down = lo > 0 ? vol(lo - 1) : -1;
+    if (up >= down) {
+      hi += 1;
+      held += up;
+    } else {
+      lo -= 1;
+      held += down;
+    }
+  }
+  return { lo, hi };
 }
 
 class FootprintRenderer implements ICustomSeriesPaneRenderer {
@@ -185,12 +217,27 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
       // Diagonal imbalance: asks against the bids one row down, bids against the asks one row up.
       const askImb = below ? level.ask > 0 && level.ask >= imbalance * Math.max(below.bid, 1) : false;
       const bidImb = above ? level.bid > 0 && level.bid >= imbalance * Math.max(above.ask, 1) : false;
-      const tint = (side: number) => 0.1 + 0.42 * (side / maxSide);
+      const tint = (side: number) => 0.12 + 0.6 * (side / maxSide);
 
-      ctx.fillStyle = bidImb ? DOWN : isPoc ? POC_FILL : `rgba(242,54,69,${tint(level.bid)})`;
+      ctx.fillStyle = isPoc ? POC_FILL : `rgba(242,54,69,${tint(level.bid)})`;
       ctx.fillRect(left, top, leftW, h);
-      ctx.fillStyle = askImb ? UP : isPoc ? POC_FILL : `rgba(8,153,129,${tint(level.ask)})`;
+      ctx.fillStyle = isPoc ? POC_FILL : `rgba(8,153,129,${tint(level.ask)})`;
       ctx.fillRect(rightX, top, rightW, h);
+
+      // Imbalance: a small bar on the outer edge of the row (red on the bid side, green on the ask side).
+      // Rows that follow one another join into one bar.
+      if (bidImb || askImb) {
+        const barW = Math.max(2, Math.round(3 * hr));
+        const barH = Math.max(1, Math.round((yb - yt) * vr));
+        if (bidImb) {
+          ctx.fillStyle = DOWN;
+          ctx.fillRect(left, top, barW, barH);
+        }
+        if (askImb) {
+          ctx.fillStyle = UP;
+          ctx.fillRect(left + w - barW, top, barW, barH);
+        }
+      }
 
       if (showText) {
         const cy = top + h / 2;
@@ -206,6 +253,26 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
         ctx.fillText(fmtVol(level.ask), rightX + gap, cy);
       }
     });
+
+    // Value area: dotted lines across the candle at the top of its highest row (VAH) and the bottom of its lowest (VAL).
+    const va = valueArea(rows);
+    if (va) {
+      const yVah = rowTop(levels[va.hi]!.price);
+      const yVal = rowBottom(levels[va.lo]!.price);
+      ctx.save();
+      ctx.strokeStyle = VA_LINE;
+      ctx.lineWidth = Math.max(1, Math.round(hr));
+      ctx.setLineDash([3 * hr, 3 * hr]);
+      for (const y of [yVah, yVal]) {
+        if (y == null) continue;
+        const py = Math.round(y * vr) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(left, py);
+        ctx.lineTo(left + w, py);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
 
     // Candle through the middle: wick high to low, body open to close.
     const yh = priceToY(d.high);
