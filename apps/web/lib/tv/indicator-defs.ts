@@ -26,6 +26,12 @@ export interface IndicatorCfg {
   style?: 'split' | 'total';
   /** Cumulative volume delta: the period the running total restarts in. */
   anchor?: 'session' | 'week' | 'month';
+  /** CVD: mark price/CVD divergences. Absent = regular ones. */
+  divMode?: 'off' | 'regular' | 'all';
+  /** CVD divergence: candles each side a swing must clear (absent = 3). */
+  divPivot?: number;
+  /** CVD divergence: the two swings are at most this many candles apart (absent = 30). */
+  divGap?: number;
   /** Bollinger std-dev multiplier. */
   mult?: number;
   color: string;

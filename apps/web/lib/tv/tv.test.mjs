@@ -772,3 +772,103 @@ test('dropSpikeWicks: stray quotes in no-volume extended-hours bars are trimmed,
   assert.equal(dropSpikeWicks(bars, 60, () => true), bars);
   assert.equal(dropSpikeWicks(bars, null, regular), bars);
 });
+
+// ── CVD divergence ────────────────────────────────────────────────────────
+import { CVD_DIV_DEFAULTS, findCvdDivergences, intrabarUsable, nearSetup } from './cvd-divergence.ts';
+
+const divCfg = { ...CVD_DIV_DEFAULTS, pivot: 1, tol: 0 };
+/** Candles from their highs (lows one under, closes half under the high). */
+const fromHighs = (highs) =>
+  highs.map((h, i) => ({ time: open + i * 60, open: h - 0.5, high: h, low: h - 1, close: h - 0.5, volume: 10 }));
+/** Candles from their lows (highs one over, closes half over the low). */
+const fromLows = (lows) =>
+  lows.map((l, i) => ({ time: open + i * 60, open: l + 0.5, high: l + 1, low: l, close: l + 0.5, volume: 10 }));
+/** CVD candles spanning [-100, 100] unless `highs` / `lows` say otherwise at an index. */
+const cvdOf = (n, highs = {}, lows = {}) =>
+  Array.from({ length: n }, (_, i) => ({ open: 0, high: highs[i] ?? 100, low: lows[i] ?? -100, close: 0 }));
+const same = (n) => Array(n).fill('day');
+
+test('findCvdDivergences: regular bearish = price higher high, CVD lower high; confirmed by a close under the swing low between', () => {
+  const bars = fromHighs([10, 12, 10, 9, 11, 14, 10, 9, 8]);
+  const out = findCvdDivergences(bars, cvdOf(9, { 1: 500, 5: 300 }), same(9), [], divCfg);
+  assert.equal(out.length, 1);
+  const d = out[0];
+  assert.equal(d.kind, 'regular-bearish');
+  assert.deepEqual([d.i1, d.i2, d.p1, d.p2, d.c1, d.c2], [1, 5, 12, 14, 500, 300]);
+  assert.equal(d.knownIndex, 6);
+  assert.equal(d.level, 8); // lowest low between the two swings
+  assert.equal(d.status, 'confirmed');
+  assert.equal(d.confirmIndex, 8); // first close under 8 (7.5), and not before the swing was known
+});
+
+test('findCvdDivergences: regular bullish = price lower low, CVD higher low, confirmed by a close over the swing high between', () => {
+  const bars = fromLows([10, 8, 10, 11, 9, 7, 10, 11, 12]);
+  const out = findCvdDivergences(bars, cvdOf(9, {}, { 1: -100, 5: -50 }), same(9), [], divCfg);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].kind, 'regular-bullish');
+  assert.equal(out[0].level, 12);
+  assert.equal(out[0].status, 'confirmed');
+  assert.equal(out[0].confirmIndex, 8);
+});
+
+test('findCvdDivergences: hidden kinds only when asked; agreeing price and CVD is no divergence', () => {
+  const bars = fromHighs([10, 14, 10, 9, 11, 12, 10, 9, 8]); // lower high
+  const cvd = cvdOf(9, { 1: 300, 5: 500 }); // CVD higher high
+  assert.equal(findCvdDivergences(bars, cvd, same(9), [], divCfg).length, 0);
+  const hidden = findCvdDivergences(bars, cvd, same(9), [], { ...divCfg, hidden: true });
+  assert.deepEqual(hidden.map((d) => d.kind), ['hidden-bearish']);
+  // lower high with CVD also lower: they agree
+  assert.equal(findCvdDivergences(bars, cvdOf(9, { 1: 500, 5: 300 }), same(9), [], { ...divCfg, hidden: true }).length, 0);
+  // a higher low with a lower CVD low is hidden bullish
+  const lows = fromLows([10, 8, 10, 11, 9, 9.5, 10, 11, 12]);
+  const hb = findCvdDivergences(lows, cvdOf(9, {}, { 1: -50, 5: -100 }), same(9), [], { ...divCfg, hidden: true });
+  assert.deepEqual(hb.map((d) => d.kind), ['hidden-bullish']);
+});
+
+test('findCvdDivergences: not across a CVD reset, a gap, an unusable swing, or equal highs', () => {
+  const bars = fromHighs([10, 12, 10, 9, 11, 14, 10, 9, 8]);
+  const cvd = cvdOf(9, { 1: 500, 5: 300 });
+  const split = same(9).map((_, i) => (i < 3 ? 'a' : 'b'));
+  assert.equal(findCvdDivergences(bars, cvd, split, [], divCfg).length, 0);
+  assert.equal(findCvdDivergences(bars, cvd, same(9), [], { ...divCfg, maxGap: 3 }).length, 0);
+  const usable = Array(9).fill(true);
+  usable[5] = false;
+  assert.equal(findCvdDivergences(bars, cvd, same(9), usable, divCfg).length, 0);
+  const missing = cvd.map((c, i) => (i === 1 ? { ...c, missing: true } : c));
+  assert.equal(findCvdDivergences(bars, missing, same(9), [], divCfg).length, 0);
+  const equal = fromHighs([10, 12, 10, 9, 11, 12.001, 10, 9, 8]);
+  assert.equal(findCvdDivergences(equal, cvd, same(9), [], divCfg).length, 0);
+});
+
+test('findCvdDivergences: failed when price closes past the second swing, pending until the window plays out', () => {
+  const run = (tail) => findCvdDivergences(fromHighs([10, 12, 10, 9, 11, 14, ...tail]), cvdOf(6 + tail.length, { 1: 500, 5: 300 }), same(6 + tail.length), [], divCfg)[0];
+  assert.equal(run([10, 15.5, 16]).status, 'failed'); // closed above 14
+  assert.equal(run([10, 9.5]).status, 'pending'); // nothing decided yet, window still open
+  const long = run([10, 9.6, 9.7, 9.8, 9.6, 9.7, 9.8, 9.6, 9.7, 9.8, 9.9, 9.9, 9.9]);
+  assert.equal(long.status, 'failed'); // window over without a close under 8
+});
+
+test('findCvdDivergences: a prefix of the candles gives exactly the divergences already knowable (no look-ahead)', () => {
+  const bars = fromHighs([10, 12, 10, 9, 11, 14, 10, 9, 8]);
+  const cvd = cvdOf(9, { 1: 500, 5: 300 });
+  for (let k = 0; k <= bars.length; k += 1) {
+    const part = findCvdDivergences(bars.slice(0, k), cvd.slice(0, k), same(k), [], divCfg);
+    assert.equal(part.length, k > 6 ? 1 : 0, `prefix ${k}`); // swing at 5 is known once candle 6 has closed
+    if (part[0]) assert.ok(part[0].knownIndex <= k - 1);
+  }
+});
+
+test('nearSetup: same direction, signal or confirming candle within the window', () => {
+  const bars = fromLows([10, 8, 10, 11, 9, 7, 10, 11, 12]);
+  const d = findCvdDivergences(bars, cvdOf(9, {}, { 1: -100, 5: -50 }), same(9), [], divCfg)[0];
+  assert.equal(nearSetup(d, [{ chartIndex: 6, confirmChartIndex: null, kind: 'sellers' }], 3), 0);
+  assert.equal(nearSetup(d, [{ chartIndex: 6, confirmChartIndex: null, kind: 'buyers' }], 3), null); // wrong way
+  assert.equal(nearSetup(d, [{ chartIndex: 20, confirmChartIndex: null, kind: 'sellers' }], 3), null); // too far
+  assert.equal(nearSetup(d, [{ chartIndex: 20, confirmChartIndex: 7, kind: 'sellers' }], 3), 0); // via the confirming candle
+});
+
+test('intrabarUsable: too few intrabars under a candle is flagged; candles older than the intrabars are not usable', () => {
+  const bars = [minute(0, 1, 1, 1, 1, 1), minute(5, 1, 1, 1, 1, 1), minute(10, 1, 1, 1, 1, 1)];
+  const sub = Array.from({ length: 8 }, (_, i) => minute(5 + i, 1, 1, 1, 1, 1)); // minutes 5 to 12
+  assert.deepEqual(intrabarUsable(bars, sub, 300), [false, true, false]); // 0: older than the intrabars; 5: five bars; 10: only three
+});

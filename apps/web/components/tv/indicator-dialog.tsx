@@ -199,6 +199,72 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
             </select>
           </label>
         ) : null}
+        {cfg.type === 'cvd' ? (
+          <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+            Divergences
+            <select
+              value={cfg.divMode ?? 'regular'}
+              onChange={(e) => onChange({ ...cfg, divMode: e.target.value as 'off' | 'regular' | 'all' })}
+              className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+            >
+              <option value="off">Off</option>
+              <option value="regular">Regular</option>
+              <option value="all">Regular + hidden</option>
+            </select>
+          </label>
+        ) : null}
+        {cfg.type === 'cvd' && (cfg.divMode ?? 'regular') !== 'off' ? (
+          <>
+            <NumberField
+              label="Swing size (candles each side)"
+              value={cfg.divPivot ?? 3}
+              min={1}
+              onChange={(divPivot) => onChange({ ...cfg, divPivot: Math.min(20, divPivot) })}
+            />
+            <NumberField
+              label="Max candles between swings"
+              value={cfg.divGap ?? 30}
+              min={4}
+              onChange={(divGap) => onChange({ ...cfg, divGap: Math.min(200, divGap) })}
+            />
+          </>
+        ) : null}
+        {cfg.type === 'cvd' ? (
+          <details className="mt-2 rounded border border-[#363a45] bg-[#131722] px-3 py-2 text-[12px] leading-relaxed text-[#b2b5be]">
+            <summary className="cursor-pointer text-[13px] text-[#d1d4dc]">What do these divergences mean?</summary>
+            <p className="mt-2">
+              A divergence is when price and the CVD (running buy minus sell volume) disagree between two
+              consecutive swing highs or two consecutive swing lows. It is a warning, not a signal: it can persist
+              or fail. The tag is drawn on the second swing.
+            </p>
+            <p className="mt-2">
+              <b className="text-[#26a69a]">▲ Bull div (regular bullish)</b>: price makes a <i>lower low</i>, CVD
+              makes a <i>higher low</i>. Sellers are running out of steam, so a reversal up is possible.
+            </p>
+            <p className="mt-2">
+              <b className="text-[#ef5350]">▼ Bear div (regular bearish)</b>: price makes a <i>higher high</i>, CVD
+              makes a <i>lower high</i>. Buyers are exhausted, so a reversal down is possible.
+            </p>
+            <p className="mt-2">
+              <b className="text-[#26a69a]">▲ Hidden Bull</b>: price makes a <i>higher low</i>, CVD makes a{' '}
+              <i>lower low</i>. Sellers pushed hard but price held higher, meaning buyers absorbed them. It hints
+              that an uptrend continues, so it is not a reversal.
+            </p>
+            <p className="mt-2">
+              <b className="text-[#ef5350]">▼ Hidden Bear</b>: price makes a <i>lower high</i>, CVD makes a{' '}
+              <i>higher high</i>. Buyers pushed hard but price stayed lower, meaning sellers absorbed them. It
+              hints that a downtrend continues.
+            </p>
+            <p className="mt-2">
+              <b className="text-[#d1d4dc]">Line style</b>: solid = confirmed (a candle closed through the swing
+              between the two points), dashed = still waiting, faded = failed. <b className="text-[#e879f9]">+ Δ</b>{' '}
+              = a wick/delta setup pointing the same way sits next to it.
+            </p>
+            <p className="mt-2">
+              CVD here is estimated from bars, and only candles with at least 5 minute-bars under them are used.
+            </p>
+          </details>
+        ) : null}
         {cfg.type === 'svp' ? (
           <NumberField
             label="Width (% of session)"

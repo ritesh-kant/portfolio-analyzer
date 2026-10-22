@@ -74,7 +74,16 @@ import { DrawingsPrimitive } from './drawings-primitive';
 import { NewsPrimitive } from './news-primitive';
 import { foldTrailingTick, intervalSecs } from '../../lib/tv/clean-bars';
 import { DeltaPrimitive, type DeltaMark } from './delta-primitive';
+import { CvdDivPrimitive, type CvdDivMark } from './cvd-div-primitive';
+import {
+  CVD_DIV_DEFAULTS,
+  type CvdDivergence,
+  findCvdDivergences,
+  intrabarUsable,
+  nearSetup,
+} from '../../lib/tv/cvd-divergence';
 import { DeltaPanel } from './delta-panel';
+import { CvdPanel, type CvdFilter, type CvdItem } from './cvd-panel';
 import {
   DELTA_DEFAULTS,
   type DeltaConfig,
@@ -306,6 +315,9 @@ export function TvChart() {
   const sessionsPrimRef = useRef<SessionsPrimitive | null>(null);
   const svpPrimRef = useRef<SessionProfilePrimitive | null>(null);
   const deltaPrimRef = useRef<DeltaPrimitive | null>(null);
+  /** CVD divergence layers: one on the price pane, one in each CVD pane (by indicator id). */
+  const cvdDivMainRef = useRef<CvdDivPrimitive | null>(null);
+  const cvdDivSubRef = useRef<Map<string, CvdDivPrimitive>>(new Map());
   const indStructRef = useRef<{
     key: string;
     entries: { line: Line; cfgId: string; series: ISeriesApi<SeriesType, Time> }[];
@@ -398,6 +410,11 @@ export function TvChart() {
   const [deltaMarks, setDeltaMarks] = useState(true);
   const [deltaView, setDeltaView] = useState<DeltaView>(DELTA_VIEW_DEFAULTS);
   const [deltaPick, setDeltaPick] = useState<number | null>(null);
+  // CVD divergence list: docked in the same right slot (one panel open at a time).
+  const [cvdOpen, setCvdOpen] = useState(false);
+  const [cvdFilter, setCvdFilter] = useState<CvdFilter>('all');
+  const [cvdShowFailed, setCvdShowFailed] = useState(true);
+  const [cvdPick, setCvdPick] = useState<number | null>(null);
   useEffect(() => {
     const saved = load<Partial<DeltaConfig>>('tv:deltaCfg', {});
     setDeltaCfg({
@@ -412,6 +429,9 @@ export function TvChart() {
     setDeltaView({ ...DELTA_VIEW_DEFAULTS, ...load<Partial<DeltaView>>('tv:deltaView', {}) });
     setDeltaMarks(load<boolean>('tv:deltaMarks', true));
     setDeltaOpen(load<boolean>('tv:deltaOpen', false));
+    setCvdOpen(load<boolean>('tv:cvdOpen', false));
+    setCvdFilter(load<CvdFilter>('tv:cvdFilter', 'all'));
+    setCvdShowFailed(load<boolean>('tv:cvdShowFailed', true));
   }, []);
   const [showIndicators, setShowIndicators] = useState(false);
   const [settingsId, setSettingsId] = useState<string | null>(null);
@@ -566,6 +586,53 @@ export function TvChart() {
     () => computeIndicators(indicators, bars, timeZone, subBars, tf.secs, regularHours),
     [indicators, bars, timeZone, subBars, tf.secs, regularHours],
   );
+  // Price/CVD divergences of each CVD indicator, with the delta-divergence setups they sit next to.
+  const cvdDivs = useMemo(() => {
+    const out = new Map<string, { div: CvdDivergence; near: boolean }[]>();
+    const setupRefs = divergences.map((d) => ({
+      chartIndex: d.chartIndex,
+      confirmChartIndex: d.confirmChartIndex,
+      kind: d.kind,
+    }));
+    for (const c of computed) {
+      if (c.cfg.type !== 'cvd' || (c.cfg.divMode ?? 'regular') === 'off') continue;
+      const ohlc = c.lines[0]?.ohlc;
+      if (!ohlc || ohlc.length !== bars.length) continue;
+      const anchor = c.cfg.anchor ?? 'session';
+      const keys = bars.map((b) => anchorKey(sessionDay(b.time, timeZone), anchor));
+      const found = findCvdDivergences(bars, ohlc, keys, intrabarUsable(bars, subBars, tf.secs), {
+        ...CVD_DIV_DEFAULTS,
+        pivot: c.cfg.divPivot ?? CVD_DIV_DEFAULTS.pivot,
+        maxGap: c.cfg.divGap ?? CVD_DIV_DEFAULTS.maxGap,
+        hidden: c.cfg.divMode === 'all',
+      });
+      out.set(
+        c.cfg.id,
+        found.map((div) => ({ div, near: nearSetup(div, setupRefs, 3) != null })),
+      );
+    }
+    return out;
+  }, [computed, bars, subBars, tf.secs, timeZone, divergences]);
+  // The list's rows (and what the chart draws): the divergences with their times, minus failed ones when hidden.
+  const cvdItems = useMemo<CvdItem[]>(() => {
+    const out: CvdItem[] = [];
+    for (const [id, list] of cvdDivs) {
+      for (const { div, near } of list) {
+        if (!cvdShowFailed && div.status === 'failed') continue;
+        const t = bars[div.i2]?.time;
+        if (t == null) continue;
+        const ct = div.confirmIndex == null ? null : bars[div.confirmIndex]?.time;
+        out.push({
+          key: `${id}:${div.kind}:${div.i1}:${div.i2}`,
+          div,
+          near,
+          time: t,
+          confirmTime: ct == null ? null : ct + tf.secs,
+        });
+      }
+    }
+    return out;
+  }, [cvdDivs, cvdShowFailed, bars, tf.secs]);
   const axis = useMemo(
     () =>
       makeTimeAxis(
@@ -1041,6 +1108,7 @@ export function TvChart() {
     primRef.current = new DrawingsPrimitive();
     newsPrimRef.current = new NewsPrimitive();
     deltaPrimRef.current = new DeltaPrimitive();
+    cvdDivMainRef.current = new CvdDivPrimitive(true);
     sessionsPrimRef.current = new SessionsPrimitive();
     svpPrimRef.current = new SessionProfilePrimitive();
 
@@ -1110,6 +1178,7 @@ export function TvChart() {
       series.attachPrimitive(prim);
       if (newsPrimRef.current) series.attachPrimitive(newsPrimRef.current);
       if (deltaPrimRef.current) series.attachPrimitive(deltaPrimRef.current);
+      if (cvdDivMainRef.current) series.attachPrimitive(cvdDivMainRef.current);
       if (sessionsPrimRef.current) series.attachPrimitive(sessionsPrimRef.current);
       if (svpPrimRef.current) series.attachPrimitive(svpPrimRef.current);
       mainRef.current = { key, series };
@@ -1310,6 +1379,17 @@ export function TvChart() {
       subs.set(c.cfg.id, { prim, series: host.series });
     }
     subPrimsRef.current = subs;
+    // CVD panes also get the divergence layer (drawn in CVD terms), fed by the effect further down.
+    const divSubs = new Map<string, CvdDivPrimitive>();
+    for (const c of computed) {
+      if (c.cfg.type !== 'cvd') continue;
+      const host = entries.find((e) => e.cfgId === c.cfg.id);
+      if (!host) continue;
+      const prim = new CvdDivPrimitive(false);
+      host.series.attachPrimitive(prim);
+      divSubs.set(c.cfg.id, prim);
+    }
+    cvdDivSubRef.current = divSubs;
     // Pane DOM nodes host the per-pane legends; they exist only after the first layout, so retry briefly.
     let attempts = 0;
     const syncPanes = () => {
@@ -1525,6 +1605,40 @@ export function TvChart() {
     );
   }, [divergences, deltaMarks, deltaMark, bars, chartType, fp.on, fp.showDelta]);
   useEffect(() => setDeltaPick(null), [symbol, tfId]);
+  useEffect(() => setCvdPick(null), [symbol, tfId]);
+
+  // Price/CVD divergences → a layer in each CVD pane (CVD values) and on the price pane (prices).
+  useEffect(() => {
+    const onPrice: CvdDivMark[] = [];
+    for (const c of computed) {
+      if (c.cfg.type !== 'cvd') continue;
+      const list = c.cfg.hidden
+        ? []
+        : (cvdDivs.get(c.cfg.id) ?? []).filter((x) => cvdShowFailed || x.div.status !== 'failed');
+      const mark = (
+        x: { div: CvdDivergence; near: boolean },
+        i1: number,
+        i2: number,
+        v1: number,
+        v2: number,
+      ): CvdDivMark => ({
+        i1,
+        i2,
+        v1,
+        v2,
+        bullish: x.div.bullish,
+        hidden: x.div.hidden,
+        status: x.div.status,
+        confirmIndex: x.div.confirmIndex,
+        level: x.div.level,
+        near: x.near,
+        focus: x.div.i2 === cvdPick,
+      });
+      cvdDivSubRef.current.get(c.cfg.id)?.setState(list.map((x) => mark(x, x.div.ci1, x.div.ci2, x.div.c1, x.div.c2)));
+      onPrice.push(...list.map((x) => mark(x, x.div.i1, x.div.i2, x.div.p1, x.div.p2)));
+    }
+    cvdDivMainRef.current?.setState(onPrice);
+  }, [cvdDivs, computed, chartType, structKey, cvdShowFailed, cvdPick]);
 
   // Drawings → primitive.
   useEffect(() => {
@@ -2013,6 +2127,18 @@ export function TvChart() {
     ts.setVisibleLogicalRange({ from: mid - half, to: mid + half });
     setDeltaPick(index);
     if (d && bars[index]) deltaPrimRef.current?.focus(deltaMark(d));
+  };
+
+  /** Centre the chart on a CVD divergence's second swing, keeping the zoom, and highlight it. */
+  const jumpToCvd = (index: number) => {
+    const ts = chartRef.current?.timeScale();
+    const range = ts?.getVisibleLogicalRange();
+    if (!ts || !range) return;
+    const half = (range.to - range.from) / 2;
+    ts.setVisibleLogicalRange({ from: index - half, to: index + half });
+    setCvdPick(index);
+    cvdDivMainRef.current?.pulse(index);
+    for (const prim of cvdDivSubRef.current.values()) prim.pulse(index);
   };
 
   const zoomIn = () => {
@@ -2639,7 +2765,36 @@ export function TvChart() {
             onJump={jumpToBar}
           />
         ) : null}
-        {watchOpen && !(deltaOpen && !compact) ? (
+        {cvdOpen && !deltaOpen && !compact ? (
+          <CvdPanel
+            symbol={meta?.symbol ?? symbol}
+            items={cvdItems}
+            enabled={computed.some((c) => c.cfg.type === 'cvd' && (c.cfg.divMode ?? 'regular') !== 'off')}
+            missing={
+              !indicators.some((i) => i.type === 'cvd')
+                ? 'indicator'
+                : indicators.every((i) => i.type !== 'cvd' || i.divMode === 'off')
+                  ? 'off'
+                  : null
+            }
+            onAddIndicator={() => setIndicators((list) => [...list, makeIndicator('cvd', list)])}
+            filter={cvdFilter}
+            onFilter={(f) => {
+              setCvdFilter(f);
+              save('tv:cvdFilter', f);
+            }}
+            showFailed={cvdShowFailed}
+            onShowFailed={(on) => {
+              setCvdShowFailed(on);
+              save('tv:cvdShowFailed', on);
+            }}
+            intraday={tf.intraday}
+            timeZone={timeZone}
+            active={cvdPick}
+            onJump={jumpToCvd}
+          />
+        ) : null}
+        {watchOpen && !(deltaOpen && !compact) && !(cvdOpen && !compact) ? (
           <WatchlistPanel
             active={symbol}
             overlay={compact}
@@ -2655,21 +2810,37 @@ export function TvChart() {
         ) : null}
         {compact ? null : (
           <RightRail
-            watchlistOpen={watchOpen && !deltaOpen}
+            watchlistOpen={watchOpen && !deltaOpen && !cvdOpen}
             deltaOpen={deltaOpen}
+            cvdOpen={cvdOpen && !deltaOpen}
             onWatchlist={() => {
-              const next = !(watchOpen && !deltaOpen);
+              const next = !(watchOpen && !deltaOpen && !cvdOpen);
               setWatchOpen(next);
               save('tv:watchOpen', next);
               if (next) {
                 setDeltaOpen(false);
                 save('tv:deltaOpen', false);
+                setCvdOpen(false);
+                save('tv:cvdOpen', false);
               }
             }}
             onDelta={() => {
               const next = !deltaOpen;
               setDeltaOpen(next);
               save('tv:deltaOpen', next);
+              if (next) {
+                setCvdOpen(false);
+                save('tv:cvdOpen', false);
+              }
+            }}
+            onCvd={() => {
+              const next = !(cvdOpen && !deltaOpen);
+              setCvdOpen(next);
+              save('tv:cvdOpen', next);
+              if (next) {
+                setDeltaOpen(false);
+                save('tv:deltaOpen', false);
+              }
             }}
           />
         )}

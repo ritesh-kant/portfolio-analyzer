@@ -283,6 +283,14 @@ export const Icons = {
       </>,
       size,
     ),
+  cvd: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M2.5 14l4-4 3 2.5 3-6 4.5 3" />
+        <path d="M2.5 17.5h15" />
+      </>,
+      size,
+    ),
   gear: ({ size }: IconProps) =>
     wrap(
       <>
