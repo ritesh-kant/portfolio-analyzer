@@ -13,7 +13,7 @@ import { buildProfile } from './volume-profile.ts';
 import { cotItems, metalRoot, parseBlsCalendar, parseFedRss, zonedInstant } from './macro.ts';
 import { groupByBar } from './news-markers.ts';
 import { barContaining, deltaDepthDays, findDeltaDivergences, inDeltaView, DELTA_VIEW_DEFAULTS } from './delta-divergence.ts';
-import { foldTrailingTick, intervalSecs } from './clean-bars.ts';
+import { dropSpikeWicks, foldTrailingTick, intervalSecs } from './clean-bars.ts';
 
 const IST = 'Asia/Kolkata';
 // 2026-10-19 09:15 IST
@@ -656,4 +656,119 @@ test('editPositionLevels rejects levels on the wrong side', () => {
   assert.equal(editPositionLevels(d, { target: 120 }).pts[2].p, 120);
   assert.equal(editPositionLevels(d, { stop: Number.NaN }), d);
   assert.equal(editPositionLevels(pos('short'), { stop: 110 }).pts[3].p, 110);
+});
+
+// ── cumulative volume delta ───────────────────────────────────────────────
+import { anchorKey, computeCvd, signedVolumes } from './cvd.ts';
+
+test('signedVolumes: direction of each bar, flat bars follow the close then the previous sign', () => {
+  const out = signedVolumes([
+    minute(0, 10, 11, 10, 11, 100), // up
+    minute(1, 11, 11, 10, 10, 50), // down
+    minute(2, 10, 10, 10, 10, 30), // flat, close equal to previous close: keeps selling
+    minute(3, 9, 9, 9, 9, 20), // flat bar below the previous close: selling
+  ]);
+  assert.deepEqual(out, [100, -50, -30, -20]);
+  // flat close above the previous close counts as buying
+  assert.deepEqual(signedVolumes([minute(0, 10, 10, 10, 9, 5), minute(1, 11, 11, 11, 11, 7)]), [-5, 7]);
+});
+
+test('anchorKey: session, week (Monday) and month', () => {
+  assert.equal(anchorKey('2026-10-21', 'session'), '2026-10-21');
+  assert.equal(anchorKey('2026-10-21', 'month'), '2026-10');
+  assert.equal(anchorKey('2026-10-21', 'week'), '2026-10-19'); // a Wednesday
+  assert.equal(anchorKey('2026-10-25', 'week'), '2026-10-19'); // the Sunday before the next Monday
+  assert.equal(anchorKey('2026-10-26', 'week'), '2026-10-26');
+});
+
+test('computeCvd: running total of intrabar deltas, candle high/low from the path, reset per anchor', () => {
+  // two 3-minute chart bars, minutes 0-2 and 3-5
+  const sub = [
+    minute(0, 10, 11, 10, 11, 100), // +100
+    minute(1, 11, 11, 10, 10, 150), // −150 → −50 (low)
+    minute(2, 10, 11, 10, 11, 80), // +80 → +30
+    minute(3, 11, 11, 10, 10, 20), // −20 → +10
+    minute(4, 10, 11, 10, 11, 200), // +200 → +210
+    minute(5, 11, 11, 10, 11, 0),
+  ];
+  const bars = [minute(0, 10, 11, 10, 11, 330), minute(3, 11, 11, 10, 11, 220)];
+  const out = computeCvd(bars, sub, 180, () => 'day');
+  assert.deepEqual(out[0], { open: 0, high: 100, low: -50, close: 30 });
+  assert.deepEqual(out[1], { open: 30, high: 210, low: 10, close: 210 });
+  // a new anchor period restarts the total at zero
+  const split = computeCvd(bars, sub, 180, (t) => (t < open + 180 ? 'a' : 'b'));
+  assert.equal(split[1].open, 0);
+  assert.equal(split[1].close, 180);
+});
+
+test('computeCvd: a bar with no intrabars is one intrabar of its own', () => {
+  const bars = [minute(0, 10, 12, 9, 12, 100), minute(1, 12, 12, 8, 9, 40)];
+  const out = computeCvd(bars, [], 60, () => 'day');
+  assert.deepEqual(out[0], { open: 0, high: 100, low: 0, close: 100 });
+  assert.deepEqual(out[1], { open: 100, high: 100, low: 60, close: 60 });
+});
+
+test('computeCvd: inside the loaded intrabars an empty candle adds nothing; before them it stands in for itself', () => {
+  const sub = [minute(10, 10, 11, 10, 11, 100), minute(40, 11, 11, 10, 10, 60)];
+  const bars = [minute(0, 10, 12, 9, 12, 500), minute(20, 10, 11, 10, 11, 700), minute(40, 11, 11, 10, 10, 60)];
+  const out = computeCvd(bars, sub, 600, () => 'day');
+  // the first candle is older than every intrabar: its own volume, bought
+  assert.equal(out[0].close, 500);
+  // the second sits in the loaded range with no intrabars: nothing to count
+  assert.equal(out[1].close, 500);
+  assert.deepEqual(out[2], { open: 500, high: 500, low: 440, close: 440 });
+});
+
+test('computeCvd: outside regular hours adds nothing (closing cross included) and the candle is missing', () => {
+  // minutes 0-4 regular; minute 5 is the closing cross (huge volume, closes lower); 6-9 post-market, no volume
+  const regular = (t) => t < open + 300;
+  const sub = [
+    minute(0, 10, 11, 10, 11, 100), // +100
+    minute(2, 11, 11, 10, 10, 40), // −40 → 60
+    minute(5, 10, 10, 9, 9, 5000), // closing cross: must not count
+    minute(6, 9, 9, 9, 9, 0),
+  ];
+  const bars = [
+    minute(0, 10, 11, 10, 10, 140), // 0-4: regular
+    minute(5, 10, 10, 9, 9, 5000), // 5-9: post-market candle
+  ];
+  const out = computeCvd(bars, sub, 300, () => 'day', regular);
+  assert.deepEqual(out[0], { open: 0, high: 100, low: 0, close: 60 });
+  assert.deepEqual(out[1], { open: 60, high: 60, low: 60, close: 60, missing: true });
+  // without the regular-hours filter the cross is counted (the old behaviour)
+  assert.equal(computeCvd(bars, sub, 300, () => 'day')[1].close, 60 - 5000);
+});
+
+test('computeCvd: a candle older than the intrabars, outside regular hours, is missing rather than faked', () => {
+  const regular = (t) => t >= open + 600;
+  const sub = [minute(20, 10, 11, 10, 11, 100)];
+  const bars = [minute(0, 10, 12, 9, 12, 500), minute(10, 10, 12, 9, 12, 300), minute(20, 10, 11, 10, 11, 100)];
+  const out = computeCvd(bars, sub, 600, () => 'day', regular);
+  assert.equal(out[0].missing, true);
+  assert.equal(out[1].missing, undefined);
+  assert.equal(out[1].close, 300); // regular hours, older than the intrabars: stands in for itself
+  assert.equal(out[2].close, 400);
+});
+
+test('dropSpikeWicks: stray quotes in no-volume extended-hours bars are trimmed, real bars untouched', () => {
+  const regular = (t) => t < open;
+  const b = (i, o, h, l, c, v = 0) => minute(i + 100, o, h, l, c, v);
+  const bars = [
+    b(0, 372.2, 372.3, 372.1, 372.2),
+    b(1, 372.2, 372.3, 346.7, 372.1), // low 7% under the body
+    b(2, 346.5, 372.4, 346.5, 372.2), // open 7% under the previous close
+    b(3, 372.2, 380.1, 372.1, 372.4), // high 2% over the body
+    b(4, 372.4, 372.6, 372.0, 372.5), // ordinary: untouched
+  ];
+  const out = dropSpikeWicks(bars, 60, regular);
+  assert.ok(out[1].low > 370 && out[1].low <= 372.1);
+  assert.equal(out[2].open, 372.1);
+  assert.ok(out[2].low > 370);
+  assert.ok(out[3].high < 374.5 && out[3].high >= 372.4);
+  assert.equal(out[4], bars[4]);
+  // bars with volume, regular-hours bars and an unknown interval pass through as is
+  const spiky = [b(0, 372, 380, 340, 372, 1000)];
+  assert.equal(dropSpikeWicks(spiky, 60, regular), spiky);
+  assert.equal(dropSpikeWicks(bars, 60, () => true), bars);
+  assert.equal(dropSpikeWicks(bars, null, regular), bars);
 });

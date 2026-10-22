@@ -51,6 +51,7 @@ import {
   sma,
   vwap,
 } from '../../lib/tv/indicators';
+import { type CvdCandle, anchorKey, computeCvd } from '../../lib/tv/cvd';
 import { load, save } from '../../lib/tv/storage';
 import {
   TIMEFRAMES,
@@ -139,8 +140,10 @@ interface Line {
   key: string;
   label?: string;
   color: string;
+  /** For a candle line: the close of each candle (what the legend and the axis follow). */
   values: Series;
-  kind: 'line' | 'hist';
+  kind: 'line' | 'hist' | 'candle';
+  ohlc?: CvdCandle[];
 }
 
 interface Computed {
@@ -150,7 +153,14 @@ interface Computed {
   lines: Line[];
 }
 
-function computeIndicators(indicators: IndicatorCfg[], bars: Bar[], timeZone: string): Computed[] {
+function computeIndicators(
+  indicators: IndicatorCfg[],
+  bars: Bar[],
+  timeZone: string,
+  sub: Bar[],
+  secs: number,
+  regular?: (time: number) => boolean,
+): Computed[] {
   const closes = bars.map((b) => b.close);
   const volumes = bars.map((b) => b.volume);
   let nextPane = 1;
@@ -216,6 +226,12 @@ function computeIndicators(indicators: IndicatorCfg[], bars: Bar[], timeZone: st
         // Drawn by SessionProfilePrimitive, not as a series.
         lines = [];
         break;
+      case 'cvd': {
+        const anchor = cfg.anchor ?? 'session';
+        const ohlc = computeCvd(bars, sub, secs, (t) => anchorKey(sessionDay(t, timeZone), anchor), regular);
+        lines = [{ key: 'cvd', color: UP, values: ohlc.map((c) => c.close), kind: 'candle', ohlc }];
+        break;
+      }
     }
     return { cfg, pane, lines };
   });
@@ -229,6 +245,14 @@ const fmtVolume = (v: number) =>
       : v >= 1e3
         ? `${(v / 1e3).toFixed(2)}K`
         : `${Math.round(v)}`;
+
+/** A signed volume as TradingView prints it: 1.23K, −45.6K, 2.1M. */
+const fmtDelta = (v: number) => {
+  const a = Math.abs(v);
+  const s =
+    a >= 1e6 ? `${(a / 1e6).toFixed(2)}M` : a >= 1e3 ? `${(a / 1e3).toFixed(2)}K` : `${Math.round(a)}`;
+  return v < 0 ? `−${s}` : s;
+};
 
 const histColor = (cur: number, prev: number | null) =>
   cur >= 0
@@ -437,12 +461,13 @@ export function TvChart() {
     [bars, timeZone],
   );
   const decimals = pricePrecision(bars[bars.length - 1]?.close ?? meta?.price ?? 0);
-  // The footprint's own 1-minute fetch reaches 7 days back; with the delta panel open its ~4-week 1-minute bars
-  // (same symbol) are used instead, so the footprint on the older candles the list jumps to is there too.
+  // The footprint's own 1-minute fetch reaches 7 days back; with the delta panel open, or CVD on the chart, the
+  // ~4-week 1-minute bars (same symbol) are used instead, so the older candles have real intrabars too.
+  const cvdOn = indicators.some((i) => i.type === 'cvd');
   const subBars =
     tf.source === '1m'
       ? rawBars
-      : deltaOpen && deltaSub.symbol === symbol && deltaSub.bars.length > subRaw.length
+      : (deltaOpen || cvdOn) && deltaSub.symbol === symbol && deltaSub.bars.length > subRaw.length
         ? deltaSub.bars
         : subRaw;
   const effectiveStep = fp.auto ? autoStep(bars) : fp.step;
@@ -519,9 +544,21 @@ export function TvChart() {
     () => (fp.on ? buildFootprints(bars, subBars, tf.secs, effectiveStep) : []),
     [fp.on, bars, subBars, tf.secs, effectiveStep],
   );
+  // US stocks: Yahoo reports no volume before 09:30 or after 16:00 (bar for bar, apart from the closing cross
+  // stamped 16:00), so CVD only counts regular hours there.
+  const regularHours = useMemo(() => {
+    const def = meta && hasExtendedBars({ symbol, instrumentType: meta.instrumentType, timezone: meta.timezone })
+      ? sessionFor({ symbol, instrumentType: meta.instrumentType, timezone: meta.timezone })
+      : null;
+    if (!def) return undefined;
+    return (t: number) => {
+      const minute = Math.floor((wallClock(t, timeZone) % 86400) / 60);
+      return minute >= def.start && minute < def.end;
+    };
+  }, [meta, symbol, timeZone]);
   const computed = useMemo(
-    () => computeIndicators(indicators, bars, timeZone),
-    [indicators, bars, timeZone],
+    () => computeIndicators(indicators, bars, timeZone, subBars, tf.secs, regularHours),
+    [indicators, bars, timeZone, subBars, tf.secs, regularHours],
   );
   const axis = useMemo(
     () =>
@@ -708,13 +745,13 @@ export function TvChart() {
   // Footprint needs 1-minute bars underneath coarser candles.
   const svpOn = indicators.some((i) => i.type === 'svp');
   useEffect(() => {
-    if (!ready || (!fp.on && !svpOn) || tf.source === '1m') return;
+    if (!ready || (!fp.on && !svpOn && !cvdOn) || tf.source === '1m') return;
     const ctl = new AbortController();
     fetchBars(symbol, '1m', '7d', ctl.signal, wantPrepost)
       .then((res) => setSubRaw(res.bars))
       .catch(() => setSubRaw([]));
     return () => ctl.abort();
-  }, [ready, fp.on, svpOn, symbol, tf.source, wantPrepost, fetchBars]);
+  }, [ready, fp.on, svpOn, cvdOn, symbol, tf.source, wantPrepost, fetchBars]);
 
   // Delta divergence reads 1-minute bars further back than the footprint does. NSE stocks: Upstox's exchange
   // candles, as far back as the view needs (3 months at least). Everything else: Yahoo serves them ~4 weeks back,
@@ -722,7 +759,7 @@ export function TvChart() {
   const nse = symbol.endsWith('.NS');
   const deltaDays = deltaDepthDays(deltaView, Math.floor(Date.now() / 1000));
   useEffect(() => {
-    if (!ready || !deltaOpen) return;
+    if (!ready || (!deltaOpen && !cvdOn)) return;
     const ctl = new AbortController();
     const now = Math.floor(Date.now() / 1000);
     const yahoo = () => {
@@ -732,10 +769,12 @@ export function TvChart() {
           fetchWindow(symbol, '1m', now - week * (k + 1), now - week * k, ctl.signal, wantPrepost),
         ),
       );
-      // 5-minute bars reach 60 days: they carry the delta for candles older than the 1-minute bars
-      const mid = fetchBars(symbol, '5m', '60d', ctl.signal, wantPrepost)
-        .then((res) => res.bars)
-        .catch(() => [] as Bar[]);
+      // 5-minute bars reach 60 days: they carry the delta for candles older than the 1-minute bars (panel only)
+      const mid = deltaOpen
+        ? fetchBars(symbol, '5m', '60d', ctl.signal, wantPrepost)
+            .then((res) => res.bars)
+            .catch(() => [] as Bar[])
+        : Promise.resolve([] as Bar[]);
       void Promise.all([windows, mid]).then(([results, bars5]) => {
         if (ctl.signal.aborted) return;
         const byTime = new Map<number, Bar>();
@@ -764,7 +803,7 @@ export function TvChart() {
         });
     }
     return () => ctl.abort();
-  }, [ready, deltaOpen, symbol, nse, deltaDays, wantPrepost, fetchWindow, fetchBars, fetchUpstox]);
+  }, [ready, deltaOpen, cvdOn, symbol, nse, deltaDays, wantPrepost, fetchWindow, fetchBars, fetchUpstox]);
 
   // The chart's own bars only go back as far as Yahoo's intraday history (60 days for 5m/15m/30m, 7 days for
   // 1m), so older setups would have nowhere to be drawn: fill in the earlier bars from Upstox.
@@ -1183,6 +1222,22 @@ export function TvChart() {
             0,
           );
           series.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+        } else if (line.kind === 'candle') {
+          series = chart.addSeries(
+            CandlestickSeries,
+            {
+              upColor: UP,
+              downColor: DOWN,
+              borderUpColor: UP,
+              borderDownColor: DOWN,
+              wickUpColor: UP,
+              wickDownColor: DOWN,
+              priceFormat: { type: 'volume' },
+              lastValueVisible: true,
+              priceLineVisible: false,
+            },
+            c.pane,
+          );
         } else if (line.kind === 'hist') {
           series = chart.addSeries(
             HistogramSeries,
@@ -1329,6 +1384,15 @@ export function TvChart() {
             out.push({ time: wall[idx]!, value: v, color: b.close >= b.open ? VOL_UP : VOL_DOWN });
           });
           entry.series.setData(out as never);
+        } else if (line.kind === 'candle') {
+          // A candle with no volume data is a gap, not a flat line at the running total
+          entry.series.setData(
+            (line.ohlc ?? []).map((k, idx) =>
+              k.missing
+                ? { time: wall[idx]! }
+                : { time: wall[idx]!, open: k.open, high: k.high, low: k.low, close: k.close },
+            ) as never,
+          );
         } else if (line.kind === 'hist') {
           const out: { time: UTCTimestamp; value: number; color: string }[] = [];
           let prev: number | null = null;
@@ -1949,6 +2013,7 @@ export function TvChart() {
   const valueText = (c: Computed, line: Line) => {
     const v = line.values[idx];
     if (v == null) return '';
+    if (c.cfg.type === 'cvd') return fmtDelta(v);
     if (c.cfg.type === 'volume') return fmtVolume(v);
     if (c.cfg.type === 'rvol' || c.cfg.type === 'rsi') return v.toFixed(2);
     if (c.cfg.type === 'atr') return v.toFixed(decimals);
@@ -1965,16 +2030,43 @@ export function TvChart() {
       <span className={c.cfg.hidden ? 'text-[#5d606b]' : 'text-[#b2b5be]'}>
         {indicatorLabel(c.cfg)}
       </span>
-      {c.cfg.hidden ? null : c.lines.map((l) => (
-        <span
-          key={l.key}
-          style={{
-            color: c.cfg.type === 'volume' ? (bar && bar.close >= bar.open ? UP : DOWN) : l.color,
-          }}
-        >
-          {valueText(c, l)}
-        </span>
-      ))}
+      {c.cfg.hidden ? null : c.lines.map((l) => {
+        const k = l.ohlc?.[idx];
+        if (k?.missing) {
+          return (
+            <span key={l.key} className="text-[#787b86]" title="Yahoo reports no volume outside regular hours">
+              n/a
+            </span>
+          );
+        }
+        if (k) {
+          // CVD candle: open / high / low / close of the running total, in the candle's colour
+          return (
+            <span
+              key={l.key}
+              className="flex items-center gap-2 tabular-nums"
+              style={{ color: k.close >= k.open ? UP : DOWN }}
+            >
+              {(['open', 'high', 'low', 'close'] as const).map((f) => (
+                <span key={f}>
+                  {f[0]!.toUpperCase()}
+                  <b className="ml-0.5 font-medium">{fmtDelta(k[f])}</b>
+                </span>
+              ))}
+            </span>
+          );
+        }
+        return (
+          <span
+            key={l.key}
+            style={{
+              color: c.cfg.type === 'volume' ? (bar && bar.close >= bar.open ? UP : DOWN) : l.color,
+            }}
+          >
+            {valueText(c, l)}
+          </span>
+        );
+      })}
       <span
         className={`flex gap-1 transition-opacity group-hover:opacity-100 ${c.cfg.hidden ? 'opacity-100' : 'opacity-0'}`}
       >

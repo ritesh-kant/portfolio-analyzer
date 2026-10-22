@@ -8,6 +8,7 @@ import {
   catalogOf,
   indicatorLabel,
 } from '../../lib/tv/indicator-defs';
+import { CVD_ANCHORS, type CvdAnchor } from '../../lib/tv/cvd';
 import { Icons } from './icons';
 
 interface PickerProps {
@@ -168,7 +169,7 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
             <Icons.close size={20} />
           </button>
         </div>
-        {cfg.type !== 'vwap' && cfg.type !== 'volume' ? (
+        {cfg.type !== 'vwap' && cfg.type !== 'volume' && cfg.type !== 'cvd' ? (
           <NumberField
             label={
               cfg.type === 'macd'
@@ -181,6 +182,22 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
             min={cfg.type === 'svp' ? 0 : 1}
             onChange={(length) => onChange({ ...cfg, length })}
           />
+        ) : null}
+        {cfg.type === 'cvd' ? (
+          <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+            Anchor period
+            <select
+              value={cfg.anchor ?? 'session'}
+              onChange={(e) => onChange({ ...cfg, anchor: e.target.value as CvdAnchor })}
+              className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+            >
+              {CVD_ANCHORS.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+          </label>
         ) : null}
         {cfg.type === 'svp' ? (
           <NumberField
@@ -224,7 +241,7 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
             onChange={(mult) => onChange({ ...cfg, mult })}
           />
         ) : null}
-        {cfg.type !== 'volume' && cfg.type !== 'svp' ? (
+        {cfg.type !== 'volume' && cfg.type !== 'svp' && cfg.type !== 'cvd' ? (
           <div className="flex items-center justify-between py-1.5 text-[13px] text-[#d1d4dc]">
             Colour
             <div className="flex gap-1.5">

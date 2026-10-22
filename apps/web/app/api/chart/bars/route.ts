@@ -1,4 +1,7 @@
 import { NextResponse } from 'next/server';
+import { dropSpikeWicks, intervalSecs } from '../../../../lib/tv/clean-bars';
+import { hasExtendedBars, sessionFor } from '../../../../lib/tv/sessions';
+import { wallClock } from '../../../../lib/tv/timeframes';
 import type { Bar, BarsResponse } from '../../../../lib/tv/types';
 
 export const dynamic = 'force-dynamic';
@@ -113,19 +116,27 @@ export async function GET(req: Request) {
       bars.push({ time, open, high, low, close, volume: quote.volume?.[i] ?? 0 });
     });
     const m = result.meta;
+    const meta: BarsResponse['meta'] = {
+      symbol: String(m.symbol ?? symbol),
+      name: String(m.longName ?? m.shortName ?? m.symbol ?? symbol),
+      currency: String(m.currency ?? ''),
+      exchange: String(m.fullExchangeName ?? m.exchangeName ?? ''),
+      timezone: String(m.exchangeTimezoneName ?? 'UTC'),
+      instrumentType: String(m.instrumentType ?? ''),
+      prevClose: typeof m.chartPreviousClose === 'number' ? m.chartPreviousClose : null,
+      price: typeof m.regularMarketPrice === 'number' ? m.regularMarketPrice : null,
+    };
+    // US stocks: stray quotes in the no-volume pre/post-market bars draw as wicks off the scale
+    const def = hasExtendedBars({ ...meta, symbol }) ? sessionFor({ ...meta, symbol }) : null;
     const body: BarsResponse = {
       interval,
-      bars,
-      meta: {
-        symbol: String(m.symbol ?? symbol),
-        name: String(m.longName ?? m.shortName ?? m.symbol ?? symbol),
-        currency: String(m.currency ?? ''),
-        exchange: String(m.fullExchangeName ?? m.exchangeName ?? ''),
-        timezone: String(m.exchangeTimezoneName ?? 'UTC'),
-        instrumentType: String(m.instrumentType ?? ''),
-        prevClose: typeof m.chartPreviousClose === 'number' ? m.chartPreviousClose : null,
-        price: typeof m.regularMarketPrice === 'number' ? m.regularMarketPrice : null,
-      },
+      bars: def
+        ? dropSpikeWicks(bars, intervalSecs(interval), (t) => {
+            const minute = Math.floor((wallClock(t, meta.timezone) % 86400) / 60);
+            return minute >= def.start && minute < def.end;
+          })
+        : bars,
+      meta,
     };
     return NextResponse.json(body, { headers: { 'Cache-Control': 'no-store' } });
   } catch (e) {

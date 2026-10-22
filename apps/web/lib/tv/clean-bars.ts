@@ -31,3 +31,43 @@ export function foldTrailingTick(bars: Bar[], secs: number | null): Bar[] {
     },
   ];
 }
+
+/** How far a no-volume bar's open may sit from the previous close, and its wicks from its body. */
+export const SPIKE_TOLERANCE = 0.005;
+
+/**
+ * Yahoo's pre/post-market bars carry no volume, and some of their prices are stray quotes, not trades: a TSLA
+ * 15-minute bar opening at 346.53 between bars at 372, or a low 7% under the bar. They draw as wicks running off
+ * the scale. For a zero-volume bar outside regular hours (`regular(time)` false):
+ *   - an open more than SPIKE_TOLERANCE from the previous close, in a bar that directly follows it, is that close;
+ *   - high and low are held within SPIKE_TOLERANCE of the bar's own body.
+ * Bars with volume, regular-hours bars and the first bar after a gap (where a real gap can open) are left alone.
+ */
+export function dropSpikeWicks(
+  bars: Bar[],
+  secs: number | null,
+  regular: (time: number) => boolean,
+): Bar[] {
+  if (!secs) return bars;
+  let changed = false;
+  const out = bars.map((b, i) => {
+    if (b.volume > 0 || regular(b.time)) return b;
+    const prev = bars[i - 1];
+    let open = b.open;
+    if (
+      prev &&
+      b.time - prev.time === secs &&
+      Math.abs(open / prev.close - 1) > SPIKE_TOLERANCE
+    ) {
+      open = prev.close;
+    }
+    const top = Math.max(open, b.close);
+    const bottom = Math.min(open, b.close);
+    const high = Math.max(top, Math.min(b.high, top * (1 + SPIKE_TOLERANCE)));
+    const low = Math.min(bottom, Math.max(b.low, bottom * (1 - SPIKE_TOLERANCE)));
+    if (open === b.open && high === b.high && low === b.low) return b;
+    changed = true;
+    return { ...b, open, high, low };
+  });
+  return changed ? out : bars;
+}

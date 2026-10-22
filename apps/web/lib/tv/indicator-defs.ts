@@ -8,7 +8,8 @@ export type IndicatorType =
   | 'macd'
   | 'rsi'
   | 'atr'
-  | 'svp';
+  | 'svp'
+  | 'cvd';
 
 export interface IndicatorCfg {
   id: string;
@@ -23,6 +24,8 @@ export interface IndicatorCfg {
   width?: number;
   /** Session volume profile colouring: up/down volume split, or total with a grey value area. */
   style?: 'split' | 'total';
+  /** Cumulative volume delta: the period the running total restarts in. */
+  anchor?: 'session' | 'week' | 'month';
   /** Bollinger std-dev multiplier. */
   mult?: number;
   color: string;
@@ -112,6 +115,13 @@ export const CATALOG: CatalogEntry[] = [
     where: 'overlay',
     defaults: { type: 'svp', length: 0, width: 30, style: 'total' },
   },
+  {
+    type: 'cvd',
+    name: 'Cumulative Volume Delta',
+    description: 'Running total of buying minus selling volume, drawn as candles',
+    where: 'pane',
+    defaults: { type: 'cvd', length: 0, anchor: 'session' },
+  },
 ];
 
 export const catalogOf = (type: IndicatorType): CatalogEntry =>
@@ -180,5 +190,7 @@ export function indicatorLabel(i: IndicatorCfg): string {
       return `RSI ${i.length} close`;
     case 'svp':
       return `SVP ${i.length > 0 ? i.length : 'auto'}`;
+    case 'cvd':
+      return 'CVD';
   }
 }
