@@ -9,26 +9,30 @@ import type {
   Time,
 } from 'lightweight-charts';
 import type { Bar } from '../../lib/tv/types';
+import { type VpSettings, VP_DEFAULTS, withAlpha } from '../../lib/tv/drawings';
 import { type VolumeProfile, buildProfile } from '../../lib/tv/volume-profile';
 import { logicalX } from './coords';
 
-export type SvpStyle = 'split' | 'total';
-
 export interface SvpOptions {
-  /** Price rows per session; 0 = automatic (about one row per few screen pixels). */
+  /** Price rows per session. */
   rows: number;
-  /** Fraction of a session's width its busiest row may fill. */
-  width: number;
-  style: SvpStyle;
+  /** Look and inputs, shared with the fixed range volume profile. */
+  vp: VpSettings;
+  /** Price decimals, for the level labels. */
+  decimals: number;
   /** Candle length in seconds. */
   secs: number;
   /** 1-minute candles for a finer profile, where they cover the session. */
   fine: Bar[] | null;
 }
 
-const NONE: SvpOptions = { rows: 24, width: 0.3, style: 'split', secs: 60, fine: null };
-/** Target screen height of one row in automatic mode. */
-const AUTO_ROW_PX = 3;
+const NONE: SvpOptions = {
+  rows: 24,
+  vp: { ...VP_DEFAULTS, showBackground: false },
+  decimals: 2,
+  secs: 60,
+  fine: null,
+};
 
 /** First index in `bars` whose time is >= t. */
 function lowerBound(bars: Bar[], t: number): number {
@@ -94,7 +98,7 @@ export class SessionProfilePrimitive implements ISeriesPrimitive<Time> {
     this.requestUpdate?.();
   }
 
-  private profileOf(a: number, b: number, rows: number): VolumeProfile | null {
+  private profileOf(a: number, b: number, rows: number, valueArea: number): VolumeProfile | null {
     const { fine, secs } = this.opts;
     const start = this.bars[a]!.time;
     const lastStart = this.bars[b]!.time;
@@ -108,10 +112,10 @@ export class SessionProfilePrimitive implements ISeriesPrimitive<Time> {
     const i0 = useFine ? lowerBound(fine!, start) : a;
     const i1 = useFine ? lowerBound(fine!, lastStart + secs) - 1 : b;
     const last = source[i1];
-    const key = `${a}|${b}|${rows}|${useFine}|${i1}|${last?.volume}|${last?.high}|${last?.low}`;
+    const key = `${a}|${b}|${rows}|${valueArea}|${useFine}|${i1}|${last?.volume}|${last?.high}|${last?.low}`;
     if (this.cache.has(key)) return this.cache.get(key)!;
     if (this.cache.size > 600) this.cache.clear();
-    const profile = i1 >= i0 ? buildProfile(source, i0, i1, rows) : null;
+    const profile = i1 >= i0 ? buildProfile(source, i0, i1, rows, valueArea) : null;
     this.cache.set(key, profile);
     return profile;
   }
@@ -123,7 +127,9 @@ export class SessionProfilePrimitive implements ISeriesPrimitive<Time> {
     const visible = chart.timeScale().getVisibleLogicalRange();
     if (!visible) return;
     const y = (price: number) => series.priceToCoordinate(price);
-    const { style, width } = this.opts;
+    const { vp, decimals } = this.opts;
+    const rows = this.opts.rows > 0 ? this.opts.rows : 24;
+    const fromRight = vp.placement === 'right';
 
     for (const [a, b] of this.sessions) {
       if (b < visible.from - 1 || a > visible.to + 1) continue;
@@ -131,78 +137,68 @@ export class SessionProfilePrimitive implements ISeriesPrimitive<Time> {
       const x1 = logicalX(chart, b + 0.5);
       if (x0 == null || x1 == null || x1 < 0 || x0 > w) continue;
 
-      let rows = this.opts.rows;
-      if (rows <= 0) {
-        let lo = Infinity;
-        let hi = -Infinity;
-        for (let i = a; i <= b; i += 1) {
-          lo = Math.min(lo, this.bars[i]!.low);
-          hi = Math.max(hi, this.bars[i]!.high);
-        }
-        const yHi = y(hi);
-        const yLo = y(lo);
-        rows = yHi != null && yLo != null ? Math.round(Math.abs(yLo - yHi) / AUTO_ROW_PX) : 24;
-        rows = Math.max(12, Math.min(400, rows));
-      }
-
-      const profile = this.profileOf(a, b, rows);
+      const profile = this.profileOf(a, b, rows, vp.valueArea / 100);
       if (!profile || profile.maxRow <= 0) continue;
-      const maxLen = (x1 - x0) * width;
 
-      if (style === 'total') {
-        // Grey box over the value area's price span, across the whole session.
-        const vTop = y(profile.vah);
-        const vBottom = y(profile.val);
-        if (vTop != null && vBottom != null) {
-          ctx.fillStyle = 'rgba(140, 140, 150, 0.22)';
-          ctx.fillRect(x0, Math.min(vTop, vBottom), x1 - x0, Math.abs(vBottom - vTop));
+      if (vp.showBackground) {
+        const yTop = y(profile.hi);
+        const yBottom = y(profile.lo);
+        if (yTop != null && yBottom != null) {
+          ctx.fillStyle = withAlpha(vp.backgroundColor, vp.backgroundOpacity);
+          ctx.fillRect(x0, yTop, x1 - x0, yBottom - yTop);
         }
       }
 
+      // Histogram grows from the session's edge: up volume then down volume (or one colour for total), value area brighter.
+      const maxLen = (x1 - x0) * (vp.width / 100);
+      const edge = fromRight ? x1 : x0;
+      const sign = fromRight ? -1 : 1;
       profile.rows.forEach((row, i) => {
         const top = y(row.price + profile.step);
         const bottom = y(row.price);
         const total = row.up + row.down;
         if (top == null || bottom == null || total <= 0) return;
-        const h = Math.max(1, Math.abs(bottom - top) - (Math.abs(bottom - top) > 3 ? 1 : 0));
+        const h = Math.max(1, Math.abs(bottom - top) - 1);
+        const yy = Math.min(top, bottom);
         const len = (maxLen * total) / profile.maxRow;
-        const rowTop = Math.min(top, bottom);
+        const upLen = vp.volume === 'total' ? len : (len * row.up) / total;
         const inValue = i >= profile.vaLo && i <= profile.vaHi;
-        if (style === 'total') {
-          ctx.fillStyle = inValue ? 'rgba(205, 205, 212, 0.8)' : 'rgba(59, 130, 246, 0.9)';
-          ctx.fillRect(x0, rowTop, len, h);
-        } else {
-          const upLen = (len * row.up) / total;
-          ctx.fillStyle = inValue ? 'rgba(41, 98, 255, 0.45)' : 'rgba(41, 98, 255, 0.22)';
-          ctx.fillRect(x0, rowTop, upLen, h);
-          ctx.fillStyle = inValue ? 'rgba(251, 192, 45, 0.5)' : 'rgba(251, 192, 45, 0.25)';
-          ctx.fillRect(x0 + upLen, rowTop, len - upLen, h);
+        const alpha = inValue ? vp.opacity : vp.opacity * 0.45;
+        const seg = (from: number, length: number) => {
+          const sx = edge + sign * from;
+          ctx.fillRect(fromRight ? sx - length : sx, yy, length, h);
+        };
+        ctx.fillStyle = withAlpha(inValue ? vp.vaUpColor : vp.upColor, alpha);
+        seg(0, upLen);
+        if (vp.volume !== 'total') {
+          ctx.fillStyle = withAlpha(inValue ? vp.vaDownColor : vp.downColor, alpha);
+          seg(upLen, len - upLen);
         }
       });
 
-      const poc = y(profile.pocPrice);
-      if (poc != null) {
-        ctx.strokeStyle = style === 'total' ? '#e879f9' : 'rgba(242, 54, 69, 0.75)';
-        ctx.lineWidth = 1;
+      // Point of control and value-area edges run across the whole session.
+      ctx.font = '10px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
+      ctx.textAlign = fromRight ? 'left' : 'right';
+      ctx.textBaseline = 'bottom';
+      const level = (price: number, label: string, color: string, lineWidth: number) => {
+        const ly = y(price);
+        if (ly == null) return;
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = lineWidth;
         ctx.beginPath();
-        ctx.moveTo(x0, poc);
-        ctx.lineTo(x1, poc);
+        ctx.moveTo(x0, ly);
+        ctx.lineTo(x1, ly);
         ctx.stroke();
+        if (vp.showLabels) ctx.fillText(`${label} ${price.toFixed(decimals)}`, fromRight ? x0 + 4 : x1 - 4, ly - 2);
+      };
+      if (vp.showVa) {
+        level(profile.vah, 'VAH', vp.vaLineColor, 1);
+        level(profile.val, 'VAL', vp.vaLineColor, 1);
       }
-
-      if (style === 'total') {
-        // The session's open→close as a short bar just left of the profile.
-        const open = y(this.bars[a]!.open);
-        const close = y(this.bars[b]!.close);
-        if (open != null && close != null) {
-          ctx.strokeStyle = this.bars[b]!.close >= this.bars[a]!.open ? '#22c55e' : '#ef4444';
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.moveTo(x0 - 3, open);
-          ctx.lineTo(x0 - 3, close);
-          ctx.stroke();
-        }
-      }
+      if (vp.showPoc) level(profile.pocPrice, 'POC', vp.pocColor, vp.pocWidth);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
     }
   }
 }

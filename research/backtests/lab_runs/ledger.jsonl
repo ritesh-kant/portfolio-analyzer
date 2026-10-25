@@ -242,3 +242,11 @@
 {"id": "20261012-202302-9538f8", "key": "9538f8e49f90", "window": "6c56d7f17047", "at": "2026-10-12T20:23:02", "plugins": ["market_reaction", "news", "tap_high_ceiling", "target_fixed_rr"]}
 {"id": "20261012-202353-371080", "key": "3710800fdaf6", "window": "6c56d7f17047", "at": "2026-10-12T20:23:53", "plugins": ["market_reaction", "news", "news_pullback", "tap_high_ceiling", "target_fixed_rr"]}
 {"id": "20261012-205104-ed4ba5", "key": "ed4ba59b1a40", "window": "6c56d7f17047", "at": "2026-10-12T20:51:04", "plugins": ["market_reaction", "news", "news_pullback", "tap_high_ceiling", "target_fixed_rr"]}
+{"id": "20261023-182705-352b76", "key": "352b7696783d", "window": "3066ed37854c", "at": "2026-10-23T18:27:05", "plugins": []}
+{"id": "20261023-182709-e39855", "key": "e398555f73b8", "window": "3066ed37854c", "at": "2026-10-23T18:27:09", "plugins": ["cvd_divergence"]}
+{"id": "20261023-182713-7592dd", "key": "7592dd7c126b", "window": "3066ed37854c", "at": "2026-10-23T18:27:13", "plugins": ["cvd_divergence"]}
+{"id": "20261023-182716-060398", "key": "060398f7d715", "window": "3066ed37854c", "at": "2026-10-23T18:27:16", "plugins": ["cvd_divergence"]}
+{"id": "20261023-182720-43ca91", "key": "43ca91a4003d", "window": "3066ed37854c", "at": "2026-10-23T18:27:20", "plugins": ["cvd_divergence"]}
+{"id": "20261023-182724-dd455d", "key": "dd455dc2091c", "window": "3066ed37854c", "at": "2026-10-23T18:27:24", "plugins": ["cvd_divergence"]}
+{"id": "20261023-182727-58e0c3", "key": "58e0c3547cfe", "window": "3066ed37854c", "at": "2026-10-23T18:27:27", "plugins": ["cvd_divergence"]}
+{"id": "20261023-182731-39b0ee", "key": "39b0ee6d17f0", "window": "3066ed37854c", "at": "2026-10-23T18:27:31", "plugins": ["delta_divergence"]}

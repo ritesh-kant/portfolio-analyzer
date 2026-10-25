@@ -3,12 +3,16 @@
 import { Icons } from './icons';
 
 interface Props {
+  screenerOpen: boolean;
+  onScreener: () => void;
   watchlistOpen: boolean;
   onWatchlist: () => void;
   deltaOpen: boolean;
   onDelta: () => void;
   cvdOpen: boolean;
   onCvd: () => void;
+  hideDivs: boolean;
+  onHideDivs: () => void;
 }
 
 const button = (open: boolean) =>
@@ -17,7 +21,7 @@ const button = (open: boolean) =>
   }`;
 
 /** TradingView's right-hand icon rail: the watchlist, the delta-divergence panel and the CVD-divergence panel share the one docked slot. */
-export function RightRail({ watchlistOpen, onWatchlist, deltaOpen, onDelta, cvdOpen, onCvd }: Props) {
+export function RightRail({ screenerOpen, onScreener, watchlistOpen, onWatchlist, deltaOpen, onDelta, cvdOpen, onCvd, hideDivs, onHideDivs }: Props) {
   return (
     <div className="flex w-[48px] shrink-0 flex-col items-center gap-1 border-l border-[#2a2e39] bg-[#131722] py-1.5">
       <button
@@ -27,6 +31,14 @@ export function RightRail({ watchlistOpen, onWatchlist, deltaOpen, onDelta, cvdO
         className={button(watchlistOpen)}
       >
         <Icons.list size={22} />
+      </button>
+      <button
+        type="button"
+        title="Stock screener"
+        onClick={onScreener}
+        className={button(screenerOpen)}
+      >
+        <Icons.screener size={22} />
       </button>
       <button
         type="button"
@@ -43,6 +55,14 @@ export function RightRail({ watchlistOpen, onWatchlist, deltaOpen, onDelta, cvdO
         className={button(cvdOpen)}
       >
         <Icons.cvd size={22} />
+      </button>
+      <button
+        type="button"
+        title={hideDivs ? 'Show delta and CVD divergences on the chart' : 'Hide delta and CVD divergences on the chart'}
+        onClick={onHideDivs}
+        className={`${button(hideDivs)} mt-1`}
+      >
+        {hideDivs ? <Icons.eyeOff size={22} /> : <Icons.eye size={22} />}
       </button>
     </div>
   );

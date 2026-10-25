@@ -1,0 +1,182 @@
+{
+ "id": "20261023-182724-dd455d",
+ "key": "dd455dc2091c",
+ "window": "3066ed37854c",
+ "created_at": "2026-10-23T18:27:24",
+ "name": "CVD div p3",
+ "notes": "Exploratory: CVD divergence pivot 1/2/3 x delta, market buy at the next minute when the signal is known, 15m candles, 2026.",
+ "starred": false,
+ "is_base": false,
+ "base_id": "20261023-182705-352b76",
+ "config": {
+  "years": [
+   2026
+  ],
+  "base": {
+   "day_chg_max": 8.0,
+   "day_chg_min": 4.0,
+   "entry_cutoff_min": 870,
+   "entry_mode": "market",
+   "entry_slip_pct": 0.03,
+   "fill_valid_minutes": 15,
+   "pattern_tf": "5m",
+   "rvol_min": 3.0,
+   "session_level_sessions": 10,
+   "stop_buffer_pct": 0.1,
+   "target_buffer_pct": 0.15
+  },
+  "patterns": [
+   "bullish_engulfing",
+   "dragonfly_doji",
+   "hammer",
+   "inverted_hammer",
+   "morning_doji_star",
+   "morning_star",
+   "rising_three",
+   "three_white_soldiers",
+   "tweezer_bottom"
+  ],
+  "risk_inr": 500.0,
+  "max_notional_inr": 50000.0,
+  "max_trades": 0,
+  "plugins": [
+   {
+    "id": "cvd_divergence",
+    "params": {
+     "kinds": "all",
+     "max_gap": 30,
+     "pivot": 3,
+     "timeframe": "15m",
+     "with_delta": "off",
+     "within_min": 0
+    }
+   }
+  ],
+  "lab_version": "lab-1"
+ },
+ "git": {
+  "sha": "b77b0a6",
+  "dirty": true
+ },
+ "metrics": {
+  "n": 55,
+  "symbols": 44,
+  "days": 47,
+  "win_pct": 38.2,
+  "gross_pct_mean": 0.05,
+  "net_real_pct_mean": -0.1561,
+  "net_stress_pct_mean": -0.9563,
+  "net_real_inr": -4138.0,
+  "net_stress_inr": -23517.0,
+  "gross_inr": 852.0,
+  "costs_inr": 4990.0,
+  "mean_inr": -75.24,
+  "median_inr": -39.55,
+  "mean_ex_top5_inr": -131.11,
+  "top5_share_pct": null,
+  "profit_factor": 0.55,
+  "avg_win_inr": 243.5,
+  "avg_loss_inr": -272.1,
+  "max_drawdown_inr": -4462.0,
+  "deployed_inr": 2421898.0,
+  "return_on_deployed_pct": -0.171,
+  "mean_r": -0.304,
+  "target_hit_pct": 50.9,
+  "stop_pct": 36.4,
+  "exit_mix": {
+   "target": 28,
+   "stop": 20,
+   "eod": 7
+  },
+  "stop_source_mix": {
+   "support": 55
+  },
+  "by_year": [
+   {
+    "year": 2026,
+    "n": 55,
+    "net_real_inr": -4138.0,
+    "mean_inr": -75.2,
+    "win_pct": 38.2
+   }
+  ],
+  "curve": [
+   -483.3,
+   -770.2,
+   -571.8,
+   -605.1,
+   -471.1,
+   -1032.0,
+   -1627.6,
+   -1698.5,
+   -1997.4,
+   -1630.9,
+   -1272.6,
+   -1196.7,
+   -1028.9,
+   -1111.0,
+   -968.7,
+   -1498.3,
+   -1461.7,
+   -1955.3,
+   -1411.2,
+   -1688.7,
+   -1449.3,
+   -1492.4,
+   -1522.5,
+   -1461.5,
+   -1377.2,
+   -1977.8,
+   -2523.0,
+   -2258.4,
+   -2836.6,
+   -2876.2,
+   -2928.3,
+   -3192.8,
+   -3552.5,
+   -3059.2,
+   -3640.4,
+   -3988.6,
+   -4031.2,
+   -3447.7,
+   -3200.0,
+   -3116.2,
+   -3521.4,
+   -3556.6,
+   -3856.3,
+   -4115.7,
+   -4119.4,
+   -4039.5,
+   -4123.9,
+   -4439.3,
+   -4462.3,
+   -4152.6,
+   -3722.7,
+   -4048.5,
+   -4311.3,
+   -4099.6,
+   -4138.1
+  ]
+ },
+ "vs_base": {
+  "base_id": "20261023-182705-352b76",
+  "overlap": {
+   "base_n": 4496,
+   "run_n": 55,
+   "same": 18,
+   "dropped": 4478,
+   "new": 37
+  },
+  "removed": {
+   "n": 4478,
+   "mean_inr": -117.4,
+   "median_inr": -62.72,
+   "net_real_inr": -525708.0
+  },
+  "kept_vs_removed": {
+   "z": -0.14,
+   "p": 0.887
+  }
+ },
+ "trial_n": 5
+}

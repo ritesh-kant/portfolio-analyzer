@@ -12,7 +12,7 @@ import type {
 import { logicalX } from './coords';
 import type { Bar } from '../../lib/tv/types';
 import { DEFAULT_ROWS, type VolumeProfile, buildProfile } from '../../lib/tv/volume-profile';
-import { type Drawing, FIB_LEVELS, type Pt, type TimeAxis, formatDuration } from '../../lib/tv/drawings';
+import { type Drawing, FREEHAND, type Pt, fibOf, vpOf, withAlpha, lineDash, type TimeAxis, formatDuration } from '../../lib/tv/drawings';
 import {
   POSITION_PROFIT,
   POSITION_STOP,
@@ -58,6 +58,20 @@ function distToSegment(p: Px, a: Px, b: Px): number {
   return Math.sqrt(dist2(p, { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) }));
 }
 
+const ARROW_MARK_W = 22;
+const ARROW_MARK_H = 30;
+
+/** Isosceles triangle inscribed in the box spanned by two anchors: apex top-middle, base along the bottom. */
+function triangleVerts(a: Px, b: Px): [Px, Px, Px] {
+  const top = Math.min(a.y, b.y);
+  const bottom = Math.max(a.y, b.y);
+  return [
+    { x: (a.x + b.x) / 2, y: top },
+    { x: Math.max(a.x, b.x), y: bottom },
+    { x: Math.min(a.x, b.x), y: bottom },
+  ];
+}
+
 /** Extend the line a→b to the pane's right (or left) edge. */
 function rayEnd(a: Px, b: Px, w: number): Px {
   if (b.x === a.x) return { x: b.x, y: b.y > a.y ? 1e5 : -1e5 };
@@ -69,7 +83,7 @@ function rayEnd(a: Px, b: Px, w: number): Px {
 
 function fibLevelPrice(d: Drawing, v: number): number {
   const [a, b] = d.pts as unknown as [{ p: number }, { p: number }];
-  return b.p + (a.p - b.p) * v;
+  return fibOf(d).reverse ? a.p + (b.p - a.p) * v : b.p + (a.p - b.p) * v;
 }
 
 /**
@@ -192,11 +206,12 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     const a = Math.round(this.state.axis.toLogical(d.pts[0]!.t));
     const b = Math.round(this.state.axis.toLogical(d.pts[1]!.t));
     const rows = d.rows ?? DEFAULT_ROWS;
+    const va = vpOf(d).valueArea;
     const last = bars[bars.length - 1]!;
-    const key = `${a}|${b}|${rows}|${bars.length}|${last.volume}|${last.high}|${last.low}`;
+    const key = `${a}|${b}|${rows}|${va}|${bars.length}|${last.volume}|${last.high}|${last.low}`;
     const hit = this.profiles.get(d.id);
     if (hit?.key === key) return hit.profile;
-    const profile = buildProfile(bars, a, b, rows);
+    const profile = buildProfile(bars, a, b, rows, va / 100);
     this.profiles.set(d.id, { key, profile });
     return profile;
   }
@@ -272,6 +287,8 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   private handlePoints(d: Drawing, g: Geometry): (Px | null)[] {
     if (d.kind === 'hline') return [null];
     if (d.kind === 'vline') return [null];
+    // A freehand stroke has hundreds of points: it is moved as a whole, never reshaped.
+    if (FREEHAND.has(d.kind)) return [];
     return g.pts;
   }
 
@@ -306,11 +323,12 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         return inside || nearEdge;
       }
       case 'fib': {
-        const x0 = Math.min(a.x, b!.x);
-        const x1 = Math.max(a.x, b!.x);
-        if (distToSegment(p, a, b!) <= tol) return true;
+        const fib = fibOf(d);
+        const x0 = fib.extendLeft ? -1e5 : Math.min(a.x, b!.x);
+        const x1 = fib.extendRight ? 1e5 : Math.max(a.x, b!.x);
+        if (fib.trend.on && distToSegment(p, a, b!) <= tol) return true;
         if (p.x < x0 - tol || p.x > x1 + tol) return false;
-        return FIB_LEVELS.some((l) => {
+        return fib.levels.filter((l) => l.on).some((l) => {
           const y = this.series?.priceToCoordinate(fibLevelPrice(d, l.v));
           return y != null && Math.abs(p.y - y) <= tol;
         });
@@ -331,6 +349,41 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         const y0 = Math.min(t.y, st.y);
         const y1 = Math.max(t.y, st.y);
         return p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol;
+      }
+      case 'brush':
+      case 'highlighter': {
+        const reach = d.kind === 'highlighter' ? Math.max(tol, d.width / 2) : tol;
+        for (let i = 1; i < g.pts.length; i += 1)
+          if (distToSegment(p, g.pts[i - 1]!, g.pts[i]!) <= reach) return true;
+        return false;
+      }
+      case 'arrow':
+      case 'arrowmarker':
+        return distToSegment(p, a, b!) <= tol;
+      case 'arrowup':
+      case 'arrowdown': {
+        const down = d.kind === 'arrowup' ? 1 : -1;
+        return Math.abs(p.x - a.x) <= ARROW_MARK_W / 2 + tol && down * (p.y - a.y) >= -tol && down * (p.y - a.y) <= ARROW_MARK_H + tol;
+      }
+      case 'circle': {
+        const r = Math.sqrt(dist2(a, b!));
+        return Math.sqrt(dist2(p, a)) <= r + tol;
+      }
+      case 'ellipse': {
+        const rx = Math.abs(b!.x - a.x) / 2 + tol;
+        const ry = Math.abs(b!.y - a.y) / 2 + tol;
+        const cx = (a.x + b!.x) / 2;
+        const cy = (a.y + b!.y) / 2;
+        return ((p.x - cx) / rx) ** 2 + ((p.y - cy) / ry) ** 2 <= 1;
+      }
+      case 'triangle': {
+        const [v0, v1, v2] = triangleVerts(a, b!);
+        const side = (u: Px, v: Px) => (p.x - v.x) * (u.y - v.y) - (u.x - v.x) * (p.y - v.y);
+        const s0 = side(v0, v1);
+        const s1 = side(v1, v2);
+        const s2 = side(v2, v0);
+        const inside = !((s0 < 0 || s1 < 0 || s2 < 0) && (s0 > 0 || s1 > 0 || s2 > 0));
+        return inside || distToSegment(p, v0, v1) <= tol || distToSegment(p, v1, v2) <= tol || distToSegment(p, v2, v0) <= tol;
       }
       case 'text':
         return Math.abs(p.x - a.x) < 60 && p.y > a.y - 16 && p.y < a.y + 6;
@@ -417,7 +470,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         break;
       }
       case 'fib':
-        this.paintFib(ctx, d, a, b!);
+        this.paintFib(ctx, d, a, b!, g.w);
         break;
       case 'measure':
         this.paintMeasure(ctx, d, a, b!);
@@ -429,6 +482,98 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
       case 'short':
         this.paintPosition(ctx, d, g, selected || hovered);
         break;
+      case 'brush':
+      case 'highlighter': {
+        ctx.lineJoin = 'round';
+        if (d.kind === 'highlighter') {
+          ctx.globalAlpha = 0.35;
+          ctx.lineCap = 'butt';
+        }
+        ctx.beginPath();
+        g.pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+        // A stroke that has not moved yet is a dot.
+        if (g.pts.length < 2 || g.pts.every((q) => q.x === a.x && q.y === a.y)) ctx.lineTo(a.x + 0.01, a.y);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'arrow': {
+        line(a, b!);
+        const ang = Math.atan2(b!.y - a.y, b!.x - a.x);
+        const len = 8 + d.width * 2;
+        ctx.beginPath();
+        ctx.moveTo(b!.x, b!.y);
+        ctx.lineTo(b!.x - len * Math.cos(ang - 0.45), b!.y - len * Math.sin(ang - 0.45));
+        ctx.moveTo(b!.x, b!.y);
+        ctx.lineTo(b!.x - len * Math.cos(ang + 0.45), b!.y - len * Math.sin(ang + 0.45));
+        ctx.stroke();
+        break;
+      }
+      case 'arrowmarker': {
+        // A filled arrow that widens from a point at the tail to a head at the tip.
+        const dx = b!.x - a.x;
+        const dy = b!.y - a.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 1) break;
+        const ux = dx / len;
+        const uy = dy / len;
+        const nx = -uy;
+        const ny = ux;
+        const headLen = Math.min(len * 0.45, 22);
+        const headW = Math.min(len * 0.3, 10);
+        const bodyW = headW * 0.45;
+        const bx = b!.x - ux * headLen;
+        const by = b!.y - uy * headLen;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(bx + nx * bodyW, by + ny * bodyW);
+        ctx.lineTo(bx + nx * headW, by + ny * headW);
+        ctx.lineTo(b!.x, b!.y);
+        ctx.lineTo(bx - nx * headW, by - ny * headW);
+        ctx.lineTo(bx - nx * bodyW, by - ny * bodyW);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'arrowup':
+      case 'arrowdown': {
+        // The tip sits on the clicked price; the body trails away from it.
+        const s = d.kind === 'arrowup' ? 1 : -1;
+        const hw = ARROW_MARK_W / 2;
+        const neck = ARROW_MARK_H * 0.5;
+        const sw = hw * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(a.x + hw, a.y + s * neck);
+        ctx.lineTo(a.x + sw, a.y + s * neck);
+        ctx.lineTo(a.x + sw, a.y + s * ARROW_MARK_H);
+        ctx.lineTo(a.x - sw, a.y + s * ARROW_MARK_H);
+        ctx.lineTo(a.x - sw, a.y + s * neck);
+        ctx.lineTo(a.x - hw, a.y + s * neck);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'circle':
+      case 'ellipse':
+      case 'triangle': {
+        ctx.beginPath();
+        if (d.kind === 'circle') ctx.arc(a.x, a.y, Math.sqrt(dist2(a, b!)), 0, Math.PI * 2);
+        else if (d.kind === 'ellipse')
+          ctx.ellipse((a.x + b!.x) / 2, (a.y + b!.y) / 2, Math.abs(b!.x - a.x) / 2, Math.abs(b!.y - a.y) / 2, 0, 0, Math.PI * 2);
+        else {
+          const [v0, v1, v2] = triangleVerts(a, b!);
+          ctx.moveTo(v0.x, v0.y);
+          ctx.lineTo(v1.x, v1.y);
+          ctx.lineTo(v2.x, v2.y);
+          ctx.closePath();
+        }
+        ctx.globalAlpha = 0.15;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.stroke();
+        break;
+      }
       case 'text': {
         ctx.font = `600 13px ${FONT}`;
         ctx.textBaseline = 'alphabetic';
@@ -545,22 +690,26 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     const yBottom = y(profile.lo);
     if (yTop == null || yBottom == null) return;
 
-    // The span of candles the profile covers.
-    ctx.fillStyle = 'rgba(41, 98, 255, 0.06)';
-    ctx.fillRect(x0, yTop, x1 - x0, yBottom - yTop);
-    ctx.strokeStyle = emphasis ? 'rgba(41, 98, 255, 0.95)' : 'rgba(120, 123, 134, 0.7)';
-    ctx.lineWidth = emphasis ? 2 : 1;
-    ctx.setLineDash(emphasis ? [] : [4, 4]);
-    ctx.beginPath();
-    for (const x of [x0, x1]) {
-      ctx.moveTo(Math.round(x) + 0.5, 0);
-      ctx.lineTo(Math.round(x) + 0.5, paneH);
+    const vp = vpOf(d);
+    // The span of candles the profile covers: a faint box, with edges only while hovered or selected.
+    if (vp.showBackground) {
+      ctx.fillStyle = withAlpha(vp.backgroundColor, vp.backgroundOpacity);
+      ctx.fillRect(x0, yTop, x1 - x0, yBottom - yTop);
     }
-    ctx.stroke();
-    ctx.setLineDash([]);
+    if (emphasis) {
+      ctx.strokeStyle = 'rgba(41, 98, 255, 0.95)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (const x of [x0, x1]) {
+        ctx.moveTo(Math.round(x) + 0.5, 0);
+        ctx.lineTo(Math.round(x) + 0.5, paneH);
+      }
+      ctx.stroke();
+    }
 
-    // Histogram grows rightward from the left anchor; up volume then down volume, value area stronger.
-    const maxLen = (x1 - x0) * 0.7;
+    // Histogram grows from the chosen edge; up volume then down volume (or one colour for total), value area brighter.
+    const maxLen = ((x1 - x0) * vp.width) / 100;
+    const fromRight = vp.placement === 'right';
     profile.rows.forEach((row, i) => {
       const top = y(row.price + profile.step);
       const bottom = y(row.price);
@@ -568,80 +717,103 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
       const total = row.up + row.down;
       if (total <= 0 || profile.maxRow <= 0) return;
       const h = Math.max(1, Math.abs(bottom - top) - 1);
+      const yy = Math.min(top, bottom);
       const len = (maxLen * total) / profile.maxRow;
-      const upLen = (len * row.up) / total;
+      const upLen = vp.volume === 'total' ? len : (len * row.up) / total;
       const inValue = i >= profile.vaLo && i <= profile.vaHi;
-      ctx.fillStyle = inValue ? 'rgba(41, 98, 255, 0.55)' : 'rgba(41, 98, 255, 0.28)';
-      ctx.fillRect(x0, Math.min(top, bottom), upLen, h);
-      ctx.fillStyle = inValue ? 'rgba(251, 192, 45, 0.6)' : 'rgba(251, 192, 45, 0.3)';
-      ctx.fillRect(x0 + upLen, Math.min(top, bottom), len - upLen, h);
+      const alpha = inValue ? vp.opacity : vp.opacity * 0.45;
+      const edge = fromRight ? x1 : x0;
+      const sign = fromRight ? -1 : 1;
+      const seg = (from: number, length: number) => {
+        const sx = edge + sign * from;
+        ctx.fillRect(fromRight ? sx - length : sx, yy, length, h);
+      };
+      ctx.fillStyle = withAlpha(inValue ? vp.vaUpColor : vp.upColor, alpha);
+      seg(0, upLen);
+      if (vp.volume !== 'total') {
+        ctx.fillStyle = withAlpha(inValue ? vp.vaDownColor : vp.downColor, alpha);
+        seg(upLen, len - upLen);
+      }
     });
 
-    // Point of control and value-area edges, labelled at the right end.
+    // Point of control and value-area edges: lines across the box, labelled only if asked.
     const decimals = this.state.decimals;
     ctx.font = `10px ${FONT}`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'bottom';
-    const level = (price: number, label: string, color: string, dashed: boolean) => {
+    const level = (price: number, label: string, color: string, lineWidth: number) => {
       const ly = y(price);
       if (ly == null) return;
       ctx.strokeStyle = color;
       ctx.fillStyle = color;
-      ctx.lineWidth = dashed ? 1 : 1.5;
-      ctx.setLineDash(dashed ? [4, 3] : []);
+      ctx.lineWidth = lineWidth;
       ctx.beginPath();
       ctx.moveTo(x0, ly);
       ctx.lineTo(x1, ly);
       ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillText(`${label} ${price.toFixed(decimals)}`, x1 - 4, ly - 2);
+      if (vp.showLabels) ctx.fillText(`${label} ${price.toFixed(decimals)}`, x1 - 4, ly - 2);
     };
-    level(profile.vah, 'VAH', 'rgba(41, 98, 255, 0.95)', true);
-    level(profile.val, 'VAL', 'rgba(41, 98, 255, 0.95)', true);
-    level(profile.pocPrice, 'POC', '#f23645', false);
+    if (vp.showVa) {
+      level(profile.vah, 'VAH', vp.vaLineColor, 1);
+      level(profile.val, 'VAL', vp.vaLineColor, 1);
+    }
+    if (vp.showPoc) level(profile.pocPrice, 'POC', vp.pocColor, vp.pocWidth);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
   }
 
-  private paintFib(ctx: CanvasRenderingContext2D, d: Drawing, a: Px, b: Px) {
-    const x0 = Math.min(a.x, b.x);
-    const x1 = Math.max(a.x, b.x);
-    const ys = FIB_LEVELS.map((l) => this.series?.priceToCoordinate(fibLevelPrice(d, l.v)) ?? null);
+  private paintFib(ctx: CanvasRenderingContext2D, d: Drawing, a: Px, b: Px, w: number) {
+    const fib = fibOf(d);
+    const x0 = fib.extendLeft ? 0 : Math.min(a.x, b.x);
+    const x1 = fib.extendRight ? w : Math.max(a.x, b.x);
+    const levels: { l: (typeof fib.levels)[number]; y: number }[] = [];
+    for (const l of fib.levels) {
+      if (!l.on) continue;
+      const y = this.series?.priceToCoordinate(fibLevelPrice(d, l.v));
+      if (y != null) levels.push({ l, y: y as number });
+    }
+    levels.sort((p, q) => p.l.v - q.l.v);
     ctx.font = `11px ${FONT}`;
     ctx.textBaseline = 'middle';
-    ctx.textAlign = 'right';
-    for (let i = 0; i < FIB_LEVELS.length; i += 1) {
-      const y = ys[i];
-      if (y == null) continue;
-      const level = FIB_LEVELS[i]!;
-      const next = ys[i + 1];
-      if (next != null && i + 1 < FIB_LEVELS.length && level.v < 1) {
-        ctx.globalAlpha = 0.09;
-        ctx.fillStyle = FIB_LEVELS[i + 1]!.color;
-        ctx.fillRect(x0, Math.min(y, next), x1 - x0, Math.abs(next - y));
-        ctx.globalAlpha = 1;
+    if (fib.background.on) {
+      for (let i = 0; i + 1 < levels.length; i += 1) {
+        const cur = levels[i]!;
+        const next = levels[i + 1]!;
+        ctx.globalAlpha = fib.background.opacity;
+        ctx.fillStyle = next.l.color;
+        ctx.fillRect(x0, Math.min(cur.y, next.y), x1 - x0, Math.abs(next.y - cur.y));
       }
-      ctx.strokeStyle = level.color;
-      ctx.lineWidth = 1;
+      ctx.globalAlpha = 1;
+    }
+    for (const { l, y } of levels) {
+      ctx.strokeStyle = l.color;
+      ctx.lineWidth = fib.lines.width;
+      ctx.setLineDash(lineDash(fib.lines.style, fib.lines.width));
       ctx.beginPath();
       ctx.moveTo(x0, y);
       ctx.lineTo(x1, y);
       ctx.stroke();
-      ctx.fillStyle = level.color;
-      ctx.fillText(
-        `${level.v} (${this.fmt(fibLevelPrice(d, level.v))})`,
-        x0 - 6,
-        y,
-      );
+      ctx.setLineDash([]);
+      if (!fib.labels.show) continue;
+      const parts: string[] = [];
+      parts.push(fib.labels.percent ? `${+(l.v * 100).toFixed(1)}%` : `${l.v}`);
+      if (fib.labels.price) parts.push(`(${this.fmt(fibLevelPrice(d, l.v))})`);
+      ctx.fillStyle = l.color;
+      const left = fib.labels.side === 'left';
+      ctx.textAlign = left ? 'right' : 'left';
+      ctx.fillText(parts.join(' '), left ? x0 - 6 : x1 + 6, y);
     }
     ctx.textAlign = 'left';
-    ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = '#787b86';
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    if (fib.trend.on) {
+      ctx.setLineDash(lineDash(fib.trend.style, fib.trend.width));
+      ctx.strokeStyle = fib.trend.color;
+      ctx.lineWidth = fib.trend.width;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
 
   private paintMeasure(ctx: CanvasRenderingContext2D, d: Drawing, a: Px, b: Px) {

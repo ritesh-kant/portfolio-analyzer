@@ -1,3 +1,6 @@
+import { VP_DEFAULTS, type VpSettings } from './drawings';
+import { DEFAULT_ROWS } from './volume-profile';
+
 export type IndicatorType =
   | 'volume'
   | 'rvol'
@@ -20,10 +23,8 @@ export interface IndicatorCfg {
   length2?: number;
   /** MACD signal. */
   length3?: number;
-  /** Session volume profile: widest bar as a percentage of the session's width. */
-  width?: number;
-  /** Session volume profile colouring: up/down volume split, or total with a grey value area. */
-  style?: 'split' | 'total';
+  /** Session volume profile: look and inputs on top of `SVP_DEFAULTS` (rows = `length`). */
+  vp?: Partial<VpSettings>;
   /** Cumulative volume delta: the period the running total restarts in. */
   anchor?: 'session' | 'week' | 'month';
   /** CVD: mark price/CVD divergences. Absent = regular ones. */
@@ -119,7 +120,7 @@ export const CATALOG: CatalogEntry[] = [
     name: 'Session Volume Profile',
     description: 'Volume by price for every trading day, with POC and value area',
     where: 'overlay',
-    defaults: { type: 'svp', length: 0, width: 30, style: 'total' },
+    defaults: { type: 'svp', length: DEFAULT_ROWS },
   },
   {
     type: 'cvd',
@@ -195,8 +196,12 @@ export function indicatorLabel(i: IndicatorCfg): string {
     case 'rsi':
       return `RSI ${i.length} close`;
     case 'svp':
-      return `SVP ${i.length > 0 ? i.length : 'auto'}`;
+      return `SVP ${i.length}`;
     case 'cvd':
       return 'CVD';
   }
 }
+
+/** TradingView's session volume profile: the fixed-range look, but no box behind the histogram. */
+export const SVP_DEFAULTS: VpSettings = { ...VP_DEFAULTS, showBackground: false };
+export const svpOf = (cfg: IndicatorCfg): VpSettings => ({ ...SVP_DEFAULTS, ...cfg.vp });

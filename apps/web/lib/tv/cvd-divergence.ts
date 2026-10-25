@@ -103,6 +103,9 @@ function isPivot(bars: Bar[], i: number, n: number, high: boolean): boolean {
 /**
  * Divergences among `bars`, oldest first. `cvd[i]` is the CVD candle of `bars[i]`; `anchors[i]` the key of its anchor
  * period; `usable[i]` false skips a candle as a swing (no volume under it, or too few intrabars to trust the delta).
+ * `skip[i]` true takes a candle out altogether (an NSE closing print, `nseClosingPrints`): it is not a swing, not one
+ * of the candles that make the swing next to it, and not a close that confirms or fails a divergence. Indexes in the
+ * result are still into `bars`.
  */
 export function findCvdDivergences(
   bars: Bar[],
@@ -110,7 +113,28 @@ export function findCvdDivergences(
   anchors: string[],
   usable: boolean[] = [],
   cfg: CvdDivConfig = CVD_DIV_DEFAULTS,
+  skip: boolean[] = [],
 ): CvdDivergence[] {
+  if (skip.some(Boolean) && cvd.length === bars.length) {
+    const keep = bars.flatMap((_, i) => (skip[i] ? [] : [i]));
+    const at = (k: number) => keep[k]!;
+    const found = findCvdDivergences(
+      keep.map((i) => bars[i]!),
+      keep.map((i) => cvd[i]!),
+      keep.map((i) => anchors[i]!),
+      keep.map((i) => usable[i] ?? true),
+      cfg,
+    );
+    return found.map((d) => ({
+      ...d,
+      i1: at(d.i1),
+      i2: at(d.i2),
+      ci1: at(d.ci1),
+      ci2: at(d.ci2),
+      knownIndex: at(d.knownIndex),
+      confirmIndex: d.confirmIndex == null ? null : at(d.confirmIndex),
+    }));
+  }
   const n = Math.max(1, Math.floor(cfg.pivot));
   const out: CvdDivergence[] = [];
   if (bars.length < 2 * n + 2 || cvd.length !== bars.length) return out;

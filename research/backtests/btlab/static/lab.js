@@ -43,6 +43,7 @@ const CATEGORIES = {
     ["VWAP", ["above_vwap", "vwap_cross"]],
     ["MACD", ["macd5_positive", "macd1_open"]],
     ["Volume", ["volume_surge", "surge_f3", "rising_price_volume"]],
+    ["Order flow", ["cvd_divergence", "delta_divergence"]],
     ["Pattern", ["pattern_strength"]],
     ["Risk & levels", ["min_reward_risk", "max_stop_distance", "support_rule", "resistance_rule", "away_from_round"]],
   ],

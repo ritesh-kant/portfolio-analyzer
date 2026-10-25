@@ -245,6 +245,40 @@ records a fingerprint of filing inputs in `run.json`. New runs have new keys. Hi
 remain intact. A missing historical trade CSV is not silently rebuilt with the new indicator, and a current
 run cannot be rebuilt if its filing inputs have changed: restore its original CSV or Apply a new experiment.
 
+### CVD divergence and Delta divergence (order flow, two entry indicators)
+
+Python ports of the web chart's own detectors (`btlab/orderflow.py` ← `apps/web/lib/tv/cvd.ts`,
+`cvd-divergence.ts`, `footprint.ts`, `delta-divergence.ts`), so a run tests the marks a trader sees on the chart.
+Checked once against the TypeScript on 120 real 2026 symbol-days (5m and 15m, pivots 1–3): 2,562 divergences and
+1,174 delta setups, 0 mismatches. Long side only: **bullish** CVD divergences (regular and, with *Kinds = all*,
+hidden) and **sellers-trapped** delta setups. CVD and delta are estimates from 1-minute bars, not trades.
+
+* **CVD divergence**: the signal is the close of the candle *Pivot* candles after the second swing low, which is
+  when the swing is first known. The decision bar must close within *Known within* minutes of it (0 = that very
+  bar). *Near delta setup* also needs a sellers-trapped setup within 3 candles of the second low (the chart's
+  `+ Δ` tag), counted only if it had closed and was not already missed by then.
+* **Delta divergence**: the signal is the close of the confirming candle.
+* Use them with the **No pattern (market buy)** trigger to buy the minute after the signal. Stamped at Apply time from
+  the 1-minute cache (the trade day plus two sessions before it), so no base rebuild. The live chart can show a
+  divergence one candle early because it passes the still-forming candle to the detector. The Lab never does.
+
+First look (2026 to 25 Sep, 15-minute candles, market buy at the next minute, default stop/target, **exploratory**,
+one window already tuned on). Net at real costs per trade; the base is every momentum bar (4,496 trades, −₹117,
+median −₹63):
+
+| Arm | Trades | Win % | Gross ₹/trade | Net ₹/trade | Median | Entry above 2nd low (median) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| CVD div, pivot 1 | 164 | 32 | −33 | −125 | −75 | 0.69 % |
+| CVD div, pivot 2 | 78 | 35 | −20 | −113 | −83 | 1.05 % |
+| CVD div, pivot 3 | 55 | 38 | +16 | −75 | −40 | 3.26 % |
+| pivot 1 / 2 / 3 + delta near | 12 / 5 / 8 | 8 / 40 / 25 | −282 / −145 / −91 | −372 / −227 / −181 | | |
+| Delta divergence alone | 58 | 38 | −34 | −116 | −79 | |
+
+Waiting (pivot 3) pays ~2.6 points more above the swing low yet does no worse, because the swings it waits out are
+the ones that failed; pivot 1 vs 3 is not significant (Welch p = 0.31, 55 trades), and every arm loses ~₹90/trade
+to costs on a gross near zero. Pivot 1 and pivot 3 share only 23 stock-days: an earlier pivot is a different,
+noisier set of swings, not the same signal sooner. Adding the delta setup leaves 5–12 trades: no reading.
+
 ## How to read a result
 
 * **Judge ₹ per trade, not total ₹** for filters that leave sizing unchanged. A filter can raise the total just

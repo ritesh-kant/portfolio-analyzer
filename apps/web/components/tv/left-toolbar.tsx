@@ -6,15 +6,21 @@ import { Icons } from './icons';
 
 export type Tool = 'cursor' | DrawingKind;
 
-const GROUPS: { id: string; tools: Tool[] }[] = [
+/** Entries that switch an indicator on and off rather than start a drawing. */
+type Action = 'svp';
+
+const GROUPS: { id: string; tools: Tool[]; actions?: Action[] }[] = [
   { id: 'cursor', tools: ['cursor'] },
   { id: 'lines', tools: ['trend', 'ray', 'hline', 'hray', 'vline'] },
   { id: 'fib', tools: ['fib'] },
   { id: 'forecast', tools: ['long', 'short'] },
-  { id: 'shapes', tools: ['rect'] },
+  {
+    id: 'shapes',
+    tools: ['brush', 'highlighter', 'arrowmarker', 'arrow', 'arrowup', 'arrowdown', 'rect', 'circle', 'ellipse', 'triangle'],
+  },
   { id: 'text', tools: ['text'] },
   { id: 'measure', tools: ['measure'] },
-  { id: 'volume', tools: ['vprofile'] },
+  { id: 'volume', tools: ['vprofile'], actions: ['svp'] },
 ];
 
 const ICON: Record<Tool, (p: { size?: number }) => ReactNode> = {
@@ -31,14 +37,73 @@ const ICON: Record<Tool, (p: { size?: number }) => ReactNode> = {
   long: Icons.long,
   short: Icons.short,
   text: Icons.text,
+  brush: Icons.brush,
+  highlighter: Icons.highlighter,
+  arrow: Icons.arrow,
+  arrowmarker: Icons.arrowmarker,
+  arrowup: Icons.arrowup,
+  arrowdown: Icons.arrowdown,
+  circle: Icons.circle,
+  ellipse: Icons.ellipse,
+  triangle: Icons.triangle,
 };
 
 const LABEL: Record<Tool, string> = { cursor: 'Cross', ...KIND_LABEL };
+const ACTION_LABEL: Record<Action, string> = { svp: 'Session volume profile' };
+const ACTION_ICON: Record<Action, (p: { size?: number }) => ReactNode> = { svp: Icons.vprofile };
 
-const GROUP_TITLE: Record<string, string> = { lines: 'Lines', forecast: 'Forecasting' };
+/** Single-key shortcuts (Alt/Option held is also accepted); matched on `code` so layout and Option don't matter. */
+export const TOOL_KEYS: Record<Tool, { code: string; shift?: boolean; label: string }> = {
+  cursor: { code: 'KeyC', label: 'C' },
+  trend: { code: 'KeyT', label: 'T' },
+  ray: { code: 'KeyY', label: 'Y' },
+  hline: { code: 'KeyH', label: 'H' },
+  hray: { code: 'KeyJ', label: 'J' },
+  vline: { code: 'KeyV', label: 'V' },
+  fib: { code: 'KeyF', label: 'F' },
+  long: { code: 'KeyL', label: 'L' },
+  short: { code: 'KeyS', label: 'S' },
+  rect: { code: 'KeyR', shift: true, label: 'Shift+R' },
+  text: { code: 'KeyT', shift: true, label: 'Shift+T' },
+  measure: { code: 'KeyM', label: 'M' },
+  vprofile: { code: 'KeyV', shift: true, label: 'Shift+V' },
+  // No shortcut: an empty code never matches a key.
+  brush: { code: '', label: '' },
+  highlighter: { code: '', label: '' },
+  arrow: { code: '', label: '' },
+  arrowmarker: { code: '', label: '' },
+  arrowup: { code: '', label: '' },
+  arrowdown: { code: '', label: '' },
+  circle: { code: '', label: '' },
+  ellipse: { code: '', label: '' },
+  triangle: { code: '', label: '' },
+};
+export const ZOOM_IN_KEY = { code: 'KeyZ', label: 'Z' };
+
+export function toolForKey(e: KeyboardEvent): Tool | null {
+  if (e.ctrlKey || e.metaKey) return null;
+  for (const [tool, k] of Object.entries(TOOL_KEYS) as [Tool, (typeof TOOL_KEYS)[Tool]][]) {
+    if (k.code === e.code && !!k.shift === e.shiftKey) return tool;
+  }
+  return null;
+}
+
+const GROUP_TITLE: Record<string, string> = {
+  lines: 'Lines',
+  forecast: 'Forecasting',
+}
+
+/** Groups whose flyout is split into titled sub-sections (TradingView's brushes / arrows / shapes menu). */
+const SECTIONS: Record<string, { title: string; tools: Tool[] }[]> = {
+  shapes: [
+    { title: 'Brushes', tools: ['brush', 'highlighter'] },
+    { title: 'Arrows', tools: ['arrowmarker', 'arrow', 'arrowup', 'arrowdown'] },
+    { title: 'Shapes', tools: ['rect', 'circle', 'ellipse', 'triangle'] },
+  ],
+};
 
 /** Groups that start below a separator. */
-const SEP_BEFORE = new Set(['fib', 'measure', 'volume']);
+const SEP_BEFORE = new Set(['fib', 'shapes', 'text', 'measure', 'volume']);
 
 interface Props {
   tool: Tool;
@@ -53,6 +118,8 @@ interface Props {
   onHideAll: () => void;
   onRemoveAll: () => void;
   onZoomIn: () => void;
+  svpOn: boolean;
+  onToggleSvp: () => void;
 }
 
 const btn = (active: boolean) =>
@@ -66,12 +133,18 @@ function Sep() {
 
 export function LeftToolbar(p: Props) {
   // The visible tool of a multi-tool group is the last one picked from it.
-  const [picked, setPicked] = useState<Record<string, Tool>>({ lines: 'trend' });
+  const [picked, setPicked] = useState<Record<string, Tool | Action>>({ lines: 'trend' });
   const [open, setOpen] = useState<string | null>(null);
   // The toolbar scrolls, which would clip an absolutely positioned flyout, so it is placed in viewport coordinates.
   const [flyTop, setFlyTop] = useState(0);
   const [flyLeft, setFlyLeft] = useState(52);
   const root = useRef<HTMLDivElement>(null);
+
+  // Keep the visible tool of a group in step with a tool chosen by keyboard.
+  useEffect(() => {
+    const g = GROUPS.find((v) => v.tools.includes(p.tool));
+    if (g && (g.tools.length > 1 || g.actions)) setPicked((s) => (s[g.id] === p.tool ? s : { ...s, [g.id]: p.tool }));
+  }, [p.tool]);
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -86,6 +159,11 @@ export function LeftToolbar(p: Props) {
     setOpen(null);
     p.onTool(tool);
   };
+  const act = (group: string, action: Action) => {
+    setPicked((s) => ({ ...s, [group]: action }));
+    setOpen(null);
+    if (action === 'svp') p.onToggleSvp();
+  };
 
   return (
     <div
@@ -94,18 +172,30 @@ export function LeftToolbar(p: Props) {
     >
       {GROUPS.map((g, gi) => {
         const current = picked[g.id] ?? g.tools[0]!;
-        const Icon = ICON[current];
-        const multi = g.tools.length > 1;
-        const active = g.tools.includes(p.tool);
+        const isAction = (g.actions as string[] | undefined)?.includes(current) ?? false;
+        const Icon = isAction ? ACTION_ICON[current as Action] : ICON[current as Tool];
+        const multi = g.tools.length + (g.actions?.length ?? 0) > 1;
+        const active = isAction ? p.svpOn : g.tools.includes(p.tool);
+        const title = isAction
+          ? `${ACTION_LABEL[current as Action]}${p.svpOn ? ' (on)' : ''}`
+          : TOOL_KEYS[current as Tool].label
+            ? `${LABEL[current as Tool]} (${TOOL_KEYS[current as Tool].label})`
+            : LABEL[current as Tool];
         return (
           <div key={g.id} className="relative">
             {gi > 0 && SEP_BEFORE.has(g.id) ? <Sep /> : null}
             <div className="flex items-center">
               <button
                 type="button"
-                title={LABEL[current]}
+                title={title}
                 className={btn(active)}
-                onClick={() => (g.id === 'cursor' ? p.onTool('cursor') : choose(g.id, current))}
+                onClick={() =>
+                  isAction
+                    ? act(g.id, current as Action)
+                    : g.id === 'cursor'
+                      ? p.onTool('cursor')
+                      : choose(g.id, current as Tool)
+                }
               >
                 <Icon size={22} />
               </button>
@@ -128,25 +218,48 @@ export function LeftToolbar(p: Props) {
             </div>
             {multi && open === g.id ? (
               <div
-                className="fixed z-50 w-60 max-w-[calc(100vw-60px)] rounded-md border border-[#363a45] bg-[#1e222d] py-1 shadow-xl"
+                className="fixed z-50 max-h-[calc(100vh-24px)] w-60 max-w-[calc(100vw-60px)] overflow-y-auto rounded-md border border-[#363a45] bg-[#1e222d] py-1 shadow-xl"
                 style={{ left: flyLeft, top: flyTop }}
               >
-                <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[#787b86]">
-                  {GROUP_TITLE[g.id] ?? 'Tools'}
-                </div>
-                {g.tools.map((t) => {
-                  const I = ICON[t];
+                {(SECTIONS[g.id] ?? [{ title: GROUP_TITLE[g.id] ?? 'Tools', tools: g.tools }]).map((sec, si) => (
+                  <div key={sec.title}>
+                    {si > 0 ? <div className="my-1 h-px bg-[#363a45]" /> : null}
+                    <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[#787b86]">
+                      {sec.title}
+                    </div>
+                    {sec.tools.map((t) => {
+                      const I = ICON[t];
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => choose(g.id, t)}
+                          className={`flex w-full items-center gap-3 px-3 py-1.5 text-left text-[13px] hover:bg-[#2a2e39] ${
+                            p.tool === t ? 'text-[#2962ff]' : 'text-[#d1d4dc]'
+                          }`}
+                        >
+                          <I size={18} />
+                          <span className="flex-1">{LABEL[t]}</span>
+                          <span className="text-[11px] text-[#787b86]">{TOOL_KEYS[t].label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+                {g.actions?.map((a) => {
+                  const I = ACTION_ICON[a];
                   return (
                     <button
-                      key={t}
+                      key={a}
                       type="button"
-                      onClick={() => choose(g.id, t)}
+                      onClick={() => act(g.id, a)}
                       className={`flex w-full items-center gap-3 px-3 py-1.5 text-left text-[13px] hover:bg-[#2a2e39] ${
-                        p.tool === t ? 'text-[#2962ff]' : 'text-[#d1d4dc]'
+                        p.svpOn ? 'text-[#2962ff]' : 'text-[#d1d4dc]'
                       }`}
                     >
                       <I size={18} />
-                      {LABEL[t]}
+                      <span className="flex-1">{ACTION_LABEL[a]}</span>
+                      <span className="text-[11px] text-[#787b86]">{p.svpOn ? 'On' : 'Off'}</span>
                     </button>
                   );
                 })}
@@ -156,7 +269,7 @@ export function LeftToolbar(p: Props) {
         );
       })}
       <Sep />
-      <button type="button" title="Zoom in" className={btn(false)} onClick={p.onZoomIn}>
+      <button type="button" title={`Zoom in (${ZOOM_IN_KEY.label})`} className={btn(false)} onClick={p.onZoomIn}>
         <Icons.zoom size={22} />
       </button>
       <div className="flex-1" />

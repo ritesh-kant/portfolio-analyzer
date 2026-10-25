@@ -1,4 +1,5 @@
 import type {
+  Coordinate,
   IChartApi,
   IPrimitivePaneRenderer,
   IPrimitivePaneView,
@@ -201,7 +202,18 @@ export class CvdDivPrimitive implements ISeriesPrimitive<Time> {
       const w = ctx.measureText(text).width + 10;
       const h = 16;
       const tx = x2 - w / 2;
-      const ty = m.bullish ? y2 + 8 : y2 - 8 - h;
+      // clear every candle under the tag, not just the swing's own: a bull tag goes below the lowest low in its
+      // span, a bear tag above the highest high, so it never covers a wick
+      let yEdge: number = y2;
+      const l0 = Math.floor(ts.coordinateToLogical((x2 - w / 2) as Coordinate) ?? m.i2);
+      const l1 = Math.ceil(ts.coordinateToLogical((x2 + w / 2) as Coordinate) ?? m.i2);
+      for (let l = l0; l <= l1; l += 1) {
+        const bar = series.dataByIndex(l) as { low?: number; high?: number } | null;
+        const v = m.bullish ? bar?.low : bar?.high;
+        const y = v == null ? null : series.priceToCoordinate(v);
+        if (y != null) yEdge = m.bullish ? Math.max(yEdge, y) : Math.min(yEdge, y);
+      }
+      const ty = m.bullish ? yEdge + 8 : yEdge - 8 - h;
       ctx.fillStyle = 'rgba(19, 23, 34, 0.92)';
       ctx.strokeStyle = m.near ? NEAR : color;
       ctx.lineWidth = 1;

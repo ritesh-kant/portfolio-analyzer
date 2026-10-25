@@ -57,6 +57,76 @@ export function signedVolumes(bars: Bar[]): number[] {
   });
 }
 
+/**
+ * NSE closing prints. On large NSE stocks (RELIANCE, TCS, HDFCBANK, SBIN) nothing trades after 15:14: Yahoo serves
+ * no bars (one stray tick of a few hundred shares at most), Upstox flat zero-volume ones, and then both have one flat
+ * bar at 15:28 or 15:29 at the day's closing price that carries the closing volume (872,733 shares on RELIANCE
+ * 2026-10-22, 26.6M on the 2026-08-31 index rebalance), sometimes followed by another zero-volume minute. One price
+ * for the whole lot: there is no buyer or seller side to read, and it is not a candle the session traded.
+ *
+ * A 1-minute bar is one when it is flat (O=H=L=C), starts 15:15–15:29 exchange time and no later bar of its session
+ * day has volume. Stocks that really trade to 15:29 (IKS, RHIM) end on ordinary bars, so nothing is flagged there; a
+ * genuinely flat last trade in that window is flagged too, at the cost of one illiquid minute's volume.
+ * `minuteOf` gives a time's minute of the exchange day, `dayOf` its session day.
+ */
+export function nseClosingPrints(
+  bars: Bar[],
+  minuteOf: (time: number) => number,
+  dayOf: (time: number) => string,
+): boolean[] {
+  return bars.map((b, i) => flat(b) && lastInClosingWindow(bars, i, minuteOf, dayOf));
+}
+
+const flat = (b: Bar) => b.open === b.high && b.high === b.low && b.low === b.close;
+
+/** Bar `i` starts 15:15–15:29 and is the last bar of its session day with volume (zero-volume fillers may follow). */
+function lastInClosingWindow(
+  bars: Bar[],
+  i: number,
+  minuteOf: (time: number) => number,
+  dayOf: (time: number) => string,
+): boolean {
+  const b = bars[i]!;
+  const minute = minuteOf(b.time);
+  if (minute < 15 * 60 + 15 || minute >= 15 * 60 + 30) return false;
+  const day = dayOf(b.time);
+  for (let k = i + 1; k < bars.length && dayOf(bars[k]!.time) === day; k += 1) {
+    if (bars[k]!.volume > 0) return false;
+  }
+  return true;
+}
+
+/**
+ * Chart candles that are an NSE closing print: the session's last candle with volume, starting 15:15–15:29, with at
+ * least 90% of its intrabar volume in a closing print (`subPrints`, from `nseClosingPrints` on `sub`). Yahoo's 15m/1h
+ * candle there is the print plus the 15:14 price, so it has just two prices (open and close at the two extremes, or
+ * flat); where no intrabars are loaded under it, that shape marks it. Measured on 60 days of 15m candles: 51/55
+ * RELIANCE 15:15 candles have that shape, 0/60 on IKS and RHIM.
+ */
+export function closingPrintCandles(
+  bars: Bar[],
+  sub: Bar[],
+  subPrints: boolean[],
+  secs: number,
+  minuteOf: (time: number) => number,
+  dayOf: (time: number) => string,
+): boolean[] {
+  let j = 0;
+  return bars.map((b, i) => {
+    while (j < sub.length && sub[j]!.time < b.time) j += 1;
+    if (!lastInClosingWindow(bars, i, minuteOf, dayOf)) return false;
+    let all = 0;
+    let print = 0;
+    for (let k = j; k < sub.length && sub[k]!.time < b.time + secs; k += 1) {
+      all += sub[k]!.volume;
+      if (subPrints[k]) print += sub[k]!.volume;
+    }
+    if (all > 0) return print >= 0.9 * all;
+    const twoPrice = (b.open === b.high && b.low === b.close) || (b.open === b.low && b.high === b.close);
+    return twoPrice;
+  });
+}
+
 /** The key of the anchor period a session day ('YYYY-MM-DD') belongs to; the total restarts when it changes. */
 export function anchorKey(day: string, anchor: CvdAnchor): string {
   if (anchor === 'month') return day.slice(0, 7);
@@ -72,6 +142,9 @@ export function anchorKey(day: string, anchor: CvdAnchor): string {
  * One CVD candle per chart bar. `sub` are the intrabars (ascending), `secs` the chart bar's length, and
  * `anchorOf` maps a bar's start time to the key of its anchor period. `regular`, when given, says whether a
  * time is inside regular trading hours; bars outside them add nothing and a candle with none inside is `missing`.
+ * `prints`, when given, flags NSE closing prints among the intrabars (`nseClosingPrints`) and the chart bars
+ * (`closingPrintCandles`): a flagged
+ * intrabar adds nothing, and a flagged chart bar is `missing`.
  */
 export function computeCvd(
   bars: Bar[],
@@ -79,8 +152,9 @@ export function computeCvd(
   secs: number,
   anchorOf: (time: number) => string,
   regular?: (time: number) => boolean,
+  prints?: { sub: boolean[]; bars: boolean[] },
 ): CvdCandle[] {
-  const sub = regular ? allSub.filter((b) => regular(b.time)) : allSub;
+  const sub = allSub.filter((b, k) => (!regular || regular(b.time)) && !prints?.sub[k]);
   const signed = signedVolumes(sub);
   const out: CvdCandle[] = [];
   let level = 0;
@@ -88,7 +162,7 @@ export function computeCvd(
   let j = 0;
   let fbSign = 0;
   let fbPrev: number | null = null;
-  for (const b of bars) {
+  for (const [i, b] of bars.entries()) {
     const k = anchorOf(b.time);
     if (k !== key) {
       key = k;
@@ -114,7 +188,9 @@ export function computeCvd(
     const standIn = n === 0 && !(sub.length > 0 && b.time >= sub[0]!.time);
     // A candle that starts outside regular hours and has no regular-hours intrabar (a 1h candle starting 09:00
     // does) has no volume to read.
-    if (regular && n === 0 && !regular(b.time)) {
+    // A closing print is the close, not trading: nothing to read either (and anything under it is not counted).
+    if ((regular && n === 0 && !regular(b.time)) || prints?.bars[i]) {
+      level = open;
       out.push({ open, high: open, low: open, close: open, missing: true });
       continue;
     }

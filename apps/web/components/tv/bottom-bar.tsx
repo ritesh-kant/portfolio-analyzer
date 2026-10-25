@@ -6,6 +6,8 @@ export const RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'All'] a
 export type RangeId = (typeof RANGES)[number];
 
 interface Props {
+  paperOpen: boolean;
+  onPaper: () => void;
   onRange: (r: RangeId) => void;
   timeZone: string;
   /** Unix seconds when the latest candle closes. */
@@ -60,6 +62,14 @@ export function BottomBar(p: Props) {
 
   return (
     <div className="scrollbar-none flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto border-t border-[#2a2e39] bg-[#131722] px-2 [&>*]:shrink-0">
+      <button
+        type="button"
+        className={`${b(p.paperOpen)} mr-2 border border-[#363a45]`}
+        onClick={p.onPaper}
+        title="Paper trading: practise with a simulated account on this chart"
+      >
+        Paper Trading
+      </button>
       {RANGES.map((r) => (
         <button key={r} type="button" className={b()} onClick={() => p.onRange(r)}>
           {r}

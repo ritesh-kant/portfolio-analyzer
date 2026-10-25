@@ -171,15 +171,9 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
         </div>
         {cfg.type !== 'vwap' && cfg.type !== 'volume' && cfg.type !== 'cvd' ? (
           <NumberField
-            label={
-              cfg.type === 'macd'
-                ? 'Fast length'
-                : cfg.type === 'svp'
-                  ? 'Rows (0 = auto)'
-                  : 'Length'
-            }
+            label={cfg.type === 'macd' ? 'Fast length' : cfg.type === 'svp' ? 'Rows' : 'Length'}
             value={cfg.length}
-            min={cfg.type === 'svp' ? 0 : 1}
+            min={1}
             onChange={(length) => onChange({ ...cfg, length })}
           />
         ) : null}
@@ -264,26 +258,6 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
               CVD here is estimated from bars, and only candles with at least 5 minute-bars under them are used.
             </p>
           </details>
-        ) : null}
-        {cfg.type === 'svp' ? (
-          <NumberField
-            label="Width (% of session)"
-            value={cfg.width ?? 30}
-            onChange={(width) => onChange({ ...cfg, width: Math.min(100, width) })}
-          />
-        ) : null}
-        {cfg.type === 'svp' ? (
-          <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
-            Style
-            <select
-              value={cfg.style ?? 'split'}
-              onChange={(e) => onChange({ ...cfg, style: e.target.value as 'split' | 'total' })}
-              className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
-            >
-              <option value="total">Total, grey value area</option>
-              <option value="split">Up / down volume</option>
-            </select>
-          </label>
         ) : null}
         {cfg.type === 'macd' ? (
           <>

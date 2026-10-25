@@ -659,7 +659,76 @@ test('editPositionLevels rejects levels on the wrong side', () => {
 });
 
 // ── cumulative volume delta ───────────────────────────────────────────────
-import { anchorKey, computeCvd, signedVolumes } from './cvd.ts';
+import { anchorKey, closingPrintCandles, computeCvd, nseClosingPrints, signedVolumes } from './cvd.ts';
+
+const minuteOfIst = (t) => Math.floor((wallClock(t, IST) % 86400) / 60);
+const dayOfIst = (t) => sessionDay(t, IST);
+const nextDay = 86400;
+
+test('nseClosingPrints: the flat last bar at 15:15-15:29 is the close, real trading to 15:29 is not', () => {
+  // RELIANCE 2026-10-22 shape: trading to 15:14, nothing, then one flat print at 15:28, then the next day
+  const reliance = [
+    minute(359, 1189.2, 1189.9, 1188.6, 1189.9, 36494), // 15:14
+    minute(373, 1184.5, 1184.5, 1184.5, 1184.5, 872733), // 15:28 closing print
+    { ...minute(0, 1190, 1191, 1189, 1190, 1000), time: open + nextDay }, // next day 09:15
+  ];
+  assert.deepEqual(nseClosingPrints(reliance, minuteOfIst, dayOfIst), [false, true, false]);
+  // IKS shape: ordinary bars to 15:29, the last one not flat
+  const iks = [minute(373, 1644.4, 1645.5, 1641.5, 1645.5, 506), minute(374, 1635, 1655, 1633.7, 1648, 3107)];
+  assert.deepEqual(nseClosingPrints(iks, minuteOfIst, dayOfIst), [false, false]);
+  // flat but not the last bar of its day, or the last bar but before 15:15: ordinary
+  const flatMid = [minute(373, 10, 10, 10, 10, 5), minute(374, 10, 11, 10, 11, 5)];
+  assert.deepEqual(nseClosingPrints(flatMid, minuteOfIst, dayOfIst), [false, false]);
+  assert.deepEqual(nseClosingPrints([minute(355, 10, 10, 10, 10, 5)], minuteOfIst, dayOfIst), [false]);
+  // Upstox 2026-08-27 shape: zero-volume fillers from 15:15, the print at 15:28, another zero-volume minute after it
+  const upstox = [
+    minute(359, 1288.6, 1288.8, 1287.5, 1288.5, 39372), // 15:14
+    minute(360, 1288.5, 1288.5, 1288.5, 1288.5, 0), // 15:15 filler
+    minute(373, 1282.2, 1282.2, 1282.2, 1282.2, 688271), // 15:28 closing print
+    minute(374, 1282.2, 1282.2, 1282.2, 1282.2, 0), // 15:29 filler
+  ];
+  assert.deepEqual(nseClosingPrints(upstox, minuteOfIst, dayOfIst), [false, false, true, true]);
+});
+
+test('closingPrintCandles: the last candle made of the print (plus the stray 15:15 tick) is flagged, real trading is not', () => {
+  // RELIANCE 2026-10-16: trading to 15:14, a 449-share tick at 15:15, the closing print at 15:28
+  const sub = [
+    minute(359, 1209, 1210, 1208.6, 1209.7, 45164), // 15:14
+    minute(360, 1209.5, 1209.5, 1209.5, 1209.5, 449), // 15:15 stray tick
+    minute(373, 1211.2, 1211.2, 1211.2, 1211.2, 403091), // 15:28 closing print
+  ];
+  const subPrints = nseClosingPrints(sub, minuteOfIst, dayOfIst);
+  assert.deepEqual(subPrints, [false, false, true]);
+  const candles = [minute(345, 1207, 1210, 1206, 1209.7, 900000), minute(360, 1209.5, 1211.2, 1209.5, 1211.2, 403540)];
+  assert.deepEqual(closingPrintCandles(candles, sub, subPrints, 900, minuteOfIst, dayOfIst), [false, true]);
+  // before the print arrives the 15:15 candle is the tick alone: not flagged
+  assert.deepEqual(closingPrintCandles(candles, sub.slice(0, 2), [false, false], 900, minuteOfIst, dayOfIst), [false, false]);
+  // IKS: real minutes to 15:29 under the last candle
+  const iksSub = [minute(372, 1644, 1644.6, 1644, 1644, 206), minute(374, 1635, 1655, 1633.7, 1648, 3107)];
+  const iks = [minute(360, 1646.8, 1655, 1633.7, 1648, 9000)];
+  assert.deepEqual(closingPrintCandles(iks, iksSub, nseClosingPrints(iksSub, minuteOfIst, dayOfIst), 900, minuteOfIst, dayOfIst), [false]);
+  // no intrabars loaded: the two-price shape marks it (RELIANCE 2026-08-31), a real candle with wicks does not
+  const old = [minute(360, 1294.9, 1294.9, 1277, 1277, 26635062)];
+  assert.deepEqual(closingPrintCandles(old, [], [], 900, minuteOfIst, dayOfIst), [true]);
+  assert.deepEqual(closingPrintCandles([minute(360, 1290, 1295, 1277, 1280, 1)], [], [], 900, minuteOfIst, dayOfIst), [false]);
+});
+
+test('computeCvd: an NSE closing print adds nothing and its candle is missing', () => {
+  const sub = [
+    minute(344, 10, 11, 10, 11, 100), // 15:04 +100
+    minute(358, 11, 11, 10, 10, 40), // 15:18 −40 → 60
+    minute(373, 9, 9, 9, 9, 5000), // 15:28 closing print, below the previous close
+  ];
+  const bars = [minute(330, 10, 11, 10, 10, 140), minute(345, 10, 11, 10, 10, 40), minute(360, 9, 9, 9, 9, 5000)];
+  const subPrints = nseClosingPrints(sub, minuteOfIst, dayOfIst);
+  const prints = { sub: subPrints, bars: closingPrintCandles(bars, sub, subPrints, 900, minuteOfIst, dayOfIst) };
+  assert.deepEqual(prints, { sub: [false, false, true], bars: [false, false, true] });
+  const out = computeCvd(bars, sub, 900, () => 'day', undefined, prints);
+  assert.equal(out[1].close, 60);
+  assert.deepEqual(out[2], { open: 60, high: 60, low: 60, close: 60, missing: true });
+  // without it the print counts as 5,000 shares sold (the old behaviour)
+  assert.equal(computeCvd(bars, sub, 900, () => 'day')[2].close, 60 - 5000);
+});
 
 test('signedVolumes: direction of each bar, flat bars follow the close then the previous sign', () => {
   const out = signedVolumes([
@@ -858,6 +927,21 @@ test('findCvdDivergences: a prefix of the candles gives exactly the divergences 
   }
 });
 
+test('findCvdDivergences: a skipped candle (closing print) neither makes a swing nor confirms one; indexes stay chart indexes', () => {
+  const cfg2 = { ...divCfg, pivot: 2 };
+  // swing highs at 2 and 6; candle 8 is the closing print, the second candle right of 6
+  const bars = fromHighs([9, 10, 12, 11, 9, 11, 14, 13, 8]);
+  const cvd = cvdOf(9, { 2: 500, 6: 300 });
+  assert.equal(findCvdDivergences(bars, cvd, same(9), [], cfg2).length, 1); // the print made the swing
+  const skip = [false, false, false, false, false, false, false, false, true];
+  assert.equal(findCvdDivergences(bars, cvd, same(9), [], cfg2, skip).length, 0);
+  // once a real candle follows the print the swing is made, and every index points at the chart's own candles
+  const more = fromHighs([9, 10, 12, 11, 9, 11, 14, 13, 8, 12, 9]);
+  const out = findCvdDivergences(more, cvdOf(11, { 2: 500, 6: 300 }), same(11), [], cfg2, [...skip, false, false]);
+  assert.equal(out.length, 1);
+  assert.deepEqual([out[0].i1, out[0].i2, out[0].ci2, out[0].knownIndex], [2, 6, 6, 9]); // known at 9, not the print
+});
+
 test('nearSetup: same direction, signal or confirming candle within the window', () => {
   const bars = fromLows([10, 8, 10, 11, 9, 7, 10, 11, 12]);
   const d = findCvdDivergences(bars, cvdOf(9, {}, { 1: -100, 5: -50 }), same(9), [], divCfg)[0];
@@ -871,4 +955,90 @@ test('intrabarUsable: too few intrabars under a candle is flagged; candles older
   const bars = [minute(0, 1, 1, 1, 1, 1), minute(5, 1, 1, 1, 1, 1), minute(10, 1, 1, 1, 1, 1)];
   const sub = Array.from({ length: 8 }, (_, i) => minute(5 + i, 1, 1, 1, 1, 1)); // minutes 5 to 12
   assert.deepEqual(intrabarUsable(bars, sub, 300), [false, true, false]); // 0: older than the intrabars; 5: five bars; 10: only three
+});
+
+// ── paper trading ───────────────────────────────────────────────────────
+import {
+  cancelOrder,
+  closePosition,
+  equityOf,
+  newAccount,
+  placeMarket,
+  placePending,
+  setBracket,
+  updateOrder,
+  step as paperStep,
+} from './paper.ts';
+
+const pb = (i, o, h, l, c) => ({ time: i * 60, open: o, high: h, low: l, close: c, volume: 1 });
+
+test('paper: market long books P&L and commission on close', () => {
+  let s = newAccount(10000, 0.1);
+  s = placeMarket(s, 'X', 'buy', 10, 100, 60).state;
+  assert.equal(s.positions.X.qty, 10);
+  assert.ok(Math.abs(s.cash - 9999) < 1e-9); // 0.1% of 1000
+  s = closePosition(s, 'X', 110, 120);
+  assert.equal(s.positions.X, undefined);
+  assert.equal(s.history.length, 1);
+  assert.ok(Math.abs(s.history[0].pnl - (100 - 1 - 1.1)) < 1e-9);
+  assert.ok(Math.abs(equityOf(s) - (10000 + 100 - 2.1)) < 1e-9);
+});
+
+test('paper: opposite fill flips the position', () => {
+  let s = newAccount(10000);
+  s = placeMarket(s, 'X', 'buy', 5, 100, 60).state;
+  s = placeMarket(s, 'X', 'sell', 8, 90, 120).state;
+  assert.equal(s.positions.X.qty, -3);
+  assert.equal(s.positions.X.avg, 90);
+  assert.equal(s.history[0].pnl, -50);
+});
+
+test('paper: limit order fills only on candles after it was placed', () => {
+  let s = newAccount(10000);
+  const bars = [pb(0, 100, 101, 95, 100), pb(1, 100, 102, 99, 101)];
+  // placed after bar 1 closed (since = 120): bar 1's earlier low of 99 must not fill a 98 limit
+  s = placePending(s, 'X', 'buy', 'limit', 1, 98, 101, 120).state;
+  s = paperStep(s, 'X', bars, 60);
+  assert.equal(s.orders.length, 1);
+  s = paperStep(s, 'X', [...bars, pb(2, 100, 100, 97, 99)], 60);
+  assert.equal(s.orders.length, 0);
+  assert.equal(s.positions.X.avg, 98);
+});
+
+test('paper: stop and target trigger; stop wins when one candle hits both', () => {
+  let s = newAccount(10000);
+  s = placeMarket(s, 'X', 'buy', 1, 100, 60, { sl: 95, tp: 110 }).state;
+  const both = [pb(0, 100, 100, 100, 100), pb(2, 100, 112, 94, 100)];
+  const r = paperStep(s, 'X', both, 60);
+  assert.equal(r.history[0].reason, 'sl');
+  assert.equal(r.history[0].exit, 95);
+  const up = paperStep(s, 'X', [pb(0, 100, 100, 100, 100), pb(2, 101, 111, 100, 109)], 60);
+  assert.equal(up.history[0].reason, 'tp');
+});
+
+test('paper: validation', () => {
+  const s = newAccount(1000);
+  assert.ok(placeMarket(s, 'X', 'buy', 1, 100, 0, { sl: 105 }).error);
+  assert.ok(placeMarket(s, 'X', 'buy', 100, 100, 0).error); // 10,000 > 5 × 1,000
+  assert.ok(placePending(s, 'X', 'buy', 'limit', 1, 105, 100, 0).error);
+  assert.ok(setBracket(s, 'X', 90, undefined).error);
+  const p = placePending(s, 'X', 'sell', 'stop', 1, 90, 100, 0).state;
+  assert.equal(cancelOrder(p, p.orders[0].id).orders.length, 0);
+});
+
+test('paper: day orders expire, every ending is logged, orders can be modified', () => {
+  let s = newAccount(10000);
+  s = placePending(s, 'X', 'buy', 'limit', 1, 90, 100, 60, undefined, 'day').state;
+  assert.equal(s.orders[0].expires, 60 + 86400);
+  const late = paperStep(s, 'X', [pb(0, 100, 100, 100, 100), pb(1500, 100, 101, 99, 100)], 60);
+  assert.equal(late.orders.length, 0);
+  assert.equal(late.log[0].status, 'expired');
+  const c = cancelOrder(s, s.orders[0].id, 70);
+  assert.equal(c.log[0].status, 'cancelled');
+  const m = updateOrder(s, s.orders[0].id, { price: 95, qty: 3, tp: 110, tif: 'gtc' }, 100);
+  assert.equal(m.state.orders[0].price, 95);
+  assert.equal(m.state.orders[0].expires, undefined);
+  assert.ok(updateOrder(s, s.orders[0].id, { price: 105 }, 100).error); // buy limit above market
+  const f = paperStep(placePending(newAccount(10000), 'X', 'buy', 'limit', 1, 95, 100, 60).state, 'X', [pb(0, 100, 100, 100, 100), pb(1, 100, 100, 94, 99)], 60);
+  assert.equal(f.log[0].status, 'filled');
 });

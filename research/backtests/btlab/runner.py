@@ -114,6 +114,10 @@ def run(cfg: RunConfig, cands: pd.DataFrame, days: dict) -> pd.DataFrame:
     if nparams is not None:
         from . import news
         df = news.stamp_candidates(df, days, nparams, mk.id)
+    flow = {x["id"]: x["params"] for x in selected if x["id"] in ("cvd_divergence", "delta_divergence")}
+    if flow and not df.empty:
+        from . import orderflow
+        df = orderflow.stamp_candidates(df, cfg.rule, flow.get("cvd_divergence"), flow.get("delta_divergence"))
     df = P.first_news_bar(df[P.entry_mask(df, selected)], selected)
     rows: list[dict] = []
     order: list[tuple] = []
@@ -231,5 +235,5 @@ def _trade_row(c, ex, qty: int, stop: float, stop_source: str, ecfg, cfg: RunCon
         "mfe_r": ex.mfe_r, "mae_r": ex.mae_r,
         "strength": round(c.strength, 2),
         **{name: getattr(c, name) for name in ("news_move_pct", "news_rvol", "news_filing_at",
-                                              "news_headline", "news_reference") if hasattr(c, name)},
+                                              "news_headline", "news_reference", "cvd_div_kind") if hasattr(c, name)},
     }

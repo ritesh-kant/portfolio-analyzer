@@ -22,7 +22,7 @@ def cand(**kw):
                 ema9_5=99.0, ema20_5=98.0, ema200_5=90.0, vwap5=99.5, macd5=0.3, macd5_prev=0.2,
                 macd1=0.2, macd1_prev=0.1, vol_ratio5=2.0, pullback_ord=1, atr_pct=2.0,
                 daily_uptrend=True, f1_uptrend=True, f2_chart=True, f3_surge=True, pv_rising=True,
-                dist_round_pct=0.4, vwap_cross_bars=1.0, news_move_pct=3.0, news_pullback_ord=1.0, news_pullback_ord_1m=1.0, news_in_pullback=True, news_in_pullback_1m=True, day_key=KEY)
+                dist_round_pct=0.4, vwap_cross_bars=1.0, news_move_pct=3.0, news_pullback_ord=1.0, news_pullback_ord_1m=1.0, news_in_pullback=True, news_in_pullback_1m=True, cvd_div_ok=True, delta_div_ok=True, day_key=KEY)
     return {**base, **kw}
 
 

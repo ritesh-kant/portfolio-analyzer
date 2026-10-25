@@ -24,12 +24,15 @@ import {
   type Drawing,
   type DrawingKind,
   POINTS_NEEDED,
+  FREEHAND,
+  DEFAULT_WIDTH,
   PRICE_ONLY,
   type Pt,
   SWATCHES,
   makeTimeAxis,
   newId,
   translate,
+  vpOf,
 } from '../../lib/tv/drawings';
 import { dragPositionHandle, isPosition, positionPts } from '../../lib/tv/position';
 import { autoStep, buildFootprints, stepLadder } from '../../lib/tv/footprint';
@@ -37,9 +40,11 @@ import {
   CATALOG,
   DEFAULT_INDICATORS,
   type IndicatorCfg,
+  SVP_DEFAULTS,
   catalogOf,
   indicatorLabel,
   makeIndicator,
+  svpOf,
 } from '../../lib/tv/indicator-defs';
 import {
   type Series,
@@ -52,7 +57,7 @@ import {
   sma,
   vwap,
 } from '../../lib/tv/indicators';
-import { type CvdCandle, anchorKey, computeCvd } from '../../lib/tv/cvd';
+import { type CvdCandle, anchorKey, closingPrintCandles, computeCvd, nseClosingPrints } from '../../lib/tv/cvd';
 import { load, save } from '../../lib/tv/storage';
 import {
   TIMEFRAMES,
@@ -70,6 +75,7 @@ import { RightRail } from './right-rail';
 import { WatchlistPanel, type WatchItem } from './watchlist-panel';
 import { useCompact } from '../../lib/tv/use-compact';
 import { BottomBar, type RangeId } from './bottom-bar';
+import { ScreenerPanel } from '../screener/screener-panel';
 import { DrawingsPrimitive } from './drawings-primitive';
 import { NewsPrimitive } from './news-primitive';
 import { foldTrailingTick, intervalSecs } from '../../lib/tv/clean-bars';
@@ -105,6 +111,33 @@ import {
   sessionFor,
 } from '../../lib/tv/sessions';
 import { ReplayBar } from './replay-bar';
+import {
+  PaperOrderDialog,
+  DEFAULT_PREFS,
+  PaperPanel,
+  PaperTicket,
+  type DialogInit,
+  type OrderRequest,
+  type TradingPrefs,
+} from './paper-panel';
+import { PaperOverlay, type QuickOrder } from './paper-overlay';
+import {
+  cancelOrder as paperCancel,
+  closePosition as paperClose,
+  DEFAULT_CAPITAL,
+  OLD_DEFAULT_CAPITAL,
+  equityOf,
+  newAccount,
+  placeMarket,
+  placePending,
+  moveOrder as paperMove,
+  updateOrder as paperUpdate,
+  reversePosition as paperReverse,
+  setBracket as paperBracket,
+  step as paperStep,
+  updateSettings as paperSettings,
+  type PaperState,
+} from '../../lib/tv/paper';
 import { DEFAULT_ROWS } from '../../lib/tv/volume-profile';
 import { completedCount, endAfter, nextEnd } from '../../lib/tv/replay';
 import { groupByBar } from '../../lib/tv/news-markers';
@@ -112,7 +145,9 @@ import type { NewsItem, NewsResponse } from '../../lib/tv/news-types';
 import { FootprintView, type FootprintData } from './footprint-series';
 import { Icons } from './icons';
 import { IndicatorPicker, IndicatorSettings } from './indicator-dialog';
-import { LeftToolbar, type Tool } from './left-toolbar';
+import { LeftToolbar, type Tool, ZOOM_IN_KEY, toolForKey } from './left-toolbar';
+import { FibSettingsDialog } from './fib-settings';
+import { VpSettingsDialog } from './vp-settings';
 import { PositionSettings } from './position-settings';
 import { SymbolSearch } from './symbol-search';
 import { type ChartType, type FootprintUi, TopBar } from './top-bar';
@@ -170,6 +205,7 @@ function computeIndicators(
   sub: Bar[],
   secs: number,
   regular?: (time: number) => boolean,
+  prints?: { sub: boolean[]; bars: boolean[] },
 ): Computed[] {
   const closes = bars.map((b) => b.close);
   const volumes = bars.map((b) => b.volume);
@@ -238,7 +274,7 @@ function computeIndicators(
         break;
       case 'cvd': {
         const anchor = cfg.anchor ?? 'session';
-        const ohlc = computeCvd(bars, sub, secs, (t) => anchorKey(sessionDay(t, timeZone), anchor), regular);
+        const ohlc = computeCvd(bars, sub, secs, (t) => anchorKey(sessionDay(t, timeZone), anchor), regular, prints);
         lines = [{ key: 'cvd', color: UP, values: ohlc.map((c) => c.close), kind: 'candle', ohlc }];
         break;
       }
@@ -388,7 +424,13 @@ export function TvChart() {
   const [draft, setDraft] = useState<Drawing | null>(null);
   const [measure, setMeasure] = useState<Drawing | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Inline label editor for the text tool (replaces window.prompt): position in wrap pixels. */
+  const [textEdit, setTextEdit] = useState<{ x: number; y: number; value: string } | null>(null);
+  const textCommitRef = useRef<((value: string) => void) | null>(null);
+  const textValueRef = useRef('');
   const [posEditId, setPosEditId] = useState<string | null>(null);
+  const [fibEditId, setFibEditId] = useState<string | null>(null);
+  const [vpEditId, setVpEditId] = useState<string | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [histTick, setHistTick] = useState(0);
   const history = useRef<{ past: Drawing[][]; future: Drawing[][] }>({ past: [], future: [] });
@@ -399,6 +441,10 @@ export function TvChart() {
   const [watchOpen, setWatchOpen] = useState(true);
   const [pendingWatch, setPendingWatch] = useState<WatchItem | null>(null);
   const clearPendingWatch = useCallback(() => setPendingWatch(null), []);
+  const [screenerOpen, setScreenerOpen] = useState(false);
+  useEffect(() => {
+    setScreenerOpen(load<boolean>('tv:screenerOpen', false));
+  }, []);
   useEffect(() => {
     // A docked watchlist would swallow a phone screen; there it is an on-demand drawer, closed to start.
     const phone = window.matchMedia('(max-width: 767px)').matches;
@@ -415,6 +461,8 @@ export function TvChart() {
   const [cvdFilter, setCvdFilter] = useState<CvdFilter>('all');
   const [cvdShowFailed, setCvdShowFailed] = useState(true);
   const [cvdPick, setCvdPick] = useState<number | null>(null);
+  // One switch that takes every delta- and CVD-divergence tag and line off the chart (the side panels still list them).
+  const [hideDivs, setHideDivs] = useState(false);
   useEffect(() => {
     const saved = load<Partial<DeltaConfig>>('tv:deltaCfg', {});
     setDeltaCfg({
@@ -432,6 +480,7 @@ export function TvChart() {
     setCvdOpen(load<boolean>('tv:cvdOpen', false));
     setCvdFilter(load<CvdFilter>('tv:cvdFilter', 'all'));
     setCvdShowFailed(load<boolean>('tv:cvdShowFailed', true));
+    setHideDivs(load<boolean>('tv:hideDivs', false));
   }, []);
   const [showIndicators, setShowIndicators] = useState(false);
   const [settingsId, setSettingsId] = useState<string | null>(null);
@@ -582,9 +631,17 @@ export function TvChart() {
       return minute >= def.start && minute < def.end;
     };
   }, [meta, symbol, timeZone]);
+  // NSE: Yahoo's last bar of the day is often one flat print at the closing price, not trading (see cvd.ts).
+  const closingPrints = useMemo(() => {
+    if (timeZone !== 'Asia/Kolkata') return undefined;
+    const minuteOf = (t: number) => Math.floor((wallClock(t, timeZone) % 86400) / 60);
+    const dayOf = (t: number) => sessionDay(t, timeZone);
+    const sub = nseClosingPrints(subBars, minuteOf, dayOf);
+    return { sub, bars: closingPrintCandles(bars, subBars, sub, tf.secs, minuteOf, dayOf) };
+  }, [bars, subBars, tf.secs, timeZone]);
   const computed = useMemo(
-    () => computeIndicators(indicators, bars, timeZone, subBars, tf.secs, regularHours),
-    [indicators, bars, timeZone, subBars, tf.secs, regularHours],
+    () => computeIndicators(indicators, bars, timeZone, subBars, tf.secs, regularHours, closingPrints),
+    [indicators, bars, timeZone, subBars, tf.secs, regularHours, closingPrints],
   );
   // Price/CVD divergences of each CVD indicator, with the delta-divergence setups they sit next to.
   const cvdDivs = useMemo(() => {
@@ -600,19 +657,26 @@ export function TvChart() {
       if (!ohlc || ohlc.length !== bars.length) continue;
       const anchor = c.cfg.anchor ?? 'session';
       const keys = bars.map((b) => anchorKey(sessionDay(b.time, timeZone), anchor));
-      const found = findCvdDivergences(bars, ohlc, keys, intrabarUsable(bars, subBars, tf.secs), {
-        ...CVD_DIV_DEFAULTS,
-        pivot: c.cfg.divPivot ?? CVD_DIV_DEFAULTS.pivot,
-        maxGap: c.cfg.divGap ?? CVD_DIV_DEFAULTS.maxGap,
-        hidden: c.cfg.divMode === 'all',
-      });
+      const found = findCvdDivergences(
+        bars,
+        ohlc,
+        keys,
+        intrabarUsable(bars, subBars, tf.secs),
+        {
+          ...CVD_DIV_DEFAULTS,
+          pivot: c.cfg.divPivot ?? CVD_DIV_DEFAULTS.pivot,
+          maxGap: c.cfg.divGap ?? CVD_DIV_DEFAULTS.maxGap,
+          hidden: c.cfg.divMode === 'all',
+        },
+        closingPrints?.bars,
+      );
       out.set(
         c.cfg.id,
         found.map((div) => ({ div, near: nearSetup(div, setupRefs, 3) != null })),
       );
     }
     return out;
-  }, [computed, bars, subBars, tf.secs, timeZone, divergences]);
+  }, [computed, bars, subBars, tf.secs, timeZone, divergences, closingPrints]);
   // The list's rows (and what the chart draws): the divergences with their times, minus failed ones when hidden.
   const cvdItems = useMemo<CvdItem[]>(() => {
     const out: CvdItem[] = [];
@@ -1551,12 +1615,12 @@ export function TvChart() {
           : subBars.filter((b) => b.time < replayEnd);
     prim.setState(bars, sessions, {
       rows: cfg.length,
-      width: (cfg.width ?? 30) / 100,
-      style: cfg.style ?? 'split',
+      vp: svpOf(cfg),
+      decimals,
       secs: tf.secs,
       fine: fine && fine.length ? fine : null,
     });
-  }, [indicators, tf.intraday, tf.secs, bars, subBars, replayEnd, chartType, fp.on]);
+  }, [indicators, tf.intraday, tf.secs, bars, subBars, replayEnd, chartType, fp.on, decimals]);
 
   // Session shading + day-start lines → primitive (intraday charts of instruments with a defined session).
   useEffect(() => {
@@ -1600,10 +1664,10 @@ export function TvChart() {
   );
   useEffect(() => {
     deltaPrimRef.current?.setState(
-      deltaMarks ? divergences.map(deltaMark) : [],
+      deltaMarks && !hideDivs ? divergences.map(deltaMark) : [],
       fp.on && fp.showDelta,
     );
-  }, [divergences, deltaMarks, deltaMark, bars, chartType, fp.on, fp.showDelta]);
+  }, [divergences, deltaMarks, hideDivs, deltaMark, bars, chartType, fp.on, fp.showDelta]);
   useEffect(() => setDeltaPick(null), [symbol, tfId]);
   useEffect(() => setCvdPick(null), [symbol, tfId]);
 
@@ -1612,7 +1676,7 @@ export function TvChart() {
     const onPrice: CvdDivMark[] = [];
     for (const c of computed) {
       if (c.cfg.type !== 'cvd') continue;
-      const list = c.cfg.hidden
+      const list = c.cfg.hidden || hideDivs
         ? []
         : (cvdDivs.get(c.cfg.id) ?? []).filter((x) => cvdShowFailed || x.div.status !== 'failed');
       const mark = (
@@ -1638,7 +1702,7 @@ export function TvChart() {
       onPrice.push(...list.map((x) => mark(x, x.div.i1, x.div.i2, x.div.p1, x.div.p2)));
     }
     cvdDivMainRef.current?.setState(onPrice);
-  }, [cvdDivs, computed, chartType, structKey, cvdShowFailed, cvdPick]);
+  }, [cvdDivs, computed, chartType, structKey, cvdShowFailed, cvdPick, hideDivs]);
 
   // Drawings → primitive.
   useEffect(() => {
@@ -1714,6 +1778,12 @@ export function TvChart() {
       }
       return { t, p: price };
     };
+    /** A freehand stroke grows by one point per move; every other drawing just moves its second anchor. */
+    const nextPts = (d: Drawing, pt: Pt): Pt[] => {
+      if (!FREEHAND.has(d.kind)) return [d.pts[0]!, pt];
+      const last = d.pts[d.pts.length - 1]!;
+      return last.t === pt.t && last.p === pt.p ? d.pts : [...d.pts, pt];
+    };
     const finishDraft = () => {
       const d = draftRef;
       draftRef = null;
@@ -1736,6 +1806,14 @@ export function TvChart() {
     const onDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
       if ((e.target as HTMLElement).closest('[data-tv-ui]')) return;
+      if (textCommitRef.current) {
+        // mousedown below is preventDefault-ed, so the open text editor never blurs: place it now.
+        const commit = textCommitRef.current;
+        textCommitRef.current = null;
+        if (textValueRef.current.trim()) commit(textValueRef.current);
+        setTextEdit(null);
+        if (latest.current.tool === 'text') return;
+      }
       const { x, y } = local(e);
       const here = locate(x, y);
       if (!here) return;
@@ -1800,15 +1878,20 @@ export function TvChart() {
           kind,
           pts,
           color: DEFAULT_COLOR[kind],
-          width: 2,
+          width: DEFAULT_WIDTH[kind] ?? 2,
           text: kind === 'text' ? 'Text' : undefined,
           rows: kind === 'vprofile' ? DEFAULT_ROWS : undefined,
           pane: loc.key ?? undefined,
         };
         if (kind === 'text') {
-          const input = window.prompt('Text', 'Text');
-          if (input === null) return;
-          d.text = input || 'Text';
+          textCommitRef.current = (value) => {
+            d.text = value.trim() || 'Text';
+            draftRef = d;
+            finishDraft();
+          };
+          textValueRef.current = '';
+          setTextEdit({ x, y, value: '' });
+          return;
         }
         draftRef = d;
         setDraft(d);
@@ -1856,9 +1939,9 @@ export function TvChart() {
       const { x, y } = local(e);
       if (draftRef) {
         const dloc = paneLoc(draftRef.pane ?? null);
-        const pt = dloc ? toPt(x, y, true, dloc) : null;
+        const pt = dloc ? toPt(x, y, !FREEHAND.has(draftRef.kind), dloc) : null;
         if (pt) {
-          draftRef = { ...draftRef, pts: [draftRef.pts[0]!, pt] };
+          draftRef = { ...draftRef, pts: nextPts(draftRef, pt) };
           setDraft(draftRef);
         }
         if (drag?.mode === 'create' && Math.hypot(x - drag.startX, y - drag.startY) > 6)
@@ -1930,8 +2013,8 @@ export function TvChart() {
         if (drag.moved) {
           const { x, y } = local(e);
           const uloc = paneLoc(draftRef.pane ?? null);
-          const pt = uloc ? toPt(x, y, true, uloc) : null;
-          if (pt) draftRef = { ...draftRef, pts: [draftRef.pts[0]!, pt] };
+          const pt = uloc ? toPt(x, y, !FREEHAND.has(draftRef.kind), uloc) : null;
+          if (pt) draftRef = { ...draftRef, pts: nextPts(draftRef, pt) };
           finishDraft();
         }
         drag = null;
@@ -1968,12 +2051,27 @@ export function TvChart() {
         setPosEditId(d.id);
         return;
       }
+      if (d?.kind === 'vprofile') {
+        setSelectedId(d.id);
+        setVpEditId(d.id);
+        return;
+      }
+      if (d?.kind === 'fib') {
+        setSelectedId(d.id);
+        setFibEditId(d.id);
+        return;
+      }
       if (d?.kind !== 'text') return;
-      const input = window.prompt('Text', d.text ?? '');
-      if (input === null) return;
-      setDrawings(
-        latest.current.drawings.map((v) => (v.id === d.id ? { ...v, text: input || v.text } : v)),
-      );
+      textCommitRef.current = (value) => {
+        const next = value.trim();
+        if (!next) return;
+        setDrawings(
+          latest.current.drawings.map((v) => (v.id === d.id ? { ...v, text: next } : v)),
+        );
+      };
+      setSelectedId(d.id);
+      textValueRef.current = d.text ?? '';
+      setTextEdit({ x, y, value: d.text ?? '' });
     };
 
     const onKey = (e: KeyboardEvent) => {
@@ -1991,6 +2089,18 @@ export function TvChart() {
       }
       if (e.key === 'Escape' && replayPickRef.current) {
         setReplayPick(false);
+        return;
+      }
+      const keyTool = toolForKey(e);
+      if (keyTool) {
+        e.preventDefault();
+        setTool(keyTool);
+        setMeasure(null);
+        return;
+      }
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === ZOOM_IN_KEY.code) {
+        e.preventDefault();
+        zoomIn();
         return;
       }
       if (e.key === 'Escape') {
@@ -2394,6 +2504,93 @@ export function TvChart() {
     );
   });
 
+
+  // ── paper trading ──────────────────────────────────────────────────────
+  // Two accounts: the live one persists; the replay one is a sandbox that starts fresh with every replay.
+  const [paperOpen, setPaperOpen] = useState(false);
+  const [livePaper, setLivePaper] = useState<PaperState>(() => newAccount());
+  const [replayPaper, setReplayPaper] = useState<PaperState>(() => newAccount());
+  const paperHydrated = useRef(false);
+  useEffect(() => {
+    setPaperOpen(load<boolean>('tv:paperOpen', false));
+    const saved = load<PaperState | null>('tv:paper', null);
+    if (saved && saved.positions && saved.orders && saved.history) {
+      const untouched =
+        saved.initial === OLD_DEFAULT_CAPITAL &&
+        saved.cash === OLD_DEFAULT_CAPITAL &&
+        !saved.history.length &&
+        !saved.orders.length &&
+        !Object.keys(saved.positions).length;
+      setLivePaper(
+        untouched ? newAccount(DEFAULT_CAPITAL, saved.commissionPct) : { ...newAccount(), ...saved, log: saved.log ?? [] },
+      );
+    }
+    paperHydrated.current = true;
+  }, []);
+  useEffect(() => {
+    if (paperHydrated.current) save('tv:paper', livePaper);
+  }, [livePaper]);
+  const paper = replayActive ? replayPaper : livePaper;
+  const setPaper = replayActive ? setReplayPaper : setLivePaper;
+  const wasReplayPaper = useRef(false);
+  useEffect(() => {
+    if (replayActive && !wasReplayPaper.current) setReplayPaper(newAccount(livePaper.initial, livePaper.commissionPct));
+    wasReplayPaper.current = replayActive;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replayActive]);
+  const barsReady = raw.key.startsWith(`${symbol}|${tf.source}|`);
+  useEffect(() => {
+    if (!barsReady || !bars.length) return;
+    setPaper((s) => paperStep(s, symbol, bars, tf.secs));
+  }, [bars, barsReady, symbol, tf.secs, setPaper]);
+  const lastBar = bars[bars.length - 1];
+  const lastPrice = barsReady && lastBar ? lastBar.close : null;
+  // a fill happens at the last close, i.e. when that candle ends
+  const paperNow = lastBar ? lastBar.time + tf.secs : 0;
+  const placeOrder = useCallback(
+    (o: OrderRequest): string | null => {
+      if (lastPrice == null) return 'No price yet';
+      const bracket = { sl: o.sl, tp: o.tp };
+      const res =
+        o.type === 'market'
+          ? placeMarket(paper, symbol, o.side, o.qty, lastPrice, paperNow, bracket)
+          : placePending(paper, symbol, o.side, o.type, o.qty, o.price ?? 0, lastPrice, paperNow, bracket, o.tif);
+      if (res.error) return res.error;
+      setPaper(res.state);
+      return null;
+    },
+    [paper, symbol, lastPrice, paperNow, setPaper],
+  );
+  // TradingView's trading layer: quantity, one-click mode and the order dialog
+  const [paperQty, setPaperQty] = useState('1');
+  const [prefs, setPrefs] = useState<TradingPrefs>(DEFAULT_PREFS);
+  const oneClick = prefs.instant;
+  const [orderDlg, setOrderDlg] = useState<DialogInit | null>(null);
+  useEffect(() => {
+    setPaperQty(load<string>('tv:paperQty', '1'));
+    setPrefs({ ...DEFAULT_PREFS, ...load<Partial<TradingPrefs>>('tv:paperPrefs', {}) });
+  }, []);
+  const updatePrefs = useCallback((next: TradingPrefs) => {
+    setPrefs(next);
+    save('tv:paperPrefs', next);
+  }, []);
+  const getMainSeries = useCallback(() => mainRef.current?.series ?? null, []);
+  const quickOrder = useCallback(
+    (o: QuickOrder): string | null =>
+      placeOrder({ side: o.side, type: o.type, qty: Number(paperQty), price: o.price }),
+    [placeOrder, paperQty],
+  );
+  const lastPriceRef = useRef(lastPrice);
+  lastPriceRef.current = lastPrice;
+  const setBrackets = useCallback(
+    (sl: number | undefined | null, tp: number | undefined | null): string | null => {
+      const r = paperBracket(paper, symbol, sl ?? undefined, tp ?? undefined);
+      if (!r.error) setPaper(r.state);
+      return r.error ?? null;
+    },
+    [paper, symbol, setPaper],
+  );
+
   const canUndo = histTick >= 0 && history.current.past.length > 0;
   const canRedo = histTick >= 0 && history.current.future.length > 0;
 
@@ -2455,6 +2652,14 @@ export function TvChart() {
           onHideAll={() => setHideAll((v) => !v)}
           onRemoveAll={removeAll}
           onZoomIn={zoomIn}
+          svpOn={indicators.some((i) => i.type === 'svp')}
+          onToggleSvp={() =>
+            setIndicators((list) =>
+              list.some((i) => i.type === 'svp')
+                ? list.filter((i) => i.type !== 'svp')
+                : [...list, makeIndicator('svp', list)],
+            )
+          }
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <div
@@ -2462,8 +2667,169 @@ export function TvChart() {
             className={`relative min-h-0 flex-1 ${tool !== 'cursor' || replayPick ? 'tv-tool' : ''}`}
           >
             <div ref={containerRef} className="absolute inset-0" />
+            {textEdit ? (
+              <input
+                data-tv-ui
+                autoFocus
+                value={textEdit.value}
+                placeholder="Type text, Enter to place"
+                onChange={(e) => {
+                  textValueRef.current = e.target.value;
+                  setTextEdit({ ...textEdit, value: e.target.value });
+                }}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter') {
+                    const commit = textCommitRef.current;
+                    textCommitRef.current = null;
+                    commit?.(textEdit.value);
+                    setTextEdit(null);
+                  } else if (e.key === 'Escape') {
+                    textCommitRef.current = null;
+                    setTextEdit(null);
+                  }
+                }}
+                onBlur={() => {
+                  const commit = textCommitRef.current;
+                  textCommitRef.current = null;
+                  if (commit && textEdit.value.trim()) commit(textEdit.value);
+                  setTextEdit(null);
+                }}
+                style={{
+                  left: Math.max(4, Math.min(textEdit.x, (wrapRef.current?.clientWidth ?? 800) - 224)),
+                  top: Math.max(4, textEdit.y - 14),
+                }}
+                className="absolute z-30 w-52 rounded border border-sky-500 bg-neutral-900 px-2 py-1 text-sm text-neutral-100 shadow-lg outline-none placeholder:text-neutral-500"
+              />
+            ) : null}
             {priceLegend}
             {portals}
+            {paperOpen ? (
+              <>
+                {prefs.showButtons ? (
+                <PaperTicket
+                  price={lastPrice}
+                  decimals={decimals}
+                  shifted={!!selected}
+                  qty={paperQty}
+                  onQty={(v) => {
+                    setPaperQty(v);
+                    save('tv:paperQty', v);
+                  }}
+                  oneClick={oneClick}
+                  onSide={(side) => {
+                    if (oneClick) {
+                      const err = placeOrder({ side, type: 'market', qty: Number(paperQty) });
+                      if (err) window.alert(err);
+                    } else setOrderDlg({ side, type: 'market' });
+                  }}
+                  onDialog={() => setOrderDlg({ side: 'buy', type: 'market' })}
+                />
+                ) : null}
+                <PaperOverlay
+                  chartRef={chartRef}
+                  getSeries={getMainSeries}
+                  wrap={wrapRef.current}
+                  state={paper}
+                  symbol={symbol}
+                  last={lastPrice}
+                  decimals={decimals}
+                  qty={Number(paperQty) > 0 ? Number(paperQty) : 1}
+                  enabled={tool === 'cursor' && !replayPick}
+                  showPositions={prefs.showPositions}
+                  showOrders={prefs.showOrders}
+                  onModifyOrder={(id) => {
+                    const o = paper.orders.find((x) => x.id === id);
+                    if (o)
+                      setOrderDlg({
+                        side: o.side,
+                        type: o.type,
+                        price: o.price,
+                        edit: { id: o.id, qty: o.qty, tp: o.tp, sl: o.sl, tif: o.tif },
+                      });
+                  }}
+                  onHLine={(price) =>
+                    setDrawings([
+                      ...drawings,
+                      {
+                        id: newId(),
+                        kind: 'hline',
+                        pts: [{ t: bars.length ? bars[bars.length - 1]!.time : Date.now() / 1000, p: price }],
+                        color: DEFAULT_COLOR.hline,
+                        width: 1,
+                      },
+                    ])
+                  }
+                  onMoveOrder={(id, price) => {
+                    if (lastPrice == null) return 'No price yet';
+                    const r = paperMove(paper, id, price, lastPrice);
+                    if (!r.error) setPaper(r.state);
+                    return r.error ?? null;
+                  }}
+                  onCancelOrder={(id) => setPaper(paperCancel(paper, id, paperNow))}
+                  onUpdateOrder={(id, patch) => {
+                    if (lastPrice == null) return 'No price yet';
+                    const r = paperUpdate(paper, id, patch, lastPrice);
+                    if (!r.error) setPaper(r.state);
+                    return r.error ?? null;
+                  }}
+                  onOrderMarket={(id) => {
+                    const o = paper.orders.find((x) => x.id === id);
+                    if (!o || lastPrice == null) return 'No price yet';
+                    const r = placeMarket(paperCancel(paper, id, paperNow), symbol, o.side, o.qty, lastPrice, paperNow, {
+                      sl: o.sl,
+                      tp: o.tp,
+                    });
+                    if (!r.error) setPaper(r.state);
+                    return r.error ?? null;
+                  }}
+                  onBracket={setBrackets}
+                  onClosePos={() => {
+                    if (lastPrice != null) setPaper(paperClose(paper, symbol, lastPrice, paperNow));
+                  }}
+                  onReverse={() => {
+                    if (lastPrice == null) return 'No price yet';
+                    const r = paperReverse(paper, symbol, lastPrice, paperNow);
+                    if (!r.error) setPaper(r.state);
+                    return r.error ?? null;
+                  }}
+                  onQuick={quickOrder}
+                  onDialog={(price) =>
+                    setOrderDlg({
+                      side: lastPrice != null && price < lastPrice ? 'buy' : 'sell',
+                      type: 'limit',
+                      price,
+                    })
+                  }
+                />
+                {orderDlg && lastPrice != null ? (
+                  <PaperOrderDialog
+                    key={`${orderDlg.edit?.id ?? ''}${orderDlg.side}${orderDlg.type}${orderDlg.price ?? ''}`}
+                    init={orderDlg}
+                    symbol={symbol}
+                    last={lastPrice}
+                    decimals={decimals}
+                    currency={meta?.currency ?? ''}
+                    qty={paperQty}
+                    oneClick={oneClick}
+                    equity={equityOf(paper)}
+                    onModify={(id, patch) => {
+                      if (lastPrice == null) return 'No price yet';
+                      const r = paperUpdate(paper, id, patch, lastPrice);
+                      if (!r.error) setPaper(r.state);
+                      return r.error ?? null;
+                    }}
+                    onOneClick={(v) => updatePrefs({ ...prefs, instant: v })}
+                    onSubmit={(o, q) => {
+                      setPaperQty(q);
+                      save('tv:paperQty', q);
+                      return placeOrder(o);
+                    }}
+                    onClose={() => setOrderDlg(null)}
+                  />
+                ) : null}
+              </>
+            ) : null}
             {status === 'loading' ? (
               <div className="pointer-events-none absolute right-16 top-2 z-10 rounded bg-[#1e222d] px-2 py-1 text-xs text-[#b2b5be]">
                 Loading {symbol}…
@@ -2644,7 +3010,24 @@ export function TvChart() {
                         </option>
                       ))}
                     </select>
+                    <button
+                      type="button"
+                      title="Settings"
+                      className="ml-1 rounded p-1 text-[#b2b5be] hover:bg-[#2a2e39]"
+                      onClick={() => setVpEditId(selected.id)}
+                    >
+                      <Icons.gear size={16} />
+                    </button>
                   </label>
+                ) : selected.kind === 'fib' ? (
+                  <button
+                    type="button"
+                    title="Settings"
+                    className="rounded p-1 text-[#b2b5be] hover:bg-[#2a2e39]"
+                    onClick={() => setFibEditId(selected.id)}
+                  >
+                    <Icons.gear size={16} />
+                  </button>
                 ) : isPosition(selected.kind) ? (
                   <button
                     type="button"
@@ -2705,7 +3088,41 @@ export function TvChart() {
               </div>
             ) : null}
           </div>
+          {paperOpen ? (
+            <PaperPanel
+              state={paper}
+              symbol={symbol}
+              replay={replayActive}
+              prices={lastPrice != null ? { [symbol]: lastPrice } : {}}
+              decimals={decimals}
+              currency={meta?.currency ?? ''}
+              tz={timeZone}
+              onClose={() => {
+                setPaperOpen(false);
+                save('tv:paperOpen', false);
+              }}
+              onClosePos={(sym) => {
+                if (sym === symbol && lastPrice != null) setPaper(paperClose(paper, sym, lastPrice, paperNow));
+              }}
+              onCancel={(id) => setPaper(paperCancel(paper, id, paperNow))}
+              onBracket={(sym, sl, tp) => {
+                const r = paperBracket(paper, sym, sl, tp);
+                if (!r.error) setPaper(r.state);
+                return r.error ?? null;
+              }}
+              onSettings={(i, c) => setPaper(paperSettings(paper, i, c))}
+              onReset={() => setPaper(newAccount(paper.initial, paper.commissionPct))}
+              prefs={prefs}
+              onPrefs={updatePrefs}
+            />
+          ) : null}
           <BottomBar
+            paperOpen={paperOpen}
+            onPaper={() => {
+              const next = !paperOpen;
+              setPaperOpen(next);
+              save('tv:paperOpen', next);
+            }}
             onRange={rangeTo}
             lastBarEnd={bars.length ? bars[bars.length - 1]!.time + tf.secs : null}
             updatedAt={updatedAt}
@@ -2765,7 +3182,7 @@ export function TvChart() {
             onJump={jumpToBar}
           />
         ) : null}
-        {cvdOpen && !deltaOpen && !compact ? (
+        {cvdOpen && !deltaOpen && !screenerOpen && !compact ? (
           <CvdPanel
             symbol={meta?.symbol ?? symbol}
             items={cvdItems}
@@ -2794,7 +3211,19 @@ export function TvChart() {
             onJump={jumpToCvd}
           />
         ) : null}
-        {watchOpen && !(deltaOpen && !compact) && !(cvdOpen && !compact) ? (
+        {screenerOpen && !compact ? (
+          <ScreenerPanel
+            mode="side"
+            activeSymbol={symbol}
+            onOpenSymbol={(row) => setSymbol(row.symbol)}
+            onAddWatch={(row) => setPendingWatch({ symbol: row.symbol, name: row.name })}
+            onClose={() => {
+              setScreenerOpen(false);
+              save('tv:screenerOpen', false);
+            }}
+          />
+        ) : null}
+        {watchOpen && !screenerOpen && !(deltaOpen && !compact) && !(cvdOpen && !compact) ? (
           <WatchlistPanel
             active={symbol}
             overlay={compact}
@@ -2810,14 +3239,34 @@ export function TvChart() {
         ) : null}
         {compact ? null : (
           <RightRail
-            watchlistOpen={watchOpen && !deltaOpen && !cvdOpen}
-            deltaOpen={deltaOpen}
-            cvdOpen={cvdOpen && !deltaOpen}
+            screenerOpen={screenerOpen}
+            onScreener={() => {
+              const next = !screenerOpen;
+              setScreenerOpen(next);
+              save('tv:screenerOpen', next);
+              if (next) {
+                setDeltaOpen(false);
+                save('tv:deltaOpen', false);
+                setCvdOpen(false);
+                save('tv:cvdOpen', false);
+              }
+            }}
+            watchlistOpen={watchOpen && !deltaOpen && !cvdOpen && !screenerOpen}
+            deltaOpen={deltaOpen && !screenerOpen}
+            cvdOpen={cvdOpen && !deltaOpen && !screenerOpen}
+            hideDivs={hideDivs}
+            onHideDivs={() => {
+              const next = !hideDivs;
+              setHideDivs(next);
+              save('tv:hideDivs', next);
+            }}
             onWatchlist={() => {
-              const next = !(watchOpen && !deltaOpen && !cvdOpen);
+              const next = !(watchOpen && !deltaOpen && !cvdOpen && !screenerOpen);
               setWatchOpen(next);
               save('tv:watchOpen', next);
               if (next) {
+                setScreenerOpen(false);
+                save('tv:screenerOpen', false);
                 setDeltaOpen(false);
                 save('tv:deltaOpen', false);
                 setCvdOpen(false);
@@ -2829,6 +3278,8 @@ export function TvChart() {
               setDeltaOpen(next);
               save('tv:deltaOpen', next);
               if (next) {
+                setScreenerOpen(false);
+                save('tv:screenerOpen', false);
                 setCvdOpen(false);
                 save('tv:cvdOpen', false);
               }
@@ -2838,6 +3289,8 @@ export function TvChart() {
               setCvdOpen(next);
               save('tv:cvdOpen', next);
               if (next) {
+                setScreenerOpen(false);
+                save('tv:screenerOpen', false);
                 setDeltaOpen(false);
                 save('tv:deltaOpen', false);
               }
@@ -2877,7 +3330,36 @@ export function TvChart() {
           onClose={() => setPosEditId(null)}
         />
       ) : null}
-      {settingsId && indicators.find((i) => i.id === settingsId) ? (
+      {vpEditId && drawings.find((d) => d.id === vpEditId) ? (
+        <VpSettingsDialog
+          vp={vpOf(drawings.find((d) => d.id === vpEditId)!)}
+          rows={drawings.find((d) => d.id === vpEditId)!.rows ?? DEFAULT_ROWS}
+          onChange={({ vp, rows }) =>
+            setDrawings(drawings.map((d) => (d.id === vpEditId ? { ...d, vp, rows } : d)))
+          }
+          onClose={() => setVpEditId(null)}
+        />
+      ) : null}
+      {fibEditId && drawings.find((d) => d.id === fibEditId) ? (
+        <FibSettingsDialog
+          drawing={drawings.find((d) => d.id === fibEditId)!}
+          onChange={(next) => setDrawings(drawings.map((d) => (d.id === next.id ? next : d)))}
+          onClose={() => setFibEditId(null)}
+        />
+      ) : null}
+      {settingsId && indicators.find((i) => i.id === settingsId)?.type === 'svp' ? (
+        <VpSettingsDialog
+          title="Session volume profile"
+          vp={svpOf(indicators.find((i) => i.id === settingsId)!)}
+          rows={indicators.find((i) => i.id === settingsId)!.length}
+          defaults={SVP_DEFAULTS}
+          widthLabel="Width (% of session)"
+          onChange={({ vp, rows }) =>
+            setIndicators((list) => list.map((i) => (i.id === settingsId ? { ...i, vp, length: rows } : i)))
+          }
+          onClose={() => setSettingsId(null)}
+        />
+      ) : settingsId && indicators.find((i) => i.id === settingsId) ? (
         <IndicatorSettings
           cfg={indicators.find((i) => i.id === settingsId)!}
           onChange={(next) =>

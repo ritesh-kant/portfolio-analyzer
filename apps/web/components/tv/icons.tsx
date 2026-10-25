@@ -101,6 +101,73 @@ export const Icons = {
       </>,
       size,
     ),
+  brush: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M3.5 16.5c0-2 1.2-3 2.8-3 1.3 0 2.2 1 1.8 2.3-.5 1.5-2.600 2.200-4.600.700z" />
+        <path d="M8 13.500l7-8.500a1.300 1.300 0 0 1 2 1.600L10 14.500" />
+      </>,
+      size,
+    ),
+  highlighter: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M11.500 3.500l5 5-6 6-5-5z" />
+        <path d="M5.500 9.500l-2 4.500 2 .5 1.500-1M3 17h6" />
+      </>,
+      size,
+    ),
+  arrow: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M4.500 15.500l10-10M9 5.500h5.500V11" />
+        <circle cx="4" cy="16" r="1.300" />
+      </>,
+      size,
+    ),
+  arrowmarker: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M3.500 16.500l3-1 7-7-2.500-2.500-7 7zM11 6l4.500-2.500L13.500 8z" />
+      </>,
+      size,
+    ),
+  arrowup: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M10 3L4 9.500h3.500V17h5V9.500H16z" />
+      </>,
+      size,
+    ),
+  arrowdown: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M10 17l6-6.500h-3.500V3h-5v7.500H4z" />
+      </>,
+      size,
+    ),
+  circle: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <circle cx="10" cy="10" r="6.500" />
+        <circle cx="10" cy="10" r="1" />
+      </>,
+      size,
+    ),
+  ellipse: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <ellipse cx="10" cy="10" rx="7.500" ry="5" />
+      </>,
+      size,
+    ),
+  triangle: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M10 4l6.500 11.500h-13z" />
+      </>,
+      size,
+    ),
   fib: ({ size }: IconProps) =>
     wrap(
       <>
@@ -415,6 +482,13 @@ export const Icons = {
       <>
         <rect x="7" y="7" width="9" height="9" rx="1" />
         <path d="M4 13V4h9" />
+      </>,
+      size,
+    ),
+  screener: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M3 4.5h14l-5.2 6.2V16l-3.6-1.8v-3.5z" />
       </>,
       size,
     ),
