@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { dropSpikeWicks, intervalSecs } from '../../../../lib/tv/clean-bars';
+import { backfillOpeningVolume, dropSpikeWicks, intervalSecs } from '../../../../lib/tv/clean-bars';
 import { hasExtendedBars, sessionFor } from '../../../../lib/tv/sessions';
-import { wallClock } from '../../../../lib/tv/timeframes';
+import { sessionDay, wallClock } from '../../../../lib/tv/timeframes';
 import type { Bar, BarsResponse } from '../../../../lib/tv/types';
 
 export const dynamic = 'force-dynamic';
@@ -78,6 +78,22 @@ async function fetchYahoo(
   throw new Error(lastError);
 }
 
+/** Daily bars covering the same span, used to backfill a missing opening-bar volume. Best effort: [] on failure. */
+async function fetchDailyBars(symbol: string, range: string, window?: Window): Promise<Bar[]> {
+  try {
+    const r = await fetchYahoo(symbol, '1d', range, false, window);
+    const q = r.indicators.quote[0] ?? {};
+    const out: Bar[] = [];
+    (r.timestamp ?? []).forEach((time, i) => {
+      const v = q.volume?.[i];
+      if (v) out.push({ time, open: 0, high: 0, low: 0, close: 0, volume: v });
+    });
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const symbol = (searchParams.get('symbol') ?? '').trim();
@@ -128,14 +144,23 @@ export async function GET(req: Request) {
     };
     // US stocks: stray quotes in the no-volume pre/post-market bars draw as wicks off the scale
     const def = hasExtendedBars({ ...meta, symbol }) ? sessionFor({ ...meta, symbol }) : null;
+    // NSE: the 09:15 bar often has volume 0 (see backfillOpeningVolume)
+    const secs = intervalSecs(interval);
+    const isNse = /\.(NS|BO)$/.test(symbol) || meta.exchange.includes('NSE');
+    const filled =
+      isNse && secs && secs <= 3600 && bars.length > 0 && bars.some((b) => b.volume === 0)
+        ? backfillOpeningVolume(bars, await fetchDailyBars(symbol, range, window), (t) =>
+            sessionDay(t, meta.timezone),
+          )
+        : bars;
     const body: BarsResponse = {
       interval,
       bars: def
-        ? dropSpikeWicks(bars, intervalSecs(interval), (t) => {
+        ? dropSpikeWicks(bars, secs, (t) => {
             const minute = Math.floor((wallClock(t, meta.timezone) % 86400) / 60);
             return minute >= def.start && minute < def.end;
           })
-        : bars,
+        : filled,
       meta,
     };
     return NextResponse.json(body, { headers: { 'Cache-Control': 'no-store' } });

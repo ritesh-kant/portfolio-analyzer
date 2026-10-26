@@ -71,3 +71,43 @@ export function dropSpikeWicks(
   });
   return changed ? out : bars;
 }
+
+/** The backfill never credits the opening bar with more than this share of the day's volume. */
+export const OPENING_VOLUME_MAX_SHARE = 0.4;
+
+/**
+ * Yahoo's first intraday bar of an NSE session (09:15) usually arrives with volume 0, while its daily bar has
+ * the full-day total. Left alone, every intraday volume sum, VWAP and relative-volume reading runs short by the
+ * opening volume (RELIANCE 2026-10-26: 7.04M against 7.49M; VWAP 0.6 off TradingView's).
+ *
+ * For each day whose first bar has no volume but whose other bars do, the opening bar gets the daily total minus
+ * those other bars. Skipped when the daily volume is missing, the remainder is not positive, or it exceeds
+ * OPENING_VOLUME_MAX_SHARE of the day (a lagging daily bar would otherwise inflate it).
+ */
+export function backfillOpeningVolume(
+  bars: Bar[],
+  dailyBars: Bar[],
+  dayOf: (time: number) => string,
+): Bar[] {
+  const daily = new Map<string, number>();
+  for (const d of dailyBars) if (d.volume > 0) daily.set(dayOf(d.time), d.volume);
+  if (daily.size === 0) return bars;
+  const firstOfDay = new Map<string, number>();
+  const rest = new Map<string, number>();
+  bars.forEach((b, i) => {
+    const day = dayOf(b.time);
+    if (!firstOfDay.has(day)) firstOfDay.set(day, i);
+    else rest.set(day, (rest.get(day) ?? 0) + b.volume);
+  });
+  let out: Bar[] | null = null;
+  for (const [day, i] of firstOfDay) {
+    const total = daily.get(day);
+    const others = rest.get(day) ?? 0;
+    if (!total || bars[i]!.volume > 0 || others <= 0) continue;
+    const missing = total - others;
+    if (missing <= 0 || missing > total * OPENING_VOLUME_MAX_SHARE) continue;
+    out ??= bars.slice();
+    out[i] = { ...bars[i]!, volume: missing };
+  }
+  return out ?? bars;
+}

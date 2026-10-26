@@ -13,7 +13,7 @@ import { buildProfile } from './volume-profile.ts';
 import { cotItems, metalRoot, parseBlsCalendar, parseFedRss, zonedInstant } from './macro.ts';
 import { groupByBar } from './news-markers.ts';
 import { barContaining, deltaDepthDays, findDeltaDivergences, inDeltaView, DELTA_VIEW_DEFAULTS } from './delta-divergence.ts';
-import { dropSpikeWicks, foldTrailingTick, intervalSecs } from './clean-bars.ts';
+import { backfillOpeningVolume, dropSpikeWicks, foldTrailingTick, intervalSecs } from './clean-bars.ts';
 
 const IST = 'Asia/Kolkata';
 // 2026-10-19 09:15 IST
@@ -1041,4 +1041,22 @@ test('paper: day orders expire, every ending is logged, orders can be modified',
   assert.ok(updateOrder(s, s.orders[0].id, { price: 105 }, 100).error); // buy limit above market
   const f = paperStep(placePending(newAccount(10000), 'X', 'buy', 'limit', 1, 95, 100, 60).state, 'X', [pb(0, 100, 100, 100, 100), pb(1, 100, 100, 94, 99)], 60);
   assert.equal(f.log[0].status, 'filled');
+});
+
+test('backfillOpeningVolume gives a zero-volume 09:15 bar the daily total minus the rest', () => {
+  const day = (t) => sessionDay(t, IST);
+  const bar = (i, v) => ({ time: open + i * 300, open: 1, high: 1, low: 1, close: 1, volume: v });
+  const bars = [bar(0, 0), bar(1, 200), bar(2, 300)];
+  const daily = [{ time: open, open: 0, high: 0, low: 0, close: 0, volume: 800 }];
+  const got = backfillOpeningVolume(bars, daily, day);
+  assert.equal(got[0].volume, 300);
+  assert.equal(got[1].volume, 200);
+  assert.equal(bars[0].volume, 0, 'input is not mutated');
+  // opening bar already has volume, no daily volume, or an implausible remainder: untouched
+  assert.equal(backfillOpeningVolume([bar(0, 50), bar(1, 200)], daily, day)[0].volume, 50);
+  assert.equal(backfillOpeningVolume(bars, [], day), bars);
+  const huge = [{ ...daily[0], volume: 10_000 }];
+  assert.equal(backfillOpeningVolume(bars, huge, day), bars);
+  const small = [{ ...daily[0], volume: 400 }];
+  assert.equal(backfillOpeningVolume(bars, small, day), bars);
 });
