@@ -10,7 +10,7 @@ import type {
 } from 'lightweight-charts';
 import type { Bar } from '../../lib/tv/types';
 import { type VpSettings, VP_DEFAULTS, withAlpha } from '../../lib/tv/drawings';
-import { type VolumeProfile, buildProfile } from '../../lib/tv/volume-profile';
+import { type VolumeProfile, profileOver } from '../../lib/tv/volume-profile';
 import { logicalX } from './coords';
 
 export interface SvpOptions {
@@ -33,18 +33,6 @@ const NONE: SvpOptions = {
   secs: 60,
   fine: null,
 };
-
-/** First index in `bars` whose time is >= t. */
-function lowerBound(bars: Bar[], t: number): number {
-  let lo = 0;
-  let hi = bars.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (bars[mid]!.time < t) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
-}
 
 /**
  * Session volume profile: for every trading session on screen, a volume-by-price
@@ -100,24 +88,7 @@ export class SessionProfilePrimitive implements ISeriesPrimitive<Time> {
 
   private profileOf(a: number, b: number, rows: number, valueArea: number): VolumeProfile | null {
     const { fine, secs } = this.opts;
-    const start = this.bars[a]!.time;
-    const lastStart = this.bars[b]!.time;
-    // 1-minute candles, when they span the whole session so far.
-    const useFine =
-      !!fine &&
-      fine.length > 0 &&
-      fine[0]!.time <= start &&
-      fine[fine.length - 1]!.time >= lastStart;
-    const source = useFine ? fine! : this.bars;
-    const i0 = useFine ? lowerBound(fine!, start) : a;
-    const i1 = useFine ? lowerBound(fine!, lastStart + secs) - 1 : b;
-    const last = source[i1];
-    const key = `${a}|${b}|${rows}|${valueArea}|${useFine}|${i1}|${last?.volume}|${last?.high}|${last?.low}`;
-    if (this.cache.has(key)) return this.cache.get(key)!;
-    if (this.cache.size > 600) this.cache.clear();
-    const profile = i1 >= i0 ? buildProfile(source, i0, i1, rows, valueArea) : null;
-    this.cache.set(key, profile);
-    return profile;
+    return profileOver(this.bars, fine, secs, a, b, rows, valueArea, this.cache);
   }
 
   private paint(ctx: CanvasRenderingContext2D, w: number) {

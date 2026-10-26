@@ -545,6 +545,11 @@ export function TvChart() {
       : (deltaOpen || cvdOn) && deltaSub.symbol === symbol && deltaSub.bars.length > subRaw.length
         ? deltaSub.bars
         : subRaw;
+  // 1-minute candles for volume profiles (never past the replay cut-off); none when the chart already is 1-minute.
+  const profileFine = useMemo(() => {
+    if (tf.secs <= 60 || !subBars.length) return null;
+    return replayEnd == null ? subBars : subBars.filter((b) => b.time < replayEnd);
+  }, [subBars, tf.secs, replayEnd]);
   const effectiveStep = fp.auto ? autoStep(bars) : fp.step;
   // Delta divergences on 15-minute candles, using the footprint's own delta for each. Where 1-minute bars cover a
   // candle its delta is built from them; older candles (to ~60 days) fall back to 5-minute bars, flagged as
@@ -880,7 +885,7 @@ export function TvChart() {
   }, [ready, symbol, tf.source, tf.range, wantPrepost, fetchBars]);
 
   // Footprint needs 1-minute bars underneath coarser candles.
-  const svpOn = indicators.some((i) => i.type === 'svp');
+  const svpOn = indicators.some((i) => i.type === 'svp') || drawings.some((d) => d.kind === 'vprofile');
   useEffect(() => {
     if (!ready || (!fp.on && !svpOn && !cvdOn) || tf.source === '1m') return;
     const ctl = new AbortController();
@@ -1607,12 +1612,7 @@ export function TvChart() {
       (starts[i + 1] ?? bars.length) - 1,
     ]);
     // Never let minutes after the replay cut-off into a profile.
-    const fine =
-      tf.secs <= 60
-        ? null
-        : replayEnd == null
-          ? subBars
-          : subBars.filter((b) => b.time < replayEnd);
+    const fine = profileFine;
     prim.setState(bars, sessions, {
       rows: cfg.length,
       vp: svpOf(cfg),
@@ -1620,7 +1620,7 @@ export function TvChart() {
       secs: tf.secs,
       fine: fine && fine.length ? fine : null,
     });
-  }, [indicators, tf.intraday, tf.secs, bars, subBars, replayEnd, chartType, fp.on, decimals]);
+  }, [indicators, tf.intraday, tf.secs, bars, profileFine, chartType, fp.on, decimals]);
 
   // Session shading + day-start lines → primitive (intraday charts of instruments with a defined session).
   useEffect(() => {
@@ -1707,10 +1707,10 @@ export function TvChart() {
   // Drawings → primitive.
   useEffect(() => {
     const all = measure ? [...drawings, measure] : drawings;
-    const next = { drawings: all, draft, selectedId, hidden: hideAll, axis, decimals, bars };
+    const next = { drawings: all, draft, selectedId, hidden: hideAll, axis, decimals, bars, fine: profileFine, secs: tf.secs };
     primRef.current?.setState(next);
     for (const { prim } of subPrimsRef.current.values()) prim.setState(next);
-  }, [drawings, measure, draft, selectedId, hideAll, axis, decimals, bars, structKey]);
+  }, [drawings, measure, draft, selectedId, hideAll, axis, decimals, bars, profileFine, tf.secs, structKey]);
 
   // ── pointer interaction with drawings ─────────────────────────────────
   useEffect(() => {

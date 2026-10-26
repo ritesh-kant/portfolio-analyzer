@@ -11,7 +11,7 @@ import type {
 } from 'lightweight-charts';
 import { logicalX } from './coords';
 import type { Bar } from '../../lib/tv/types';
-import { DEFAULT_ROWS, type VolumeProfile, buildProfile } from '../../lib/tv/volume-profile';
+import { DEFAULT_ROWS, type VolumeProfile, profileOver } from '../../lib/tv/volume-profile';
 import { type Drawing, FREEHAND, type Pt, fibOf, vpOf, withAlpha, lineDash, type TimeAxis, formatDuration } from '../../lib/tv/drawings';
 import {
   POSITION_PROFIT,
@@ -32,6 +32,9 @@ export interface DrawingsState {
   decimals: number;
   /** The candles on screen, for volume profiles. */
   bars: Bar[];
+  /** 1-minute candles under `bars` (candle length `secs`), for finer volume profiles; null when unavailable. */
+  fine: Bar[] | null;
+  secs: number;
 }
 
 interface Px {
@@ -106,6 +109,8 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     axis: { count: 0, toLogical: () => 0, toTime: () => 0 },
     decimals: 2,
     bars: [],
+    fine: null,
+    secs: 60,
   };
   private axisViews: ISeriesPrimitiveAxisView[] = [];
   private view: IPrimitivePaneView = {
@@ -197,23 +202,16 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     return x == null || y == null ? null : { x, y };
   }
 
-  private profiles = new Map<string, { key: string; profile: VolumeProfile | null }>();
+  private profiles = new Map<string, VolumeProfile | null>();
 
-  /** Volume profile over the candles between a profile drawing's two anchors (cached until the data or range changes). */
+  /** Volume profile over the candles between a profile drawing's two anchors (memoised until the data or range changes). */
   private profileOf(d: Drawing): VolumeProfile | null {
-    const bars = this.state.bars;
+    const { bars, fine, secs } = this.state;
     if (!bars.length || d.pts.length < 2) return null;
-    const a = Math.round(this.state.axis.toLogical(d.pts[0]!.t));
-    const b = Math.round(this.state.axis.toLogical(d.pts[1]!.t));
-    const rows = d.rows ?? DEFAULT_ROWS;
-    const va = vpOf(d).valueArea;
-    const last = bars[bars.length - 1]!;
-    const key = `${a}|${b}|${rows}|${va}|${bars.length}|${last.volume}|${last.high}|${last.low}`;
-    const hit = this.profiles.get(d.id);
-    if (hit?.key === key) return hit.profile;
-    const profile = buildProfile(bars, a, b, rows, va / 100);
-    this.profiles.set(d.id, { key, profile });
-    return profile;
+    const clamp = (i: number) => Math.max(0, Math.min(bars.length - 1, i));
+    const a = clamp(Math.min(Math.round(this.state.axis.toLogical(d.pts[0]!.t)), Math.round(this.state.axis.toLogical(d.pts[1]!.t))));
+    const b = clamp(Math.max(Math.round(this.state.axis.toLogical(d.pts[0]!.t)), Math.round(this.state.axis.toLogical(d.pts[1]!.t))));
+    return profileOver(bars, fine, secs, a, b, d.rows ?? DEFAULT_ROWS, vpOf(d).valueArea / 100, this.profiles);
   }
 
   private geometry(d: Drawing, w: number, h: number): Geometry | null {

@@ -121,3 +121,49 @@ export function buildProfile(
     maxRow: sum(out[poc]!),
   };
 }
+
+/** First index in `bars` whose time is >= t. */
+function lowerBound(bars: Bar[], t: number): number {
+  let lo = 0;
+  let hi = bars.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (bars[mid]!.time < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * Profile of chart candles `a..b`, built from the 1-minute candles underneath when they cover the whole range
+ * (a much finer shape, and what TradingView does), else from the chart's own candles. Every profile on the chart
+ * goes through here so a session profile and a fixed range one over the same candles agree on the POC.
+ * Results are memoised in `cache` when given.
+ */
+export function profileOver(
+  bars: Bar[],
+  fine: Bar[] | null,
+  secs: number,
+  a: number,
+  b: number,
+  rows: number,
+  valueArea: number,
+  cache?: Map<string, VolumeProfile | null>,
+): VolumeProfile | null {
+  const start = bars[a]!.time;
+  const lastStart = bars[b]!.time;
+  const useFine =
+    !!fine && fine.length > 0 && fine[0]!.time <= start && fine[fine.length - 1]!.time >= lastStart;
+  const source = useFine ? fine! : bars;
+  const i0 = useFine ? lowerBound(fine!, start) : a;
+  const i1 = useFine ? lowerBound(fine!, lastStart + secs) - 1 : b;
+  const last = source[i1];
+  const key = `${a}|${b}|${rows}|${valueArea}|${useFine}|${i1}|${last?.volume}|${last?.high}|${last?.low}`;
+  if (cache?.has(key)) return cache.get(key)!;
+  const profile = i1 >= i0 ? buildProfile(source, i0, i1, rows, valueArea) : null;
+  if (cache) {
+    if (cache.size > 600) cache.clear();
+    cache.set(key, profile);
+  }
+  return profile;
+}
