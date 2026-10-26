@@ -239,16 +239,16 @@ export interface VpSettings {
   backgroundOpacity: number;
 }
 
-/** TradingView's look: width 30% of the box, rows teal (up) / magenta (down), value area brighter, red POC and blue VAH/VAL. */
+/** TradingView's look: width 30% of the box, rows blue (up) / yellow (down), value area brighter, red POC and blue VAH/VAL. */
 export const VP_DEFAULTS: VpSettings = {
   volume: 'updown',
   valueArea: 70,
   placement: 'left',
   width: 30,
-  upColor: '#2eb5c6',
-  downColor: '#c2406f',
-  vaUpColor: '#2eb5c6',
-  vaDownColor: '#c2406f',
+  upColor: '#3b66e8',
+  downColor: '#e6d24f',
+  vaUpColor: '#3b66e8',
+  vaDownColor: '#e6d24f',
   opacity: 0.85,
   showPoc: true,
   pocColor: '#f23645',
@@ -257,7 +257,7 @@ export const VP_DEFAULTS: VpSettings = {
   vaLineColor: '#2962ff',
   showLabels: false,
   showBackground: true,
-  backgroundColor: '#2eb5c6',
+  backgroundColor: '#3b66e8',
   backgroundOpacity: 0.06,
 };
 

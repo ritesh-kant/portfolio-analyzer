@@ -114,6 +114,8 @@ interface Props {
   onRedo: () => void;
   onScreenshot: () => void;
   onFullscreen: () => void;
+  trade: boolean;
+  onTrade: () => void;
   /** Phones have no right rail, so the watchlist opens from here. */
   watchlistOpen?: boolean;
   onWatchlist?: () => void;
@@ -350,6 +352,16 @@ export function TopBar(p: Props) {
         <Icons.redo size={20} />
       </button>
       <div className="flex-1" />
+      <button
+        type="button"
+        className={`mr-1 h-8 shrink-0 rounded-full border px-4 text-[14px] font-medium transition-colors ${
+          p.trade ? 'border-[#2962ff] bg-[#2962ff] text-white' : 'border-[#363a45] text-[#d1d4dc] hover:bg-[#2a2e39]'
+        }`}
+        onClick={p.onTrade}
+        title="Trade with your broker"
+      >
+        Trade
+      </button>
       {p.onWatchlist ? (
         <button
           type="button"

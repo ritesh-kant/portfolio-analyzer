@@ -53,7 +53,7 @@ interface Props {
 }
 
 const iconButton =
-  'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#363a45] text-[#b2b5be] transition-colors hover:border-[#5d606b] hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[#363a45] disabled:hover:text-[#b2b5be]';
+  'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#363a45] text-[#b2b5be] transition-colors hover:border-[#5d606b] hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[#363a45] disabled:hover:text-[#b2b5be]';
 
 const Refresh = ({ spin }: { spin: boolean }) => (
   <svg
@@ -339,18 +339,15 @@ export function ScreenerPanel({
         </>
       ) : null}
       {/* title row */}
-      <div className="flex items-center justify-between gap-3 px-5 pt-4">
-        <div className="flex items-center gap-3 text-[15px] font-medium text-white">
-          <Icons.list size={22} />
-          Stock Screener
-        </div>
+      <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-[#2a2e39] px-3">
+        <div className="text-[14px] font-semibold text-[#d1d4dc]">Stock screener</div>
         {mode === 'side' ? (
           <div className="flex items-center gap-1">
             <button
               type="button"
               title={expanded ? 'Narrower' : 'Wider'}
               aria-label={expanded ? 'Narrower screener' : 'Wider screener'}
-              className="flex h-8 w-8 items-center justify-center rounded-md text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white"
+              className="flex h-7 w-7 items-center justify-center rounded text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white"
               onClick={() => setSaved(expanded ? DEFAULT_WIDTH : WIDE_WIDTH)}
             >
               {expanded ? <Icons.collapse size={18} /> : <Icons.expand size={18} />}
@@ -360,7 +357,7 @@ export function ScreenerPanel({
                 type="button"
                 title="Close"
                 aria-label="Close screener"
-                className="flex h-8 w-8 items-center justify-center rounded-md text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white"
+                className="flex h-7 w-7 items-center justify-center rounded text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white"
                 onClick={onClose}
               >
                 <Icons.close size={18} />
@@ -371,15 +368,15 @@ export function ScreenerPanel({
       </div>
 
       {/* screen name · undo/redo · screen actions */}
-      <div className="flex items-center gap-2 px-5 pb-3 pt-3">
+      <div className="flex items-center gap-1.5 px-3 pb-2 pt-2.5">
         <button
           ref={nameRef}
           type="button"
-          className="flex items-center gap-1.5 rounded-md py-1 pr-2 text-[22px] font-semibold leading-none text-white hover:text-[#2962ff]"
+          className="flex items-center gap-1.5 rounded-md py-1 pr-2 text-[16px] font-semibold leading-none text-white hover:text-[#2962ff]"
           onClick={() => setNameMenu(nameMenu === 'list' ? null : 'list')}
         >
           {screen.name}
-          <Icons.chevron size={16} />
+          <Icons.chevron size={14} />
         </button>
         <div className="flex-1" />
         <button
@@ -390,7 +387,7 @@ export function ScreenerPanel({
           disabled={!history.past.length}
           onClick={undo}
         >
-          <Icons.undo size={18} />
+          <Icons.undo size={15} />
         </button>
         <button
           type="button"
@@ -400,7 +397,7 @@ export function ScreenerPanel({
           disabled={!history.future.length}
           onClick={redo}
         >
-          <Icons.redo size={18} />
+          <Icons.redo size={15} />
         </button>
         <button
           ref={gearRef}
@@ -410,7 +407,7 @@ export function ScreenerPanel({
           className={iconButton}
           onClick={() => setNameMenu(nameMenu === 'actions' ? null : 'actions')}
         >
-          <Icons.gear size={18} />
+          <Icons.gear size={15} />
         </button>
         {nameMenu === 'list' ? (
           <Popover anchor={nameRef} onClose={() => setNameMenu(null)} width={260}>
@@ -463,7 +460,7 @@ export function ScreenerPanel({
       </div>
 
       {/* filters */}
-      <div className="px-5 pb-4">
+      <div className="px-3 pb-3">
         <FilterBar
           market={market}
           onMarket={switchMarket}
@@ -481,21 +478,21 @@ export function ScreenerPanel({
       </div>
 
       {/* table toolbar */}
-      <div className="flex items-center gap-2 border-t border-[#2a2e39] px-5 py-3">
-        <div className="flex h-9 items-center gap-2 px-1 text-[15px] text-white">
-          <Icons.list size={20} />
+      <div className="flex items-center gap-2 border-t border-[#2a2e39] px-3 py-2">
+        <div className="flex h-7 items-center gap-1.5 px-1 text-[13px] text-white">
+          <Icons.list size={16} />
           Table
         </div>
-        <span className="mx-1 h-6 w-px bg-[#363a45]" />
+        <span className="mx-1 h-4 w-px bg-[#363a45]" />
         <button
           ref={colRef}
           type="button"
-          className="flex h-9 items-center gap-2 rounded-lg px-2 text-[15px] text-white hover:bg-[#2a2e39]"
+          className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[13px] text-white hover:bg-[#2a2e39]"
           onClick={() => setColMenu((m) => !m)}
         >
-          <Icons.indicators size={20} />
+          <Icons.indicators size={16} />
           {viewName}
-          <Icons.chevron size={14} />
+          <Icons.chevron size={12} />
         </button>
         {colMenu ? (
           <ColumnsMenu

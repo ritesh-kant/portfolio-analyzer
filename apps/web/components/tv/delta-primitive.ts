@@ -126,6 +126,22 @@ export class DeltaPrimitive implements ISeriesPrimitive<Time> {
     ctx.fillText('Δ', cx, cy + 0.5);
   }
 
+  /** Chart bar of the badge under (x, y), or null. */
+  findBar(x: number, y: number): number | null {
+    for (const m of this.marks) {
+      const p = this.pos(m);
+      if (p && Math.hypot(x - p.cx, y - p.cy) <= RADIUS + 3) return m.index;
+    }
+    return null;
+  }
+
+  /** Where a badge sits, for anchoring a popover to it. */
+  position(index: number): { x: number; y: number; below: boolean } | null {
+    const m = this.marks.find((v) => v.index === index);
+    const p = m ? this.pos(m) : null;
+    return m && p ? { x: p.cx, y: p.cy, below: m.kind === 'sellers' } : null;
+  }
+
   private pos(m: DeltaMark): { cx: number; cy: number; x0: number; x1: number } | null {
     const xEnd = this.chart?.timeScale().logicalToCoordinate(m.index as Logical);
     const xStart = this.chart?.timeScale().logicalToCoordinate(m.startIndex as Logical);

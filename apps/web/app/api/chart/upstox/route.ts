@@ -1,6 +1,6 @@
-import { gunzipSync } from 'node:zlib';
 import { NextResponse } from 'next/server';
 import type { Bar } from '../../../../lib/tv/types';
+import { instrumentKey } from '../../../../lib/broker/upstox-instruments';
 
 /**
  * Exchange candles for NSE stocks from Upstox's public candle API (no token). It reaches back years at 1-minute
@@ -10,35 +10,10 @@ import type { Bar } from '../../../../lib/tv/types';
 export const dynamic = 'force-dynamic';
 
 const UPSTOX = 'https://api.upstox.com';
-const INSTRUMENTS_URL = 'https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz';
-const DAY_MS = 86_400_000;
 const MAX_WINDOW_DAYS = 30;
 /** Chart interval → Upstox minutes. */
 const MINUTES: Record<string, number> = { '1m': 1, '5m': 5, '15m': 15, '30m': 30 };
 const SYMBOL = /^[A-Za-z0-9&\-_]{1,24}$/;
-
-let instruments: { at: number; bySymbol: Map<string, string> } | null = null;
-
-async function instrumentKey(symbol: string): Promise<string | undefined> {
-  if (!instruments || Date.now() - instruments.at > DAY_MS) {
-    const res = await fetch(INSTRUMENTS_URL);
-    if (!res.ok) throw new Error(`instrument master HTTP ${res.status}`);
-    const rows = JSON.parse(gunzipSync(Buffer.from(await res.arrayBuffer())).toString('utf8')) as {
-      segment?: string;
-      instrument_type?: string;
-      trading_symbol?: string;
-      instrument_key?: string;
-    }[];
-    const bySymbol = new Map<string, string>();
-    for (const r of rows) {
-      if (r.segment === 'NSE_EQ' && r.instrument_type === 'EQ' && r.trading_symbol && r.instrument_key) {
-        bySymbol.set(r.trading_symbol, r.instrument_key);
-      }
-    }
-    instruments = { at: Date.now(), bySymbol };
-  }
-  return instruments.bySymbol.get(symbol);
-}
 
 /** YYYY-MM-DD of an instant in India (UTC+5:30, no DST). */
 function istDay(unix: number): string {

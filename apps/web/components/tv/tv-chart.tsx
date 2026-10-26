@@ -121,6 +121,8 @@ import {
   type TradingPrefs,
 } from './paper-panel';
 import { PaperOverlay, type QuickOrder } from './paper-overlay';
+import { BrokerPanel } from './broker-panel';
+import { TradeDialog } from './trade-dialog';
 import {
   cancelOrder as paperCancel,
   closePosition as paperClose,
@@ -376,6 +378,7 @@ export function TvChart() {
   const [news, setNews] = useState<{ symbol: string; res: NewsResponse } | null>(null);
   const [newsHover, setNewsHover] = useState<number | null>(null);
   const [newsPinned, setNewsPinned] = useState<number | null>(null);
+  const [deltaTip, setDeltaTip] = useState<number | null>(null);
   const [newsExpanded, setNewsExpanded] = useState(false);
 
   // replay: `replayEnd` is the cut-off instant (unix s); null = live chart
@@ -1669,6 +1672,7 @@ export function TvChart() {
     );
   }, [divergences, deltaMarks, hideDivs, deltaMark, bars, chartType, fp.on, fp.showDelta]);
   useEffect(() => setDeltaPick(null), [symbol, tfId]);
+  useEffect(() => setDeltaTip(null), [symbol, tfId]);
   useEffect(() => setCvdPick(null), [symbol, tfId]);
 
   // Price/CVD divergences → a layer in each CVD pane (CVD values) and on the price pane (prices).
@@ -1831,6 +1835,14 @@ export function TvChart() {
       }
 
       if (L.tool === 'cursor' && here.key == null) {
+        const dBar = deltaPrimRef.current?.findBar(x, y) ?? null;
+        if (dBar != null) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          setDeltaTip((cur) => (cur === dBar ? null : dBar));
+          return;
+        }
+        setDeltaTip(null);
         const bar = newsPrimRef.current?.findBar(x, y) ?? null;
         if (bar != null) {
           e.stopImmediatePropagation();
@@ -2163,6 +2175,30 @@ export function TvChart() {
     wrap.addEventListener('touchstart', onTouchStart, { capture: true, passive: false });
     wrap.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
     wrap.addEventListener('touchend', onTouchEnd, true);
+    // The library ignores a vertical drag while the price scale auto-fits; drop auto-fit as soon as a pane drag
+    // turns vertical (this runs in the capture phase, before the library starts its scroll).
+    let panStart: { x: number; y: number } | null = null;
+    const panDown = (e: MouseEvent) => {
+      const { x, y } = local(e);
+      panStart =
+        e.button === 0 && !(e.target as HTMLElement).closest('[data-tv-ui]') && locate(x, y)
+          ? { x, y }
+          : null;
+    };
+    const panMove = (e: MouseEvent) => {
+      if (!panStart || !(e.buttons & 1) || drag || draftRef || latest.current.tool !== 'cursor') return;
+      const { x, y } = local(e);
+      const dy = Math.abs(y - panStart.y);
+      if (dy < 3 || dy < Math.abs(x - panStart.x)) return;
+      panStart = null;
+      const chart = chartRef.current;
+      if (chart?.priceScale('right').options().autoScale) {
+        chart.priceScale('right').applyOptions({ autoScale: false });
+        setAutoScale(false);
+      }
+    };
+    wrap.addEventListener('mousedown', panDown, true);
+    wrap.addEventListener('mousemove', panMove, true);
     wrap.addEventListener('mousedown', onDown, true);
     wrap.addEventListener('mousemove', onMove, true);
     window.addEventListener('mousemove', onMove);
@@ -2173,6 +2209,8 @@ export function TvChart() {
       wrap.removeEventListener('touchstart', onTouchStart, true);
       wrap.removeEventListener('touchmove', onTouchMove, true);
       wrap.removeEventListener('touchend', onTouchEnd, true);
+      wrap.removeEventListener('mousedown', panDown, true);
+      wrap.removeEventListener('mousemove', panMove, true);
       wrap.removeEventListener('mousedown', onDown, true);
       wrap.removeEventListener('mousemove', onMove, true);
       window.removeEventListener('mousemove', onMove);
@@ -2508,6 +2546,9 @@ export function TvChart() {
   // ── paper trading ──────────────────────────────────────────────────────
   // Two accounts: the live one persists; the replay one is a sandbox that starts fresh with every replay.
   const [paperOpen, setPaperOpen] = useState(false);
+  const [brokerOpen, setBrokerOpen] = useState(false);
+  const [brokerSel, setBrokerSel] = useState<string | null>(null);
+  const [tradeOpen, setTradeOpen] = useState(false);
   const [livePaper, setLivePaper] = useState<PaperState>(() => newAccount());
   const [replayPaper, setReplayPaper] = useState<PaperState>(() => newAccount());
   const paperHydrated = useRef(false);
@@ -2632,6 +2673,8 @@ export function TvChart() {
         onRedo={redo}
         onScreenshot={screenshot}
         onFullscreen={fullscreen}
+        trade={tradeOpen || brokerOpen}
+        onTrade={() => setTradeOpen(true)}
         watchlistOpen={watchOpen}
         onWatchlist={() => setWatchOpen((v) => !v)}
       />
@@ -2879,6 +2922,47 @@ export function TvChart() {
               </div>
             ) : null}
             {(() => {
+              const d = deltaTip != null ? divergences.find((v) => v.chartIndex === deltaTip) : undefined;
+              const pos = d ? deltaPrimRef.current?.position(d.chartIndex) : null;
+              if (!d || !pos) return null;
+              const buyers = d.kind === 'buyers';
+              const W = 210;
+              const cw = wrapRef.current?.clientWidth ?? 800;
+              const ch = wrapRef.current?.clientHeight ?? 600;
+              const left = Math.max(8, Math.min(pos.x - W / 2, cw - W - 72));
+              // prefer the side away from the candle, but flip when that side has no room
+              const H = 130;
+              const above = pos.below ? ch - pos.y < H + 16 : pos.y >= H + 16;
+              const status =
+                d.status === 'confirmed' ? 'confirmed' : d.status === 'pending' ? 'waiting for confirmation' : 'no follow-through';
+              return (
+                <div
+                  className="absolute z-30 rounded-lg border border-[#e879f9]/60 bg-[#1e222d] p-3 text-[12px] text-[#d1d4dc] shadow-2xl"
+                  style={{ left, width: W, ...(above ? { bottom: ch - pos.y + 16 } : { top: pos.y + 16 }) }}
+                  data-tv-ui
+                >
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="font-semibold text-[#e879f9]">Δ {buyers ? 'buyers trapped' : 'sellers trapped'}</span>
+                    <button type="button" onClick={() => setDeltaTip(null)} className="text-[#787b86] hover:text-white">
+                      <Icons.close size={12} />
+                    </button>
+                  </div>
+                  <div className={`text-[18px] font-semibold tabular-nums ${d.delta >= 0 ? 'text-[#089981]' : 'text-[#f23645]'}`}>
+                    {d.delta >= 0 ? '+' : '−'}
+                    {Math.abs(Math.round(d.delta)).toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-[#787b86]">
+                    {d.pct.toFixed(1)}% of volume · {buyers ? 'upper' : 'lower'} wick {d.wick.toFixed(0)}%
+                    {d.rvol != null ? ` · RVOL ${d.rvol.toFixed(1)}×` : ''}
+                  </div>
+                  <div className="mt-1 text-[#787b86]">
+                    {status}
+                    {d.coarse ? ' · 5m estimate' : ''}
+                  </div>
+                </div>
+              );
+            })()}
+            {(() => {
               const idx = newsPinned ?? newsHover;
               const items = idx != null ? newsByBar.get(idx) : undefined;
               const pos = idx != null ? newsPrimRef.current?.position(idx) : null;
@@ -3088,6 +3172,9 @@ export function TvChart() {
               </div>
             ) : null}
           </div>
+          {brokerOpen ? (
+            <BrokerPanel selected={brokerSel} symbol={symbol} lastPrice={lastPrice} onClose={() => setBrokerOpen(false)} />
+          ) : null}
           {paperOpen ? (
             <PaperPanel
               state={paper}
@@ -3298,6 +3385,19 @@ export function TvChart() {
           />
         )}
       </div>
+      {tradeOpen ? (
+        <TradeDialog
+          onClose={() => setTradeOpen(false)}
+          onPaper={() => {
+            setPaperOpen(true);
+            save('tv:paperOpen', true);
+          }}
+          onBroker={(id) => {
+            setBrokerSel(id);
+            setBrokerOpen(true);
+          }}
+        />
+      ) : null}
       {showSearch ? (
         <SymbolSearch
           onPick={(sym, name) =>

@@ -11,12 +11,12 @@ import { Icons } from '../tv/icons';
 import { Popover } from './popover';
 
 const pillBase =
-  'inline-flex h-9 shrink-0 items-center rounded-lg border text-[14px] font-medium transition-colors';
-const idle = `${pillBase} gap-1.5 border-[#363a45] px-3 text-[#b2b5be] hover:border-[#5d606b] hover:text-white`;
+  'inline-flex h-7 shrink-0 items-center rounded-md border text-[12px] font-medium transition-colors';
+const idle = `${pillBase} gap-1 border-[#363a45] px-2 text-[#b2b5be] hover:border-[#5d606b] hover:text-white`;
 
 const Chevron = () => (
-  <span className="inline-block h-3.5 w-3.5 text-current opacity-70">
-    <Icons.chevron size={14} />
+  <span className="inline-block h-3 w-3 text-current opacity-70">
+    <Icons.chevron size={12} />
   </span>
 );
 
@@ -228,7 +228,7 @@ function FilterPill({
         <div className={`${pillBase} overflow-hidden border-white bg-white text-[#131722]`}>
           <button
             type="button"
-            className="flex h-full items-center gap-2 pl-3 pr-3"
+            className="flex h-full items-center gap-1.5 px-2"
             onClick={() => onOpen(!open)}
           >
             <span className="text-[#6a6d78]">{def.short ?? def.label}</span>
@@ -238,13 +238,13 @@ function FilterPill({
             type="button"
             title={`Clear ${def.label}`}
             aria-label={`Clear ${def.label}`}
-            className="flex h-full w-9 items-center justify-center border-l border-[#d1d4dc] text-[#131722] hover:bg-[#e0e3eb]"
+            className="flex h-full w-7 items-center justify-center border-l border-[#d1d4dc] text-[#131722] hover:bg-[#e0e3eb]"
             onClick={() => {
               onChange(withFilter(filters, def.id, null));
               onOpen(false);
             }}
           >
-            <Icons.close size={14} />
+            <Icons.close size={12} />
           </button>
         </div>
       ) : (
@@ -431,10 +431,10 @@ function AddFilter({ shown, onAdd }: { shown: readonly string[]; onAdd: (id: str
         type="button"
         title="Add filter"
         aria-label="Add filter"
-        className={`${pillBase} w-9 justify-center border-[#363a45] text-[#b2b5be] hover:border-[#5d606b] hover:text-white ${open ? 'border-[#2962ff] text-white' : ''}`}
+        className={`${pillBase} w-7 justify-center border-[#363a45] text-[#b2b5be] hover:border-[#5d606b] hover:text-white ${open ? 'border-[#2962ff] text-white' : ''}`}
         onClick={() => setOpen((o) => !o)}
       >
-        <Icons.plus size={18} />
+        <Icons.plus size={14} />
       </button>
       {open ? (
         <Popover anchor={ref} onClose={() => setOpen(false)} width={300}>
@@ -513,9 +513,9 @@ export function FilterBar({
 }: BarProps) {
   const activeCount = pills.filter((id) => isActive(filters[id])).length;
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-1.5">
       <UniverseChip market={market} filters={filters} onChange={onChange} onMarket={onMarket} />
-      <span className="mx-0.5 hidden h-6 w-px bg-[#363a45] sm:block" />
+      <span className="mx-0.5 hidden h-4 w-px bg-[#363a45] sm:block" />
       {pills.map((id) => {
         const def = FIELD.get(id);
         if (!def || (def.kind !== 'range' && def.kind !== 'multi')) return null;
@@ -535,7 +535,7 @@ export function FilterBar({
       {activeCount > 0 ? (
         <button
           type="button"
-          className="ml-1 text-[13px] text-[#868993] hover:text-white"
+          className="ml-1 text-[12px] text-[#868993] hover:text-white"
           onClick={onReset}
         >
           Reset
