@@ -20,7 +20,14 @@ export function foldTrailingTick(bars: Bar[], secs: number | null): Bar[] {
   if (!secs || bars.length < 2) return bars;
   const last = bars[bars.length - 1]!;
   const prev = bars[bars.length - 2]!;
-  if (last.time <= prev.time || last.time >= prev.time + secs) return bars;
+  if (last.time <= prev.time) return bars;
+  if (last.time >= prev.time + secs) {
+    // A thin stock has minutes with no trade at all, so the tick can fall in a candle Yahoo never drew
+    // (prev 22:46, tick 22:51:34). Left off the candle grid it never updates the chart: open that candle.
+    if (last.volume !== 0 || (last.time - prev.time) % secs === 0) return bars;
+    const start = prev.time + Math.floor((last.time - prev.time) / secs) * secs;
+    return [...bars.slice(0, -1), { ...last, time: start }];
+  }
   return [
     ...bars.slice(0, -2),
     {

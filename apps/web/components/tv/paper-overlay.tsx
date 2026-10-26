@@ -347,7 +347,7 @@ export function PaperOverlay(p: Props) {
     }
     items.push({ text: 'Create new order…', run: () => p.onDialog(price) });
     items.push({
-      text: `Draw Horizontal Line on ${fmt(price)}`,
+      text: `Draw horizontal line at ${fmt(price)}`,
       icon: '—',
       sep: true,
       run: () => p.onHLine(price),
@@ -599,7 +599,7 @@ export function PaperOverlay(p: Props) {
             const r = host.current!.getBoundingClientRect();
             setMenu({ x: e.clientX - r.left, y: hover.y, price: hover.price });
           }}
-          className="pointer-events-auto absolute flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-[#363a45] bg-[#1e222d] text-[14px] leading-none text-[#d1d4dc] hover:bg-[#2a2e39]"
+          className="pointer-events-auto absolute flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-[#d1d4dc] bg-[#131722] text-[15px] leading-none text-white hover:bg-[#2a2e39]"
           style={{
             top: hover.y,
             right: (chartRef.current?.priceScale('right').width() ?? 56) + 4,

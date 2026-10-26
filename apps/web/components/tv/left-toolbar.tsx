@@ -77,6 +77,7 @@ export const TOOL_KEYS: Record<Tool, { code: string; shift?: boolean; label: str
   ellipse: { code: 'KeyE', label: 'E' },
   triangle: { code: 'KeyG', label: 'G' },
 };
+export const SVP_KEY = { code: 'KeyP', shift: true, label: 'Shift+P' };
 export const ZOOM_IN_KEY = { code: 'KeyZ', label: 'Z' };
 
 export function toolForKey(e: KeyboardEvent): Tool | null {
@@ -258,7 +259,9 @@ export function LeftToolbar(p: Props) {
                     >
                       <I size={18} />
                       <span className="flex-1">{ACTION_LABEL[a]}</span>
-                      <span className="text-[11px] text-[#787b86]">{p.svpOn ? 'On' : 'Off'}</span>
+                      <span className="text-[11px] text-[#787b86]">
+                        {p.svpOn ? 'On' : 'Off'} · {SVP_KEY.label}
+                      </span>
                     </button>
                   );
                 })}

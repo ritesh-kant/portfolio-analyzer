@@ -147,7 +147,7 @@ import type { NewsItem, NewsResponse } from '../../lib/tv/news-types';
 import { FootprintView, type FootprintData } from './footprint-series';
 import { Icons } from './icons';
 import { IndicatorPicker, IndicatorSettings } from './indicator-dialog';
-import { LeftToolbar, type Tool, ZOOM_IN_KEY, toolForKey } from './left-toolbar';
+import { LeftToolbar, type Tool, SVP_KEY, ZOOM_IN_KEY, toolForKey } from './left-toolbar';
 import { FibSettingsDialog } from './fib-settings';
 import { VpSettingsDialog } from './vp-settings';
 import { PositionSettings } from './position-settings';
@@ -2103,6 +2103,15 @@ export function TvChart() {
         setReplayPick(false);
         return;
       }
+      if (!e.ctrlKey && !e.metaKey && e.shiftKey && e.code === SVP_KEY.code) {
+        e.preventDefault();
+        setIndicators((list) =>
+          list.some((i) => i.type === 'svp')
+            ? list.filter((i) => i.type !== 'svp')
+            : [...list, makeIndicator('svp', list)],
+        );
+        return;
+      }
       const keyTool = toolForKey(e);
       if (keyTool) {
         e.preventDefault();
@@ -2550,6 +2559,7 @@ export function TvChart() {
   const [brokerSel, setBrokerSel] = useState<string | null>(null);
   const [tradeOpen, setTradeOpen] = useState(false);
   const [livePaper, setLivePaper] = useState<PaperState>(() => newAccount());
+  const initialLivePaper = useRef(livePaper);
   const [replayPaper, setReplayPaper] = useState<PaperState>(() => newAccount());
   const paperHydrated = useRef(false);
   useEffect(() => {
@@ -2569,7 +2579,8 @@ export function TvChart() {
     paperHydrated.current = true;
   }, []);
   useEffect(() => {
-    if (paperHydrated.current) save('tv:paper', livePaper);
+    // never write the blank starter account: on mount (twice under StrictMode) it would overwrite the saved one before it is read
+    if (paperHydrated.current && livePaper !== initialLivePaper.current) save('tv:paper', livePaper);
   }, [livePaper]);
   const paper = replayActive ? replayPaper : livePaper;
   const setPaper = replayActive ? setReplayPaper : setLivePaper;
@@ -2769,6 +2780,10 @@ export function TvChart() {
                   onDialog={() => setOrderDlg({ side: 'buy', type: 'market' })}
                 />
                 ) : null}
+              </>
+            ) : null}
+            {/* the on-chart "+" / right-click menu works whether or not the paper panel is open */}
+            <>
                 <PaperOverlay
                   chartRef={chartRef}
                   getSeries={getMainSeries}
@@ -2871,8 +2886,7 @@ export function TvChart() {
                     onClose={() => setOrderDlg(null)}
                   />
                 ) : null}
-              </>
-            ) : null}
+            </>
             {status === 'loading' ? (
               <div className="pointer-events-none absolute right-16 top-2 z-10 rounded bg-[#1e222d] px-2 py-1 text-xs text-[#b2b5be]">
                 Loading {symbol}…

@@ -522,6 +522,11 @@ test('foldTrailingTick folds Yahoo\'s zero-volume last-trade bar into the formin
   const next = [...real, b(1800, 11, 11, 11, 11, 5)];
   assert.equal(foldTrailingTick(next, 900), next);
   assert.equal(foldTrailingTick([...real, tick], null).length, 3);
+  // thin stock: the tick falls in a minute with no candle at all -> it becomes that candle, on the grid
+  const gap = b(900 + 5 * 900 + 94, 12.4, 12.4, 12.4, 12.4, 0);
+  const opened = foldTrailingTick([...real, gap], 900);
+  assert.equal(opened.length, 3);
+  assert.deepEqual(opened[2], { ...gap, time: 900 + 5 * 900 });
   assert.equal(intervalSecs('15m'), 900);
   assert.equal(intervalSecs('60m'), 3600);
   assert.equal(intervalSecs('1h'), 3600);
