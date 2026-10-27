@@ -493,8 +493,16 @@ export function TvChart() {
   const [cvdPick, setCvdPick] = useState<number | null>(null);
   // One switch that takes every delta- and CVD-divergence tag and line off the chart (the side panels still list them).
   const [hideDivs, setHideDivs] = useState(false);
+  // While everything is hidden, the indicators the user brought back one by one (indicator ids, 'delta-div', 'fvg').
+  const [revealed, setRevealed] = useState<string[]>([]);
+  const hiddenAll = (id: string) => hideDivs && !revealed.includes(id);
   // Fair value gap list: docked in the same right slot (one panel open at a time).
   const [fvgOpen, setFvgOpen] = useState(false);
+  // "On chart" (the indicator is listed in the legend and keeps drawing) is separate from its side panel being open.
+  const [deltaOn, setDeltaOn] = useState(false);
+  const [fvgOn, setFvgOn] = useState(false);
+  const deltaActive = deltaOn || deltaOpen;
+  const fvgActive = fvgOn || fvgOpen;
   const [fvgCfg, setFvgCfg] = useState<FvgConfig>(FVG_DEFAULTS);
   const [fvgView, setFvgView] = useState<FvgView>(FVG_VIEW_DEFAULTS);
   const [fvgMarks, setFvgMarks] = useState(true);
@@ -523,6 +531,8 @@ export function TvChart() {
     setCvdShowFailed(load<boolean>('tv:cvdShowFailed', true));
     setHideDivs(load<boolean>('tv:hideDivs', false));
     setFvgOpen(load<boolean>('tv:fvgOpen', false));
+    setDeltaOn(load<boolean>('tv:deltaOn', false) || load<boolean>('tv:deltaOpen', false));
+    setFvgOn(load<boolean>('tv:fvgOn', false) || load<boolean>('tv:fvgOpen', false));
     setFvgCfg({ ...FVG_DEFAULTS, ...load<Partial<FvgConfig>>('tv:fvgCfg', {}) });
     setFvgView({ ...FVG_VIEW_DEFAULTS, ...load<Partial<FvgView>>('tv:fvgView', {}) });
     setFvgMarks(load<boolean>('tv:fvgMarks', true));
@@ -542,7 +552,7 @@ export function TvChart() {
   const rawBars = useMemo(() => {
     const first = raw.bars[0]?.time;
     if (
-      !deltaOpen ||
+      !deltaActive ||
       first == null ||
       older.key !== `${symbol}|${tf.source}` ||
       !raw.key.startsWith(`${symbol}|${tf.source}|`)
@@ -551,7 +561,7 @@ export function TvChart() {
     }
     const before = older.bars.filter((b) => b.time < first);
     return before.length ? [...before, ...raw.bars] : raw.bars;
-  }, [raw.bars, raw.key, older, deltaOpen, symbol, tf.source]);
+  }, [raw.bars, raw.key, older, deltaActive, symbol, tf.source]);
   const fullBars = useMemo(
     () => (tf.aggregateSecs ? aggregateBars(rawBars, tf.aggregateSecs, timeZone) : rawBars),
     [rawBars, tf.aggregateSecs, timeZone],
@@ -587,7 +597,7 @@ export function TvChart() {
   const subBars =
     tf.source === '1m'
       ? rawBars
-      : (deltaOpen || cvdOn) && deltaSub.symbol === symbol && deltaSub.bars.length > subRaw.length
+      : (deltaActive || cvdOn) && deltaSub.symbol === symbol && deltaSub.bars.length > subRaw.length
         ? deltaSub.bars
         : subRaw;
   // 1-minute candles for volume profiles (never past the replay cut-off); none when the chart already is 1-minute.
@@ -668,8 +678,10 @@ export function TvChart() {
   // Fair value gaps on the chart's own candles, shown while the panel is open.
   const fvgAll = useMemo(
     () =>
-      fvgOpen ? findFvgs(bars, fvgCfg, fvgCfg.filter === 'atr' ? atr(bars, FVG_ATR_LEN) : []) : [],
-    [fvgOpen, bars, fvgCfg],
+      fvgActive
+        ? findFvgs(bars, fvgCfg, fvgCfg.filter === 'atr' ? atr(bars, FVG_ATR_LEN) : [])
+        : [],
+    [fvgActive, bars, fvgCfg],
   );
   const fvgShown = useMemo(
     () =>
@@ -987,7 +999,7 @@ export function TvChart() {
   const nse = symbol.endsWith('.NS');
   const deltaDays = deltaDepthDays(deltaView, Math.floor(Date.now() / 1000));
   useEffect(() => {
-    if (!ready || (!deltaOpen && !cvdOn)) return;
+    if (!ready || (!deltaActive && !cvdOn)) return;
     const ctl = new AbortController();
     const now = Math.floor(Date.now() / 1000);
     const yahoo = () => {
@@ -998,7 +1010,7 @@ export function TvChart() {
         ),
       );
       // 5-minute bars reach 60 days: they carry the delta for candles older than the 1-minute bars (panel only)
-      const mid = deltaOpen
+      const mid = deltaActive
         ? fetchBars(symbol, '5m', '60d', ctl.signal, wantPrepost)
             .then((res) => res.bars)
             .catch(() => [] as Bar[])
@@ -1033,7 +1045,7 @@ export function TvChart() {
     return () => ctl.abort();
   }, [
     ready,
-    deltaOpen,
+    deltaActive,
     cvdOn,
     symbol,
     nse,
@@ -1049,7 +1061,7 @@ export function TvChart() {
   const rawFirst = raw.bars[0]?.time;
   useEffect(() => {
     const upstoxInterval = ['1m', '5m', '15m', '30m'].includes(tf.source);
-    if (!ready || !deltaOpen || !nse || !upstoxInterval || rawFirst == null) return;
+    if (!ready || !deltaActive || !nse || !upstoxInterval || rawFirst == null) return;
     if (!raw.key.startsWith(`${symbol}|${tf.source}|`)) return;
     const from = Math.floor(Date.now() / 1000) - deltaDays * 86400;
     if (rawFirst <= from) return;
@@ -1060,7 +1072,7 @@ export function TvChart() {
       })
       .catch(() => undefined);
     return () => ctl.abort();
-  }, [ready, deltaOpen, nse, symbol, tf.source, deltaDays, rawFirst, raw.key, fetchUpstox]);
+  }, [ready, deltaActive, nse, symbol, tf.source, deltaDays, rawFirst, raw.key, fetchUpstox]);
 
   // Live: re-pull the tail and merge it in. Yahoo caches each reply ~10 s, so polling faster than
   // every few seconds gains nothing; intraday polls at 3 s, longer timeframes at 30 s.
@@ -1628,9 +1640,11 @@ export function TvChart() {
   useEffect(() => {
     for (const entry of indStructRef.current.entries) {
       const cfg = indicators.find((i) => i.id === entry.cfgId);
-      entry.series.applyOptions({ visible: !cfg?.hidden });
+      entry.series.applyOptions({
+        visible: !cfg?.hidden && !(hideDivs && !revealed.includes(entry.cfgId)),
+      });
     }
-  }, [indicators, structKey]);
+  }, [indicators, structKey, hideDivs, revealed]);
 
   // Indicator data.
   useEffect(() => {
@@ -1702,7 +1716,13 @@ export function TvChart() {
     const prim = svpPrimRef.current;
     if (!prim) return;
     const cfg = indicators.find((i) => i.type === 'svp');
-    if (!cfg || cfg.hidden || !tf.intraday || !bars.length) {
+    if (
+      !cfg ||
+      cfg.hidden ||
+      (hideDivs && !revealed.includes(cfg.id)) ||
+      !tf.intraday ||
+      !bars.length
+    ) {
       prim.setState([], []);
       return;
     }
@@ -1726,7 +1746,18 @@ export function TvChart() {
       secs: tf.secs,
       fine: fine && fine.length ? fine : null,
     });
-  }, [indicators, tf.intraday, tf.secs, bars, profileFine, chartType, fp.on, decimals]);
+  }, [
+    indicators,
+    hideDivs,
+    revealed,
+    tf.intraday,
+    tf.secs,
+    bars,
+    profileFine,
+    chartType,
+    fp.on,
+    decimals,
+  ]);
 
   // Session shading + day-start lines → primitive (intraday charts of instruments with a defined session).
   useEffect(() => {
@@ -1770,14 +1801,24 @@ export function TvChart() {
   );
   useEffect(() => {
     deltaPrimRef.current?.setState(
-      deltaMarks && !hideDivs ? divergences.map(deltaMark) : [],
+      deltaMarks && !hiddenAll('delta-div') ? divergences.map(deltaMark) : [],
       fp.on && fp.showDelta,
     );
-  }, [divergences, deltaMarks, hideDivs, deltaMark, bars, chartType, fp.on, fp.showDelta]);
+  }, [
+    divergences,
+    deltaMarks,
+    hideDivs,
+    revealed,
+    deltaMark,
+    bars,
+    chartType,
+    fp.on,
+    fp.showDelta,
+  ]);
   // Fair value gaps → zones on the price pane (hidden while the panel's "Mark on chart" is off or it is closed).
   useEffect(() => {
     const marks: FvgMark[] =
-      fvgOpen && fvgMarks
+      fvgActive && fvgMarks && !hiddenAll('fvg')
         ? fvgShown.map((g) => ({
             i1: g.index - 2,
             i2: g.index,
@@ -1792,7 +1833,7 @@ export function TvChart() {
           }))
         : [];
     fvgPrimRef.current?.setState(marks);
-  }, [fvgShown, fvgOpen, fvgMarks, bars, chartType, fvgPick]);
+  }, [fvgShown, fvgActive, fvgMarks, hideDivs, revealed, bars, chartType, fvgPick]);
   useEffect(() => setFvgPick(null), [symbol, tfId]);
   useEffect(() => setDeltaPick(null), [symbol, tfId]);
   useEffect(() => setDeltaTip(null), [symbol, tfId]);
@@ -1804,7 +1845,7 @@ export function TvChart() {
     for (const c of computed) {
       if (c.cfg.type !== 'cvd') continue;
       const list =
-        c.cfg.hidden || hideDivs
+        c.cfg.hidden || (hideDivs && !revealed.includes(c.cfg.id))
           ? []
           : (cvdDivs.get(c.cfg.id) ?? []).filter((x) => cvdShowFailed || x.div.status !== 'failed');
       const mark = (
@@ -1832,7 +1873,7 @@ export function TvChart() {
       onPrice.push(...list.map((x) => mark(x, x.div.i1, x.div.i2, x.div.p1, x.div.p2)));
     }
     cvdDivMainRef.current?.setState(onPrice);
-  }, [cvdDivs, computed, chartType, structKey, cvdShowFailed, cvdPick, hideDivs]);
+  }, [cvdDivs, computed, chartType, structKey, cvdShowFailed, cvdPick, hideDivs, revealed]);
 
   // Drawings → primitive.
   useEffect(() => {
@@ -2547,16 +2588,30 @@ export function TvChart() {
     return v.toFixed(decimals);
   };
 
+  // Clicking an eye while everything is hidden: bring back just that one; the rail eye still brings back the rest.
+  const revealOnly = (which: string) => {
+    setRevealed((list) => [...list, which]);
+    setIndicators((list) => list.map((i) => (i.id === which ? { ...i, hidden: false } : i)));
+    if (which === 'delta-div') {
+      setDeltaMarks(true);
+      save('tv:deltaMarks', true);
+    }
+    if (which === 'fvg') {
+      setFvgMarks(true);
+      save('tv:fvgMarks', true);
+    }
+  };
+
   const legendRow = (c: Computed): ReactNode => (
     <div
       key={c.cfg.id}
       className="group pointer-events-auto flex w-fit max-w-full items-center gap-2 text-[12px] leading-5"
       data-tv-ui
     >
-      <span className={c.cfg.hidden ? 'text-[#5d606b]' : 'text-[#b2b5be]'}>
+      <span className={c.cfg.hidden || hiddenAll(c.cfg.id) ? 'text-[#5d606b]' : 'text-[#b2b5be]'}>
         {indicatorLabel(c.cfg)}
       </span>
-      {c.cfg.hidden
+      {c.cfg.hidden || hiddenAll(c.cfg.id)
         ? null
         : c.lines.map((l) => {
             const k = l.ohlc?.[idx];
@@ -2601,19 +2656,25 @@ export function TvChart() {
             );
           })}
       <span
-        className={`flex gap-1 transition-opacity group-hover:opacity-100 ${c.cfg.hidden ? 'opacity-100' : 'opacity-0'}`}
+        className={`flex gap-1 transition-opacity group-hover:opacity-100 ${c.cfg.hidden || hiddenAll(c.cfg.id) ? 'opacity-100' : 'opacity-0'}`}
       >
         <button
           type="button"
-          title={c.cfg.hidden ? 'Show' : 'Hide'}
+          title={c.cfg.hidden || hiddenAll(c.cfg.id) ? 'Show' : 'Hide'}
           onClick={() =>
-            setIndicators((list) =>
-              list.map((i) => (i.id === c.cfg.id ? { ...i, hidden: !i.hidden } : i)),
-            )
+            hiddenAll(c.cfg.id)
+              ? revealOnly(c.cfg.id)
+              : setIndicators((list) =>
+                  list.map((i) => (i.id === c.cfg.id ? { ...i, hidden: !i.hidden } : i)),
+                )
           }
           className="text-[#787b86] hover:text-white"
         >
-          {c.cfg.hidden ? <Icons.eyeOff size={14} /> : <Icons.eye size={14} />}
+          {c.cfg.hidden || hiddenAll(c.cfg.id) ? (
+            <Icons.eyeOff size={14} />
+          ) : (
+            <Icons.eye size={14} />
+          )}
         </button>
         {c.cfg.type !== 'volume' && c.cfg.type !== 'vwap' ? (
           <button
@@ -2636,6 +2697,127 @@ export function TvChart() {
       </span>
     </div>
   );
+
+  const toggleDelta = () => {
+    const next = !deltaOpen;
+    setDeltaOpen(next);
+    save('tv:deltaOpen', next);
+    if (next) {
+      setDeltaOn(true);
+      save('tv:deltaOn', true);
+      setScreenerOpen(false);
+      save('tv:screenerOpen', false);
+      setCvdOpen(false);
+      save('tv:cvdOpen', false);
+      setFvgOpen(false);
+      save('tv:fvgOpen', false);
+    }
+  };
+  const toggleFvg = () => {
+    const next = !fvgOpen;
+    setFvgOpen(next);
+    save('tv:fvgOpen', next);
+    if (next) {
+      setFvgOn(true);
+      save('tv:fvgOn', true);
+      setScreenerOpen(false);
+      save('tv:screenerOpen', false);
+      setDeltaOpen(false);
+      save('tv:deltaOpen', false);
+      setCvdOpen(false);
+      save('tv:cvdOpen', false);
+    }
+  };
+
+  const panelLegendRow = (
+    key: string,
+    label: string,
+    marksOn: boolean,
+    setMarks: (on: boolean) => void,
+    marksKey: string,
+    panelOpen: boolean,
+    openPanel: () => void,
+    remove: () => void,
+  ): ReactNode => {
+    const shown = marksOn && !hiddenAll(key);
+    return (
+      <div
+        key={key}
+        className="group pointer-events-auto flex w-fit max-w-full items-center gap-2 text-[12px] leading-5"
+        data-tv-ui
+      >
+        <span className={shown ? 'text-[#b2b5be]' : 'text-[#5d606b]'}>{label}</span>
+        <span
+          className={`flex gap-1 transition-opacity group-hover:opacity-100 ${shown ? 'opacity-0' : 'opacity-100'}`}
+        >
+          <button
+            type="button"
+            title={shown ? 'Hide' : 'Show'}
+            onClick={() => {
+              if (hiddenAll(key)) return revealOnly(key);
+              setMarks(!marksOn);
+              save(marksKey, !marksOn);
+            }}
+            className="text-[#787b86] hover:text-white"
+          >
+            {shown ? <Icons.eye size={14} /> : <Icons.eyeOff size={14} />}
+          </button>
+          <button
+            type="button"
+            title={panelOpen ? 'Panel is open' : 'Settings'}
+            onClick={() => {
+              if (!panelOpen) openPanel();
+            }}
+            className="text-[#787b86] hover:text-white"
+          >
+            <Icons.gear size={14} />
+          </button>
+          <button
+            type="button"
+            title="Remove"
+            onClick={remove}
+            className="text-[#787b86] hover:text-[#f23645]"
+          >
+            <Icons.close size={14} />
+          </button>
+        </span>
+      </div>
+    );
+  };
+  const panelLegendRows = [
+    deltaActive
+      ? panelLegendRow(
+          'delta-div',
+          'Delta Divergence',
+          deltaMarks,
+          setDeltaMarks,
+          'tv:deltaMarks',
+          deltaOpen,
+          toggleDelta,
+          () => {
+            setDeltaOn(false);
+            save('tv:deltaOn', false);
+            if (deltaOpen) toggleDelta();
+          },
+        )
+      : null,
+    fvgActive
+      ? panelLegendRow(
+          'fvg',
+          'Fair Value Gap',
+          fvgMarks,
+          setFvgMarks,
+          'tv:fvgMarks',
+          fvgOpen,
+          toggleFvg,
+          () => {
+            setFvgOn(false);
+            save('tv:fvgOn', false);
+            if (fvgOpen) toggleFvg();
+          },
+        )
+      : null,
+  ];
 
   const priceLegend = (
     <div
@@ -2670,6 +2852,7 @@ export function TvChart() {
         ) : null}
       </div>
       {maxPane == null ? computed.filter((c) => c.pane === 0).map(legendRow) : null}
+      {maxPane == null ? panelLegendRows : null}
     </div>
   );
 
@@ -3674,6 +3857,7 @@ export function TvChart() {
             hideDivs={hideDivs}
             onHideDivs={() => {
               const next = !hideDivs;
+              setRevealed([]);
               setHideDivs(next);
               save('tv:hideDivs', next);
             }}
@@ -3692,19 +3876,7 @@ export function TvChart() {
                 save('tv:fvgOpen', false);
               }
             }}
-            onDelta={() => {
-              const next = !deltaOpen;
-              setDeltaOpen(next);
-              save('tv:deltaOpen', next);
-              if (next) {
-                setScreenerOpen(false);
-                save('tv:screenerOpen', false);
-                setCvdOpen(false);
-                save('tv:cvdOpen', false);
-                setFvgOpen(false);
-                save('tv:fvgOpen', false);
-              }
-            }}
+            onDelta={toggleDelta}
             onCvd={() => {
               const next = !(cvdOpen && !deltaOpen);
               setCvdOpen(next);
@@ -3718,19 +3890,7 @@ export function TvChart() {
                 save('tv:fvgOpen', false);
               }
             }}
-            onFvg={() => {
-              const next = !fvgOpen;
-              setFvgOpen(next);
-              save('tv:fvgOpen', next);
-              if (next) {
-                setScreenerOpen(false);
-                save('tv:screenerOpen', false);
-                setDeltaOpen(false);
-                save('tv:deltaOpen', false);
-                setCvdOpen(false);
-                save('tv:cvdOpen', false);
-              }
-            }}
+            onFvg={toggleFvg}
           />
         )}
       </div>
@@ -3760,6 +3920,32 @@ export function TvChart() {
       {showIndicators ? (
         <IndicatorPicker
           active={indicators}
+          panels={[
+            {
+              id: 'delta',
+              name: 'Delta Divergence',
+              description: 'Price vs footprint delta divergences, with the setups they sit next to',
+              open: deltaActive,
+              onToggle: () => {
+                const next = !deltaActive;
+                setDeltaOn(next);
+                save('tv:deltaOn', next);
+                if (!next && deltaOpen) toggleDelta();
+              },
+            },
+            {
+              id: 'fvg',
+              name: 'Fair Value Gap',
+              description: 'Volumetric fair value gaps, drawn on the chart and listed in a panel',
+              open: fvgActive,
+              onToggle: () => {
+                const next = !fvgActive;
+                setFvgOn(next);
+                save('tv:fvgOn', next);
+                if (!next && fvgOpen) toggleFvg();
+              },
+            },
+          ]}
           onAdd={(type) => {
             if (type === 'volume' && indicators.some((i) => i.type === 'volume')) return;
             setIndicators((list) => [...list, makeIndicator(type, list)]);

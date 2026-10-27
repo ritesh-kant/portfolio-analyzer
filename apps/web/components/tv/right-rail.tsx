@@ -87,8 +87,8 @@ export function RightRail({
         type="button"
         title={
           hideDivs
-            ? 'Show delta and CVD divergences on the chart'
-            : 'Hide delta and CVD divergences on the chart'
+            ? 'Show all indicators on the chart'
+            : 'Hide all indicators on the chart'
         }
         onClick={onHideDivs}
         className={`${button(hideDivs)} mt-1`}

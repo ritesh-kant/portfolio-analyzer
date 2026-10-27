@@ -11,17 +11,30 @@ import {
 import { CVD_ANCHORS, type CvdAnchor } from '../../lib/tv/cvd';
 import { Icons } from './icons';
 
+/** Indicators that live in a docked side panel rather than a chart series: Add opens it, Remove closes it. */
+export interface PanelEntry {
+  id: string;
+  name: string;
+  description: string;
+  open: boolean;
+  onToggle: () => void;
+}
+
 interface PickerProps {
   active: IndicatorCfg[];
+  panels?: PanelEntry[];
   onAdd: (type: IndicatorCfg['type']) => void;
   onRemove: (id: string) => void;
   onClose: () => void;
 }
 
-export function IndicatorPicker({ active, onAdd, onRemove, onClose }: PickerProps) {
+export function IndicatorPicker({ active, panels = [], onAdd, onRemove, onClose }: PickerProps) {
   const [q, setQ] = useState('');
   const list = CATALOG.filter((c) =>
     `${c.name} ${c.description} ${c.type}`.toLowerCase().includes(q.toLowerCase()),
+  );
+  const panelList = panels.filter((p) =>
+    `${p.name} ${p.description}`.toLowerCase().includes(q.toLowerCase()),
   );
   return (
     <div
@@ -82,6 +95,26 @@ export function IndicatorPicker({ active, onAdd, onRemove, onClose }: PickerProp
               </div>
             );
           })}
+          {panelList.map((p) => (
+            <div key={p.id} className="flex items-center gap-3 px-5 py-2 hover:bg-[#2a2e39]">
+              <button type="button" className="min-w-0 flex-1 text-left" onClick={p.onToggle}>
+                <div className="text-[14px] font-medium text-[#d1d4dc]">{p.name}</div>
+                <div className="text-[12px] text-[#787b86]">{p.description}</div>
+              </button>
+              {p.open ? (
+                <span className="rounded bg-[#2962ff]/20 px-2 py-0.5 text-[11px] text-[#7ea4ff]">
+                  open
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={p.onToggle}
+                className="rounded border border-[#363a45] px-2 py-1 text-[12px] text-[#d1d4dc] hover:border-[#2962ff]"
+              >
+                {p.open ? 'Remove' : 'Add'}
+              </button>
+            </div>
+          ))}
           {active.length ? (
             <div className="mt-2 border-t border-[#2a2e39] px-5 pt-3">
               <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[#787b86]">
