@@ -11,6 +11,7 @@ import {
   HistogramSeries,
   type IChartApi,
   type ISeriesApi,
+  type ITimeScaleApi,
   LineSeries,
   LineStyle,
   PriceScaleMode,
@@ -90,6 +91,9 @@ import {
 } from '../../lib/tv/cvd-divergence';
 import { DeltaPanel } from './delta-panel';
 import { CvdPanel, type CvdFilter, type CvdItem } from './cvd-panel';
+import { FvgPrimitive, type FvgMark } from './fvg-primitive';
+import { FvgPanel, FVG_VIEW_DEFAULTS, type FvgView } from './fvg-panel';
+import { FVG_ATR_LEN, FVG_DEFAULTS, type FvgConfig, findFvgs } from '../../lib/tv/fvg';
 import {
   DELTA_DEFAULTS,
   type DeltaConfig,
@@ -353,6 +357,7 @@ export function TvChart() {
   const sessionsPrimRef = useRef<SessionsPrimitive | null>(null);
   const svpPrimRef = useRef<SessionProfilePrimitive | null>(null);
   const deltaPrimRef = useRef<DeltaPrimitive | null>(null);
+  const fvgPrimRef = useRef<FvgPrimitive | null>(null);
   /** CVD divergence layers: one on the price pane, one in each CVD pane (by indicator id). */
   const cvdDivMainRef = useRef<CvdDivPrimitive | null>(null);
   const cvdDivSubRef = useRef<Map<string, CvdDivPrimitive>>(new Map());
@@ -466,6 +471,12 @@ export function TvChart() {
   const [cvdPick, setCvdPick] = useState<number | null>(null);
   // One switch that takes every delta- and CVD-divergence tag and line off the chart (the side panels still list them).
   const [hideDivs, setHideDivs] = useState(false);
+  // Fair value gap list: docked in the same right slot (one panel open at a time).
+  const [fvgOpen, setFvgOpen] = useState(false);
+  const [fvgCfg, setFvgCfg] = useState<FvgConfig>(FVG_DEFAULTS);
+  const [fvgView, setFvgView] = useState<FvgView>(FVG_VIEW_DEFAULTS);
+  const [fvgMarks, setFvgMarks] = useState(true);
+  const [fvgPick, setFvgPick] = useState<number | null>(null);
   useEffect(() => {
     const saved = load<Partial<DeltaConfig>>('tv:deltaCfg', {});
     setDeltaCfg({
@@ -484,6 +495,10 @@ export function TvChart() {
     setCvdFilter(load<CvdFilter>('tv:cvdFilter', 'all'));
     setCvdShowFailed(load<boolean>('tv:cvdShowFailed', true));
     setHideDivs(load<boolean>('tv:hideDivs', false));
+    setFvgOpen(load<boolean>('tv:fvgOpen', false));
+    setFvgCfg({ ...FVG_DEFAULTS, ...load<Partial<FvgConfig>>('tv:fvgCfg', {}) });
+    setFvgView({ ...FVG_VIEW_DEFAULTS, ...load<Partial<FvgView>>('tv:fvgView', {}) });
+    setFvgMarks(load<boolean>('tv:fvgMarks', true));
   }, []);
   const [showIndicators, setShowIndicators] = useState(false);
   const [settingsId, setSettingsId] = useState<string | null>(null);
@@ -623,6 +638,21 @@ export function TvChart() {
     const newest = bars[bars.length - 1]?.time ?? 0;
     return setups.filter((d) => inDeltaView(d, deltaView, newest, (t) => sessionDay(t, timeZone)));
   }, [setups, deltaView, bars, timeZone]);
+  // Fair value gaps on the chart's own candles, shown while the panel is open.
+  const fvgAll = useMemo(
+    () => (fvgOpen ? findFvgs(bars, fvgCfg, fvgCfg.filter === 'atr' ? atr(bars, FVG_ATR_LEN) : []) : []),
+    [fvgOpen, bars, fvgCfg],
+  );
+  const fvgShown = useMemo(
+    () =>
+      fvgAll.filter(
+        (g) =>
+          (fvgView.filter === 'all' || (fvgView.filter === 'bullish') === g.bullish) &&
+          (fvgView.invalidated || g.status !== 'invalidated') &&
+          (g.against == null || g.against <= fvgView.maxAgainst),
+      ),
+    [fvgAll, fvgView],
+  );
   const footprints = useMemo(
     () => (fp.on ? buildFootprints(bars, subBars, tf.secs, effectiveStep) : []),
     [fp.on, bars, subBars, tf.secs, effectiveStep],
@@ -1180,6 +1210,7 @@ export function TvChart() {
     primRef.current = new DrawingsPrimitive();
     newsPrimRef.current = new NewsPrimitive();
     deltaPrimRef.current = new DeltaPrimitive();
+    fvgPrimRef.current = new FvgPrimitive();
     cvdDivMainRef.current = new CvdDivPrimitive(true);
     sessionsPrimRef.current = new SessionsPrimitive();
     svpPrimRef.current = new SessionProfilePrimitive();
@@ -1250,6 +1281,7 @@ export function TvChart() {
       series.attachPrimitive(prim);
       if (newsPrimRef.current) series.attachPrimitive(newsPrimRef.current);
       if (deltaPrimRef.current) series.attachPrimitive(deltaPrimRef.current);
+      if (fvgPrimRef.current) series.attachPrimitive(fvgPrimRef.current);
       if (cvdDivMainRef.current) series.attachPrimitive(cvdDivMainRef.current);
       if (sessionsPrimRef.current) series.attachPrimitive(sessionsPrimRef.current);
       if (svpPrimRef.current) series.attachPrimitive(svpPrimRef.current);
@@ -1671,6 +1703,25 @@ export function TvChart() {
       fp.on && fp.showDelta,
     );
   }, [divergences, deltaMarks, hideDivs, deltaMark, bars, chartType, fp.on, fp.showDelta]);
+  // Fair value gaps → zones on the price pane (hidden while the panel's "Mark on chart" is off or it is closed).
+  useEffect(() => {
+    const marks: FvgMark[] = fvgOpen && fvgMarks
+      ? fvgShown.map((g) => ({
+          i1: g.index - 2,
+          i2: g.index,
+          endIndex: g.invalidIndex,
+          top: g.top,
+          bottom: g.bottom,
+          bullish: g.bullish,
+          tested: g.status !== 'open',
+          volume: g.volume,
+          against: g.against,
+          focus: g.index === fvgPick,
+        }))
+      : [];
+    fvgPrimRef.current?.setState(marks);
+  }, [fvgShown, fvgOpen, fvgMarks, bars, chartType, fvgPick]);
+  useEffect(() => setFvgPick(null), [symbol, tfId]);
   useEffect(() => setDeltaPick(null), [symbol, tfId]);
   useEffect(() => setDeltaTip(null), [symbol, tfId]);
   useEffect(() => setCvdPick(null), [symbol, tfId]);
@@ -2272,6 +2323,19 @@ export function TvChart() {
     chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, idx - 1), to: n + 5 });
   };
 
+  /**
+   * Show bars [from, to] (logical indices) for a side-list click. The price scale goes back to auto-fit as well:
+   * after a manual price-axis drag it would keep its old range and the bars would sit off-screen vertically.
+   */
+  const showRange = (ts: ITimeScaleApi<Time>, from: number, to: number) => {
+    const chart = chartRef.current;
+    if (chart && !chart.priceScale('right').options().autoScale) {
+      chart.priceScale('right').applyOptions({ autoScale: true });
+      setAutoScale(true);
+    }
+    ts.setVisibleLogicalRange({ from, to });
+  };
+
   /** Centre the chart on a bar, keeping the current zoom, and pulse its badge for a moment so it is easy to spot. */
   const jumpToBar = (index: number) => {
     const ts = chartRef.current?.timeScale();
@@ -2281,9 +2345,20 @@ export function TvChart() {
     const d = divergences.find((x) => x.chartIndex === index);
     // centre on the middle of the 15-minute candle (several bars wide on a 5m or 1m chart)
     const mid = d ? (d.startChartIndex + d.chartIndex) / 2 : index;
-    ts.setVisibleLogicalRange({ from: mid - half, to: mid + half });
+    showRange(ts, mid - half, mid + half);
     setDeltaPick(index);
     if (d && bars[index]) deltaPrimRef.current?.focus(deltaMark(d));
+  };
+
+  /** Centre the chart on a fair value gap, keeping the zoom, and pulse its zone. */
+  const jumpToFvg = (index: number) => {
+    const ts = chartRef.current?.timeScale();
+    const range = ts?.getVisibleLogicalRange();
+    if (!ts || !range) return;
+    const half = (range.to - range.from) / 2;
+    showRange(ts, index - 1 - half, index - 1 + half);
+    setFvgPick(index);
+    fvgPrimRef.current?.pulse(index);
   };
 
   /** Centre the chart on a CVD divergence's second swing, keeping the zoom, and highlight it. */
@@ -2292,7 +2367,7 @@ export function TvChart() {
     const range = ts?.getVisibleLogicalRange();
     if (!ts || !range) return;
     const half = (range.to - range.from) / 2;
-    ts.setVisibleLogicalRange({ from: index - half, to: index + half });
+    showRange(ts, index - half, index + half);
     setCvdPick(index);
     cvdDivMainRef.current?.pulse(index);
     for (const prim of cvdDivSubRef.current.values()) prim.pulse(index);
@@ -3312,6 +3387,38 @@ export function TvChart() {
             onJump={jumpToCvd}
           />
         ) : null}
+        {fvgOpen && !screenerOpen && !compact ? (
+          <FvgPanel
+            symbol={meta?.symbol ?? symbol}
+            items={fvgShown}
+            detected={fvgAll.length}
+            cfg={fvgCfg}
+            onCfg={(patch) =>
+              setFvgCfg((cur) => {
+                const next = { ...cur, ...patch };
+                save('tv:fvgCfg', next);
+                return next;
+              })
+            }
+            view={fvgView}
+            onView={(patch) =>
+              setFvgView((cur) => {
+                const next = { ...cur, ...patch };
+                save('tv:fvgView', next);
+                return next;
+              })
+            }
+            marksOn={fvgMarks}
+            onMarks={(on) => {
+              setFvgMarks(on);
+              save('tv:fvgMarks', on);
+            }}
+            intraday={tf.intraday}
+            timeZone={timeZone}
+            active={fvgPick}
+            onJump={jumpToFvg}
+          />
+        ) : null}
         {screenerOpen && !compact ? (
           <ScreenerPanel
             mode="side"
@@ -3324,7 +3431,7 @@ export function TvChart() {
             }}
           />
         ) : null}
-        {watchOpen && !screenerOpen && !(deltaOpen && !compact) && !(cvdOpen && !compact) ? (
+        {watchOpen && !screenerOpen && !(deltaOpen && !compact) && !(cvdOpen && !compact) && !(fvgOpen && !compact) ? (
           <WatchlistPanel
             active={symbol}
             overlay={compact}
@@ -3350,9 +3457,12 @@ export function TvChart() {
                 save('tv:deltaOpen', false);
                 setCvdOpen(false);
                 save('tv:cvdOpen', false);
+                setFvgOpen(false);
+                save('tv:fvgOpen', false);
               }
             }}
-            watchlistOpen={watchOpen && !deltaOpen && !cvdOpen && !screenerOpen}
+            watchlistOpen={watchOpen && !deltaOpen && !cvdOpen && !fvgOpen && !screenerOpen}
+            fvgOpen={fvgOpen && !screenerOpen}
             deltaOpen={deltaOpen && !screenerOpen}
             cvdOpen={cvdOpen && !deltaOpen && !screenerOpen}
             hideDivs={hideDivs}
@@ -3362,7 +3472,7 @@ export function TvChart() {
               save('tv:hideDivs', next);
             }}
             onWatchlist={() => {
-              const next = !(watchOpen && !deltaOpen && !cvdOpen && !screenerOpen);
+              const next = !(watchOpen && !deltaOpen && !cvdOpen && !fvgOpen && !screenerOpen);
               setWatchOpen(next);
               save('tv:watchOpen', next);
               if (next) {
@@ -3372,6 +3482,8 @@ export function TvChart() {
                 save('tv:deltaOpen', false);
                 setCvdOpen(false);
                 save('tv:cvdOpen', false);
+                setFvgOpen(false);
+                save('tv:fvgOpen', false);
               }
             }}
             onDelta={() => {
@@ -3383,6 +3495,8 @@ export function TvChart() {
                 save('tv:screenerOpen', false);
                 setCvdOpen(false);
                 save('tv:cvdOpen', false);
+                setFvgOpen(false);
+                save('tv:fvgOpen', false);
               }
             }}
             onCvd={() => {
@@ -3394,6 +3508,21 @@ export function TvChart() {
                 save('tv:screenerOpen', false);
                 setDeltaOpen(false);
                 save('tv:deltaOpen', false);
+                setFvgOpen(false);
+                save('tv:fvgOpen', false);
+              }
+            }}
+            onFvg={() => {
+              const next = !fvgOpen;
+              setFvgOpen(next);
+              save('tv:fvgOpen', next);
+              if (next) {
+                setScreenerOpen(false);
+                save('tv:screenerOpen', false);
+                setDeltaOpen(false);
+                save('tv:deltaOpen', false);
+                setCvdOpen(false);
+                save('tv:cvdOpen', false);
               }
             }}
           />

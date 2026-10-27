@@ -13,6 +13,7 @@ import { buildProfile } from './volume-profile.ts';
 import { cotItems, metalRoot, parseBlsCalendar, parseFedRss, zonedInstant } from './macro.ts';
 import { groupByBar } from './news-markers.ts';
 import { barContaining, deltaDepthDays, findDeltaDivergences, inDeltaView, DELTA_VIEW_DEFAULTS } from './delta-divergence.ts';
+import { FVG_DEFAULTS, findFvgs } from './fvg.ts';
 import { backfillOpeningVolume, dropSpikeWicks, foldTrailingTick, intervalSecs } from './clean-bars.ts';
 
 const IST = 'Asia/Kolkata';
@@ -1064,4 +1065,80 @@ test('backfillOpeningVolume gives a zero-volume 09:15 bar the daily total minus 
   assert.equal(backfillOpeningVolume(bars, huge, day), bars);
   const small = [{ ...daily[0], volume: 400 }];
   assert.equal(backfillOpeningVolume(bars, small, day), bars);
+});
+
+// --- volumetric fair value gaps ---
+const fvgBar = (i, o, h, l, c, v) => ({ time: open + i * 60, open: o, high: h, low: l, close: c, volume: v });
+const fvgOff = { ...FVG_DEFAULTS, filter: 'off' };
+/** c1 high 10, impulse, c3 low 12 → bullish gap [10, 12]; volumes 20 / 50 / 30. */
+const bullGap = () => [
+  fvgBar(0, 9, 10, 8, 9.5, 20),
+  fvgBar(1, 9.5, 13, 9.5, 12.8, 50),
+  fvgBar(2, 12.8, 14, 12, 13.5, 30),
+];
+
+test('findFvgs: bullish gap zone and volume split (against = c1 share of the three candles)', () => {
+  const [g] = findFvgs(bullGap(), fvgOff);
+  assert.equal(g.bullish, true);
+  assert.equal(g.index, 2);
+  assert.deepEqual([g.bottom, g.top], [10, 12]);
+  assert.equal(g.volume, 100);
+  assert.equal(g.against, 20);
+  assert.equal(g.status, 'open');
+});
+
+test('findFvgs: overlapping wicks are no gap; bearish mirrors bullish', () => {
+  const overlap = bullGap();
+  overlap[2] = fvgBar(2, 12.8, 14, 9.9, 13.5, 30);
+  assert.equal(findFvgs(overlap, fvgOff).length, 0);
+  const bear = [
+    fvgBar(0, 11, 12, 10, 10.5, 20),
+    fvgBar(1, 10.5, 10.5, 7, 7.2, 50),
+    fvgBar(2, 7.2, 8, 6, 6.5, 30),
+  ];
+  const [g] = findFvgs(bear, fvgOff);
+  assert.equal(g.bullish, false);
+  assert.deepEqual([g.bottom, g.top], [8, 10]);
+  assert.equal(g.against, 20);
+});
+
+test('findFvgs: same-type needs three candles pointing the gap\'s way, all accepts mixed', () => {
+  const mixed = bullGap();
+  mixed[0] = fvgBar(0, 9.5, 10, 8, 9, 20); // red c1
+  assert.equal(findFvgs(mixed, fvgOff).length, 0);
+  assert.equal(findFvgs(mixed, { ...fvgOff, detection: 'all' }).length, 1);
+});
+
+test('findFvgs: tested once price trades back in, invalidated by a close (or a wick) through the far side', () => {
+  const base = bullGap();
+  const dip = [...base, fvgBar(3, 13.5, 13.6, 11.5, 12.5, 10)]; // low 11.5 enters [10,12]
+  const [t] = findFvgs(dip, fvgOff);
+  assert.equal(t.status, 'tested');
+  assert.equal(t.testedIndex, 3);
+  const wickThrough = [...dip, fvgBar(4, 12.5, 12.6, 9.5, 11, 10)]; // wick under 10, close above
+  assert.equal(findFvgs(wickThrough, fvgOff)[0].status, 'tested');
+  const w = findFvgs(wickThrough, { ...fvgOff, invalidation: 'wick' })[0];
+  assert.equal(w.status, 'invalidated');
+  assert.equal(w.invalidIndex, 4);
+  const closeThrough = [...dip, fvgBar(4, 12.5, 12.6, 9, 9.5, 10)];
+  assert.equal(findFvgs(closeThrough, fvgOff)[0].invalidIndex, 4);
+});
+
+test('findFvgs: volume filter drops gaps formed on thin volume; no-volume bars are kept with against null', () => {
+  const quiet = Array.from({ length: 12 }, (_, i) => fvgBar(i, 9, 9.5, 8.5, 9.2, 100));
+  // flat bars overlapping the gap's own candles, so they form no gap with them
+  const thin = [...quiet, ...bullGap().map((b, k) => ({ ...b, time: open + (12 + k) * 60 }))];
+  assert.equal(findFvgs(thin, { ...FVG_DEFAULTS, filter: 'volume', volumeThreshold: 100 }).length, 0);
+  const busy = thin.map((b, i) => (i >= 12 ? { ...b, volume: b.volume * 10 } : b));
+  assert.equal(findFvgs(busy, { ...FVG_DEFAULTS, filter: 'volume', volumeThreshold: 100 }).length, 1);
+  const none = bullGap().map((b) => ({ ...b, volume: 0 }));
+  const [g] = findFvgs(none, FVG_DEFAULTS);
+  assert.equal(g.against, null);
+});
+
+test('findFvgs: atr filter drops gaps smaller than the multiple of ATR', () => {
+  const atrs = [null, 4, 4]; // read at c2, the candle before the gap completes
+  // gap is 2 tall; at 0.5 × 4 = 2 it stays, at 1 × 4 it goes
+  assert.equal(findFvgs(bullGap(), { ...FVG_DEFAULTS, filter: 'atr', atrMult: 0.5 }, atrs).length, 1);
+  assert.equal(findFvgs(bullGap(), { ...FVG_DEFAULTS, filter: 'atr', atrMult: 1 }, atrs).length, 0);
 });

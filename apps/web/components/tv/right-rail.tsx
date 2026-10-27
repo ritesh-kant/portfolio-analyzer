@@ -11,6 +11,8 @@ interface Props {
   onDelta: () => void;
   cvdOpen: boolean;
   onCvd: () => void;
+  fvgOpen: boolean;
+  onFvg: () => void;
   hideDivs: boolean;
   onHideDivs: () => void;
 }
@@ -20,8 +22,8 @@ const button = (open: boolean) =>
     open ? 'bg-[#2a2e39] text-[#2962ff]' : 'text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white'
   }`;
 
-/** TradingView's right-hand icon rail: the watchlist, the delta-divergence panel and the CVD-divergence panel share the one docked slot. */
-export function RightRail({ screenerOpen, onScreener, watchlistOpen, onWatchlist, deltaOpen, onDelta, cvdOpen, onCvd, hideDivs, onHideDivs }: Props) {
+/** TradingView's right-hand icon rail: the watchlist, the delta-divergence, CVD-divergence and fair-value-gap panels share the one docked slot. */
+export function RightRail({ screenerOpen, onScreener, watchlistOpen, onWatchlist, deltaOpen, onDelta, cvdOpen, onCvd, fvgOpen, onFvg, hideDivs, onHideDivs }: Props) {
   return (
     <div className="flex w-[48px] shrink-0 flex-col items-center gap-1 border-l border-[#2a2e39] bg-[#131722] py-1.5">
       <button
@@ -55,6 +57,14 @@ export function RightRail({ screenerOpen, onScreener, watchlistOpen, onWatchlist
         className={button(cvdOpen)}
       >
         <Icons.cvd size={22} />
+      </button>
+      <button
+        type="button"
+        title="Fair value gaps (volumetric)"
+        onClick={onFvg}
+        className={button(fvgOpen)}
+      >
+        <Icons.fvg size={22} />
       </button>
       <button
         type="button"

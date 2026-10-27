@@ -358,6 +358,14 @@ export const Icons = {
       </>,
       size,
     ),
+  fvg: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M3 3.5v4.5M3 12v4.5M10 6v8M17 3.5v4.5M17 12v4.5" />
+        <path d="M4.5 8h11v4h-11z" strokeDasharray="2 2" />
+      </>,
+      size,
+    ),
   gear: ({ size }: IconProps) =>
     wrap(
       <>
