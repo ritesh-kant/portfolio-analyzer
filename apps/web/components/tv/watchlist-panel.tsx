@@ -29,6 +29,9 @@ export const MIN_WIDTH = 260;
 const MAX_WIDTH = 640;
 const DEFAULT_WIDTH = 300;
 const clampWidth = (w: number) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(w)));
+// False until the first mount has hydrated: that one starts at the default (matching the server render), later
+// mounts (switching back from another panel) read the saved width at once so the chart doesn't resize twice.
+let hydrated = false;
 const short = (symbol: string) => symbol.replace(/\.(NS|BO)$/, '');
 
 const fmtPrice = (p: number) =>
@@ -59,7 +62,9 @@ export function WatchlistPanel({
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const [width, setWidth] = useState(() =>
+    hydrated ? clampWidth(load<number>(WIDTH_KEY, DEFAULT_WIDTH)) : DEFAULT_WIDTH,
+  );
   const [dragging, setDragging] = useState(false);
   const widthRef = useRef(DEFAULT_WIDTH);
   widthRef.current = width;
@@ -68,6 +73,7 @@ export function WatchlistPanel({
     setItems(load<WatchItem[]>(STORAGE_KEY, DEFAULT_WATCHLIST));
     setWidth(clampWidth(load<number>(WIDTH_KEY, DEFAULT_WIDTH)));
     setLoaded(true);
+    hydrated = true;
   }, []);
 
   useEffect(() => {

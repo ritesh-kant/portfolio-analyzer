@@ -44,7 +44,12 @@ interface Props {
 
 const fmtVol = (v: number) => {
   const a = Math.abs(v);
-  const s = a >= 1e6 ? `${(a / 1e6).toFixed(2)}M` : a >= 1e3 ? `${(a / 1e3).toFixed(1)}K` : `${Math.round(a)}`;
+  const s =
+    a >= 1e6
+      ? `${(a / 1e6).toFixed(2)}M`
+      : a >= 1e3
+        ? `${(a / 1e3).toFixed(1)}K`
+        : `${Math.round(a)}`;
   return `${v < 0 ? '−' : ''}${s}`;
 };
 const fmtPrice = (v: number) => (Math.abs(v) >= 100 ? v.toFixed(2) : v.toFixed(3));
@@ -85,16 +90,19 @@ export function CvdPanel({
     listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [active]);
   const rows = items
-    .filter((x) => (filter === 'all' || (filter === 'bullish') === x.div.bullish) && (showFailed || x.div.status !== 'failed'))
+    .filter(
+      (x) =>
+        (filter === 'all' || (filter === 'bullish') === x.div.bullish) &&
+        (showFailed || x.div.status !== 'failed'),
+    )
     .sort((a, b) => b.div.i2 - a.div.i2);
 
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  // Read the saved width up front: a panel only mounts after a click (never during hydration), and starting at the
+  // default then jumping to the saved width resized the chart twice, which flickered.
+  const [width, setWidth] = useState(() => clampWidth(load<number>(WIDTH_KEY, DEFAULT_WIDTH)));
   const [dragging, setDragging] = useState(false);
   const widthRef = useRef(DEFAULT_WIDTH);
   widthRef.current = width;
-  useEffect(() => {
-    setWidth(clampWidth(load<number>(WIDTH_KEY, DEFAULT_WIDTH)));
-  }, []);
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -136,7 +144,11 @@ export function CvdPanel({
         <span className="text-[14px] font-semibold text-[#d1d4dc]">CVD divergence</span>
       </div>
       <div className="space-y-2.5 border-b border-[#2a2e39] px-3 py-2.5 text-[12px] text-[#b2b5be]">
-        <div role="group" aria-label="Direction" className="grid grid-cols-3 overflow-hidden rounded-md border border-[#2a2e39]">
+        <div
+          role="group"
+          aria-label="Direction"
+          className="grid grid-cols-3 overflow-hidden rounded-md border border-[#2a2e39]"
+        >
           {FILTERS.map((f, i) => (
             <button
               key={f.id}
@@ -166,11 +178,13 @@ export function CvdPanel({
           />
         </label>
         <div className="text-[11px] leading-snug text-[#787b86]">
-          Swing size, hidden kinds and the meaning of each tag: CVD indicator settings (⚙ on the CVD pane).
+          Swing size, hidden kinds and the meaning of each tag: CVD indicator settings (⚙ on the CVD
+          pane).
         </div>
       </div>
       <div className="border-b border-[#2a2e39] px-3 py-1.5 text-[11px] text-[#787b86]">
-        {symbol} · {rows.length} divergence{rows.length === 1 ? '' : 's'} on the chart&apos;s candles
+        {symbol} · {rows.length} divergence{rows.length === 1 ? '' : 's'} on the chart&apos;s
+        candles
       </div>
       <div className="grid grid-cols-[1fr_auto] gap-x-3 border-b border-[#2a2e39] px-3 py-1.5 text-[11px] font-medium text-[#787b86]">
         <span>Second swing · status</span>
@@ -186,7 +200,11 @@ export function CvdPanel({
                 ? 'waiting for confirmation'
                 : 'failed';
           const chipColor =
-            d.status === 'confirmed' ? 'text-[#d1d4dc]' : d.status === 'pending' ? 'text-[#ffb74d]' : 'text-[#787b86]';
+            d.status === 'confirmed'
+              ? 'text-[#d1d4dc]'
+              : d.status === 'pending'
+                ? 'text-[#ffb74d]'
+                : 'text-[#787b86]';
           const move = ((d.p2 - d.p1) / d.p1) * 100;
           return (
             <div
@@ -216,7 +234,9 @@ export function CvdPanel({
                   price {fmtPrice(d.p1)} → {fmtPrice(d.p2)} · CVD {fmtVol(d.c1)} → {fmtVol(d.c2)}
                 </span>
               </span>
-              <span className={`w-16 text-right tabular-nums ${move >= 0 ? 'text-[#089981]' : 'text-[#f23645]'}`}>
+              <span
+                className={`w-16 text-right tabular-nums ${move >= 0 ? 'text-[#089981]' : 'text-[#f23645]'}`}
+              >
                 {move >= 0 ? '+' : ''}
                 {move.toFixed(2)}%
               </span>

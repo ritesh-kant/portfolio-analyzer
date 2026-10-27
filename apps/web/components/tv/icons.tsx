@@ -500,4 +500,12 @@ export const Icons = {
       </>,
       size,
     ),
+  notes: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M4.5 3.5h11v13h-11z" />
+        <path d="M7 7.5h6M7 10.5h6M7 13.5h3.5" />
+      </>,
+      size,
+    ),
 };

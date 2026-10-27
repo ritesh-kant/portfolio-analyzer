@@ -145,19 +145,27 @@ export function DeltaPanel({
     { id: '1w', label: '1W', title: 'Last 7 days' },
     { id: '2w', label: '2W', title: 'Last 14 days' },
     { id: '1m', label: '1M', title: 'Last month' },
-    { id: '3m', label: '3M', title: 'Last 3 months (NSE stocks: 1-minute exchange bars from Upstox; others reach about 60 days)' },
-    { id: '6m', label: '6M', title: 'Last 6 months (NSE stocks only; other symbols reach about 60 days)' },
+    {
+      id: '3m',
+      label: '3M',
+      title:
+        'Last 3 months (NSE stocks: 1-minute exchange bars from Upstox; others reach about 60 days)',
+    },
+    {
+      id: '6m',
+      label: '6M',
+      title: 'Last 6 months (NSE stocks only; other symbols reach about 60 days)',
+    },
     { id: 'custom', label: 'Custom', title: 'Pick a start and end date' },
   ];
 
   // Drag the panel's left edge: moving left widens it (same as the watchlist); the width is remembered.
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  // Read the saved width up front: a panel only mounts after a click (never during hydration), and starting at the
+  // default then jumping to the saved width resized the chart twice, which flickered.
+  const [width, setWidth] = useState(() => clampWidth(load<number>(WIDTH_KEY, DEFAULT_WIDTH)));
   const [dragging, setDragging] = useState(false);
   const widthRef = useRef(DEFAULT_WIDTH);
   widthRef.current = width;
-  useEffect(() => {
-    setWidth(clampWidth(load<number>(WIDTH_KEY, DEFAULT_WIDTH)));
-  }, []);
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -288,8 +296,8 @@ export function DeltaPanel({
           </summary>
           <div className="mt-2 space-y-1.5 text-[11px] leading-snug text-[#787b86]">
             <p>
-              <span className="text-[#f23645]">Buyers trapped</span>: long upper wick (at least twice
-              the lower one), positive delta, then a red candle breaks the low (short).
+              <span className="text-[#f23645]">Buyers trapped</span>: long upper wick (at least
+              twice the lower one), positive delta, then a red candle breaks the low (short).
             </p>
             <p>
               <span className="text-[#089981]">Sellers trapped</span>: long lower wick (at least
@@ -297,9 +305,9 @@ export function DeltaPanel({
             </p>
             <p>
               Solid badge = confirmed, hollow = waiting. Delta is{' '}
-              <span className="text-[#ffb74d]">estimated from 1-minute bars</span> (5-minute for candles
-              older than about 4 weeks, tagged), not trades. Check
-              the location yourself (order block, value-area edge, POC).
+              <span className="text-[#ffb74d]">estimated from 1-minute bars</span> (5-minute for
+              candles older than about 4 weeks, tagged), not trades. Check the location yourself
+              (order block, value-area edge, POC).
             </p>
           </div>
           <div className="mt-3 space-y-2">
@@ -378,7 +386,9 @@ export function DeltaPanel({
           <span title="NSE stocks use 1-minute exchange bars from Upstox, which reach back years. Other symbols come from Yahoo: 1-minute bars about 4 weeks back, 5-minute bars 60 days back, and candles older than the 1-minute data use 5-minute bars, a coarser estimate.">
             {' '}
             · {dayLabel(dataFrom)} → {dayLabel(dataTo)}
-            {fineFrom != null && fineFrom > dataFrom ? `, 1-minute delta from ${dayLabel(fineFrom)}` : ''}
+            {fineFrom != null && fineFrom > dataFrom
+              ? `, 1-minute delta from ${dayLabel(fineFrom)}`
+              : ''}
           </span>
         ) : null}
       </div>

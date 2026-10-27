@@ -43,7 +43,11 @@ interface Props {
 }
 
 const fmtVol = (v: number) =>
-  v >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : `${Math.round(v)}`;
+  v >= 1e6
+    ? `${(v / 1e6).toFixed(2)}M`
+    : v >= 1e3
+      ? `${(v / 1e3).toFixed(1)}K`
+      : `${Math.round(v)}`;
 const fmtPrice = (v: number) => (Math.abs(v) >= 100 ? v.toFixed(2) : v.toFixed(3));
 
 const FILTERS: { id: FvgFilter; label: string }[] = [
@@ -73,7 +77,10 @@ function NumberField({
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="flex items-center justify-between gap-2 text-[12px] text-[#b2b5be]" title={title}>
+    <label
+      className="flex items-center justify-between gap-2 text-[12px] text-[#b2b5be]"
+      title={title}
+    >
       <span>{label}</span>
       <input
         type="number"
@@ -105,7 +112,10 @@ function Select<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <label className="flex items-center justify-between gap-2 text-[12px] text-[#b2b5be]" title={title}>
+    <label
+      className="flex items-center justify-between gap-2 text-[12px] text-[#b2b5be]"
+      title={title}
+    >
       <span>{label}</span>
       <select
         value={value}
@@ -153,13 +163,12 @@ export function FvgPanel({
   }, [active]);
   const rows = [...items].reverse();
 
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  // Read the saved width up front: a panel only mounts after a click (never during hydration), and starting at the
+  // default then jumping to the saved width resized the chart twice, which flickered.
+  const [width, setWidth] = useState(() => clampWidth(load<number>(WIDTH_KEY, DEFAULT_WIDTH)));
   const [dragging, setDragging] = useState(false);
   const widthRef = useRef(DEFAULT_WIDTH);
   widthRef.current = width;
-  useEffect(() => {
-    setWidth(clampWidth(load<number>(WIDTH_KEY, DEFAULT_WIDTH)));
-  }, []);
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -177,7 +186,11 @@ export function FvgPanel({
   };
 
   return (
-    <div className="relative flex shrink-0 flex-col border-l border-[#2a2e39] bg-[#131722]" style={{ width }} data-tv-ui>
+    <div
+      className="relative flex shrink-0 flex-col border-l border-[#2a2e39] bg-[#131722]"
+      style={{ width }}
+      data-tv-ui
+    >
       <div
         role="separator"
         aria-orientation="vertical"
@@ -197,7 +210,11 @@ export function FvgPanel({
         <span className="text-[14px] font-semibold text-[#d1d4dc]">Fair value gaps</span>
       </div>
       <div className="space-y-2.5 border-b border-[#2a2e39] px-3 py-2.5 text-[12px] text-[#b2b5be]">
-        <div role="group" aria-label="Direction" className="grid grid-cols-3 overflow-hidden rounded-md border border-[#2a2e39]">
+        <div
+          role="group"
+          aria-label="Direction"
+          className="grid grid-cols-3 overflow-hidden rounded-md border border-[#2a2e39]"
+        >
           {FILTERS.map((f, i) => (
             <button
               key={f.id}
@@ -215,7 +232,10 @@ export function FvgPanel({
           ))}
         </div>
         <div className="grid grid-cols-2 items-center gap-x-4 gap-y-2">
-          <label className="flex items-center justify-between gap-2" title="Also list zones price has already invalidated">
+          <label
+            className="flex items-center justify-between gap-2"
+            title="Also list zones price has already invalidated"
+          >
             <span>Invalidated</span>
             <input
               type="checkbox"
@@ -244,21 +264,25 @@ export function FvgPanel({
           onChange={(maxAgainst) => onView({ maxAgainst })}
         />
         <details>
-          <summary className="cursor-pointer select-none text-[#b2b5be] hover:text-white">Rules &amp; settings</summary>
+          <summary className="cursor-pointer select-none text-[#b2b5be] hover:text-white">
+            Rules &amp; settings
+          </summary>
           <div className="mt-2 space-y-1.5 text-[11px] leading-snug text-[#787b86]">
             <p>
-              A gap is three candles whose outer wicks do not overlap: a <span className="text-[#089981]">bullish</span>{' '}
-              gap has candle 1&apos;s high below candle 3&apos;s low, a <span className="text-[#f23645]">bearish</span> one the
+              A gap is three candles whose outer wicks do not overlap: a{' '}
+              <span className="text-[#089981]">bullish</span> gap has candle 1&apos;s high below
+              candle 3&apos;s low, a <span className="text-[#f23645]">bearish</span> one the
               reverse. The zone is what price skipped.
             </p>
             <p>
-              The volume of the three candles is split into what drove the gap (candles 2 and 3) and what sat against
-              it (candle 1). <span className="text-[#d1d4dc]">Against %</span> is that against-share: low means real
-              participation behind the move, high means a weaker gap that is likelier to fail when price returns.
+              The volume of the three candles is split into what drove the gap (candles 2 and 3) and
+              what sat against it (candle 1). <span className="text-[#d1d4dc]">Against %</span> is
+              that against-share: low means real participation behind the move, high means a weaker
+              gap that is likelier to fail when price returns.
             </p>
             <p>
-              Detection follows the Flux Charts indicator&apos;s documentation, not its code, so edge cases can differ.
-              Volume is the chart&apos;s own candle volume.
+              Detection follows the Flux Charts indicator&apos;s documentation, not its code, so
+              edge cases can differ. Volume is the chart&apos;s own candle volume.
             </p>
           </div>
           <div className="mt-3 space-y-2">
@@ -329,9 +353,17 @@ export function FvgPanel({
         {rows.map((g) => {
           const color = g.bullish ? 'text-[#26a69a]' : 'text-[#ef5350]';
           const chip =
-            g.status === 'invalidated' ? 'invalidated' : g.status === 'tested' ? 'tested' : 'untouched';
+            g.status === 'invalidated'
+              ? 'invalidated'
+              : g.status === 'tested'
+                ? 'tested'
+                : 'untouched';
           const chipColor =
-            g.status === 'open' ? 'text-[#ffb74d]' : g.status === 'tested' ? 'text-[#d1d4dc]' : 'text-[#787b86]';
+            g.status === 'open'
+              ? 'text-[#ffb74d]'
+              : g.status === 'tested'
+                ? 'text-[#d1d4dc]'
+                : 'text-[#787b86]';
           const pct = g.against;
           return (
             <div
@@ -341,7 +373,9 @@ export function FvgPanel({
               onClick={() => onJump(g.index)}
               onKeyDown={(e) => e.key === 'Enter' && onJump(g.index)}
               title={`Zone ${fmtPrice(g.bottom)} → ${fmtPrice(g.top)} · volume of the three candles ${fmtVol(g.volume)}${
-                pct != null ? `, ${pct.toFixed(1)}% of it against the gap` : ' (no volume split: the candles carry no volume)'
+                pct != null
+                  ? `, ${pct.toFixed(1)}% of it against the gap`
+                  : ' (no volume split: the candles carry no volume)'
               }`}
               data-active={g.index === active}
               className={`grid cursor-pointer grid-cols-[1fr_auto] items-center gap-x-3 px-3 py-1.5 text-[12.5px] hover:bg-[#2a2e39] ${
@@ -351,9 +385,7 @@ export function FvgPanel({
               <span className="min-w-0">
                 <span className="block tabular-nums text-[#d1d4dc]">{when(g.time)}</span>
                 <span className="block truncate text-[11px]">
-                  <span className={color}>
-                    {g.bullish ? '▲ bullish' : '▼ bearish'}
-                  </span>
+                  <span className={color}>{g.bullish ? '▲ bullish' : '▼ bearish'}</span>
                   <span className="text-[#787b86]"> · </span>
                   <span className={chipColor}>{chip}</span>
                 </span>
@@ -363,7 +395,13 @@ export function FvgPanel({
               </span>
               <span
                 className={`w-16 text-right tabular-nums ${
-                  pct == null ? 'text-[#787b86]' : pct <= 25 ? 'text-[#089981]' : pct >= 40 ? 'text-[#f23645]' : 'text-[#d1d4dc]'
+                  pct == null
+                    ? 'text-[#787b86]'
+                    : pct <= 25
+                      ? 'text-[#089981]'
+                      : pct >= 40
+                        ? 'text-[#f23645]'
+                        : 'text-[#d1d4dc]'
                 }`}
               >
                 {pct == null ? '—' : `${Math.round(pct)}%`}

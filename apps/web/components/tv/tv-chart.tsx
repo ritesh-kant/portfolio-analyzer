@@ -58,7 +58,13 @@ import {
   sma,
   vwap,
 } from '../../lib/tv/indicators';
-import { type CvdCandle, anchorKey, closingPrintCandles, computeCvd, nseClosingPrints } from '../../lib/tv/cvd';
+import {
+  type CvdCandle,
+  anchorKey,
+  closingPrintCandles,
+  computeCvd,
+  nseClosingPrints,
+} from '../../lib/tv/cvd';
 import { load, save } from '../../lib/tv/storage';
 import {
   TIMEFRAMES,
@@ -73,6 +79,7 @@ import {
 } from '../../lib/tv/timeframes';
 import type { Bar, BarsResponse, SymbolMeta } from '../../lib/tv/types';
 import { RightRail } from './right-rail';
+import { NotesPanel } from './notes-panel';
 import { WatchlistPanel, type WatchItem } from './watchlist-panel';
 import { useCompact } from '../../lib/tv/use-compact';
 import { BottomBar, type RangeId } from './bottom-bar';
@@ -280,7 +287,14 @@ function computeIndicators(
         break;
       case 'cvd': {
         const anchor = cfg.anchor ?? 'session';
-        const ohlc = computeCvd(bars, sub, secs, (t) => anchorKey(sessionDay(t, timeZone), anchor), regular, prints);
+        const ohlc = computeCvd(
+          bars,
+          sub,
+          secs,
+          (t) => anchorKey(sessionDay(t, timeZone), anchor),
+          regular,
+          prints,
+        );
         lines = [{ key: 'cvd', color: UP, values: ohlc.map((c) => c.close), kind: 'candle', ohlc }];
         break;
       }
@@ -302,7 +316,11 @@ const fmtVolume = (v: number) =>
 const fmtDelta = (v: number) => {
   const a = Math.abs(v);
   const s =
-    a >= 1e6 ? `${(a / 1e6).toFixed(2)}M` : a >= 1e3 ? `${(a / 1e3).toFixed(2)}K` : `${Math.round(a)}`;
+    a >= 1e6
+      ? `${(a / 1e6).toFixed(2)}M`
+      : a >= 1e3
+        ? `${(a / 1e3).toFixed(2)}K`
+        : `${Math.round(a)}`;
   return v < 0 ? `−${s}` : s;
 };
 
@@ -354,9 +372,9 @@ export function TvChart() {
   const footViewRef = useRef<FootprintView | null>(null);
   const primRef = useRef<DrawingsPrimitive | null>(null);
   /** Drawing layers of the indicator panes, by indicator id; rebuilt with the indicator series. */
-  const subPrimsRef = useRef<Map<string, { prim: DrawingsPrimitive; series: ISeriesApi<SeriesType, Time> }>>(
-    new Map(),
-  );
+  const subPrimsRef = useRef<
+    Map<string, { prim: DrawingsPrimitive; series: ISeriesApi<SeriesType, Time> }>
+  >(new Map());
   const newsPrimRef = useRef<NewsPrimitive | null>(null);
   const sessionsPrimRef = useRef<SessionsPrimitive | null>(null);
   const svpPrimRef = useRef<SessionProfilePrimitive | null>(null);
@@ -481,6 +499,11 @@ export function TvChart() {
   const [fvgView, setFvgView] = useState<FvgView>(FVG_VIEW_DEFAULTS);
   const [fvgMarks, setFvgMarks] = useState(true);
   const [fvgPick, setFvgPick] = useState<number | null>(null);
+  // Text notes: docked at the bottom of the right column, under whichever panel is open.
+  const [notesOpen, setNotesOpen] = useState(false);
+  useEffect(() => {
+    setNotesOpen(load<boolean>('tv:notesOpen', false));
+  }, []);
   useEffect(() => {
     const saved = load<Partial<DeltaConfig>>('tv:deltaCfg', {});
     setDeltaCfg({
@@ -644,7 +667,8 @@ export function TvChart() {
   }, [setups, deltaView, bars, timeZone]);
   // Fair value gaps on the chart's own candles, shown while the panel is open.
   const fvgAll = useMemo(
-    () => (fvgOpen ? findFvgs(bars, fvgCfg, fvgCfg.filter === 'atr' ? atr(bars, FVG_ATR_LEN) : []) : []),
+    () =>
+      fvgOpen ? findFvgs(bars, fvgCfg, fvgCfg.filter === 'atr' ? atr(bars, FVG_ATR_LEN) : []) : [],
     [fvgOpen, bars, fvgCfg],
   );
   const fvgShown = useMemo(
@@ -664,9 +688,11 @@ export function TvChart() {
   // US stocks: Yahoo reports no volume before 09:30 or after 16:00 (bar for bar, apart from the closing cross
   // stamped 16:00), so CVD only counts regular hours there.
   const regularHours = useMemo(() => {
-    const def = meta && hasExtendedBars({ symbol, instrumentType: meta.instrumentType, timezone: meta.timezone })
-      ? sessionFor({ symbol, instrumentType: meta.instrumentType, timezone: meta.timezone })
-      : null;
+    const def =
+      meta &&
+      hasExtendedBars({ symbol, instrumentType: meta.instrumentType, timezone: meta.timezone })
+        ? sessionFor({ symbol, instrumentType: meta.instrumentType, timezone: meta.timezone })
+        : null;
     if (!def) return undefined;
     return (t: number) => {
       const minute = Math.floor((wallClock(t, timeZone) % 86400) / 60);
@@ -682,7 +708,8 @@ export function TvChart() {
     return { sub, bars: closingPrintCandles(bars, subBars, sub, tf.secs, minuteOf, dayOf) };
   }, [bars, subBars, tf.secs, timeZone]);
   const computed = useMemo(
-    () => computeIndicators(indicators, bars, timeZone, subBars, tf.secs, regularHours, closingPrints),
+    () =>
+      computeIndicators(indicators, bars, timeZone, subBars, tf.secs, regularHours, closingPrints),
     [indicators, bars, timeZone, subBars, tf.secs, regularHours, closingPrints],
   );
   // Price/CVD divergences of each CVD indicator, with the delta-divergence setups they sit next to.
@@ -759,7 +786,16 @@ export function TvChart() {
     cvdOpen: cvdOpen && !deltaOpen && !screenerOpen && !compact,
     fvgOpen: fvgOpen && !screenerOpen && !compact,
   };
-  const latest = useRef<Latest>({ tool, magnet, keep, lockAll, drawings, selectedId, bars, ...listOpen });
+  const latest = useRef<Latest>({
+    tool,
+    magnet,
+    keep,
+    lockAll,
+    drawings,
+    selectedId,
+    bars,
+    ...listOpen,
+  });
   latest.current = { tool, magnet, keep, lockAll, drawings, selectedId, bars, ...listOpen };
 
   // ── settings load / save ──────────────────────────────────────────────
@@ -850,7 +886,14 @@ export function TvChart() {
   // ── data fetching ─────────────────────────────────────────────────────
   // A date window rather than a named range (1-minute history older than 7 days).
   const fetchWindow = useCallback(
-    async (sym: string, interval: string, from: number, to: number, signal?: AbortSignal, prepost = false) => {
+    async (
+      sym: string,
+      interval: string,
+      from: number,
+      to: number,
+      signal?: AbortSignal,
+      prepost = false,
+    ) => {
       const res = await fetch(
         `/api/chart/bars?symbol=${encodeURIComponent(sym)}&interval=${interval}&period1=${from}&period2=${to}${prepost ? '&prepost=1' : ''}`,
         { signal, cache: 'no-store' },
@@ -927,7 +970,8 @@ export function TvChart() {
   }, [ready, symbol, tf.source, tf.range, wantPrepost, fetchBars]);
 
   // Footprint needs 1-minute bars underneath coarser candles.
-  const svpOn = indicators.some((i) => i.type === 'svp') || drawings.some((d) => d.kind === 'vprofile');
+  const svpOn =
+    indicators.some((i) => i.type === 'svp') || drawings.some((d) => d.kind === 'vprofile');
   useEffect(() => {
     if (!ready || (!fp.on && !svpOn && !cvdOn) || tf.source === '1m') return;
     const ctl = new AbortController();
@@ -987,7 +1031,18 @@ export function TvChart() {
         });
     }
     return () => ctl.abort();
-  }, [ready, deltaOpen, cvdOn, symbol, nse, deltaDays, wantPrepost, fetchWindow, fetchBars, fetchUpstox]);
+  }, [
+    ready,
+    deltaOpen,
+    cvdOn,
+    symbol,
+    nse,
+    deltaDays,
+    wantPrepost,
+    fetchWindow,
+    fetchBars,
+    fetchUpstox,
+  ]);
 
   // The chart's own bars only go back as far as Yahoo's intraday history (60 days for 5m/15m/30m, 7 days for
   // 1m), so older setups would have nowhere to be drawn: fill in the earlier bars from Upstox.
@@ -1317,14 +1372,17 @@ export function TvChart() {
     const viewKey = `${raw.key}|${tfId}`;
     // Earlier bars arriving in front of the same series shift every logical index: carry the view over by as many
     // bars as now precede the old first bar, so it stays on the same candles.
-    const keptRange = viewKeyRef.current === viewKey ? chart.timeScale().getVisibleLogicalRange() : null;
+    const keptRange =
+      viewKeyRef.current === viewKey ? chart.timeScale().getVisibleLogicalRange() : null;
     const prevFirst = firstWallRef.current;
     firstWallRef.current = { key: viewKey, time: wall[0]! };
     main.series.setData(data as never);
     if (keptRange && prevFirst && prevFirst.key === viewKey && wall[0]! < prevFirst.time) {
       const shift = wall.findIndex((t) => t >= prevFirst.time);
       if (shift > 0) {
-        chart.timeScale().setVisibleLogicalRange({ from: keptRange.from + shift, to: keptRange.to + shift });
+        chart
+          .timeScale()
+          .setVisibleLogicalRange({ from: keptRange.from + shift, to: keptRange.to + shift });
       }
     }
     if (viewKeyRef.current !== viewKey) {
@@ -1383,7 +1441,9 @@ export function TvChart() {
   }, [fp.on, fp.imbalance, fp.showDelta, bars, wall, footprints, decimals]);
 
   // Indicator series structure: rebuilt only when the indicator set / params change.
-  const structKey = JSON.stringify(indicators.map((cfg) => ({ ...cfg, hidden: undefined, collapsed: undefined })));
+  const structKey = JSON.stringify(
+    indicators.map((cfg) => ({ ...cfg, hidden: undefined, collapsed: undefined })),
+  );
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -1538,7 +1598,9 @@ export function TvChart() {
   const maxPane = computed.find((c) => c.cfg.id === maxPaneId && c.pane > 0)?.pane ?? null;
   const collapsedKey = (
     maxPane != null
-      ? [0, ...computed.map((c) => c.pane)].filter((i, k, all) => i !== maxPane && all.indexOf(i) === k)
+      ? [0, ...computed.map((c) => c.pane)].filter(
+          (i, k, all) => i !== maxPane && all.indexOf(i) === k,
+        )
       : computed.filter((c) => c.pane > 0 && c.cfg.collapsed).map((c) => c.pane)
   ).join(',');
   useEffect(() => {
@@ -1714,20 +1776,21 @@ export function TvChart() {
   }, [divergences, deltaMarks, hideDivs, deltaMark, bars, chartType, fp.on, fp.showDelta]);
   // Fair value gaps → zones on the price pane (hidden while the panel's "Mark on chart" is off or it is closed).
   useEffect(() => {
-    const marks: FvgMark[] = fvgOpen && fvgMarks
-      ? fvgShown.map((g) => ({
-          i1: g.index - 2,
-          i2: g.index,
-          endIndex: g.invalidIndex,
-          top: g.top,
-          bottom: g.bottom,
-          bullish: g.bullish,
-          tested: g.status !== 'open',
-          volume: g.volume,
-          against: g.against,
-          focus: g.index === fvgPick,
-        }))
-      : [];
+    const marks: FvgMark[] =
+      fvgOpen && fvgMarks
+        ? fvgShown.map((g) => ({
+            i1: g.index - 2,
+            i2: g.index,
+            endIndex: g.invalidIndex,
+            top: g.top,
+            bottom: g.bottom,
+            bullish: g.bullish,
+            tested: g.status !== 'open',
+            volume: g.volume,
+            against: g.against,
+            focus: g.index === fvgPick,
+          }))
+        : [];
     fvgPrimRef.current?.setState(marks);
   }, [fvgShown, fvgOpen, fvgMarks, bars, chartType, fvgPick]);
   useEffect(() => setFvgPick(null), [symbol, tfId]);
@@ -1740,9 +1803,10 @@ export function TvChart() {
     const onPrice: CvdDivMark[] = [];
     for (const c of computed) {
       if (c.cfg.type !== 'cvd') continue;
-      const list = c.cfg.hidden || hideDivs
-        ? []
-        : (cvdDivs.get(c.cfg.id) ?? []).filter((x) => cvdShowFailed || x.div.status !== 'failed');
+      const list =
+        c.cfg.hidden || hideDivs
+          ? []
+          : (cvdDivs.get(c.cfg.id) ?? []).filter((x) => cvdShowFailed || x.div.status !== 'failed');
       const mark = (
         x: { div: CvdDivergence; near: boolean },
         i1: number,
@@ -1762,7 +1826,9 @@ export function TvChart() {
         near: x.near,
         focus: x.div.i2 === cvdPick,
       });
-      cvdDivSubRef.current.get(c.cfg.id)?.setState(list.map((x) => mark(x, x.div.ci1, x.div.ci2, x.div.c1, x.div.c2)));
+      cvdDivSubRef.current
+        .get(c.cfg.id)
+        ?.setState(list.map((x) => mark(x, x.div.ci1, x.div.ci2, x.div.c1, x.div.c2)));
       onPrice.push(...list.map((x) => mark(x, x.div.i1, x.div.i2, x.div.p1, x.div.p2)));
     }
     cvdDivMainRef.current?.setState(onPrice);
@@ -1771,10 +1837,32 @@ export function TvChart() {
   // Drawings → primitive.
   useEffect(() => {
     const all = measure ? [...drawings, measure] : drawings;
-    const next = { drawings: all, draft, selectedId, hidden: hideAll, axis, decimals, bars, fine: profileFine, secs: tf.secs };
+    const next = {
+      drawings: all,
+      draft,
+      selectedId,
+      hidden: hideAll,
+      axis,
+      decimals,
+      bars,
+      fine: profileFine,
+      secs: tf.secs,
+    };
     primRef.current?.setState(next);
     for (const { prim } of subPrimsRef.current.values()) prim.setState(next);
-  }, [drawings, measure, draft, selectedId, hideAll, axis, decimals, bars, profileFine, tf.secs, structKey]);
+  }, [
+    drawings,
+    measure,
+    draft,
+    selectedId,
+    hideAll,
+    axis,
+    decimals,
+    bars,
+    profileFine,
+    tf.secs,
+    structKey,
+  ]);
 
   // ── pointer interaction with drawings ─────────────────────────────────
   useEffect(() => {
@@ -2085,7 +2173,8 @@ export function TvChart() {
         const here = locate(x, y);
         const bar = here?.key === null ? (newsPrimRef.current?.findBar(x, y) ?? null) : null;
         setNewsHover(bar);
-        const hit = here && bar == null ? (primFor(here.key)?.findHit(x, y - here.top) ?? null) : null;
+        const hit =
+          here && bar == null ? (primFor(here.key)?.findHit(x, y - here.top) ?? null) : null;
         const layers: [string | null, DrawingsPrimitive | null][] = [
           [null, primRef.current],
           ...[...subPrimsRef.current].map(([k, v]): [string, DrawingsPrimitive] => [k, v.prim]),
@@ -2155,9 +2244,7 @@ export function TvChart() {
       textCommitRef.current = (value) => {
         const next = value.trim();
         if (!next) return;
-        setDrawings(
-          latest.current.drawings.map((v) => (v.id === d.id ? { ...v, text: next } : v)),
-        );
+        setDrawings(latest.current.drawings.map((v) => (v.id === d.id ? { ...v, text: next } : v)));
       };
       setSelectedId(d.id);
       textValueRef.current = d.text ?? '';
@@ -2273,7 +2360,8 @@ export function TvChart() {
           : null;
     };
     const panMove = (e: MouseEvent) => {
-      if (!panStart || !(e.buttons & 1) || drag || draftRef || latest.current.tool !== 'cursor') return;
+      if (!panStart || !(e.buttons & 1) || drag || draftRef || latest.current.tool !== 'cursor')
+        return;
       const { x, y } = local(e);
       const dy = Math.abs(y - panStart.y);
       if (dy < 3 || dy < Math.abs(x - panStart.x)) return;
@@ -2468,43 +2556,50 @@ export function TvChart() {
       <span className={c.cfg.hidden ? 'text-[#5d606b]' : 'text-[#b2b5be]'}>
         {indicatorLabel(c.cfg)}
       </span>
-      {c.cfg.hidden ? null : c.lines.map((l) => {
-        const k = l.ohlc?.[idx];
-        if (k?.missing) {
-          return (
-            <span key={l.key} className="text-[#787b86]" title="Yahoo reports no volume outside regular hours">
-              n/a
-            </span>
-          );
-        }
-        if (k) {
-          // CVD candle: open / high / low / close of the running total, in the candle's colour
-          return (
-            <span
-              key={l.key}
-              className="flex items-center gap-2 tabular-nums"
-              style={{ color: k.close >= k.open ? UP : DOWN }}
-            >
-              {(['open', 'high', 'low', 'close'] as const).map((f) => (
-                <span key={f}>
-                  {f[0]!.toUpperCase()}
-                  <b className="ml-0.5 font-medium">{fmtDelta(k[f])}</b>
+      {c.cfg.hidden
+        ? null
+        : c.lines.map((l) => {
+            const k = l.ohlc?.[idx];
+            if (k?.missing) {
+              return (
+                <span
+                  key={l.key}
+                  className="text-[#787b86]"
+                  title="Yahoo reports no volume outside regular hours"
+                >
+                  n/a
                 </span>
-              ))}
-            </span>
-          );
-        }
-        return (
-          <span
-            key={l.key}
-            style={{
-              color: c.cfg.type === 'volume' ? (bar && bar.close >= bar.open ? UP : DOWN) : l.color,
-            }}
-          >
-            {valueText(c, l)}
-          </span>
-        );
-      })}
+              );
+            }
+            if (k) {
+              // CVD candle: open / high / low / close of the running total, in the candle's colour
+              return (
+                <span
+                  key={l.key}
+                  className="flex items-center gap-2 tabular-nums"
+                  style={{ color: k.close >= k.open ? UP : DOWN }}
+                >
+                  {(['open', 'high', 'low', 'close'] as const).map((f) => (
+                    <span key={f}>
+                      {f[0]!.toUpperCase()}
+                      <b className="ml-0.5 font-medium">{fmtDelta(k[f])}</b>
+                    </span>
+                  ))}
+                </span>
+              );
+            }
+            return (
+              <span
+                key={l.key}
+                style={{
+                  color:
+                    c.cfg.type === 'volume' ? (bar && bar.close >= bar.open ? UP : DOWN) : l.color,
+                }}
+              >
+                {valueText(c, l)}
+              </span>
+            );
+          })}
       <span
         className={`flex gap-1 transition-opacity group-hover:opacity-100 ${c.cfg.hidden ? 'opacity-100' : 'opacity-0'}`}
       >
@@ -2653,7 +2748,6 @@ export function TvChart() {
     );
   });
 
-
   // ── paper trading ──────────────────────────────────────────────────────
   // Two accounts: the live one persists; the replay one is a sandbox that starts fresh with every replay.
   const [paperOpen, setPaperOpen] = useState(false);
@@ -2675,20 +2769,24 @@ export function TvChart() {
         !saved.orders.length &&
         !Object.keys(saved.positions).length;
       setLivePaper(
-        untouched ? newAccount(DEFAULT_CAPITAL, saved.commissionPct) : { ...newAccount(), ...saved, log: saved.log ?? [] },
+        untouched
+          ? newAccount(DEFAULT_CAPITAL, saved.commissionPct)
+          : { ...newAccount(), ...saved, log: saved.log ?? [] },
       );
     }
     paperHydrated.current = true;
   }, []);
   useEffect(() => {
     // never write the blank starter account: on mount (twice under StrictMode) it would overwrite the saved one before it is read
-    if (paperHydrated.current && livePaper !== initialLivePaper.current) save('tv:paper', livePaper);
+    if (paperHydrated.current && livePaper !== initialLivePaper.current)
+      save('tv:paper', livePaper);
   }, [livePaper]);
   const paper = replayActive ? replayPaper : livePaper;
   const setPaper = replayActive ? setReplayPaper : setLivePaper;
   const wasReplayPaper = useRef(false);
   useEffect(() => {
-    if (replayActive && !wasReplayPaper.current) setReplayPaper(newAccount(livePaper.initial, livePaper.commissionPct));
+    if (replayActive && !wasReplayPaper.current)
+      setReplayPaper(newAccount(livePaper.initial, livePaper.commissionPct));
     wasReplayPaper.current = replayActive;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replayActive]);
@@ -2708,7 +2806,18 @@ export function TvChart() {
       const res =
         o.type === 'market'
           ? placeMarket(paper, symbol, o.side, o.qty, lastPrice, paperNow, bracket)
-          : placePending(paper, symbol, o.side, o.type, o.qty, o.price ?? 0, lastPrice, paperNow, bracket, o.tif);
+          : placePending(
+              paper,
+              symbol,
+              o.side,
+              o.type,
+              o.qty,
+              o.price ?? 0,
+              lastPrice,
+              paperNow,
+              bracket,
+              o.tif,
+            );
       if (res.error) return res.error;
       setPaper(res.state);
       return null;
@@ -2852,7 +2961,10 @@ export function TvChart() {
                   setTextEdit(null);
                 }}
                 style={{
-                  left: Math.max(4, Math.min(textEdit.x, (wrapRef.current?.clientWidth ?? 800) - 224)),
+                  left: Math.max(
+                    4,
+                    Math.min(textEdit.x, (wrapRef.current?.clientWidth ?? 800) - 224),
+                  ),
                   top: Math.max(4, textEdit.y - 14),
                 }}
                 className="absolute z-30 w-52 rounded border border-sky-500 bg-neutral-900 px-2 py-1 text-sm text-neutral-100 shadow-lg outline-none placeholder:text-neutral-500"
@@ -2863,131 +2975,144 @@ export function TvChart() {
             {paperOpen ? (
               <>
                 {prefs.showButtons ? (
-                <PaperTicket
-                  price={lastPrice}
-                  decimals={decimals}
-                  shifted={!!selected}
-                  qty={paperQty}
-                  onQty={(v) => {
-                    setPaperQty(v);
-                    save('tv:paperQty', v);
-                  }}
-                  oneClick={oneClick}
-                  onSide={(side) => {
-                    if (oneClick) {
-                      const err = placeOrder({ side, type: 'market', qty: Number(paperQty) });
-                      if (err) window.alert(err);
-                    } else setOrderDlg({ side, type: 'market' });
-                  }}
-                  onDialog={() => setOrderDlg({ side: 'buy', type: 'market' })}
-                />
+                  <PaperTicket
+                    price={lastPrice}
+                    decimals={decimals}
+                    shifted={!!selected}
+                    qty={paperQty}
+                    onQty={(v) => {
+                      setPaperQty(v);
+                      save('tv:paperQty', v);
+                    }}
+                    oneClick={oneClick}
+                    onSide={(side) => {
+                      if (oneClick) {
+                        const err = placeOrder({ side, type: 'market', qty: Number(paperQty) });
+                        if (err) window.alert(err);
+                      } else setOrderDlg({ side, type: 'market' });
+                    }}
+                    onDialog={() => setOrderDlg({ side: 'buy', type: 'market' })}
+                  />
                 ) : null}
               </>
             ) : null}
             {/* the on-chart "+" / right-click menu works whether or not the paper panel is open */}
             <>
-                <PaperOverlay
-                  chartRef={chartRef}
-                  getSeries={getMainSeries}
-                  wrap={wrapRef.current}
-                  state={paper}
+              <PaperOverlay
+                chartRef={chartRef}
+                getSeries={getMainSeries}
+                wrap={wrapRef.current}
+                state={paper}
+                symbol={symbol}
+                last={lastPrice}
+                decimals={decimals}
+                qty={Number(paperQty) > 0 ? Number(paperQty) : 1}
+                enabled={tool === 'cursor' && !replayPick}
+                showPositions={prefs.showPositions}
+                showOrders={prefs.showOrders}
+                onModifyOrder={(id) => {
+                  const o = paper.orders.find((x) => x.id === id);
+                  if (o)
+                    setOrderDlg({
+                      side: o.side,
+                      type: o.type,
+                      price: o.price,
+                      edit: { id: o.id, qty: o.qty, tp: o.tp, sl: o.sl, tif: o.tif },
+                    });
+                }}
+                onHLine={(price) =>
+                  setDrawings([
+                    ...drawings,
+                    {
+                      id: newId(),
+                      kind: 'hline',
+                      pts: [
+                        {
+                          t: bars.length ? bars[bars.length - 1]!.time : Date.now() / 1000,
+                          p: price,
+                        },
+                      ],
+                      color: DEFAULT_COLOR.hline,
+                      width: 1,
+                    },
+                  ])
+                }
+                onMoveOrder={(id, price) => {
+                  if (lastPrice == null) return 'No price yet';
+                  const r = paperMove(paper, id, price, lastPrice);
+                  if (!r.error) setPaper(r.state);
+                  return r.error ?? null;
+                }}
+                onCancelOrder={(id) => setPaper(paperCancel(paper, id, paperNow))}
+                onUpdateOrder={(id, patch) => {
+                  if (lastPrice == null) return 'No price yet';
+                  const r = paperUpdate(paper, id, patch, lastPrice);
+                  if (!r.error) setPaper(r.state);
+                  return r.error ?? null;
+                }}
+                onOrderMarket={(id) => {
+                  const o = paper.orders.find((x) => x.id === id);
+                  if (!o || lastPrice == null) return 'No price yet';
+                  const r = placeMarket(
+                    paperCancel(paper, id, paperNow),
+                    symbol,
+                    o.side,
+                    o.qty,
+                    lastPrice,
+                    paperNow,
+                    {
+                      sl: o.sl,
+                      tp: o.tp,
+                    },
+                  );
+                  if (!r.error) setPaper(r.state);
+                  return r.error ?? null;
+                }}
+                onBracket={setBrackets}
+                onClosePos={() => {
+                  if (lastPrice != null) setPaper(paperClose(paper, symbol, lastPrice, paperNow));
+                }}
+                onReverse={() => {
+                  if (lastPrice == null) return 'No price yet';
+                  const r = paperReverse(paper, symbol, lastPrice, paperNow);
+                  if (!r.error) setPaper(r.state);
+                  return r.error ?? null;
+                }}
+                onQuick={quickOrder}
+                onDialog={(price) =>
+                  setOrderDlg({
+                    side: lastPrice != null && price < lastPrice ? 'buy' : 'sell',
+                    type: 'limit',
+                    price,
+                  })
+                }
+              />
+              {orderDlg && lastPrice != null ? (
+                <PaperOrderDialog
+                  key={`${orderDlg.edit?.id ?? ''}${orderDlg.side}${orderDlg.type}${orderDlg.price ?? ''}`}
+                  init={orderDlg}
                   symbol={symbol}
                   last={lastPrice}
                   decimals={decimals}
-                  qty={Number(paperQty) > 0 ? Number(paperQty) : 1}
-                  enabled={tool === 'cursor' && !replayPick}
-                  showPositions={prefs.showPositions}
-                  showOrders={prefs.showOrders}
-                  onModifyOrder={(id) => {
-                    const o = paper.orders.find((x) => x.id === id);
-                    if (o)
-                      setOrderDlg({
-                        side: o.side,
-                        type: o.type,
-                        price: o.price,
-                        edit: { id: o.id, qty: o.qty, tp: o.tp, sl: o.sl, tif: o.tif },
-                      });
-                  }}
-                  onHLine={(price) =>
-                    setDrawings([
-                      ...drawings,
-                      {
-                        id: newId(),
-                        kind: 'hline',
-                        pts: [{ t: bars.length ? bars[bars.length - 1]!.time : Date.now() / 1000, p: price }],
-                        color: DEFAULT_COLOR.hline,
-                        width: 1,
-                      },
-                    ])
-                  }
-                  onMoveOrder={(id, price) => {
-                    if (lastPrice == null) return 'No price yet';
-                    const r = paperMove(paper, id, price, lastPrice);
-                    if (!r.error) setPaper(r.state);
-                    return r.error ?? null;
-                  }}
-                  onCancelOrder={(id) => setPaper(paperCancel(paper, id, paperNow))}
-                  onUpdateOrder={(id, patch) => {
+                  currency={meta?.currency ?? ''}
+                  qty={paperQty}
+                  oneClick={oneClick}
+                  equity={equityOf(paper)}
+                  onModify={(id, patch) => {
                     if (lastPrice == null) return 'No price yet';
                     const r = paperUpdate(paper, id, patch, lastPrice);
                     if (!r.error) setPaper(r.state);
                     return r.error ?? null;
                   }}
-                  onOrderMarket={(id) => {
-                    const o = paper.orders.find((x) => x.id === id);
-                    if (!o || lastPrice == null) return 'No price yet';
-                    const r = placeMarket(paperCancel(paper, id, paperNow), symbol, o.side, o.qty, lastPrice, paperNow, {
-                      sl: o.sl,
-                      tp: o.tp,
-                    });
-                    if (!r.error) setPaper(r.state);
-                    return r.error ?? null;
+                  onOneClick={(v) => updatePrefs({ ...prefs, instant: v })}
+                  onSubmit={(o, q) => {
+                    setPaperQty(q);
+                    save('tv:paperQty', q);
+                    return placeOrder(o);
                   }}
-                  onBracket={setBrackets}
-                  onClosePos={() => {
-                    if (lastPrice != null) setPaper(paperClose(paper, symbol, lastPrice, paperNow));
-                  }}
-                  onReverse={() => {
-                    if (lastPrice == null) return 'No price yet';
-                    const r = paperReverse(paper, symbol, lastPrice, paperNow);
-                    if (!r.error) setPaper(r.state);
-                    return r.error ?? null;
-                  }}
-                  onQuick={quickOrder}
-                  onDialog={(price) =>
-                    setOrderDlg({
-                      side: lastPrice != null && price < lastPrice ? 'buy' : 'sell',
-                      type: 'limit',
-                      price,
-                    })
-                  }
+                  onClose={() => setOrderDlg(null)}
                 />
-                {orderDlg && lastPrice != null ? (
-                  <PaperOrderDialog
-                    key={`${orderDlg.edit?.id ?? ''}${orderDlg.side}${orderDlg.type}${orderDlg.price ?? ''}`}
-                    init={orderDlg}
-                    symbol={symbol}
-                    last={lastPrice}
-                    decimals={decimals}
-                    currency={meta?.currency ?? ''}
-                    qty={paperQty}
-                    oneClick={oneClick}
-                    equity={equityOf(paper)}
-                    onModify={(id, patch) => {
-                      if (lastPrice == null) return 'No price yet';
-                      const r = paperUpdate(paper, id, patch, lastPrice);
-                      if (!r.error) setPaper(r.state);
-                      return r.error ?? null;
-                    }}
-                    onOneClick={(v) => updatePrefs({ ...prefs, instant: v })}
-                    onSubmit={(o, q) => {
-                      setPaperQty(q);
-                      save('tv:paperQty', q);
-                      return placeOrder(o);
-                    }}
-                    onClose={() => setOrderDlg(null)}
-                  />
-                ) : null}
+              ) : null}
             </>
             {status === 'loading' ? (
               <div className="pointer-events-none absolute right-16 top-2 z-10 rounded bg-[#1e222d] px-2 py-1 text-xs text-[#b2b5be]">
@@ -3021,11 +3146,15 @@ export function TvChart() {
                 data-tv-ui
               >
                 <span>
-                Footprint is estimated from 1-minute bars and only exists for the last ~{subBars.length ? Math.max(1, Math.round((Date.now() / 1000 - subBars[0]!.time) / 86400)) : 7} days
-                {tf.source !== '1m' && !subBars.length
-                  ? ' — loading…'
-                  : ` (${Math.round(footprintCoverage * 100)}% of candles covered)`}
-                . Zoom in on a recent candle to read the rows.
+                  Footprint is estimated from 1-minute bars and only exists for the last ~
+                  {subBars.length
+                    ? Math.max(1, Math.round((Date.now() / 1000 - subBars[0]!.time) / 86400))
+                    : 7}{' '}
+                  days
+                  {tf.source !== '1m' && !subBars.length
+                    ? ' — loading…'
+                    : ` (${Math.round(footprintCoverage * 100)}% of candles covered)`}
+                  . Zoom in on a recent candle to read the rows.
                 </span>
                 <button
                   type="button"
@@ -3038,7 +3167,8 @@ export function TvChart() {
               </div>
             ) : null}
             {(() => {
-              const d = deltaTip != null ? divergences.find((v) => v.chartIndex === deltaTip) : undefined;
+              const d =
+                deltaTip != null ? divergences.find((v) => v.chartIndex === deltaTip) : undefined;
               const pos = d ? deltaPrimRef.current?.position(d.chartIndex) : null;
               if (!d || !pos) return null;
               const buyers = d.kind === 'buyers';
@@ -3050,26 +3180,42 @@ export function TvChart() {
               const H = 130;
               const above = pos.below ? ch - pos.y < H + 16 : pos.y >= H + 16;
               const status =
-                d.status === 'confirmed' ? 'confirmed' : d.status === 'pending' ? 'waiting for confirmation' : 'no follow-through';
+                d.status === 'confirmed'
+                  ? 'confirmed'
+                  : d.status === 'pending'
+                    ? 'waiting for confirmation'
+                    : 'no follow-through';
               return (
                 <div
                   className="absolute z-30 rounded-lg border border-[#e879f9]/60 bg-[#1e222d] p-3 text-[12px] text-[#d1d4dc] shadow-2xl"
-                  style={{ left, width: W, ...(above ? { bottom: ch - pos.y + 16 } : { top: pos.y + 16 }) }}
+                  style={{
+                    left,
+                    width: W,
+                    ...(above ? { bottom: ch - pos.y + 16 } : { top: pos.y + 16 }),
+                  }}
                   data-tv-ui
                 >
                   <div className="mb-1 flex items-center justify-between">
-                    <span className="font-semibold text-[#e879f9]">Δ {buyers ? 'buyers trapped' : 'sellers trapped'}</span>
-                    <button type="button" onClick={() => setDeltaTip(null)} className="text-[#787b86] hover:text-white">
+                    <span className="font-semibold text-[#e879f9]">
+                      Δ {buyers ? 'buyers trapped' : 'sellers trapped'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setDeltaTip(null)}
+                      className="text-[#787b86] hover:text-white"
+                    >
                       <Icons.close size={12} />
                     </button>
                   </div>
-                  <div className={`text-[18px] font-semibold tabular-nums ${d.delta >= 0 ? 'text-[#089981]' : 'text-[#f23645]'}`}>
+                  <div
+                    className={`text-[18px] font-semibold tabular-nums ${d.delta >= 0 ? 'text-[#089981]' : 'text-[#f23645]'}`}
+                  >
                     {d.delta >= 0 ? '+' : '−'}
                     {Math.abs(Math.round(d.delta)).toLocaleString('en-IN')}
                   </div>
                   <div className="text-[#787b86]">
-                    {d.pct.toFixed(1)}% of volume · {buyers ? 'upper' : 'lower'} wick {d.wick.toFixed(0)}%
-                    {d.rvol != null ? ` · RVOL ${d.rvol.toFixed(1)}×` : ''}
+                    {d.pct.toFixed(1)}% of volume · {buyers ? 'upper' : 'lower'} wick{' '}
+                    {d.wick.toFixed(0)}%{d.rvol != null ? ` · RVOL ${d.rvol.toFixed(1)}×` : ''}
                   </div>
                   <div className="mt-1 text-[#787b86]">
                     {status}
@@ -3289,7 +3435,12 @@ export function TvChart() {
             ) : null}
           </div>
           {brokerOpen ? (
-            <BrokerPanel selected={brokerSel} symbol={symbol} lastPrice={lastPrice} onClose={() => setBrokerOpen(false)} />
+            <BrokerPanel
+              selected={brokerSel}
+              symbol={symbol}
+              lastPrice={lastPrice}
+              onClose={() => setBrokerOpen(false)}
+            />
           ) : null}
           {paperOpen ? (
             <PaperPanel
@@ -3305,7 +3456,8 @@ export function TvChart() {
                 save('tv:paperOpen', false);
               }}
               onClosePos={(sym) => {
-                if (sym === symbol && lastPrice != null) setPaper(paperClose(paper, sym, lastPrice, paperNow));
+                if (sym === symbol && lastPrice != null)
+                  setPaper(paperClose(paper, sym, lastPrice, paperNow));
               }}
               onCancel={(id) => setPaper(paperCancel(paper, id, paperNow))}
               onBracket={(sym, sl, tp) => {
@@ -3348,130 +3500,151 @@ export function TvChart() {
             }}
           />
         </div>
-        {deltaOpen && !compact ? (
-          <DeltaPanel
-            symbol={meta?.symbol ?? symbol}
-            items={divergences}
-            chartTf={tf.label}
-            chartIs15m={tf.secs === 900}
-            hasData={deltaOk && (deltaSub.bars.length > 0 || deltaSub.bars5.length > 0)}
-            cfg={deltaCfg}
-            view={deltaView}
-            onView={(patch) =>
-              setDeltaView((cur) => {
-                const next = { ...cur, ...patch };
-                save('tv:deltaView', next);
-                return next;
-              })
-            }
-            dataFrom={Number.isFinite(deltaFirst) ? deltaFirst : null}
-            dataTo={deltaLast > 0 ? deltaLast : null}
-            fineFrom={deltaOk ? (deltaSub.bars[0]?.time ?? null) : null}
-            onCfg={(patch) =>
-              setDeltaCfg((cur) => {
-                const next = { ...cur, ...patch };
-                save('tv:deltaCfg', next);
-                return next;
-              })
-            }
-            marksOn={deltaMarks}
-            onMarks={(on) => {
-              setDeltaMarks(on);
-              save('tv:deltaMarks', on);
-            }}
-            intraday={tf.intraday}
-            timeZone={timeZone}
-            active={deltaPick}
-            onJump={jumpToBar}
-          />
-        ) : null}
-        {cvdOpen && !deltaOpen && !screenerOpen && !compact ? (
-          <CvdPanel
-            symbol={meta?.symbol ?? symbol}
-            items={cvdItems}
-            enabled={computed.some((c) => c.cfg.type === 'cvd' && (c.cfg.divMode ?? 'regular') !== 'off')}
-            missing={
-              !indicators.some((i) => i.type === 'cvd')
-                ? 'indicator'
-                : indicators.every((i) => i.type !== 'cvd' || i.divMode === 'off')
-                  ? 'off'
-                  : null
-            }
-            onAddIndicator={() => setIndicators((list) => [...list, makeIndicator('cvd', list)])}
-            filter={cvdFilter}
-            onFilter={(f) => {
-              setCvdFilter(f);
-              save('tv:cvdFilter', f);
-            }}
-            showFailed={cvdShowFailed}
-            onShowFailed={(on) => {
-              setCvdShowFailed(on);
-              save('tv:cvdShowFailed', on);
-            }}
-            intraday={tf.intraday}
-            timeZone={timeZone}
-            active={cvdPick}
-            onJump={jumpToCvd}
-          />
-        ) : null}
-        {fvgOpen && !screenerOpen && !compact ? (
-          <FvgPanel
-            symbol={meta?.symbol ?? symbol}
-            items={fvgShown}
-            detected={fvgAll.length}
-            cfg={fvgCfg}
-            onCfg={(patch) =>
-              setFvgCfg((cur) => {
-                const next = { ...cur, ...patch };
-                save('tv:fvgCfg', next);
-                return next;
-              })
-            }
-            view={fvgView}
-            onView={(patch) =>
-              setFvgView((cur) => {
-                const next = { ...cur, ...patch };
-                save('tv:fvgView', next);
-                return next;
-              })
-            }
-            marksOn={fvgMarks}
-            onMarks={(on) => {
-              setFvgMarks(on);
-              save('tv:fvgMarks', on);
-            }}
-            intraday={tf.intraday}
-            timeZone={timeZone}
-            active={fvgPick}
-            onJump={jumpToFvg}
-          />
-        ) : null}
-        {screenerOpen && !compact ? (
-          <ScreenerPanel
-            mode="side"
-            activeSymbol={symbol}
-            onOpenSymbol={(row) => setSymbol(row.symbol)}
-            onAddWatch={(row) => setPendingWatch({ symbol: row.symbol, name: row.name })}
-            onClose={() => {
-              setScreenerOpen(false);
-              save('tv:screenerOpen', false);
-            }}
-          />
-        ) : null}
-        {watchOpen && !screenerOpen && !(deltaOpen && !compact) && !(cvdOpen && !compact) && !(fvgOpen && !compact) ? (
-          <WatchlistPanel
-            active={symbol}
-            overlay={compact}
-            onClose={() => setWatchOpen(false)}
-            onSelect={(sym) => {
-              setSymbol(sym);
-              if (compact) setWatchOpen(false);
-            }}
-            onAdd={() => setShowSearch('watchlist')}
-            pending={pendingWatch}
-            onPendingHandled={clearPendingWatch}
-          />
-        ) : null}
+        <div className={compact ? 'contents' : 'flex min-h-0 shrink-0 flex-col'}>
+          <div className={compact ? 'contents' : 'flex min-h-0 flex-1'}>
+            {deltaOpen && !compact ? (
+              <DeltaPanel
+                symbol={meta?.symbol ?? symbol}
+                items={divergences}
+                chartTf={tf.label}
+                chartIs15m={tf.secs === 900}
+                hasData={deltaOk && (deltaSub.bars.length > 0 || deltaSub.bars5.length > 0)}
+                cfg={deltaCfg}
+                view={deltaView}
+                onView={(patch) =>
+                  setDeltaView((cur) => {
+                    const next = { ...cur, ...patch };
+                    save('tv:deltaView', next);
+                    return next;
+                  })
+                }
+                dataFrom={Number.isFinite(deltaFirst) ? deltaFirst : null}
+                dataTo={deltaLast > 0 ? deltaLast : null}
+                fineFrom={deltaOk ? (deltaSub.bars[0]?.time ?? null) : null}
+                onCfg={(patch) =>
+                  setDeltaCfg((cur) => {
+                    const next = { ...cur, ...patch };
+                    save('tv:deltaCfg', next);
+                    return next;
+                  })
+                }
+                marksOn={deltaMarks}
+                onMarks={(on) => {
+                  setDeltaMarks(on);
+                  save('tv:deltaMarks', on);
+                }}
+                intraday={tf.intraday}
+                timeZone={timeZone}
+                active={deltaPick}
+                onJump={jumpToBar}
+              />
+            ) : null}
+            {cvdOpen && !deltaOpen && !screenerOpen && !compact ? (
+              <CvdPanel
+                symbol={meta?.symbol ?? symbol}
+                items={cvdItems}
+                enabled={computed.some(
+                  (c) => c.cfg.type === 'cvd' && (c.cfg.divMode ?? 'regular') !== 'off',
+                )}
+                missing={
+                  !indicators.some((i) => i.type === 'cvd')
+                    ? 'indicator'
+                    : indicators.every((i) => i.type !== 'cvd' || i.divMode === 'off')
+                      ? 'off'
+                      : null
+                }
+                onAddIndicator={() =>
+                  setIndicators((list) => [...list, makeIndicator('cvd', list)])
+                }
+                filter={cvdFilter}
+                onFilter={(f) => {
+                  setCvdFilter(f);
+                  save('tv:cvdFilter', f);
+                }}
+                showFailed={cvdShowFailed}
+                onShowFailed={(on) => {
+                  setCvdShowFailed(on);
+                  save('tv:cvdShowFailed', on);
+                }}
+                intraday={tf.intraday}
+                timeZone={timeZone}
+                active={cvdPick}
+                onJump={jumpToCvd}
+              />
+            ) : null}
+            {fvgOpen && !screenerOpen && !compact ? (
+              <FvgPanel
+                symbol={meta?.symbol ?? symbol}
+                items={fvgShown}
+                detected={fvgAll.length}
+                cfg={fvgCfg}
+                onCfg={(patch) =>
+                  setFvgCfg((cur) => {
+                    const next = { ...cur, ...patch };
+                    save('tv:fvgCfg', next);
+                    return next;
+                  })
+                }
+                view={fvgView}
+                onView={(patch) =>
+                  setFvgView((cur) => {
+                    const next = { ...cur, ...patch };
+                    save('tv:fvgView', next);
+                    return next;
+                  })
+                }
+                marksOn={fvgMarks}
+                onMarks={(on) => {
+                  setFvgMarks(on);
+                  save('tv:fvgMarks', on);
+                }}
+                intraday={tf.intraday}
+                timeZone={timeZone}
+                active={fvgPick}
+                onJump={jumpToFvg}
+              />
+            ) : null}
+            {screenerOpen && !compact ? (
+              <ScreenerPanel
+                mode="side"
+                activeSymbol={symbol}
+                onOpenSymbol={(row) => setSymbol(row.symbol)}
+                onAddWatch={(row) => setPendingWatch({ symbol: row.symbol, name: row.name })}
+                onClose={() => {
+                  setScreenerOpen(false);
+                  save('tv:screenerOpen', false);
+                }}
+              />
+            ) : null}
+            {watchOpen &&
+            !screenerOpen &&
+            !(deltaOpen && !compact) &&
+            !(cvdOpen && !compact) &&
+            !(fvgOpen && !compact) ? (
+              <WatchlistPanel
+                active={symbol}
+                overlay={compact}
+                onClose={() => setWatchOpen(false)}
+                onSelect={(sym) => {
+                  setSymbol(sym);
+                  if (compact) setWatchOpen(false);
+                }}
+                onAdd={() => setShowSearch('watchlist')}
+                pending={pendingWatch}
+                onPendingHandled={clearPendingWatch}
+              />
+            ) : null}
+          </div>
+          {notesOpen && !compact ? (
+            <NotesPanel
+              symbol={meta?.symbol ?? symbol}
+              onClose={() => {
+                setNotesOpen(false);
+                save('tv:notesOpen', false);
+              }}
+            />
+          ) : null}
+        </div>
         {compact ? null : (
           <RightRail
             screenerOpen={screenerOpen}
@@ -3492,6 +3665,12 @@ export function TvChart() {
             fvgOpen={fvgOpen && !screenerOpen}
             deltaOpen={deltaOpen && !screenerOpen}
             cvdOpen={cvdOpen && !deltaOpen && !screenerOpen}
+            notesOpen={notesOpen}
+            onNotes={() => {
+              const next = !notesOpen;
+              setNotesOpen(next);
+              save('tv:notesOpen', next);
+            }}
             hideDivs={hideDivs}
             onHideDivs={() => {
               const next = !hideDivs;
@@ -3594,9 +3773,7 @@ export function TvChart() {
           drawing={drawings.find((d) => d.id === posEditId)!}
           bars={bars}
           decimals={decimals}
-          onChange={(next) =>
-            setDrawings(drawings.map((d) => (d.id === next.id ? next : d)))
-          }
+          onChange={(next) => setDrawings(drawings.map((d) => (d.id === next.id ? next : d)))}
           onClose={() => setPosEditId(null)}
         />
       ) : null}
@@ -3625,7 +3802,9 @@ export function TvChart() {
           defaults={SVP_DEFAULTS}
           widthLabel="Width (% of session)"
           onChange={({ vp, rows }) =>
-            setIndicators((list) => list.map((i) => (i.id === settingsId ? { ...i, vp, length: rows } : i)))
+            setIndicators((list) =>
+              list.map((i) => (i.id === settingsId ? { ...i, vp, length: rows } : i)),
+            )
           }
           onClose={() => setSettingsId(null)}
         />
