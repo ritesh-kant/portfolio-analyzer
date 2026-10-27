@@ -325,6 +325,10 @@ interface Latest {
   drawings: Drawing[];
   selectedId: string | null;
   bars: Bar[];
+  /** Which right-hand lists are showing, so a click on the chart can pick the matching row. */
+  deltaOpen: boolean;
+  cvdOpen: boolean;
+  fvgOpen: boolean;
 }
 
 type Drag =
@@ -750,8 +754,13 @@ export function TvChart() {
   const footprintCoverage =
     fp.on && footprints.length ? footprints.filter(Boolean).length / footprints.length : 1;
 
-  const latest = useRef<Latest>({ tool, magnet, keep, lockAll, drawings, selectedId, bars });
-  latest.current = { tool, magnet, keep, lockAll, drawings, selectedId, bars };
+  const listOpen = {
+    deltaOpen: deltaOpen && !compact,
+    cvdOpen: cvdOpen && !deltaOpen && !screenerOpen && !compact,
+    fvgOpen: fvgOpen && !screenerOpen && !compact,
+  };
+  const latest = useRef<Latest>({ tool, magnet, keep, lockAll, drawings, selectedId, bars, ...listOpen });
+  latest.current = { tool, magnet, keep, lockAll, drawings, selectedId, bars, ...listOpen };
 
   // ── settings load / save ──────────────────────────────────────────────
   useEffect(() => {
@@ -1891,9 +1900,27 @@ export function TvChart() {
           e.stopImmediatePropagation();
           e.preventDefault();
           setDeltaTip((cur) => (cur === dBar ? null : dBar));
+          // with the list open, point at the badge's row too
+          if (L.deltaOpen) setDeltaPick(dBar);
           return;
         }
         setDeltaTip(null);
+        // a click on a fair value gap or a CVD divergence line picks its row (the click still goes on to the chart)
+        if (L.fvgOpen) {
+          const g = fvgPrimRef.current?.findAt(x, y) ?? null;
+          if (g != null) {
+            setFvgPick(g);
+            fvgPrimRef.current?.pulse(g);
+          }
+        }
+        if (L.cvdOpen) {
+          const c = cvdDivMainRef.current?.findAt(x, y) ?? null;
+          if (c != null) {
+            setCvdPick(c);
+            cvdDivMainRef.current?.pulse(c);
+            for (const prim of cvdDivSubRef.current.values()) prim.pulse(c);
+          }
+        }
         const bar = newsPrimRef.current?.findBar(x, y) ?? null;
         if (bar != null) {
           e.stopImmediatePropagation();

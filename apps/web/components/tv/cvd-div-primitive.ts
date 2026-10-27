@@ -84,6 +84,33 @@ export class CvdDivPrimitive implements ISeriesPrimitive<Time> {
     this.requestUpdate?.();
   }
 
+  /** Second-swing bar of the divergence whose swing line passes within a few pixels of (x, y), or null. */
+  findAt(x: number, y: number): number | null {
+    const chart = this.chart;
+    const series = this.series;
+    if (!chart || !series) return null;
+    const ts = chart.timeScale();
+    let best: number | null = null;
+    let bestDist = 7;
+    for (const m of this.marks) {
+      const x1 = ts.logicalToCoordinate(m.i1 as Logical);
+      const x2 = ts.logicalToCoordinate(m.i2 as Logical);
+      const y1 = series.priceToCoordinate(m.v1);
+      const y2 = series.priceToCoordinate(m.v2);
+      if (x1 == null || x2 == null || y1 == null || y2 == null) continue;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / len2));
+      const dist = Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy));
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = m.i2;
+      }
+    }
+    return best;
+  }
+
   /** Pulse the divergence whose second swing is chart bar `i2` for a couple of seconds, so it is easy to spot. */
   pulse(i2: number) {
     cancelAnimationFrame(this.raf);

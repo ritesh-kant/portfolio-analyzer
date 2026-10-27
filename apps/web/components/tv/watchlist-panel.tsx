@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Quote } from '../../app/api/chart/quotes/route';
 import { load, save } from '../../lib/tv/storage';
+import { PANEL_WIDTH_KEY } from './panel-width';
 import { Icons } from './icons';
 
 export interface WatchItem {
@@ -23,7 +24,7 @@ export const DEFAULT_WATCHLIST: WatchItem[] = [
 ];
 
 const STORAGE_KEY = 'tv:watchlist';
-const WIDTH_KEY = 'tv:watchWidth';
+const WIDTH_KEY = PANEL_WIDTH_KEY;
 export const MIN_WIDTH = 260;
 const MAX_WIDTH = 640;
 const DEFAULT_WIDTH = 300;

@@ -82,6 +82,34 @@ export class FvgPrimitive implements ISeriesPrimitive<Time> {
     this.requestUpdate?.();
   }
 
+  /** Chart bar `i2` of the zone under (x, y) (the smallest when zones overlap), or null. */
+  findAt(x: number, y: number): number | null {
+    const chart = this.chart;
+    const series = this.series;
+    if (!chart || !series) return null;
+    const ts = chart.timeScale();
+    const half = (ts.options().barSpacing ?? 8) / 2;
+    const width = ts.width();
+    let best: number | null = null;
+    let bestArea = Infinity;
+    for (const m of this.marks) {
+      const xa = ts.logicalToCoordinate(m.i1 as Logical);
+      const xb = m.endIndex == null ? width : ts.logicalToCoordinate(m.endIndex as Logical);
+      const yt = series.priceToCoordinate(m.top);
+      const yb = series.priceToCoordinate(m.bottom);
+      if (xa == null || xb == null || yt == null || yb == null) continue;
+      const x0 = xa - half;
+      const x1 = Math.max(x0 + 2, m.endIndex == null ? width : xb);
+      if (x < x0 || x > x1 || y < Math.min(yt, yb) || y > Math.max(yt, yb)) continue;
+      const area = (x1 - x0) * Math.abs(yb - yt);
+      if (area < bestArea) {
+        bestArea = area;
+        best = m.i2;
+      }
+    }
+    return best;
+  }
+
   /** Pulse the zone completed by chart bar `i2` for a couple of seconds. */
   pulse(i2: number) {
     cancelAnimationFrame(this.raf);

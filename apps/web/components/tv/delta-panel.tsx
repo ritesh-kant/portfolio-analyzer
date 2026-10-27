@@ -8,12 +8,13 @@ import type {
   PlacedDivergence,
 } from '../../lib/tv/delta-divergence';
 import { load, save } from '../../lib/tv/storage';
+import { PANEL_WIDTH_KEY } from './panel-width';
 import { sessionDay } from '../../lib/tv/timeframes';
 import { Icons } from './icons';
 
 /** The list's candle length: a confirmation is known (and actionable) at the candle's close, one candle after its start. */
 const CANDLE_SECS = 900;
-const WIDTH_KEY = 'tv:deltaWidth';
+const WIDTH_KEY = PANEL_WIDTH_KEY;
 const MIN_WIDTH = 260;
 const MAX_WIDTH = 640;
 const DEFAULT_WIDTH = 300;
@@ -131,6 +132,12 @@ export function DeltaPanel({
       month: 'short',
       ...(intraday ? { hour: '2-digit', minute: '2-digit', hour12: false } : {}),
     });
+  const listRef = useRef<HTMLDivElement>(null);
+  // a pick made on the chart (or by the list itself) scrolls its row into view
+  useEffect(() => {
+    if (active == null) return;
+    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
   const rows = [...items].reverse();
   const dayLabel = (t: number) =>
     new Date(t * 1000).toLocaleDateString('en-GB', { timeZone, day: '2-digit', month: 'short' });
@@ -385,7 +392,7 @@ export function DeltaPanel({
         <span>Signal candle · status</span>
         <span className="w-14 text-right">Δ</span>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
         {rows.map((d) => {
           const buyers = d.kind === 'buyers';
           const chip =
@@ -410,6 +417,7 @@ export function DeltaPanel({
               title={`${buyers ? 'Upper' : 'Lower'} wick ${d.wick.toFixed(0)}% of the range, footprint delta ${
                 d.delta >= 0 ? 'positive' : 'negative'
               } (${d.pct.toFixed(1)}% of volume)${d.rvol != null ? ` · RVOL ${d.rvol.toFixed(1)}×` : ''}`}
+              data-active={d.chartIndex === active}
               className={`grid cursor-pointer grid-cols-[1fr_auto] items-center gap-x-3 px-3 py-1.5 text-[12.5px] hover:bg-[#2a2e39] ${
                 d.chartIndex === active ? 'bg-[#2a2e39]' : ''
               }`}

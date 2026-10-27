@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Fvg, FvgConfig } from '../../lib/tv/fvg';
 import { load, save } from '../../lib/tv/storage';
+import { PANEL_WIDTH_KEY } from './panel-width';
 
-const WIDTH_KEY = 'tv:fvgWidth';
+const WIDTH_KEY = PANEL_WIDTH_KEY;
 const MIN_WIDTH = 260;
 const MAX_WIDTH = 640;
 const DEFAULT_WIDTH = 300;
@@ -144,6 +145,12 @@ export function FvgPanel({
       month: 'short',
       ...(intraday ? { hour: '2-digit', minute: '2-digit', hour12: false } : {}),
     });
+  const listRef = useRef<HTMLDivElement>(null);
+  // a pick made on the chart (or by the list itself) scrolls its row into view
+  useEffect(() => {
+    if (active == null) return;
+    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
   const rows = [...items].reverse();
 
   const [width, setWidth] = useState(DEFAULT_WIDTH);
@@ -318,7 +325,7 @@ export function FvgPanel({
         <span>Gap completed · status</span>
         <span className="w-16 text-right">Against</span>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
         {rows.map((g) => {
           const color = g.bullish ? 'text-[#26a69a]' : 'text-[#ef5350]';
           const chip =
@@ -336,6 +343,7 @@ export function FvgPanel({
               title={`Zone ${fmtPrice(g.bottom)} → ${fmtPrice(g.top)} · volume of the three candles ${fmtVol(g.volume)}${
                 pct != null ? `, ${pct.toFixed(1)}% of it against the gap` : ' (no volume split: the candles carry no volume)'
               }`}
+              data-active={g.index === active}
               className={`grid cursor-pointer grid-cols-[1fr_auto] items-center gap-x-3 px-3 py-1.5 text-[12.5px] hover:bg-[#2a2e39] ${
                 g.index === active ? 'bg-[#2a2e39]' : ''
               }`}
