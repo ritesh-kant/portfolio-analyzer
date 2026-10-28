@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Quote } from '../../app/api/chart/quotes/route';
+import { Popover } from '../screener/popover';
 import { load, save } from '../../lib/tv/storage';
 import { PANEL_WIDTH_KEY } from './panel-width';
 import { Icons } from './icons';
@@ -23,7 +24,61 @@ export const DEFAULT_WATCHLIST: WatchItem[] = [
   { symbol: 'GC=F', name: 'Gold — COMEX futures' },
 ];
 
-const STORAGE_KEY = 'tv:watchlist';
+export interface WatchList {
+  id: string;
+  name: string;
+  items: WatchItem[];
+}
+
+/** Every named list and the one on show. */
+interface Book {
+  activeId: string;
+  lists: WatchList[];
+}
+
+const STORAGE_KEY = 'tv:watchlists';
+/** The single list saved before there were several: it becomes the first list (and is left in place). */
+const LEGACY_KEY = 'tv:watchlist';
+
+function loadBook(): Book {
+  const book = load<Book | null>(STORAGE_KEY, null);
+  if (book?.lists?.length) {
+    return book.lists.some((l) => l.id === book.activeId)
+      ? book
+      : { ...book, activeId: book.lists[0]!.id };
+  }
+  const items = load<WatchItem[]>(LEGACY_KEY, DEFAULT_WATCHLIST);
+  return { activeId: 'main', lists: [{ id: 'main', name: 'Watchlist', items }] };
+}
+
+const activeList = (book: Book): WatchList =>
+  book.lists.find((l) => l.id === book.activeId) ?? book.lists[0]!;
+
+/** "Watchlist N", the first N not already taken. */
+function freshName(lists: WatchList[]): string {
+  const taken = new Set(lists.map((l) => l.name));
+  let n = lists.length + 1;
+  while (taken.has(`Watchlist ${n}`)) n += 1;
+  return `Watchlist ${n}`;
+}
+
+const withItem = (items: WatchItem[], item: WatchItem) =>
+  items.some((i) => i.symbol === item.symbol) ? items : [...items, item];
+
+/** The list on show, for panels shown while this one is closed (only one right panel is open at a time). */
+export const watchlistSymbols = (): Set<string> =>
+  new Set(activeList(loadBook()).items.map((i) => i.symbol));
+
+/** Appends to the list on show; the panel reads it when it next opens. */
+export function addToWatchlist(item: WatchItem): void {
+  const book = loadBook();
+  save(STORAGE_KEY, {
+    ...book,
+    lists: book.lists.map((l) =>
+      l.id === book.activeId ? { ...l, items: withItem(l.items, item) } : l,
+    ),
+  });
+}
 const WIDTH_KEY = PANEL_WIDTH_KEY;
 export const MIN_WIDTH = 260;
 const MAX_WIDTH = 640;
@@ -58,7 +113,21 @@ export function WatchlistPanel({
   overlay = false,
   onClose,
 }: Props) {
-  const [items, setItems] = useState<WatchItem[]>(DEFAULT_WATCHLIST);
+  const [book, setBook] = useState<Book>({
+    activeId: 'main',
+    lists: [{ id: 'main', name: 'Watchlist', items: DEFAULT_WATCHLIST }],
+  });
+  const list = activeList(book);
+  const items = list.items;
+  const setItems = (fn: (cur: WatchItem[]) => WatchItem[]) =>
+    setBook((b) => ({
+      ...b,
+      lists: b.lists.map((l) => (l.id === b.activeId ? { ...l, items: fn(l.items) } : l)),
+    }));
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuAnchor = useRef<HTMLButtonElement>(null);
+  /** The name being typed while renaming the list on show; null when not renaming. */
+  const [draft, setDraft] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -70,21 +139,79 @@ export function WatchlistPanel({
   widthRef.current = width;
 
   useEffect(() => {
-    setItems(load<WatchItem[]>(STORAGE_KEY, DEFAULT_WATCHLIST));
+    setBook(loadBook());
     setWidth(clampWidth(load<number>(WIDTH_KEY, DEFAULT_WIDTH)));
     setLoaded(true);
     hydrated = true;
   }, []);
 
   useEffect(() => {
-    if (loaded) save(STORAGE_KEY, items);
-  }, [items, loaded]);
+    if (loaded) save(STORAGE_KEY, book);
+  }, [book, loaded]);
 
   useEffect(() => {
     if (!pending) return;
-    setItems((cur) => (cur.some((i) => i.symbol === pending.symbol) ? cur : [...cur, pending]));
+    setBook((b) => ({
+      ...b,
+      lists: b.lists.map((l) =>
+        l.id === b.activeId ? { ...l, items: withItem(l.items, pending) } : l,
+      ),
+    }));
     onPendingHandled();
   }, [pending, onPendingHandled]);
+
+  const newList = () => {
+    const id = `l${Date.now().toString(36)}`;
+    const name = freshName(book.lists);
+    setBook((b) => ({ activeId: id, lists: [...b.lists, { id, name, items: [] }] }));
+    setMenuOpen(false);
+    setDraft(name);
+  };
+  const commitRename = () => {
+    const name = draft?.trim();
+    if (name)
+      setBook((b) => ({
+        ...b,
+        lists: b.lists.map((l) => (l.id === b.activeId ? { ...l, name } : l)),
+      }));
+    setDraft(null);
+  };
+  const deleteList = () => {
+    setMenuOpen(false);
+    if (book.lists.length < 2) return;
+    if (!window.confirm(`Delete the list "${list.name}" and its ${items.length} symbol(s)?`))
+      return;
+    setBook((b) => {
+      const lists = b.lists.filter((l) => l.id !== b.activeId);
+      return { activeId: lists[0]!.id, lists };
+    });
+  };
+
+  /** The row whose "move to" menu is open, and its button (the menu hangs under it). */
+  const [moving, setMoving] = useState<WatchItem | null>(null);
+  const moveAnchor = useRef<HTMLElement | null>(null);
+  /** Takes `item` out of the list on show and adds it to `targetId` (a new list when null), staying on this list. */
+  const moveTo = (item: WatchItem, targetId: string | null) => {
+    setBook((b) => {
+      let lists = b.lists;
+      let to = targetId;
+      if (to == null) {
+        to = `l${Date.now().toString(36)}`;
+        lists = [...lists, { id: to, name: freshName(lists), items: [] }];
+      }
+      return {
+        ...b,
+        lists: lists.map((l) =>
+          l.id === b.activeId
+            ? { ...l, items: l.items.filter((i) => i.symbol !== item.symbol) }
+            : l.id === to
+              ? { ...l, items: withItem(l.items, item) }
+              : l,
+        ),
+      };
+    });
+    setMoving(null);
+  };
 
   const symbolsKey = items.map((i) => i.symbol).join(',');
   const refresh = useCallback(
@@ -163,7 +290,101 @@ export function WatchlistPanel({
       />
       {dragging ? <div className="fixed inset-0 z-50 cursor-col-resize" /> : null}
       <div className="flex h-11 items-center justify-between border-b border-[#2a2e39] px-3">
-        <span className="text-[14px] font-semibold text-[#d1d4dc]">Watchlist</span>
+        {draft != null ? (
+          <input
+            autoFocus
+            value={draft}
+            maxLength={40}
+            aria-label="List name"
+            onChange={(e) => setDraft(e.target.value)}
+            onFocus={(e) => e.target.select()}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitRename();
+              if (e.key === 'Escape') setDraft(null);
+            }}
+            className="min-w-0 flex-1 rounded border border-[#2962ff] bg-[#131722] px-2 py-1 text-[14px] font-semibold text-[#d1d4dc] outline-none"
+          />
+        ) : (
+          <button
+            ref={menuAnchor}
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            onDoubleClick={() => {
+              setMenuOpen(false);
+              setDraft(list.name);
+            }}
+            title="Switch, add or rename lists · double-click to rename"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            className="-ml-1.5 flex min-w-0 items-center gap-1 rounded px-1.5 py-1 text-[14px] font-semibold text-[#d1d4dc] hover:bg-[#2a2e39]"
+          >
+            <span className="truncate">{list.name}</span>
+            <Icons.chevron size={16} />
+          </button>
+        )}
+        {menuOpen ? (
+          <Popover anchor={menuAnchor} onClose={() => setMenuOpen(false)} width={240}>
+            <div role="menu" className="py-1 text-[13px] text-[#d1d4dc]">
+              {book.lists.map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={l.id === book.activeId}
+                  onClick={() => {
+                    setBook((b) => ({ ...b, activeId: l.id }));
+                    setMenuOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-[#2a2e39]"
+                >
+                  <span className="flex w-4 justify-center text-[#2962ff]">
+                    {l.id === book.activeId ? <Icons.check size={14} /> : null}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{l.name}</span>
+                  <span className="tabular-nums text-[11px] text-[#787b86]">{l.items.length}</span>
+                </button>
+              ))}
+              <div className="my-1 border-t border-[#2a2e39]" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={newList}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-[#2a2e39]"
+              >
+                <span className="flex w-4 justify-center">
+                  <Icons.plus size={14} />
+                </span>
+                New list
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setDraft(list.name);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-[#2a2e39]"
+              >
+                <span className="w-4" />
+                Rename &ldquo;{list.name}&rdquo;
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={book.lists.length < 2}
+                title={book.lists.length < 2 ? 'The last list cannot be deleted' : undefined}
+                onClick={deleteList}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[#f23645] hover:bg-[#2a2e39] disabled:cursor-not-allowed disabled:text-[#5d606b] disabled:hover:bg-transparent"
+              >
+                <span className="flex w-4 justify-center">
+                  <Icons.trash size={14} />
+                </span>
+                Delete list
+              </button>
+            </div>
+          </Popover>
+        ) : null}
         {overlay ? (
           <button
             type="button"
@@ -223,6 +444,23 @@ export function WatchlistPanel({
               </span>
               <button
                 type="button"
+                title="Move to another list"
+                aria-label={`Move ${item.symbol} to another list`}
+                aria-haspopup="menu"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  moveAnchor.current = e.currentTarget;
+                  setMoving((m) => (m?.symbol === item.symbol ? null : item));
+                }}
+                className={`absolute right-7 top-1 h-5 w-5 items-center justify-center rounded bg-[#1e222d] text-[#787b86] hover:text-white group-hover:flex ${
+                  moving?.symbol === item.symbol ? 'flex' : 'hidden'
+                }`}
+              >
+                <Icons.moveTo size={12} />
+              </button>
+              <button
+                type="button"
+                title="Remove from this list"
                 aria-label={`Remove ${item.symbol}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -235,9 +473,49 @@ export function WatchlistPanel({
             </div>
           );
         })}
+        {moving ? (
+          <Popover anchor={moveAnchor} onClose={() => setMoving(null)} width={220}>
+            <div role="menu" className="py-1 text-[13px] text-[#d1d4dc]">
+              <div className="px-3 pb-1 pt-0.5 text-[11px] text-[#787b86]">
+                Move {short(moving.symbol)} to
+              </div>
+              {book.lists
+                .filter((l) => l.id !== book.activeId)
+                .map((l) => {
+                  const there = l.items.some((i) => i.symbol === moving.symbol);
+                  return (
+                    <button
+                      key={l.id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => moveTo(moving, l.id)}
+                      title={
+                        there ? 'Already in that list: this just removes it from here' : undefined
+                      }
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-[#2a2e39]"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{l.name}</span>
+                      <span className="text-[11px] text-[#787b86]">
+                        {there ? 'already there' : l.items.length}
+                      </span>
+                    </button>
+                  );
+                })}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => moveTo(moving, null)}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-[#2a2e39]"
+              >
+                <Icons.plus size={14} />
+                New list
+              </button>
+            </div>
+          </Popover>
+        ) : null}
         {!items.length ? (
           <div className="px-4 py-10 text-center text-[13px] text-[#787b86]">
-            Your watchlist is empty. Use + to add a symbol.
+            This list is empty. Use + to add a symbol.
           </div>
         ) : null}
       </div>

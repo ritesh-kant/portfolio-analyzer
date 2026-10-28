@@ -13,6 +13,8 @@ interface Props {
   onCvd: () => void;
   fvgOpen: boolean;
   onFvg: () => void;
+  pocOpen: boolean;
+  onPoc: () => void;
   notesOpen: boolean;
   onNotes: () => void;
   hideDivs: boolean;
@@ -24,7 +26,7 @@ const button = (open: boolean) =>
     open ? 'bg-[#2a2e39] text-[#2962ff]' : 'text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white'
   }`;
 
-/** TradingView's right-hand icon rail: the watchlist, the delta-divergence, CVD-divergence and fair-value-gap panels share the one docked slot. */
+/** TradingView's right-hand icon rail: the watchlist, screener, POC scanner, delta-divergence, CVD-divergence and fair-value-gap panels share the one docked slot. */
 export function RightRail({
   screenerOpen,
   onScreener,
@@ -36,6 +38,8 @@ export function RightRail({
   onCvd,
   fvgOpen,
   onFvg,
+  pocOpen,
+  onPoc,
   notesOpen,
   onNotes,
   hideDivs,
@@ -58,6 +62,14 @@ export function RightRail({
         className={button(screenerOpen)}
       >
         <Icons.screener size={22} />
+      </button>
+      <button
+        type="button"
+        title="POC retest scanner (volume profile)"
+        onClick={onPoc}
+        className={button(pocOpen)}
+      >
+        <Icons.poc size={22} />
       </button>
       <button
         type="button"
@@ -85,11 +97,7 @@ export function RightRail({
       </button>
       <button
         type="button"
-        title={
-          hideDivs
-            ? 'Show all indicators on the chart'
-            : 'Hide all indicators on the chart'
-        }
+        title={hideDivs ? 'Show all indicators on the chart' : 'Hide all indicators on the chart'}
         onClick={onHideDivs}
         className={`${button(hideDivs)} mt-1`}
       >

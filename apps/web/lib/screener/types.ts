@@ -77,6 +77,26 @@ export interface ScreenerRow {
   revGrowth?: number | null;
   roe?: number | null;
   peg?: number | null;
+  /** Needs the 5-minute bars of the last few sessions (`vprofile` tier): see `poc-retest.ts`. */
+  pocStage?: string | null;
+  pocPrice?: number | null;
+  pocEntry?: number | null;
+  pocStop?: number | null;
+  pocRiskPct?: number | null;
+  pocEdgePct?: number | null;
+  pocDistPct?: number | null;
+  pocZoneLo?: number | null;
+  pocZoneHi?: number | null;
+  /** Unix seconds (see `PocSetup`): where the chart draws the zone, the departure and the first touch. */
+  pocFrom?: number | null;
+  pocDepartAt?: number | null;
+  pocTouchAt?: number | null;
+  /** Sessions back the POC comes from (1 = yesterday); the furthest price after moving away, its time, and how
+   *  much of that move price has given back (%). */
+  pocSessionsAgo?: number | null;
+  pocExtreme?: number | null;
+  pocExtremeAt?: number | null;
+  pocPullbackPct?: number | null;
 }
 
 export interface ScreenerResponse {

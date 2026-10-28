@@ -267,6 +267,20 @@ export const Icons = {
       </>,
       size,
     ),
+  moveTo: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M3.5 10h10M10 6.5l3.5 3.5-3.5 3.5M16.5 4.5v11" />
+      </>,
+      size,
+    ),
+  check: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M4.5 10.5l3.5 3.5 7.5-8" />
+      </>,
+      size,
+    ),
   indicators: ({ size }: IconProps) =>
     wrap(
       <>
@@ -366,6 +380,14 @@ export const Icons = {
       </>,
       size,
     ),
+  poc: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M3 4.5h4M3 7.5h7M3 10h11M3 12.5h6M3 15.5h3" />
+        <path d="M2.5 10h15" strokeDasharray="1.5 1.5" />
+      </>,
+      size,
+    ),
   gear: ({ size }: IconProps) =>
     wrap(
       <>
@@ -385,6 +407,14 @@ export const Icons = {
     wrap(
       <>
         <path d="M10 16V4M5 9l5-5 5 5" />
+      </>,
+      size,
+    ),
+  refresh: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M16 10a6 6 0 1 1-1.76-4.24" />
+        <path d="M16 3.5v3.5h-3.5" />
       </>,
       size,
     ),

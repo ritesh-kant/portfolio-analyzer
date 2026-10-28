@@ -1,5 +1,6 @@
 import { INDUSTRIES, SECTORS } from './industries.ts';
 import { MARKETS, universeFor } from './markets.ts';
+import { POC_STAGES } from './poc-retest.ts';
 import type { FilterState, ScreenerRow, SortState } from './types.ts';
 
 /**
@@ -7,10 +8,11 @@ import type { FilterState, ScreenerRow, SortState } from './types.ts';
  *  - `quote`    : on every row Yahoo's screener returns (free).
  *  - `profile`  : Yahoo `quoteSummary`, one call per name, cached for the day (float, sector, short %…).
  *  - `intraday` : 5-minute bars, one call per name, cached ~1 min (relative volume at this time of day).
+ *  - `vprofile` : the same 5-minute bars, read as volume profiles (previous session's POC and today's retest of it).
  * Filtering on a `profile`/`intraday` field makes the server fetch it for every name that survived the
  * cheaper filters, so put the cheap filters in first.
  */
-export type Tier = 'quote' | 'profile' | 'intraday';
+export type Tier = 'quote' | 'profile' | 'intraday' | 'vprofile';
 export type Unit = 'usd' | 'pct' | 'x' | 'shares' | 'usdbig' | 'num' | 'days' | 'text';
 export type Group =
   | 'Price & move'
@@ -19,6 +21,7 @@ export type Group =
   | 'Valuation'
   | 'Fundamentals'
   | 'Technicals'
+  | 'Volume profile'
   | 'Profile';
 
 export interface FieldDef {
@@ -36,6 +39,8 @@ export interface FieldDef {
   sortYahoo?: string;
   /** No table column; only a filter. */
   filterOnly?: boolean;
+  /** Served by the API for the chart's POC scanner panel, not offered in the screener's filters or columns. */
+  scannerOnly?: boolean;
   options?: readonly string[];
   hint?: string;
   /** Column width in px. */
@@ -400,6 +405,89 @@ export const FIELDS: readonly FieldDef[] = [
     yahoo: 'beta',
     w: 64,
   }),
+  // ── volume profile (untested POC of a recent session, first retest) ───────
+  f({
+    id: 'pocStage',
+    label: 'POC retest stage',
+    short: 'POC setup',
+    group: 'Volume profile',
+    unit: 'text',
+    tier: 'vprofile',
+    scannerOnly: true,
+    kind: 'multi',
+    options: POC_STAGES,
+    w: 140,
+    hint: "Where price stands against the untested point of control (POC) zone of one of the last 8 sessions. First touch = it moved ≥1% away (on any later day) and is now back at the zone's near edge for the first time. Pulling back = it has given back ≥30% of the move away.",
+  }),
+  f({
+    id: 'pocEdgePct',
+    label: 'Distance to POC entry edge %',
+    short: 'To entry',
+    group: 'Volume profile',
+    unit: 'pct',
+    tier: 'vprofile',
+    scannerOnly: true,
+    kind: 'range',
+    w: 84,
+    hint: 'Price vs the zone edge a trade enters at (top edge for a long, bottom edge for a short). 0 or below = in the zone.',
+  }),
+  f({
+    id: 'pocDistPct',
+    label: 'Distance from POC %',
+    short: 'vs POC',
+    group: 'Volume profile',
+    unit: 'pct',
+    tier: 'vprofile',
+    scannerOnly: true,
+    kind: 'range',
+    w: 80,
+  }),
+  f({
+    id: 'pocPrice',
+    label: 'Untested POC',
+    short: 'POC',
+    group: 'Volume profile',
+    unit: 'usd',
+    tier: 'vprofile',
+    scannerOnly: true,
+    kind: 'none',
+    w: 84,
+    hint: "The point of control of a recent session that price has not come back to: the price with the most volume (the chart's session profile, 24 rows).",
+  }),
+  f({
+    id: 'pocEntry',
+    label: 'POC zone entry edge',
+    short: 'Entry',
+    group: 'Volume profile',
+    unit: 'usd',
+    tier: 'vprofile',
+    scannerOnly: true,
+    kind: 'none',
+    w: 84,
+  }),
+  f({
+    id: 'pocStop',
+    label: 'POC zone stop (far edge)',
+    short: 'Stop',
+    group: 'Volume profile',
+    unit: 'usd',
+    tier: 'vprofile',
+    scannerOnly: true,
+    kind: 'none',
+    w: 84,
+  }),
+  f({
+    id: 'pocRiskPct',
+    label: 'POC setup risk %',
+    short: 'Risk %',
+    group: 'Volume profile',
+    unit: 'pct',
+    tier: 'vprofile',
+    scannerOnly: true,
+    kind: 'range',
+    w: 76,
+    hint: 'Entry edge → stop (the zone height) as a % of the entry.',
+  }),
   // ── profile ───────────────────────────────────────────────────────────────
   f({
     id: 'sector',
@@ -460,8 +548,10 @@ export const GROUP_ORDER: readonly Group[] = [
 ];
 
 /** Every numeric/multi filter the user can add (filter-only fields included). */
-export const FILTERABLE = FIELDS.filter((d) => d.kind === 'range' || d.kind === 'multi');
-export const COLUMNABLE = FIELDS.filter((d) => !d.filterOnly);
+export const FILTERABLE = FIELDS.filter(
+  (d) => !d.scannerOnly && (d.kind === 'range' || d.kind === 'multi'),
+);
+export const COLUMNABLE = FIELDS.filter((d) => !d.filterOnly && !d.scannerOnly);
 
 /** Table column sets: the "Custom ▾" menu in the screenshot. */
 export const VIEWS: Record<string, readonly string[]> = {

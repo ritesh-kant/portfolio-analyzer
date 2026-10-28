@@ -1,6 +1,8 @@
 import type { Operand, YahooQuote } from './query.ts';
 import { PAGE } from './run.ts';
-import { relVolAtTime, zoneClock, type VolBar } from './relvol.ts';
+import type { Bar } from '../tv/types.ts';
+import { pocSetup, type PocSetup } from './poc-retest.ts';
+import { relVolAtTime, zoneClock } from './relvol.ts';
 
 /**
  * Server-side Yahoo Finance client for the screener. Server only: it holds a session cookie + crumb,
@@ -200,10 +202,10 @@ async function fetchProfile(symbol: string): Promise<Profile | null> {
   }
 }
 
-// ── intraday: relative volume at this time of day ───────────────────────────
+// ── intraday: 5-minute bars (rel vol at time, volume profile) ───────────────
 
-const rvolCache = new Map<string, { at: number; v: number | null }>();
-const RVOL_TTL_MS = 60_000;
+const barsCache = new Map<string, { at: number; bars: Bar[] }>();
+const BARS_TTL_MS = 60_000;
 const clocks = new Map<string, ReturnType<typeof zoneClock>>();
 const clockFor = (tz: string) => {
   let c = clocks.get(tz);
@@ -211,13 +213,30 @@ const clockFor = (tz: string) => {
   return c;
 };
 
-async function fetchRvolTime(symbol: string, tz: string): Promise<number | null | undefined> {
-  const hit = rvolCache.get(symbol);
-  if (hit && Date.now() - hit.at < RVOL_TTL_MS) return hit.v;
+/**
+ * One month of 5-minute regular-hours bars. Shared by every intraday column, so asking for rel vol at time
+ * and the POC setup on the same name downloads it once. `null` = both hosts failed.
+ */
+const fetchBars5m = (symbol: string) => fetchIntraday(symbol, '5m', '1mo');
+
+/**
+ * A week of 1-minute regular-hours bars: what the chart's session volume profile is built from where it has them,
+ * so the POC setup's profiles use them too. Older sessions fall back to the 5-minute bars, as on the chart.
+ */
+const fetchBars1m = (symbol: string) => fetchIntraday(symbol, '1m', '7d');
+
+async function fetchIntraday(
+  symbol: string,
+  interval: '1m' | '5m',
+  range: string,
+): Promise<Bar[] | null> {
+  const key = `${symbol}|${interval}`;
+  const hit = barsCache.get(key);
+  if (hit && Date.now() - hit.at < BARS_TTL_MS) return hit.bars;
   for (const host of HOSTS) {
     try {
       const res = await fetch(
-        `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=5m&range=1mo&includePrePost=false`,
+        `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=false`,
         {
           headers: { 'User-Agent': UA },
           cache: 'no-store',
@@ -229,26 +248,62 @@ async function fetchRvolTime(symbol: string, tz: string): Promise<number | null 
         chart?: {
           result?: Array<{
             timestamp?: number[];
-            indicators?: { quote?: Array<{ volume?: Array<number | null> }> };
+            indicators?: {
+              quote?: Array<{
+                open?: Array<number | null>;
+                high?: Array<number | null>;
+                low?: Array<number | null>;
+                close?: Array<number | null>;
+                volume?: Array<number | null>;
+              }>;
+            };
           }> | null;
         };
       };
       const r = body.chart?.result?.[0];
       const ts = r?.timestamp ?? [];
-      const vol = r?.indicators?.quote?.[0]?.volume ?? [];
-      const bars: VolBar[] = [];
+      const q = r?.indicators?.quote?.[0] ?? {};
+      const bars: Bar[] = [];
       ts.forEach((t, i) => {
-        const v = vol[i];
-        if (typeof v === 'number') bars.push({ t, v });
+        const v = q.volume?.[i];
+        if (typeof v !== 'number') return;
+        const close = q.close?.[i];
+        const open = q.open?.[i] ?? close;
+        const high = q.high?.[i] ?? close;
+        const low = q.low?.[i] ?? close;
+        // A volume-only row (no prices) still counts toward rel vol; it is dropped by the profile (NaN range).
+        bars.push({
+          time: t,
+          open: open ?? NaN,
+          high: high ?? NaN,
+          low: low ?? NaN,
+          close: close ?? NaN,
+          volume: v,
+        });
       });
-      const v = relVolAtTime(bars, clockFor(tz));
-      rvolCache.set(symbol, { at: Date.now(), v });
-      return v;
+      barsCache.set(key, { at: Date.now(), bars });
+      return bars;
     } catch {
       // try the next host
     }
   }
-  return undefined; // unreachable: leave it unfetched rather than claiming "no data"
+  return null;
+}
+
+async function fetchRvolTime(symbol: string, tz: string): Promise<number | null | undefined> {
+  const bars = await fetchBars5m(symbol);
+  if (!bars) return undefined; // unreachable: leave it unfetched rather than claiming "no data"
+  return relVolAtTime(
+    bars.map((b) => ({ t: b.time, v: b.volume })),
+    clockFor(tz),
+  );
+}
+
+async function fetchPocSetup(symbol: string, tz: string): Promise<PocSetup | null | undefined> {
+  const [bars, fine] = await Promise.all([fetchBars5m(symbol), fetchBars1m(symbol)]);
+  if (!bars) return undefined;
+  // without 1-minute bars every profile comes from the 5-minute ones (coarser, but still a setup)
+  return pocSetup(bars, clockFor(tz), null, fine);
 }
 
 // ── enrichment ──────────────────────────────────────────────────────────────
@@ -291,6 +346,20 @@ export async function rvolsAtTime(
 ): Promise<Map<string, number | null>> {
   const got = await mapPool(symbols, POOL, (s) => fetchRvolTime(s, tz));
   const out = new Map<string, number | null>();
+  symbols.forEach((s, i) => {
+    const v = got[i];
+    if (v !== undefined) out.set(s, v);
+  });
+  return out;
+}
+
+/** `undefined` for a name = the fetch failed; `null` = no usable previous session. */
+export async function pocSetups(
+  symbols: readonly string[],
+  tz: string,
+): Promise<Map<string, PocSetup | null>> {
+  const got = await mapPool(symbols, POOL, (s) => fetchPocSetup(s, tz));
+  const out = new Map<string, PocSetup | null>();
   symbols.forEach((s, i) => {
     const v = got[i];
     if (v !== undefined) out.set(s, v);

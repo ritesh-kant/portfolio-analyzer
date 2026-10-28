@@ -84,6 +84,17 @@ import { WatchlistPanel, type WatchItem } from './watchlist-panel';
 import { useCompact } from '../../lib/tv/use-compact';
 import { BottomBar, type RangeId } from './bottom-bar';
 import { ScreenerPanel } from '../screener/screener-panel';
+import type { ScreenerRow } from '../../lib/screener/types';
+import {
+  bestSetup,
+  liveRank,
+  pocCandidates,
+  POC_DEFAULTS,
+  type PocConfig,
+} from '../../lib/screener/poc-retest';
+import { zoneClock } from '../../lib/screener/relvol';
+import { PocSettingsDialog, POC_VIEW_DEFAULTS, type PocView } from './poc-settings';
+import { PocScannerPanel } from './poc-scanner-panel';
 import { DrawingsPrimitive } from './drawings-primitive';
 import { NewsPrimitive } from './news-primitive';
 import { foldTrailingTick, intervalSecs } from '../../lib/tv/clean-bars';
@@ -99,6 +110,7 @@ import {
 import { DeltaPanel } from './delta-panel';
 import { CvdPanel, type CvdFilter, type CvdItem } from './cvd-panel';
 import { FvgPrimitive, type FvgMark } from './fvg-primitive';
+import { PocPrimitive } from './poc-primitive';
 import { FvgPanel, FVG_VIEW_DEFAULTS, type FvgView } from './fvg-panel';
 import { FVG_ATR_LEN, FVG_DEFAULTS, type FvgConfig, findFvgs } from '../../lib/tv/fvg';
 import {
@@ -380,6 +392,9 @@ export function TvChart() {
   const svpPrimRef = useRef<SessionProfilePrimitive | null>(null);
   const deltaPrimRef = useRef<DeltaPrimitive | null>(null);
   const fvgPrimRef = useRef<FvgPrimitive | null>(null);
+  const pocPrimRef = useRef<PocPrimitive | null>(null);
+  /** The POC retest indicator: every recent untested POC on whatever chart is open (the scanner pick has its own). */
+  const pocIndPrimRef = useRef<PocPrimitive | null>(null);
   /** CVD divergence layers: one on the price pane, one in each CVD pane (by indicator id). */
   const cvdDivMainRef = useRef<CvdDivPrimitive | null>(null);
   const cvdDivSubRef = useRef<Map<string, CvdDivPrimitive>>(new Map());
@@ -474,6 +489,30 @@ export function TvChart() {
   const [screenerOpen, setScreenerOpen] = useState(false);
   useEffect(() => {
     setScreenerOpen(load<boolean>('tv:screenerOpen', false));
+  }, []);
+  const [pocOpen, setPocOpen] = useState(false);
+  useEffect(() => {
+    setPocOpen(load<boolean>('tv:pocOpen', false));
+  }, []);
+  const closePoc = () => {
+    setPocOpen(false);
+    save('tv:pocOpen', false);
+  };
+  /** The setup picked in the POC scanner: drawn on the chart while its symbol is shown and the panel is open. */
+  const [pocPick, setPocPick] = useState<ScreenerRow | null>(null);
+  /** The pick the chart last centred on, so a refresh of the bars does not yank the view back. */
+  const pocJumped = useRef<ScreenerRow | null>(null);
+  // POC retest indicator: on the chart (legend row) with its own eye, settings and dialog.
+  const [pocOn, setPocOn] = useState(false);
+  const [pocMarks, setPocMarks] = useState(true);
+  const [pocCfg, setPocCfg] = useState<PocConfig>(POC_DEFAULTS);
+  const [pocView, setPocView] = useState<PocView>(POC_VIEW_DEFAULTS);
+  const [pocSettings, setPocSettings] = useState(false);
+  useEffect(() => {
+    setPocOn(load<boolean>('tv:pocOn', false));
+    setPocMarks(load<boolean>('tv:pocMarks', true));
+    setPocCfg({ ...POC_DEFAULTS, ...load<Partial<PocConfig>>('tv:pocCfg', {}) });
+    setPocView({ ...POC_VIEW_DEFAULTS, ...load<Partial<PocView>>('tv:pocView', {}) });
   }, []);
   useEffect(() => {
     // A docked watchlist would swallow a phone screen; there it is an on-demand drawer, closed to start.
@@ -981,17 +1020,19 @@ export function TvChart() {
     return () => ctl.abort();
   }, [ready, symbol, tf.source, tf.range, wantPrepost, fetchBars]);
 
-  // Footprint needs 1-minute bars underneath coarser candles.
+  // Footprint needs 1-minute bars underneath coarser candles; so do volume profiles, the POC retest's included.
   const svpOn =
     indicators.some((i) => i.type === 'svp') || drawings.some((d) => d.kind === 'vprofile');
+  const pocFits = tf.intraday && tf.secs <= 900;
+  const pocFine = pocOn && pocFits;
   useEffect(() => {
-    if (!ready || (!fp.on && !svpOn && !cvdOn) || tf.source === '1m') return;
+    if (!ready || (!fp.on && !svpOn && !cvdOn && !pocFine) || tf.source === '1m') return;
     const ctl = new AbortController();
     fetchBars(symbol, '1m', '7d', ctl.signal, wantPrepost)
       .then((res) => setSubRaw(res.bars))
       .catch(() => setSubRaw([]));
     return () => ctl.abort();
-  }, [ready, fp.on, svpOn, cvdOn, symbol, tf.source, wantPrepost, fetchBars]);
+  }, [ready, fp.on, svpOn, cvdOn, pocFine, symbol, tf.source, wantPrepost, fetchBars]);
 
   // Delta divergence reads 1-minute bars further back than the footprint does. NSE stocks: Upstox's exchange
   // candles, as far back as the view needs (3 months at least). Everything else: Yahoo serves them ~4 weeks back,
@@ -1287,6 +1328,8 @@ export function TvChart() {
     newsPrimRef.current = new NewsPrimitive();
     deltaPrimRef.current = new DeltaPrimitive();
     fvgPrimRef.current = new FvgPrimitive();
+    pocPrimRef.current = new PocPrimitive();
+    pocIndPrimRef.current = new PocPrimitive();
     cvdDivMainRef.current = new CvdDivPrimitive(true);
     sessionsPrimRef.current = new SessionsPrimitive();
     svpPrimRef.current = new SessionProfilePrimitive();
@@ -1358,6 +1401,8 @@ export function TvChart() {
       if (newsPrimRef.current) series.attachPrimitive(newsPrimRef.current);
       if (deltaPrimRef.current) series.attachPrimitive(deltaPrimRef.current);
       if (fvgPrimRef.current) series.attachPrimitive(fvgPrimRef.current);
+      if (pocIndPrimRef.current) series.attachPrimitive(pocIndPrimRef.current);
+      if (pocPrimRef.current) series.attachPrimitive(pocPrimRef.current);
       if (cvdDivMainRef.current) series.attachPrimitive(cvdDivMainRef.current);
       if (sessionsPrimRef.current) series.attachPrimitive(sessionsPrimRef.current);
       if (svpPrimRef.current) series.attachPrimitive(svpPrimRef.current);
@@ -1835,6 +1880,142 @@ export function TvChart() {
     fvgPrimRef.current?.setState(marks);
   }, [fvgShown, fvgActive, fvgMarks, hideDivs, revealed, bars, chartType, fvgPick]);
   useEffect(() => setFvgPick(null), [symbol, tfId]);
+  // POC scanner pick → its zone on the price pane; the first time its bars are in, centre on it and pulse.
+  // It ignores "hide all indicators": the pick is an explicit request and has no legend row to reveal it from.
+  useEffect(() => {
+    const p = pocPick;
+    const shown =
+      p &&
+      pocOpen &&
+      bars.length > 0 &&
+      meta?.symbol?.toUpperCase() === p.symbol.toUpperCase() &&
+      p.pocFrom != null &&
+      p.pocZoneLo != null &&
+      p.pocZoneHi != null &&
+      p.pocPrice != null;
+    if (!shown) {
+      pocPrimRef.current?.setState(null);
+      return;
+    }
+    const at = (t: number | null | undefined) => {
+      if (t == null) return null;
+      const i = bars.findIndex((b) => b.time >= t);
+      return i < 0 ? null : i;
+    };
+    const fromIndex = at(p.pocFrom);
+    if (fromIndex == null) {
+      pocPrimRef.current?.setState(null);
+      return;
+    }
+    const long = p.pocStage?.startsWith('Long')
+      ? true
+      : p.pocStage?.startsWith('Short')
+        ? false
+        : null;
+    const departIndex = at(p.pocDepartAt);
+    const touchIndex = at(p.pocTouchAt);
+    const extremeIndex = at(p.pocExtremeAt);
+    pocPrimRef.current?.setState({
+      fromIndex,
+      departIndex,
+      touchIndex,
+      lastIndex: bars.length - 1,
+      zoneLo: p.pocZoneLo!,
+      zoneHi: p.pocZoneHi!,
+      poc: p.pocPrice!,
+      entry: p.pocEntry ?? null,
+      stop: p.pocStop ?? null,
+      extremeIndex,
+      extreme: p.pocExtreme ?? null,
+      sessionsAgo: p.pocSessionsAgo ?? null,
+      long,
+    });
+    if (pocJumped.current === p) return;
+    const ts = chartRef.current?.timeScale();
+    const range = ts?.getVisibleLogicalRange();
+    if (!ts || !range) return;
+    pocJumped.current = p;
+    // show the whole story: the profile's session through the last bar, with a little room on the right
+    const last = bars.length - 1;
+    const span = Math.max(range.to - range.from, last - fromIndex + 10);
+    showRange(ts, last + 6 - span, last + 6);
+    pocPrimRef.current?.pulse();
+  }, [pocPick, pocOpen, bars, meta, chartType]);
+  // POC retest indicator: the same detection as the scanner, run on this chart's regular-hours bars. A POC built
+  // from candles longer than 15 minutes is too coarse, so it draws nothing there (the legend says so).
+  const pocLevels = useMemo(() => {
+    if (!pocOn || !pocFits || bars.length < 2) return [];
+    const regular = regularHours ? bars.filter((b) => regularHours(b.time)) : bars;
+    // the session profile's own 1-minute bars, so the POC here is the one the SVP draws
+    const fine =
+      profileFine && regularHours ? profileFine.filter((b) => regularHours(b.time)) : profileFine;
+    return pocCandidates(regular, zoneClock(timeZone), null, pocCfg, fine);
+  }, [pocOn, pocFits, bars, regularHours, timeZone, pocCfg, profileFine]);
+  useEffect(() => {
+    const prim = pocIndPrimRef.current;
+    if (!prim) return;
+    if (!pocOn || !pocMarks || hiddenAll('poc') || !pocLevels.length) {
+      prim.setMarks([]);
+      return;
+    }
+    const index = new Map(bars.map((b, i) => [b.time, i]));
+    const at = (t: number | null) => (t == null ? null : (index.get(t) ?? null));
+    // the scanner's pick of this symbol is drawn by its own layer: leave that zone to it
+    const pickFrom =
+      pocOpen && pocPick && meta?.symbol?.toUpperCase() === pocPick.symbol.toUpperCase()
+        ? pocPick.pocFrom
+        : null;
+    const best = bestSetup(pocLevels);
+    const marks = pocLevels.flatMap((p) => {
+      const live = liveRank(p.stage) != null;
+      if (!live && !(pocView.showTested && p.touchTime != null)) return [];
+      if (p.fromTime === pickFrom) return [];
+      const fromIndex = at(p.fromTime);
+      if (fromIndex == null) return [];
+      const long = p.stage.startsWith('Long')
+        ? true
+        : p.stage.startsWith('Short')
+          ? false
+          : p.entry == null
+            ? null
+            : p.entry > (p.stop ?? p.entry);
+      return [
+        {
+          fromIndex,
+          departIndex: at(p.departTime),
+          touchIndex: at(p.touchTime),
+          lastIndex: bars.length - 1,
+          zoneLo: p.zoneLo,
+          zoneHi: p.zoneHi,
+          poc: p.poc,
+          entry: p.entry,
+          stop: p.stop,
+          extremeIndex: at(p.extremeTime),
+          extreme: p.extreme,
+          sessionsAgo: p.sessionsAgo,
+          long,
+          // with a scanner pick on the chart, that pick is the one full setup: the rest stay quiet levels
+          primary: p === best && pickFrom == null,
+          stage: live ? (p.stage.split(' · ')[1] ?? p.stage) : p.stage.toLowerCase(),
+          // a used-up POC only runs to where price came back to it
+          endIndex: live ? null : at(p.touchTime),
+        },
+      ];
+    });
+    prim.setMarks(marks);
+  }, [
+    pocLevels,
+    pocOn,
+    pocMarks,
+    pocView,
+    hideDivs,
+    revealed,
+    bars,
+    chartType,
+    pocOpen,
+    pocPick,
+    meta,
+  ]);
   useEffect(() => setDeltaPick(null), [symbol, tfId]);
   useEffect(() => setDeltaTip(null), [symbol, tfId]);
   useEffect(() => setCvdPick(null), [symbol, tfId]);
@@ -2600,6 +2781,10 @@ export function TvChart() {
       setFvgMarks(true);
       save('tv:fvgMarks', true);
     }
+    if (which === 'poc') {
+      setPocMarks(true);
+      save('tv:pocMarks', true);
+    }
   };
 
   const legendRow = (c: Computed): ReactNode => (
@@ -2707,6 +2892,7 @@ export function TvChart() {
       save('tv:deltaOn', true);
       setScreenerOpen(false);
       save('tv:screenerOpen', false);
+      closePoc();
       setCvdOpen(false);
       save('tv:cvdOpen', false);
       setFvgOpen(false);
@@ -2722,6 +2908,7 @@ export function TvChart() {
       save('tv:fvgOn', true);
       setScreenerOpen(false);
       save('tv:screenerOpen', false);
+      closePoc();
       setDeltaOpen(false);
       save('tv:deltaOpen', false);
       setCvdOpen(false);
@@ -2814,6 +3001,21 @@ export function TvChart() {
             setFvgOn(false);
             save('tv:fvgOn', false);
             if (fvgOpen) toggleFvg();
+          },
+        )
+      : null,
+    pocOn
+      ? panelLegendRow(
+          'poc',
+          pocFits ? 'POC Retest' : 'POC Retest (needs 1–15m)',
+          pocMarks,
+          setPocMarks,
+          'tv:pocMarks',
+          false,
+          () => setPocSettings(true),
+          () => {
+            setPocOn(false);
+            save('tv:pocOn', false);
           },
         )
       : null,
@@ -3787,6 +3989,18 @@ export function TvChart() {
                 onJump={jumpToFvg}
               />
             ) : null}
+            {pocOpen && !compact ? (
+              <PocScannerPanel
+                active={symbol}
+                onOpen={(row) => {
+                  pocJumped.current = null;
+                  setPocPick(row);
+                  setSymbol(row.symbol);
+                  // the zone is built from 5-minute bars: on a daily chart it would be one candle wide
+                  if (!tf.intraday || tf.secs > 900) setTfId('5m');
+                }}
+              />
+            ) : null}
             {screenerOpen && !compact ? (
               <ScreenerPanel
                 mode="side"
@@ -3801,6 +4015,7 @@ export function TvChart() {
             ) : null}
             {watchOpen &&
             !screenerOpen &&
+            !(pocOpen && !compact) &&
             !(deltaOpen && !compact) &&
             !(cvdOpen && !compact) &&
             !(fvgOpen && !compact) ? (
@@ -3836,6 +4051,7 @@ export function TvChart() {
               setScreenerOpen(next);
               save('tv:screenerOpen', next);
               if (next) {
+                closePoc();
                 setDeltaOpen(false);
                 save('tv:deltaOpen', false);
                 setCvdOpen(false);
@@ -3844,7 +4060,9 @@ export function TvChart() {
                 save('tv:fvgOpen', false);
               }
             }}
-            watchlistOpen={watchOpen && !deltaOpen && !cvdOpen && !fvgOpen && !screenerOpen}
+            watchlistOpen={
+              watchOpen && !deltaOpen && !cvdOpen && !fvgOpen && !screenerOpen && !pocOpen
+            }
             fvgOpen={fvgOpen && !screenerOpen}
             deltaOpen={deltaOpen && !screenerOpen}
             cvdOpen={cvdOpen && !deltaOpen && !screenerOpen}
@@ -3862,12 +4080,20 @@ export function TvChart() {
               save('tv:hideDivs', next);
             }}
             onWatchlist={() => {
-              const next = !(watchOpen && !deltaOpen && !cvdOpen && !fvgOpen && !screenerOpen);
+              const next = !(
+                watchOpen &&
+                !deltaOpen &&
+                !cvdOpen &&
+                !fvgOpen &&
+                !screenerOpen &&
+                !pocOpen
+              );
               setWatchOpen(next);
               save('tv:watchOpen', next);
               if (next) {
                 setScreenerOpen(false);
                 save('tv:screenerOpen', false);
+                closePoc();
                 setDeltaOpen(false);
                 save('tv:deltaOpen', false);
                 setCvdOpen(false);
@@ -3884,6 +4110,7 @@ export function TvChart() {
               if (next) {
                 setScreenerOpen(false);
                 save('tv:screenerOpen', false);
+                closePoc();
                 setDeltaOpen(false);
                 save('tv:deltaOpen', false);
                 setFvgOpen(false);
@@ -3891,6 +4118,22 @@ export function TvChart() {
               }
             }}
             onFvg={toggleFvg}
+            pocOpen={pocOpen}
+            onPoc={() => {
+              const next = !pocOpen;
+              setPocOpen(next);
+              save('tv:pocOpen', next);
+              if (next) {
+                setScreenerOpen(false);
+                save('tv:screenerOpen', false);
+                setDeltaOpen(false);
+                save('tv:deltaOpen', false);
+                setCvdOpen(false);
+                save('tv:cvdOpen', false);
+                setFvgOpen(false);
+                save('tv:fvgOpen', false);
+              }
+            }}
           />
         )}
       </div>
@@ -3943,6 +4186,17 @@ export function TvChart() {
                 setFvgOn(next);
                 save('tv:fvgOn', next);
                 if (!next && fvgOpen) toggleFvg();
+              },
+            },
+            {
+              id: 'poc',
+              name: 'POC Retest',
+              description:
+                'Untested points of control from recent sessions: moved away, pulling back, first touch',
+              open: pocOn,
+              onToggle: () => {
+                setPocOn(!pocOn);
+                save('tv:pocOn', !pocOn);
               },
             },
           ]}
@@ -4001,6 +4255,21 @@ export function TvChart() {
             setIndicators((list) => list.map((i) => (i.id === next.id ? next : i)))
           }
           onClose={() => setSettingsId(null)}
+        />
+      ) : null}
+      {pocSettings ? (
+        <PocSettingsDialog
+          cfg={pocCfg}
+          view={pocView}
+          onChange={(next) => {
+            setPocCfg(next);
+            save('tv:pocCfg', next);
+          }}
+          onView={(next) => {
+            setPocView(next);
+            save('tv:pocView', next);
+          }}
+          onClose={() => setPocSettings(false)}
         />
       ) : null}
       {/* keeps CATALOG referenced for tree-shaken dev builds */}

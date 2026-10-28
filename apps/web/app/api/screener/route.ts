@@ -4,7 +4,7 @@ import { marketOf } from '../../../lib/screener/markets';
 import { sanitizeFilters } from '../../../lib/screener/query';
 import { DEFAULT_LIMIT, MAX_LIMIT, runScreen } from '../../../lib/screener/run';
 import type { ScreenerRequest } from '../../../lib/screener/types';
-import { profiles, rvolsAtTime, screenPage } from '../../../lib/screener/yahoo';
+import { pocSetups, profiles, rvolsAtTime, screenPage } from '../../../lib/screener/yahoo';
 
 export const dynamic = 'force-dynamic';
 /** Per-name lookups (float, rel vol at time) can take a few seconds on a cold cache. */
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
         columns,
         limit,
       },
-      { screenPage, profiles, rvolsAtTime },
+      { screenPage, profiles, rvolsAtTime, pocSetups },
     );
     return NextResponse.json(res);
   } catch (e) {

@@ -10,10 +10,11 @@ import {
   yahooSort,
 } from './query.ts';
 import type { Operand } from './query.ts';
+import type { PocSetup } from './poc-retest.ts';
 import type { Profile, ScreenPage } from './yahoo.ts';
 import type { FilterState, ScreenerRequest, ScreenerResponse, ScreenerRow } from './types.ts';
 
-/** The three Yahoo calls the screen makes. Injected so the whole pipeline can be tested without a network. */
+/** The Yahoo calls the screen makes. Injected so the whole pipeline can be tested without a network. */
 export interface Deps {
   screenPage: (
     query: Operand,
@@ -23,6 +24,7 @@ export interface Deps {
   ) => Promise<ScreenPage>;
   profiles: (symbols: readonly string[]) => Promise<Map<string, Profile>>;
   rvolsAtTime: (symbols: readonly string[], tz: string) => Promise<Map<string, number | null>>;
+  pocSetups: (symbols: readonly string[], tz: string) => Promise<Map<string, PocSetup | null>>;
 }
 
 /** Yahoo's maximum page size. */
@@ -93,6 +95,54 @@ async function addRvolTime(rows: ScreenerRow[], deps: Deps, tz: string): Promise
   return { rows: out, failed };
 }
 
+async function addPoc(rows: ScreenerRow[], deps: Deps, tz: string): Promise<Enriched> {
+  const got = await deps.pocSetups(
+    rows.map((r) => r.symbol),
+    tz,
+  );
+  let failed = 0;
+  const out = rows.map((r) => {
+    if (!got.has(r.symbol)) {
+      failed++;
+      return r;
+    }
+    const p = got.get(r.symbol) ?? null;
+    return {
+      ...r,
+      pocStage: p?.stage ?? null,
+      pocPrice: p?.poc ?? null,
+      pocEntry: p?.entry ?? null,
+      pocStop: p?.stop ?? null,
+      pocRiskPct: p?.riskPct ?? null,
+      pocEdgePct: p?.edgeDistPct ?? null,
+      pocDistPct: p?.pocDistPct ?? null,
+      pocZoneLo: p?.zoneLo ?? null,
+      pocZoneHi: p?.zoneHi ?? null,
+      pocFrom: p?.fromTime ?? null,
+      pocDepartAt: p?.departTime ?? null,
+      pocTouchAt: p?.touchTime ?? null,
+      pocSessionsAgo: p?.sessionsAgo ?? null,
+      pocExtreme: p?.extreme ?? null,
+      pocExtremeAt: p?.extremeTime ?? null,
+      pocPullbackPct: p?.pullbackPct ?? null,
+    };
+  });
+  return { rows: out, failed };
+}
+
+type SlowTier = 'profile' | 'intraday' | 'vprofile';
+const STAGE_FIELD: Record<SlowTier, string> = {
+  profile: 'float',
+  intraday: 'rvolTime',
+  vprofile: 'pocStage',
+};
+const enrich = (tier: SlowTier, rows: ScreenerRow[], deps: Deps, tz: string) =>
+  tier === 'profile'
+    ? addProfile(rows, deps)
+    : tier === 'intraday'
+      ? addRvolTime(rows, deps, tz)
+      : addPoc(rows, deps, tz);
+
 export async function runScreen(
   req: ScreenerRequest,
   deps: Deps,
@@ -148,16 +198,14 @@ export async function runScreen(
   // 3. Filters that need a per-name lookup, cheapest first. Only names that survived so far are looked up.
   const filterTiers = tiersForFilters(filters);
   const enriched = new Set<string>();
-  const stage = async (tier: 'profile' | 'intraday') => {
+  const stage = async (tier: SlowTier) => {
     if (rows.length > ENRICH_CAP) {
       notes.push(
-        `${label(tier === 'profile' ? 'float' : 'rvolTime')} needs a lookup per name: only the first ${ENRICH_CAP} of ${rows.length} matches were checked. Tighten the other filters to cover them all.`,
+        `${label(STAGE_FIELD[tier])} needs a lookup per name: only the first ${ENRICH_CAP} of ${rows.length} matches were checked. Tighten the other filters to cover them all.`,
       );
       rows = rows.slice(0, ENRICH_CAP);
     }
-    const e = await (tier === 'profile'
-      ? addProfile(rows, deps)
-      : addRvolTime(rows, deps, market.tz));
+    const e = await enrich(tier, rows, deps, market.tz);
     if (e.failed)
       notes.push(
         `Yahoo did not answer the ${tier} lookup for ${e.failed} name(s): they are left out.`,
@@ -174,6 +222,7 @@ export async function runScreen(
   };
   if (filterTiers.has('profile')) await stage('profile');
   if (filterTiers.has('intraday')) await stage('intraday');
+  if (filterTiers.has('vprofile')) await stage('vprofile');
 
   for (const [id, n] of Object.entries(missing)) {
     if (n > 0)
@@ -191,8 +240,8 @@ export async function runScreen(
       );
     }
     let work = head;
-    if (late.includes('profile')) work = (await addProfile(work, deps)).rows;
-    if (late.includes('intraday')) work = (await addRvolTime(work, deps, market.tz)).rows;
+    for (const tier of ['profile', 'intraday', 'vprofile'] as const)
+      if (late.includes(tier)) work = (await enrich(tier, work, deps, market.tz)).rows;
     rows = [...work, ...rows.slice(ENRICH_CAP)];
   }
 

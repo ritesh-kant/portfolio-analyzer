@@ -28,6 +28,8 @@ import { ColumnsMenu, ResultsTable } from './results-table';
 
 const SCREENS_KEY = 'scr:screens';
 const ACTIVE_KEY = 'scr:active';
+/** Ids of the built-in screens this browser has already been offered. */
+const PRESETS_SEEN_KEY = 'scr:presetsSeen';
 const AUTO_KEY = 'scr:auto';
 const WIDTH_KEY = 'scr:width';
 const DEFAULT_WIDTH = 640;
@@ -119,10 +121,15 @@ export function ScreenerPanel({
   useEffect(() => {
     const saved = load<Screen[] | null>(SCREENS_KEY, null);
     // Screens saved before markets existed carry none: they were all US screens.
-    const list = (Array.isArray(saved) && saved.length ? saved : seedScreens()).map((s) => ({
+    const base = (Array.isArray(saved) && saved.length ? saved : seedScreens()).map((s) => ({
       ...s,
       market: s.market ?? DEFAULT_MARKET,
     }));
+    // A built-in screen shipped after the list was saved is appended once; one the user deleted stays deleted.
+    const seen = new Set(load<string[]>(PRESETS_SEEN_KEY, []));
+    const have = new Set(base.map((s) => s.id));
+    const added = seedScreens().filter((s) => !have.has(s.id) && !seen.has(s.id));
+    const list = [...base, ...added];
     const wanted = load<string>(ACTIVE_KEY, list[0]!.id);
     const first = list.find((s) => s.id === wanted) ?? list[0]!;
     setScreens(list);
@@ -133,7 +140,13 @@ export function ScreenerPanel({
     setHydrated(true);
   }, []);
   useEffect(() => {
-    if (hydrated) save(SCREENS_KEY, screens);
+    if (!hydrated) return;
+    save(SCREENS_KEY, screens);
+    // Only once the list holding them is saved: the hydrate effect may run twice (React strict mode).
+    save(
+      PRESETS_SEEN_KEY,
+      seedScreens().map((s) => s.id),
+    );
   }, [screens, hydrated]);
   useEffect(() => {
     if (hydrated) save(ACTIVE_KEY, activeId);

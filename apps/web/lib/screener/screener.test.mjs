@@ -14,6 +14,7 @@ import {
   yahooSort,
 } from './query.ts';
 import { relVolAtTime, zoneClock } from './relvol.ts';
+import { bestSetup, pocCandidates, pocSetup, pocZone, POC_DEFAULTS } from './poc-retest.ts';
 import { runScreen } from './run.ts';
 
 // A real quote from Yahoo's screener (AI Okto, a recent IPO that gapped), trimmed to what we read.
@@ -337,8 +338,8 @@ test('relVolAtTime: too little history or half-day sessions give null / are skip
 // ── the whole pipeline, with a fake Yahoo ───────────────────────────────────
 
 const quote = (symbol, over) => ({ ...AIOK, symbol, longName: `${symbol} Inc`, ...over });
-function fake(quotes, { floats = {}, rvt = {}, total } = {}) {
-  const calls = { screen: [], profiles: [], rvt: [] };
+function fake(quotes, { floats = {}, rvt = {}, poc = {}, total } = {}) {
+  const calls = { screen: [], profiles: [], rvt: [], poc: [] };
   return {
     calls,
     deps: {
@@ -369,6 +370,12 @@ function fake(quotes, { floats = {}, rvt = {}, total } = {}) {
         calls.rvt.push([...syms]);
         const m = new Map();
         for (const s of syms) if (s in rvt) m.set(s, rvt[s]);
+        return m;
+      },
+      pocSetups: async (syms) => {
+        calls.poc.push([...syms]);
+        const m = new Map();
+        for (const s of syms) if (s in poc) m.set(s, poc[s]);
         return m;
       },
     },
@@ -595,22 +602,308 @@ test('venueOf maps codes per market and passes unknown codes through', () => {
 });
 
 test('sanitizeFilters accepts venues of the chosen market only', () => {
-  assert.deepEqual(sanitizeFilters({ exchange: { in: ['NSE', 'NYSE'] } }, 'in'), { exchange: { in: ['NSE'] } });
-  assert.deepEqual(sanitizeFilters({ exchange: { in: ['NSE', 'NYSE'] } }), { exchange: { in: ['NYSE'] } });
+  assert.deepEqual(sanitizeFilters({ exchange: { in: ['NSE', 'NYSE'] } }, 'in'), {
+    exchange: { in: ['NSE'] },
+  });
+  assert.deepEqual(sanitizeFilters({ exchange: { in: ['NSE', 'NYSE'] } }), {
+    exchange: { in: ['NYSE'] },
+  });
 });
 
 test('switching market keeps non-currency filters and drops price / market cap / $ volume', () => {
-  const us = { ...universeFor(MARKETS.us), price: { min: 2, max: 20 }, marketCap: { max: 5e8 }, changePct: { min: 10 }, volume: { min: 1e6 }, sector: { in: ['Energy'] } };
+  const us = {
+    ...universeFor(MARKETS.us),
+    price: { min: 2, max: 20 },
+    marketCap: { max: 5e8 },
+    changePct: { min: 10 },
+    volume: { min: 1e6 },
+    sector: { in: ['Energy'] },
+  };
   const next = filtersForMarket(us, 'in');
-  assert.deepEqual(next, { exchange: { in: ['NSE'] }, changePct: { min: 10 }, volume: { min: 1e6 }, sector: { in: ['Energy'] } });
+  assert.deepEqual(next, {
+    exchange: { in: ['NSE'] },
+    changePct: { min: 10 },
+    volume: { min: 1e6 },
+    sector: { in: ['Energy'] },
+  });
   assert.equal(next.commonOnly, undefined); // US-only option
 });
 
 test('runScreen: rel vol at time is measured on the market clock', async () => {
-  const f = fake([quote('RELIANCE.NS')], { floats: { 'RELIANCE.NS': 5e6 }, rvt: { 'RELIANCE.NS': 3 } });
+  const f = fake([quote('RELIANCE.NS')], {
+    floats: { 'RELIANCE.NS': 5e6 },
+    rvt: { 'RELIANCE.NS': 3 },
+  });
   let tz;
   const deps = { ...f.deps, rvolsAtTime: async (syms, z) => ((tz = z), f.deps.rvolsAtTime(syms)) };
   await runScreen({ ...req({ rvolTime: { min: 2 } }), market: 'in' }, deps, NOW);
   assert.equal(tz, 'Asia/Kolkata');
   assert.match(JSON.stringify(f.calls.screen[0].query), /"region","in"/);
+});
+
+// ── POC first retest ────────────────────────────────────────────────────────
+
+const UTC = zoneClock('UTC');
+const D1 = Date.UTC(2026, 9, 26, 14, 0) / 1000;
+const D2 = Date.UTC(2026, 9, 27, 14, 0) / 1000;
+const bar = (t, lo, hi, v = 1000, up = true) => ({
+  time: t,
+  open: up ? lo : hi,
+  high: hi,
+  low: lo,
+  close: up ? hi : lo,
+  volume: v,
+});
+/** Yesterday: heavy trade at 99.9–100.1, thin tails at 98 and 102. POC ≈ 99.9, zone ≈ 99.8–100.2. */
+const yesterday = () => [
+  ...Array.from({ length: 16 }, (_, i) => bar(D1 + i * 300, 99.9, 100.1, 10_000)),
+  bar(D1 + 16 * 300, 97.9, 98.1, 100),
+  bar(D1 + 17 * 300, 97.9, 98.1, 100),
+  bar(D1 + 18 * 300, 101.9, 102.1, 100),
+  bar(D1 + 19 * 300, 101.9, 102.1, 100),
+];
+const today = (...ranges) => ranges.map(([lo, hi, up], i) => bar(D2 + i * 300, lo, hi, 1000, up));
+
+test('pocZone: the heavy rows around the POC, not the thin tails', () => {
+  const z = pocZone(yesterday());
+  assert.ok(z.poc > 99.9 && z.poc < 100.25, `poc ${z.poc}`);
+  assert.ok(z.lo >= 99.7 && z.lo <= 99.9, `lo ${z.lo}`);
+  assert.ok(z.hi >= 100.1 && z.hi <= 100.3, `hi ${z.hi}`);
+});
+
+test('pocSetup: departs up ≥1%, first pullback into the top edge = long first touch', () => {
+  const s = pocSetup(
+    [
+      ...yesterday(),
+      ...today([100.3, 100.6], [100.9, 101.6], [101.2, 101.8], [100.1, 101.3, false]),
+    ],
+    UTC,
+  );
+  assert.equal(s.stage, 'Long · first touch');
+  assert.ok(s.entry > s.stop);
+  assert.equal(s.fromTime, D1); // the zone is drawn from yesterday's first bar
+  assert.equal(s.departTime, D2 + 300); // the bar that closed ≥1% above the zone
+  assert.equal(s.touchTime, D2 + 900); // the first bar back at the top edge
+  assert.ok(s.edgeDistPct <= 0.5);
+});
+
+test('pocSetup: before the touch it is approaching / away; a second touch is a retest', () => {
+  const up = [
+    [100.3, 100.6],
+    [100.9, 101.6],
+    [101.2, 101.8],
+  ];
+  assert.equal(pocSetup([...yesterday(), ...today(...up)], UTC).stage, 'Long · away');
+  assert.equal(
+    pocSetup([...yesterday(), ...today(...up, [100.5, 101.2, false])], UTC, 100.6).stage,
+    'Long · approaching',
+  );
+  assert.equal(
+    pocSetup(
+      [...yesterday(), ...today(...up, [100.1, 101.3, false], [100.6, 101.4], [100.0, 101, false])],
+      UTC,
+    ).stage,
+    'Retested',
+  );
+});
+
+test('pocSetup: a close through the far edge is broken; the short side mirrors the long', () => {
+  const up = [
+    [100.3, 100.6],
+    [100.9, 101.6],
+    [101.2, 101.8],
+  ];
+  assert.equal(
+    pocSetup([...yesterday(), ...today(...up, [99.5, 100.8, false])], UTC).stage,
+    'Broken',
+  );
+  const short = pocSetup(
+    [
+      ...yesterday(),
+      ...today([99.5, 99.8, false], [98.4, 99.1, false], [98.2, 98.8, false], [98.7, 99.95]),
+    ],
+    UTC,
+  );
+  assert.equal(short.stage, 'Short · first touch');
+  assert.ok(short.entry < short.stop);
+});
+
+test('pocSetup: never left the zone = not departed; one session only = null', () => {
+  assert.equal(
+    pocSetup([...yesterday(), ...today([99.9, 100.2], [99.95, 100.3])], UTC).stage,
+    'Not departed',
+  );
+  assert.equal(pocSetup(yesterday(), UTC), null);
+});
+
+test('pocSetup: a wick past the 1% line that closes back is not a move away', () => {
+  // HARDWYN 2026-10-28: one print 1% under the zone in the last bar, which closed back inside it
+  const wick = { time: D2 + 600, open: 100, high: 100.1, low: 98.5, close: 100, volume: 5000 };
+  const s = pocSetup([...yesterday(), ...today([99.9, 100.2], [99.95, 100.3]), wick], UTC);
+  assert.equal(s.stage, 'Not departed');
+  assert.equal(s.departTime, null);
+});
+
+test('pocCandidates: 1-minute bars covering a session build its profile, as the chart SVP does', () => {
+  // the 5-minute bars put yesterday's volume at ~100; the 1-minute bars underneath put it at ~101
+  const fine = [
+    ...Array.from({ length: 90 }, (_, i) => bar(D1 + i * 60, 100.9, 101.1, 3000)),
+    bar(D1 + 90 * 60, 97.9, 98.1, 10),
+    bar(D1 + 99 * 60, 101.9, 102.1, 10),
+  ];
+  const bars = [...yesterday(), ...today([99.9, 100.2])];
+  const coarse = pocCandidates(bars, UTC)[0];
+  const fromFine = pocCandidates(bars, UTC, null, POC_DEFAULTS, fine)[0];
+  assert.ok(coarse.poc < 100.25, `coarse poc ${coarse.poc}`);
+  assert.ok(fromFine.poc > 100.8 && fromFine.poc < 101.2, `fine poc ${fromFine.poc}`);
+  // 1-minute bars that start after the session began do not cover it: the 5-minute profile stays
+  const late = fine.filter((b) => b.time > D1);
+  assert.equal(pocCandidates(bars, UTC, null, POC_DEFAULTS, late)[0].poc, coarse.poc);
+});
+
+const DAY = 86_400;
+/** A full session `days` after D1 whose volume sits at `center` (POC ≈ center), 16 five-minute bars. */
+const heavyDay = (days, center) =>
+  Array.from({ length: 16 }, (_, i) =>
+    bar(D1 + days * DAY + i * 300, center - 0.1, center + 0.1, 10_000),
+  );
+const on = (days, ...ranges) =>
+  ranges.map(([lo, hi, up], i) => bar(D1 + days * DAY + i * 300, lo, hi, 1000, up));
+
+test('pocSetup: an older POC left over several days and now pulling back is found, with its age', () => {
+  const s = pocSetup(
+    [
+      ...yesterday(), // day 0: POC ≈ 100
+      ...heavyDay(1, 105), // day 1: price lives at 105, its own POC
+      // today: from 105 back down to 102.6, the last bar closing at its low
+      ...on(2, [104.4, 104.9, false], [103.4, 104.4, false], [102.6, 103.4, false]),
+    ],
+    UTC,
+  );
+  assert.equal(s.stage, 'Long · pulling back');
+  assert.equal(s.sessionsAgo, 2);
+  assert.equal(s.fromTime, D1);
+  assert.equal(s.departTime, D1 + DAY); // left on day 1, not today
+  assert.ok(Math.abs(s.extreme - 105.1) < 1e-9);
+  assert.ok(s.pullbackPct > 30 && s.pullbackPct < 60, `pullback ${s.pullbackPct}`);
+});
+
+test('pocSetup: the first touch of a POC from days ago is a first touch', () => {
+  const s = pocSetup(
+    [
+      ...yesterday(),
+      ...heavyDay(1, 105),
+      ...on(2, [103.4, 104.4, false], [101.4, 103.4, false], [100.15, 101.4, false]),
+    ],
+    UTC,
+  );
+  assert.equal(s.stage, 'Long · first touch');
+  assert.equal(s.sessionsAgo, 2);
+  assert.equal(s.touchTime, D1 + 2 * DAY + 600);
+});
+
+test('pocSetup: a POC price already came back to on an earlier day is tested, not a setup', () => {
+  const s = pocSetup(
+    [
+      ...yesterday(),
+      ...heavyDay(1, 105).slice(0, 8),
+      ...on(1, ...Array.from({ length: 8 }, () => [100.0, 100.4])), // day 1 ends back at the old POC
+      ...on(2, [101.0, 101.3], [101.2, 101.5]),
+    ],
+    UTC,
+  );
+  assert.notEqual(s.sessionsAgo, 2);
+});
+
+test('pocSetup: of two live POCs the one closer to a trade wins', () => {
+  const s = pocSetup(
+    [
+      ...yesterday(), // POC ≈ 100, far below
+      ...heavyDay(1, 110), // POC ≈ 110
+      // today: up to 115, then back to 110.6: approaching the 110 zone, only pulling back toward 100
+      ...on(2, [112, 115], [111, 115, false], [110.6, 111, false]),
+    ],
+    UTC,
+  );
+  assert.equal(s.stage, 'Long · approaching');
+  assert.equal(s.sessionsAgo, 1);
+});
+
+test('pocCandidates: one entry per recent session, newest first; settings change the stages', () => {
+  const bars = [
+    ...yesterday(),
+    ...heavyDay(1, 110),
+    ...on(2, [112, 115], [111, 115, false], [110.6, 111, false]),
+  ];
+  const all = pocCandidates(bars, UTC);
+  assert.deepEqual(
+    all.map((p) => [p.sessionsAgo, p.stage]),
+    [
+      [1, 'Long · approaching'],
+      [2, 'Long · away'], // gave back 29.7% of 100.2 → 115
+    ],
+  );
+  assert.equal(bestSetup(all), all[0]);
+  // a looser pullback share makes the older one "pulling back"; a 1-session look-back drops it
+  assert.equal(
+    pocCandidates(bars, UTC, null, { ...POC_DEFAULTS, pullbackPct: 25 })[1].stage,
+    'Long · pulling back',
+  );
+  assert.equal(pocCandidates(bars, UTC, null, { ...POC_DEFAULTS, lookback: 1 }).length, 1);
+});
+
+test('runScreen: the POC scanner looks up the setup only for names that passed the cheap filters', async () => {
+  const preset = {
+    filters: {
+      commonOnly: { on: true },
+      avgVolume: { min: 5e5 },
+      pocStage: { in: ['Long · first touch'] },
+    },
+    sort: { key: 'volume', dir: 'desc' },
+    columns: ['price', 'pocStage', 'pocEntry'],
+  };
+  const f = fake(
+    [
+      quote('HIT', { averageDailyVolume3Month: 2e6 }),
+      quote('THINW', { longName: 'Thin Corp Warrants' }),
+      quote('FAR', { averageDailyVolume3Month: 2e6 }),
+    ],
+    {
+      poc: {
+        HIT: {
+          stage: 'Long · first touch',
+          poc: 10,
+          zoneLo: 9.9,
+          zoneHi: 10.1,
+          entry: 10.1,
+          stop: 9.9,
+          riskPct: 2,
+          edgeDistPct: -0.1,
+          pocDistPct: 0.5,
+        },
+        FAR: {
+          stage: 'Long · away',
+          poc: 10,
+          zoneLo: 9.9,
+          zoneHi: 10.1,
+          entry: 10.1,
+          stop: 9.9,
+          riskPct: 2,
+          edgeDistPct: 4,
+          pocDistPct: 5,
+        },
+      },
+    },
+  );
+  const res = await runScreen(
+    req(preset.filters, { sort: preset.sort, columns: [...preset.columns] }),
+    f.deps,
+    NOW,
+  );
+  assert.deepEqual(f.calls.poc[0], ['HIT', 'FAR']); // the warrant was dropped before any bar download
+  assert.deepEqual(
+    res.rows.map((r) => r.symbol),
+    ['HIT'],
+  );
+  assert.equal(res.rows[0].pocEntry, 10.1);
 });
