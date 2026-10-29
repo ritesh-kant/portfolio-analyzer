@@ -907,3 +907,87 @@ test('runScreen: the POC scanner looks up the setup only for names that passed t
   );
   assert.equal(res.rows[0].pocEntry, 10.1);
 });
+
+// ── POC setup tracking ───────────────────────────────────────────────────────
+
+const { evaluate, summarize } = await import('./poc-eval.ts');
+/** UTC "sessions": 14:00–20:00, so 20:00 (1200 min) is the close. */
+const CLOSE = 20 * 60;
+const T0 = D2 + 3600; // added 15:00 on day 2
+const ev = (setup, bars, now) =>
+  evaluate({ addedAt: T0, ...setup }, bars, UTC, now ?? D2 + 5 * DAY, CLOSE);
+const longFT = { long: true, stage: 'Long · first touch', entry: 100, stop: 99 };
+const ohlc = (t, o, h, l, c) => ({ time: t, open: o, high: h, low: l, close: c, volume: 1000 });
+
+test('evaluate: a first touch fills at the next open; +2R before the stop is a target', () => {
+  const e = ev(longFT, [
+    ohlc(T0 - 300, 100, 100.2, 99.9, 100), // before it was added: ignored
+    ohlc(T0, 100.1, 100.4, 100, 100.3),
+    ohlc(T0 + 300, 100.3, 102.5, 100.2, 102.4),
+  ]);
+  assert.equal(e.outcome, 'target');
+  assert.equal(e.fillPrice, 100.1);
+  assert.ok(Math.abs(e.r - 2) < 1e-9, `r ${e.r}`);
+  assert.equal(e.done, true);
+});
+
+test('evaluate: a candle reaching both the stop and the target counts as the stop', () => {
+  const e = ev(longFT, [ohlc(T0, 100, 100.1, 99.95, 100), ohlc(T0 + 300, 100, 103, 98.5, 101)]);
+  assert.equal(e.outcome, 'stopped');
+  assert.ok(Math.abs(e.r + 1) < 1e-9, `r ${e.r}`);
+});
+
+test('evaluate: a resting short fills only when price comes up to the entry; a gap exits at the open', () => {
+  const short = { long: false, stage: 'Short · approaching', entry: 50, stop: 50.5 };
+  const notYet = ev(short, [ohlc(T0, 49, 49.5, 48.8, 49.2)], T0 + 600);
+  assert.equal(notYet.outcome, 'waiting');
+  const gap = ev(short, [
+    ohlc(T0, 49, 49.9, 48.8, 49.8),
+    ohlc(T0 + 300, 49.9, 50.2, 49.8, 50),
+    ohlc(D2 + DAY, 51, 51.2, 50.8, 51),
+  ]);
+  assert.equal(gap.outcome, 'stopped');
+  assert.equal(gap.fillPrice, 50);
+  assert.equal(gap.exitPrice, 51); // opened past the 50.5 stop
+  assert.ok(Math.abs(gap.r + 2) < 1e-9, `r ${gap.r}`);
+});
+
+test('evaluate: the window runs to the next close; open until then, then closed at that close', () => {
+  const bars = [ohlc(T0, 100, 100.3, 99.9, 100.2), ohlc(D2 + DAY, 100.2, 100.9, 100.1, 100.5)];
+  const during = ev(longFT, bars, D2 + DAY + 600);
+  assert.equal(during.outcome, 'open');
+  assert.equal(during.done, false);
+  const after = ev(longFT, bars, D2 + DAY + CLOSE * 60);
+  assert.equal(after.outcome, 'closed');
+  assert.ok(Math.abs(after.r - 0.5) < 1e-9, `r ${after.r}`);
+  // a candle on the day after the window is never looked at
+  const later = ev(longFT, [...bars, ohlc(D2 + 2 * DAY, 100.5, 105, 100.5, 104)], D2 + 3 * DAY);
+  assert.equal(later.outcome, 'closed');
+  // never reached the entry by the end: not filled
+  const limit = { ...longFT, stage: 'Long · pulling back' };
+  const nf = ev(limit, [ohlc(T0, 101, 101.5, 100.5, 101), ohlc(D2 + DAY, 101, 102, 100.4, 101.5)]);
+  assert.equal(nf.outcome, 'not filled');
+  assert.equal(
+    summarize([
+      nf,
+      after,
+      ev(longFT, [ohlc(T0, 100, 100.1, 99.95, 100), ohlc(T0 + 300, 100, 100, 98.5, 99)]),
+    ]).totalR,
+    0.5 - 1,
+  );
+});
+
+test('summarize: median and average % beside the total, which one tiny-stop trade can swing', () => {
+  const done = (r, pct) => ({ outcome: 'closed', done: true, r, pct });
+  const s = summarize([
+    done(13.5, 1),
+    done(-1, -0.3),
+    done(-0.5, -0.1),
+    { outcome: 'open', done: false, r: 5, pct: 2 },
+  ]);
+  assert.equal(s.traded, 3);
+  assert.equal(s.totalR, 12);
+  assert.equal(s.medianR, -0.5); // the total says +12R, the typical trade lost
+  assert.ok(Math.abs(s.avgPct - 0.2) < 1e-9, `avg ${s.avgPct}`);
+  assert.equal(s.rightWay, 1);
+});

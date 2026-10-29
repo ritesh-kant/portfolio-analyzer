@@ -16,6 +16,8 @@ import { load, save } from '../../lib/tv/storage';
 import { Icons } from './icons';
 import { PANEL_WIDTH_KEY } from './panel-width';
 import { addToWatchlist, watchlistSymbols } from './watchlist-panel';
+import { loadTracked, PocTracked, saveTracked } from './poc-tracked';
+import { TARGET_R, trackId, trackRow, type TrackedSetup } from '../../lib/screener/poc-eval';
 
 const WIDTH_KEY = PANEL_WIDTH_KEY;
 const MIN_WIDTH = 260;
@@ -135,6 +137,37 @@ export function PocScannerPanel({ active, onOpen }: Props) {
   };
   const req = useRef(0);
 
+  // setups saved for checking later (localStorage: read after mount, like the watchlist)
+  const [tab, setTab] = useState<'scan' | 'tracked'>('scan');
+  const [tracked, setTracked] = useState<TrackedSetup[]>([]);
+  useEffect(() => setTracked(loadTracked()), []);
+  const changeTracked = useCallback((fn: (cur: TrackedSetup[]) => TrackedSetup[]) => {
+    setTracked((cur) => {
+      const next = fn(cur);
+      saveTracked(next);
+      return next;
+    });
+  }, []);
+  const trackedIds = new Set(tracked.map((t) => t.id));
+  const toggleTrack = (row: ScreenerRow) => {
+    const id = trackId(row);
+    if (trackedIds.has(id)) {
+      changeTracked((cur) => cur.filter((t) => t.id !== id));
+      return;
+    }
+    const t = trackRow(row, view.market, Date.now());
+    if (t) changeTracked((cur) => [...cur, t]);
+  };
+  /** Tracks every listed setup not tracked yet (the list as filtered: market, side, stages). */
+  const trackAll = (list: ScreenerRow[]) => {
+    const now = Date.now();
+    const fresh = list
+      .filter((r) => !trackedIds.has(trackId(r)))
+      .map((r) => trackRow(r, view.market, now))
+      .filter((t): t is TrackedSetup => t != null);
+    if (fresh.length) changeTracked((cur) => [...cur, ...fresh]);
+  };
+
   const patch = (p: Partial<View>) =>
     setView((cur) => {
       const next = { ...cur, ...p };
@@ -198,6 +231,51 @@ export function PocScannerPanel({ active, onOpen }: Props) {
     (a, b) => stageRank(a) - stageRank(b) || (a.pocEdgePct ?? 0) - (b.pocEdgePct ?? 0),
   );
   const currency = marketOf(view.market).currency;
+  // USA / India, shared by both tabs; the Tracked tab also shows how many each market holds
+  const marketToggle = (counts: boolean) => (
+    <div className="grid grid-cols-2 gap-2">
+      {(['us', 'in'] as const).map((id) => (
+        <button
+          key={id}
+          type="button"
+          aria-pressed={view.market === id}
+          onClick={() => patch({ market: id })}
+          className={`rounded-md border border-[#2a2e39] py-1 transition-colors ${
+            view.market === id
+              ? 'bg-[#2a2e39] text-white shadow-[inset_0_-2px_0_#4fc3f7]'
+              : 'hover:bg-[#1e222d] hover:text-white'
+          }`}
+        >
+          {MARKETS[id]!.flag} {MARKETS[id]!.label}
+          {counts ? ` (${tracked.filter((t) => t.market === id).length})` : ''}
+        </button>
+      ))}
+    </div>
+  );
+  const sideToggle = (
+    <div
+      role="group"
+      aria-label="Side"
+      className="grid grid-cols-3 overflow-hidden rounded-md border border-[#2a2e39]"
+    >
+      {SIDES.map((s, i) => (
+        <button
+          key={s.id}
+          type="button"
+          aria-pressed={view.side === s.id}
+          onClick={() => patch({ side: s.id })}
+          className={`py-1 transition-colors ${i ? 'border-l border-[#2a2e39]' : ''} ${
+            view.side === s.id
+              ? 'bg-[#2a2e39] text-white shadow-[inset_0_-2px_0_#4fc3f7]'
+              : 'hover:bg-[#1e222d] hover:text-white'
+          }`}
+        >
+          {s.label}
+        </button>
+      ))}
+    </div>
+  );
+  const untracked = rows.filter((r) => !trackedIds.has(trackId(r))).length;
   const updated = data ? new Date(data.asOf).toLocaleTimeString('en-GB', { hour12: false }) : '';
 
   return (
@@ -237,114 +315,151 @@ export function PocScannerPanel({ active, onOpen }: Props) {
         </button>
       </div>
 
-      <div className="space-y-2.5 border-b border-[#2a2e39] px-3 py-2.5 text-[12px] text-[#b2b5be]">
-        <div className="grid grid-cols-2 gap-2">
-          {(['us', 'in'] as const).map((id) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={view.market === id}
-              onClick={() => patch({ market: id })}
-              className={`rounded-md border border-[#2a2e39] py-1 transition-colors ${
-                view.market === id
-                  ? 'bg-[#2a2e39] text-white shadow-[inset_0_-2px_0_#4fc3f7]'
-                  : 'hover:bg-[#1e222d] hover:text-white'
-              }`}
-            >
-              {MARKETS[id]!.flag} {MARKETS[id]!.label}
-            </button>
-          ))}
-        </div>
-        <div
-          role="group"
-          aria-label="Side"
-          className="grid grid-cols-3 overflow-hidden rounded-md border border-[#2a2e39]"
-        >
-          {SIDES.map((s, i) => (
-            <button
-              key={s.id}
-              type="button"
-              aria-pressed={view.side === s.id}
-              onClick={() => patch({ side: s.id })}
-              className={`py-1 transition-colors ${i ? 'border-l border-[#2a2e39]' : ''} ${
-                view.side === s.id
-                  ? 'bg-[#2a2e39] text-white shadow-[inset_0_-2px_0_#4fc3f7]'
-                  : 'hover:bg-[#1e222d] hover:text-white'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-        <label
-          className="flex items-center justify-between gap-2"
-          title={`Also list names that have not touched yet but are within ${APPROACH_PCT}% of the entry edge`}
-        >
-          <span>Include approaching</span>
-          <input
-            type="checkbox"
-            checked={view.approaching}
-            onChange={(e) => patch({ approaching: e.target.checked })}
-            className="h-3.5 w-3.5 accent-[#4fc3f7]"
-          />
-        </label>
-        <label
-          className="flex items-center justify-between gap-2"
-          title={`Also list names that have given back at least ${PULLBACK_SHARE * 100}% of their move away and are heading back toward the zone`}
-        >
-          <span>Include pulling back</span>
-          <input
-            type="checkbox"
-            checked={view.pullback}
-            onChange={(e) => patch({ pullback: e.target.checked })}
-            className="h-3.5 w-3.5 accent-[#4fc3f7]"
-          />
-        </label>
+      <div role="tablist" className="grid grid-cols-2 border-b border-[#2a2e39] text-[12px]">
+        {(
+          [
+            ['scan', 'Scanner'],
+            ['tracked', `Tracked${tracked.length ? ` (${tracked.length})` : ''}`],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`py-1.5 transition-colors ${
+              tab === id
+                ? 'text-white shadow-[inset_0_-2px_0_#4fc3f7]'
+                : 'text-[#868993] hover:text-white'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {status === 'error' && !data ? (
-          <p className="px-3 py-4 text-[12px] text-[#ef5350]">Scan failed: {error}</p>
-        ) : !data ? (
-          <p className="px-3 py-4 text-[12px] text-[#868993]">Scanning…</p>
-        ) : rows.length === 0 ? (
-          <p className="px-3 py-4 text-[12px] leading-relaxed text-[#868993]">
-            No setups right now. Most liquid names have either already come back to their recent
-            POCs or are still moving away from them. It rescans every minute.
-          </p>
-        ) : (
-          rows.map((r) => (
-            <SetupRow
-              key={r.symbol}
-              row={r}
-              currency={currency}
-              active={r.symbol === active}
+      {tab === 'tracked' ? (
+        <>
+          <div className="space-y-2.5 border-b border-[#2a2e39] px-3 py-2.5 text-[12px] text-[#b2b5be]">
+            {marketToggle(true)}
+            {sideToggle}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <PocTracked
+              items={tracked}
+              market={view.market}
+              side={view.side}
+              onChange={changeTracked}
               onOpen={onOpen}
-              watched={watched.has(r.symbol)}
-              onWatch={watch}
+              active={active}
             />
-          ))
-        )}
-      </div>
+          </div>
+          <div className="border-t border-[#2a2e39] px-3 py-2 text-[11px] leading-snug text-[#868993]">
+            Each setup is replayed on 5-minute candles until the close of the next session. A first
+            touch fills at the next candle&apos;s open; other stages wait for price to reach the
+            entry. It wins at +{TARGET_R}R before the stop (a candle reaching both counts as the
+            stop), else it closes at that last close. Before costs. Saved in this browser only.
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="space-y-2.5 border-b border-[#2a2e39] px-3 py-2.5 text-[12px] text-[#b2b5be]">
+            {marketToggle(false)}
+            {sideToggle}
+            <label
+              className="flex items-center justify-between gap-2"
+              title={`Also list names that have not touched yet but are within ${APPROACH_PCT}% of the entry edge`}
+            >
+              <span>Include approaching</span>
+              <input
+                type="checkbox"
+                checked={view.approaching}
+                onChange={(e) => patch({ approaching: e.target.checked })}
+                className="h-3.5 w-3.5 accent-[#4fc3f7]"
+              />
+            </label>
+            <label
+              className="flex items-center justify-between gap-2"
+              title={`Also list names that have given back at least ${PULLBACK_SHARE * 100}% of their move away and are heading back toward the zone`}
+            >
+              <span>Include pulling back</span>
+              <input
+                type="checkbox"
+                checked={view.pullback}
+                onChange={(e) => patch({ pullback: e.target.checked })}
+                className="h-3.5 w-3.5 accent-[#4fc3f7]"
+              />
+            </label>
+          </div>
 
-      <div className="space-y-1 border-t border-[#2a2e39] px-3 py-2 text-[11px] leading-snug text-[#868993]">
-        <p>
-          Setup: a POC zone from the last {LOOKBACK_SESSIONS} sessions that price has not come back
-          to → price moved ≥{AWAY_PCT}% away (over any number of days) → pulling back (gave back ≥
-          {PULLBACK_SHARE * 100}% of the move) → first touch of the zone&apos;s near edge (live for{' '}
-          {LIVE_BARS * 5} min). Stop = the zone&apos;s far edge. Not backtested: it finds the
-          pattern, it does not say it pays.
-        </p>
-        {data ? (
-          <p>
-            {rows.length} setup{rows.length === 1 ? '' : 's'} · updated {updated}
-            {data.notes.length ? ' · the 150 most-traded names were checked' : ''}
-            {status === 'error' ? (
-              <span className="text-[#ef5350]"> · rescan failed, showing the last results</span>
+          {rows.length ? (
+            <div className="flex items-center justify-between gap-2 border-b border-[#2a2e39] px-3 py-1.5 text-[11px] text-[#868993]">
+              <span>
+                {untracked
+                  ? `${untracked} of ${rows.length} not tracked yet`
+                  : `All ${rows.length} are tracked`}
+              </span>
+              <button
+                type="button"
+                disabled={!untracked}
+                onClick={() => trackAll(rows)}
+                title="Save every setup listed here to the Tracked tab, to check after the next close"
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                <Icons.flag size={13} />
+                Track all {untracked || ''}
+              </button>
+            </div>
+          ) : null}
+
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {status === 'error' && !data ? (
+              <p className="px-3 py-4 text-[12px] text-[#ef5350]">Scan failed: {error}</p>
+            ) : !data ? (
+              <p className="px-3 py-4 text-[12px] text-[#868993]">Scanning…</p>
+            ) : rows.length === 0 ? (
+              <p className="px-3 py-4 text-[12px] leading-relaxed text-[#868993]">
+                No setups right now. Most liquid names have either already come back to their recent
+                POCs or are still moving away from them. It rescans every minute.
+              </p>
+            ) : (
+              rows.map((r) => (
+                <SetupRow
+                  key={r.symbol}
+                  row={r}
+                  currency={currency}
+                  active={r.symbol === active}
+                  onOpen={onOpen}
+                  watched={watched.has(r.symbol)}
+                  onWatch={watch}
+                  tracked={trackedIds.has(trackId(r))}
+                  onTrack={toggleTrack}
+                />
+              ))
+            )}
+          </div>
+
+          <div className="space-y-1 border-t border-[#2a2e39] px-3 py-2 text-[11px] leading-snug text-[#868993]">
+            <p>
+              Setup: a POC zone from the last {LOOKBACK_SESSIONS} sessions that price has not come
+              back to → price moved ≥{AWAY_PCT}% away (over any number of days) → pulling back (gave
+              back ≥{PULLBACK_SHARE * 100}% of the move) → first touch of the zone&apos;s near edge
+              (live for {LIVE_BARS * 5} min). Stop = the zone&apos;s far edge. Not backtested: it
+              finds the pattern, it does not say it pays.
+            </p>
+            {data ? (
+              <p>
+                {rows.length} setup{rows.length === 1 ? '' : 's'} · updated {updated}
+                {data.notes.length ? ' · the 150 most-traded names were checked' : ''}
+                {status === 'error' ? (
+                  <span className="text-[#ef5350]"> · rescan failed, showing the last results</span>
+                ) : null}
+              </p>
             ) : null}
-          </p>
-        ) : null}
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -365,6 +480,8 @@ function SetupRow({
   onOpen,
   watched,
   onWatch,
+  tracked,
+  onTrack,
 }: {
   row: ScreenerRow;
   currency: string;
@@ -372,6 +489,8 @@ function SetupRow({
   onOpen: (row: ScreenerRow) => void;
   watched: boolean;
   onWatch: (row: ScreenerRow) => void;
+  tracked: boolean;
+  onTrack: (row: ScreenerRow) => void;
 }) {
   const long = row.pocStage?.startsWith('Long');
   const touching = row.pocStage?.endsWith('first touch');
@@ -412,6 +531,25 @@ function SetupRow({
             }`}
           >
             {watched ? <Icons.check size={14} /> : <Icons.plus size={14} />}
+          </button>
+          <button
+            type="button"
+            aria-pressed={tracked}
+            title={
+              tracked
+                ? 'Tracked: see the Tracked tab (click to stop tracking)'
+                : 'Track this setup: check after the next close whether it went the right way'
+            }
+            aria-label={tracked ? `Stop tracking ${row.symbol}` : `Track ${row.symbol}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTrack(row);
+            }}
+            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-[#363a45] ${
+              tracked ? 'text-[#4fc3f7]' : 'text-[#868993] hover:text-white'
+            }`}
+          >
+            <Icons.flag size={14} />
           </button>
         </div>
         <span

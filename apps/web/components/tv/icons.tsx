@@ -410,6 +410,13 @@ export const Icons = {
       </>,
       size,
     ),
+  flag: ({ size }: IconProps) =>
+    wrap(
+      <>
+        <path d="M5.5 17V3.5M5.5 4h9l-2.25 3.5L14.5 11h-9" />
+      </>,
+      size,
+    ),
   refresh: ({ size }: IconProps) =>
     wrap(
       <>
