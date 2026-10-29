@@ -919,14 +919,15 @@ const ev = (setup, bars, now) =>
 const longFT = { long: true, stage: 'Long · first touch', entry: 100, stop: 99 };
 const ohlc = (t, o, h, l, c) => ({ time: t, open: o, high: h, low: l, close: c, volume: 1000 });
 
-test('evaluate: a first touch fills at the next open; +2R before the stop is a target', () => {
+test('evaluate: a first touch rests at the entry like any stage; +2R past the entry before the stop is a target', () => {
   const e = ev(longFT, [
     ohlc(T0 - 300, 100, 100.2, 99.9, 100), // before it was added: ignored
     ohlc(T0, 100.1, 100.4, 100, 100.3),
     ohlc(T0 + 300, 100.3, 102.5, 100.2, 102.4),
   ]);
   assert.equal(e.outcome, 'target');
-  assert.equal(e.fillPrice, 100.1);
+  assert.equal(e.fillPrice, 100); // the 15:00 candle opened at 100.1 and came down to the entry
+  assert.equal(e.rules, 2);
   assert.ok(Math.abs(e.r - 2) < 1e-9, `r ${e.r}`);
   assert.equal(e.done, true);
 });
@@ -990,4 +991,80 @@ test('summarize: median and average % beside the total, which one tiny-stop trad
   assert.equal(s.medianR, -0.5); // the total says +12R, the typical trade lost
   assert.ok(Math.abs(s.avgPct - 0.2) < 1e-9, `avg ${s.avgPct}`);
   assert.equal(s.rightWay, 1);
+});
+
+test('evaluate: no fill in the first minutes after the open; the result says which wait it used', () => {
+  // UTC "sessions" open 14:00 (840 min); added before the open of day 3, so the window is day 3
+  const open = D2 + DAY; // 14:00 on day 3
+  const added = { ...longFT, addedAt: open - 600 };
+  const bars = [
+    ohlc(open, 100, 100.2, 99.9, 100.1), // 14:00: inside the wait
+    ohlc(open + 1500, 100.4, 100.5, 100.3, 100.4), // 14:25: inside a 45-minute wait
+    ohlc(open + 2700, 100.5, 100.6, 99.98, 100.6), // 14:45: the first candle allowed to fill, back at 100
+  ];
+  const now = open + DAY;
+  const noWait = evaluate(added, bars, UTC, now, CLOSE, { openMin: 840, waitMin: 0 });
+  assert.equal(noWait.fillPrice, 100);
+  assert.equal(noWait.waitMin, 0);
+  const waited = evaluate(added, bars, UTC, now, CLOSE, { openMin: 840, waitMin: 45 });
+  assert.equal(waited.fillPrice, 100);
+  assert.equal(waited.fillTime, open + 2700);
+  assert.equal(waited.waitMin, 45);
+  // a resting order reached only inside the wait is not filled
+  const limit = { ...added, stage: 'Long · pulling back', entry: 99.95, stop: 99 };
+  assert.equal(
+    evaluate(limit, bars, UTC, now, CLOSE, { openMin: 840, waitMin: 45 }).outcome,
+    'not filled',
+  );
+});
+
+test('evaluate: reaching the stop before the entry (inside the wait, or a gap past it) cancels the setup', () => {
+  const open = D2 + DAY;
+  const short = {
+    long: false,
+    stage: 'Short · pulling back',
+    entry: 50,
+    stop: 50.5,
+    addedAt: open - 600,
+  };
+  const opts = { openMin: 840, waitMin: 45 };
+  // ran through the stop at 14:10, inside the wait
+  const inWait = evaluate(
+    short,
+    [ohlc(open + 600, 50.2, 50.8, 50.1, 50.7), ohlc(open + 2700, 50.7, 50.9, 50.6, 50.8)],
+    UTC,
+    open + DAY,
+    CLOSE,
+    opts,
+  );
+  assert.equal(inWait.outcome, 'cancelled');
+  assert.equal(inWait.done, true);
+  assert.equal(inWait.fillPrice, null);
+  // first allowed candle opens past the stop
+  const gap = evaluate(
+    { ...short, stage: 'Short · first touch' },
+    [ohlc(open + 2700, 50.7, 50.9, 50.6, 50.8)],
+    UTC,
+    open + DAY,
+    CLOSE,
+    opts,
+  );
+  assert.equal(gap.outcome, 'cancelled');
+  assert.equal(summarize([inWait, gap]).notFilled, 2);
+});
+
+test('evaluate: a first touch saved after the close is not chased the next morning', () => {
+  // TFCILTD 2026-10-29: short at 157.13, stop 157.63; next morning it opened at 158.72, above the stop
+  const short = {
+    long: false,
+    stage: 'Short · first touch',
+    entry: 157.13,
+    stop: 157.63,
+    addedAt: D2 + DAY - 600,
+  };
+  const opts = { openMin: 840, waitMin: 45 };
+  const bars = [ohlc(D2 + DAY + 2700, 158.72, 158.9, 158.5, 158.8)];
+  const e = evaluate(short, bars, UTC, D2 + 2 * DAY, CLOSE, opts);
+  assert.equal(e.outcome, 'cancelled');
+  assert.equal(e.fillPrice, null);
 });

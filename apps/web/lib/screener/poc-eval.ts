@@ -9,14 +9,29 @@ import type { ScreenerRow } from './types.ts';
  *
  * The rules, fixed in advance so a result can't be argued afterwards:
  *  - window: from the first candle that starts after the setup was added, to the close of the NEXT session (added
- *    mid-session → the rest of today and all of tomorrow; added after the close → all of the next session);
- *  - fill: a first touch is already at the entry, so it fills at the open of the first candle in the window; any
- *    other stage is a resting order at the entry and fills when a candle reaches it (at the open if it gaps past);
- *  - exits: the stop, or a target `TARGET_R` × risk beyond the fill. A candle that reaches both counts as the stop
- *    (we can't tell which came first), and the fill candle can only stop out, never hit the target;
+ *    mid-session → the rest of today and all of tomorrow; added after the close or before the open → all of the
+ *    next session);
+ *  - no entry in the first `waitMin` minutes of any session (the open is the noisiest stretch of the day): candles
+ *    starting before the open + `waitMin` can't fill;
+ *  - fill: every stage is a resting order at the entry, filled when a candle reaches it (at the open when it
+ *    opens past the entry towards the stop: a better price). Price never chased: a setup saved after the close
+ *    doesn't enter wherever the next morning opens;
+ *  - before the fill, price reaching the stop (inside the wait, or a candle opening past it) cancels the setup;
+ *  - exits: the stop, or the target `TARGET_R` × risk beyond the ENTRY (fixed levels: R = entry to stop). A candle
+ *    that reaches both counts as the stop (we can't tell which came first), and the fill candle can only stop out,
+ *    never hit the target;
  *  - still open at the end of the window: closed at that last close.
  */
 export const TARGET_R = 2;
+/**
+ * Bumped whenever the rules above change: a stored result scored under other rules is scored again. 2: no chasing
+ * a first touch, target from the entry, cancelled before entry.
+ */
+export const RULES = 2;
+/** Minutes after the open with no new entries, by default. */
+export const WAIT_MIN = 45;
+/** Session open, minutes after midnight on the exchange clock. */
+export const OPEN_MIN: Record<string, number> = { us: 9 * 60 + 30, in: 9 * 60 + 15 };
 
 export interface TrackedSetup {
   /** symbol + the zone's session: the same setup can't be tracked twice, the next one on another POC can. */
@@ -39,7 +54,15 @@ export interface TrackedSetup {
   final?: Evaluation;
 }
 
-export type Outcome = 'waiting' | 'not filled' | 'open' | 'target' | 'stopped' | 'closed';
+export type Outcome =
+  | 'waiting'
+  | 'not filled'
+  /** Price reached the stop before the trade could be entered (during the wait, or opening past it). */
+  | 'cancelled'
+  | 'open'
+  | 'target'
+  | 'stopped'
+  | 'closed';
 
 export interface Evaluation {
   outcome: Outcome;
@@ -57,6 +80,41 @@ export interface Evaluation {
   pct: number | null;
   /** The session the window ends with (null until it is known). */
   endDay: string | null;
+  /** The no-entry wait after the open it was scored with: a result stored under another wait is scored again. */
+  waitMin?: number;
+  /** `RULES` when it was scored. */
+  rules?: number;
+}
+
+/** A tracked setup's actual trade, for drawing on the chart: where it filled and where it ended (or is now). */
+export interface TradeMarks {
+  long: boolean;
+  outcome: Outcome;
+  fillTime: number;
+  fillPrice: number;
+  /** null while still open: the trade runs to the last candle, marked at `exitPrice` (the last close). */
+  exitTime: number | null;
+  exitPrice: number;
+  stop: number;
+  target: number;
+  r: number | null;
+}
+
+/** The trade to draw for a tracked setup; null before it has filled. */
+export function tradeOf(t: TrackedSetup, e: Evaluation | null): TradeMarks | null {
+  if (!e || e.fillPrice == null || e.fillTime == null || e.exitPrice == null) return null;
+  const risk = Math.abs(t.entry - t.stop);
+  return {
+    long: t.long,
+    outcome: e.outcome,
+    fillTime: e.fillTime,
+    fillPrice: e.fillPrice,
+    exitTime: e.exitTime,
+    exitPrice: e.exitPrice,
+    stop: t.stop,
+    target: t.entry + (t.long ? 1 : -1) * TARGET_R * risk,
+    r: e.r,
+  };
 }
 
 export const trackId = (row: Pick<ScreenerRow, 'symbol' | 'pocFrom'>) =>
@@ -110,6 +168,20 @@ export function evaluate(
   clock: (t: number) => SessionClock,
   now: number,
   closeMin: number,
+  { openMin = 0, waitMin = 0 }: { openMin?: number; waitMin?: number } = {},
+): Evaluation {
+  const canFill = (b: Bar) => clock(b.time).min >= openMin + waitMin;
+  return { ...replay(t, bars, clock, now, closeMin, openMin, canFill), waitMin, rules: RULES };
+}
+
+function replay(
+  t: Pick<TrackedSetup, 'long' | 'stage' | 'entry' | 'stop' | 'addedAt'>,
+  bars: readonly Bar[],
+  clock: (t: number) => SessionClock,
+  now: number,
+  closeMin: number,
+  openMin: number,
+  canFill: (b: Bar) => boolean,
 ): Evaluation {
   const after = bars.filter((b) => b.time >= t.addedAt && b.high >= b.low);
   if (!after.length) return PENDING;
@@ -120,7 +192,9 @@ export function evaluate(
     const d = clock(b.time).day;
     if (days[days.length - 1] !== d) days.push(d);
   }
-  const endDay = days[0] === addDay ? (days[1] ?? null) : days[0]!;
+  // added during a session: the rest of it and the next one; before the open or after the close: one session
+  const midSession = days[0] === addDay && clock(t.addedAt).min >= openMin;
+  const endDay = midSession ? (days[1] ?? null) : days[0]!;
   const window = endDay ? after.filter((b) => clock(b.time).day <= endDay) : after;
   const today = clock(now);
   const complete =
@@ -131,18 +205,34 @@ export function evaluate(
   const risk = Math.abs(t.entry - t.stop);
   if (!(risk > 0)) return { ...PENDING, endDay };
 
-  // the fill
+  // the fill. Before it, price reaching the stop (inside the wait, or a candle opening past it) means the setup
+  // broke before it could be entered: cancelled, never a fill already beyond its own stop.
   let i = 0;
   let fill: number | null = null;
-  if (t.stage.endsWith('first touch')) {
-    fill = window[0]!.open;
-  } else {
-    for (; i < window.length; i += 1) {
-      const b = window[i]!;
-      if (long ? b.low <= t.entry : b.high >= t.entry) {
-        fill = long ? Math.min(b.open, t.entry) : Math.max(b.open, t.entry);
-        break;
-      }
+  for (; i < window.length; i += 1) {
+    const b = window[i]!;
+    const allowed = canFill(b);
+    const pastStop = allowed
+      ? long
+        ? b.open <= t.stop
+        : b.open >= t.stop
+      : long
+        ? b.low <= t.stop
+        : b.high >= t.stop;
+    if (pastStop) {
+      return {
+        ...PENDING,
+        outcome: 'cancelled',
+        done: true,
+        exitPrice: allowed ? b.open : t.stop,
+        exitTime: b.time,
+        endDay,
+      };
+    }
+    if (!allowed) continue;
+    if (long ? b.low <= t.entry : b.high >= t.entry) {
+      fill = long ? Math.min(b.open, t.entry) : Math.max(b.open, t.entry);
+      break;
     }
   }
   if (fill == null) {
@@ -150,7 +240,7 @@ export function evaluate(
   }
   const fillTime = window[i]!.time;
   const rOf = (p: number) => (dir * (p - fill!)) / risk;
-  const target = fill + dir * TARGET_R * risk;
+  const target = t.entry + dir * TARGET_R * risk;
   const result = (
     outcome: Outcome,
     price: number,
@@ -232,7 +322,7 @@ export function summarize(evals: readonly Evaluation[]): TrackSummary {
   for (const e of evals) {
     if (!e.done) continue;
     s.finished += 1;
-    if (e.outcome === 'not filled') {
+    if (e.outcome === 'not filled' || e.outcome === 'cancelled') {
       s.notFilled += 1;
       continue;
     }

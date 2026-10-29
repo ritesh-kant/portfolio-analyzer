@@ -1,5 +1,5 @@
 import type { Bar } from './types';
-import type { Drawing, DrawingKind, Pt } from './drawings';
+import type { Drawing, DrawingKind, Pt, TimeAxis } from './drawings';
 
 /**
  * TradingView-style Long / Short position tools.
@@ -36,6 +36,25 @@ export function positionPts(
   ];
 }
 
+/** Box width in candles; legacy drawings (no `span`) derive it from their right anchor. */
+export function positionSpan(d: Drawing, axis: TimeAxis): number {
+  if (d.span != null && d.span > 0) return d.span;
+  const [a, b] = d.pts as [Pt, Pt, Pt, Pt];
+  return Math.max(1, axis.toLogical(b.t) - axis.toLogical(a.t));
+}
+
+/** Time of the box's right edge, `span` candles after the entry. */
+export function positionEnd(d: Drawing, axis: TimeAxis): number {
+  const a = d.pts[0]!;
+  return axis.toTime(axis.toLogical(a.t) + positionSpan(d, axis));
+}
+
+/** Re-measures `span` after a handle drag, while the on-screen right edge is still where the user put it. */
+export function withSpan(d: Drawing, axis: TimeAxis): Drawing {
+  const [a, b] = d.pts as [Pt, Pt, Pt, Pt];
+  return { ...d, span: Math.max(1, axis.toLogical(b.t) - axis.toLogical(a.t)) };
+}
+
 export type PositionStatus = 'open' | 'target' | 'stop';
 
 export interface PositionStats {
@@ -63,7 +82,7 @@ export interface PositionStats {
  * touch the target or the stop closes the trade; when one candle spans both we cannot know the
  * order, so the stop is assumed (the pessimistic reading).
  */
-export function positionStats(d: Drawing, bars: Bar[], tick: number): PositionStats {
+export function positionStats(d: Drawing, bars: Bar[], tick: number, end?: number): PositionStats {
   const [a, b, tp, sl] = d.pts as [Pt, Pt, Pt, Pt];
   const isLong = d.kind === 'long';
   const dir = isLong ? 1 : -1;
@@ -80,7 +99,7 @@ export function positionStats(d: Drawing, bars: Bar[], tick: number): PositionSt
   let status: PositionStatus = 'open';
   let exit: number | null = null;
   const t0 = Math.min(a.t, b.t);
-  const t1 = Math.max(a.t, b.t);
+  const t1 = end ?? Math.max(a.t, b.t);
   let last: number | null = null;
   for (const bar of bars) {
     if (bar.time <= t0) continue;

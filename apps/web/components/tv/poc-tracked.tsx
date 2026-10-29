@@ -4,8 +4,12 @@ import { useEffect, useState } from 'react';
 import { MARKETS } from '../../lib/screener/markets';
 import {
   evaluate,
+  OPEN_MIN,
+  RULES,
   summarize,
   TARGET_R,
+  tradeOf,
+  type TradeMarks,
   type Evaluation,
   type TrackedSetup,
 } from '../../lib/screener/poc-eval';
@@ -21,6 +25,8 @@ export const saveTracked = (list: TrackedSetup[]) => save(KEY, list);
 
 /** Session close, minutes after midnight on the exchange clock: when "tomorrow's close" has happened. */
 const CLOSE_MIN: Record<string, number> = { us: 16 * 60, in: 15 * 60 + 30 };
+/** The candles fetched reach a month back: a result older than this can't be scored again under a new wait. */
+const REFETCH_DAYS = 25;
 /** NSE intraday round trip at real costs (brokerage, STT, charges, slippage), as % of the price. */
 const IN_COST_PCT = 0.2;
 const REFRESH_MS = 60_000;
@@ -70,8 +76,11 @@ interface Props {
   market: string;
   /** Both, or only the longs / only the shorts. */
   side: 'both' | 'long' | 'short';
+  /** No entries in this many minutes after each session's open. */
+  waitMin: number;
   onChange: (fn: (cur: TrackedSetup[]) => TrackedSetup[]) => void;
-  onOpen: (row: ScreenerRow) => void;
+  /** Opens the setup on the chart, with its trade drawn once it has filled. */
+  onOpen: (row: ScreenerRow, trade: TradeMarks | null) => void;
   active: string;
 }
 
@@ -79,21 +88,27 @@ interface Props {
  * Setups saved from the scanner, each replayed against the candles that came after it (rules in
  * `lib/screener/poc-eval.ts`): did the long go up, did the short go down, by the close of the next session.
  */
-export function PocTracked({ items: all, market, side, onChange, onOpen, active }: Props) {
+export function PocTracked({ items: all, market, side, waitMin, onChange, onOpen, active }: Props) {
   const items = all.filter(
     (t) => t.market === market && (side === 'both' || t.long === (side === 'long')),
   );
   const [evals, setEvals] = useState<Record<string, Evaluation>>({});
   const [failed, setFailed] = useState<string[]>([]);
+  // a stored result counts only under the wait it was scored with; one too old to refetch candles for stays as it is
+  const nowS = Math.floor(Date.now() / 1000);
+  const settled = (t: TrackedSetup) =>
+    t.final != null &&
+    (((t.final.waitMin ?? 0) === waitMin && t.final.rules === RULES) ||
+      nowS - t.addedAt > REFETCH_DAYS * 86_400);
   const pendingKey = items
-    .filter((t) => !t.final)
+    .filter((t) => !settled(t))
     .map((t) => t.id)
     .join(',');
 
   useEffect(() => {
     let alive = true;
     const run = async () => {
-      const open = items.filter((t) => !t.final);
+      const open = items.filter((t) => !settled(t));
       if (!open.length) return;
       const symbols = [...new Set(open.map((t) => t.symbol))];
       const got = await Promise.allSettled(symbols.map(fetchBars));
@@ -111,7 +126,17 @@ export function PocTracked({ items: all, market, side, onChange, onOpen, active 
         const b = bars.get(t.symbol);
         if (!b) continue;
         const m = MARKETS[t.market];
-        next[t.id] = evaluate(t, b, zoneClock(m?.tz ?? 'UTC'), now, CLOSE_MIN[t.market] ?? 16 * 60);
+        next[t.id] = evaluate(
+          t,
+          b,
+          zoneClock(m?.tz ?? 'UTC'),
+          now,
+          CLOSE_MIN[t.market] ?? 16 * 60,
+          {
+            openMin: OPEN_MIN[t.market] ?? 0,
+            waitMin,
+          },
+        );
       }
       setFailed(bad);
       setEvals((cur) => ({ ...cur, ...next }));
@@ -132,9 +157,13 @@ export function PocTracked({ items: all, market, side, onChange, onOpen, active 
     };
     // re-run only when the set of unfinished setups changes, not on every stored result
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingKey]);
+  }, [pendingKey, waitMin]);
 
-  const evalOf = (t: TrackedSetup) => t.final ?? evals[t.id] ?? null;
+  const evalOf = (t: TrackedSetup) => {
+    if (settled(t)) return t.final!;
+    const e = evals[t.id];
+    return e && e.waitMin === waitMin && e.rules === RULES ? e : null;
+  };
   const sorted = [...items].sort((a, b) => b.addedAt - a.addedAt);
   const s = summarize(items.map(evalOf).filter((e): e is Evaluation => e != null));
 
@@ -152,6 +181,25 @@ export function PocTracked({ items: all, market, side, onChange, onOpen, active 
   return (
     <>
       <div className="border-b border-[#2a2e39] px-3 py-2 text-[12px] text-[#b2b5be]">
+        <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-[#868993]">
+          <span>
+            {MARKETS[market]?.label ?? market}
+            {side === 'both' ? '' : ` · ${side}s only`}
+          </span>
+          <button
+            type="button"
+            title="Stop tracking every setup listed here (only this market and side)"
+            onClick={() => {
+              const ids = new Set(items.map((t) => t.id));
+              if (!window.confirm(`Remove all ${ids.size} tracked setup(s) listed here?`)) return;
+              onChange((cur) => cur.filter((t) => !ids.has(t.id)));
+            }}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[#b2b5be] hover:bg-[#2a2e39] hover:text-[#f23645]"
+          >
+            <Icons.trash size={13} />
+            Remove all {items.length}
+          </button>
+        </div>
         <div>
           {s.total} tracked · {s.finished} finished
           {s.traded ? (
@@ -176,7 +224,7 @@ export function PocTracked({ items: all, market, side, onChange, onOpen, active 
         {s.finished ? (
           <div className="mt-0.5 text-[11px] text-[#868993]">
             {s.targets} hit +{TARGET_R}R · {s.stops} stopped · {s.closed} closed at the next close
-            {s.notFilled ? ` · ${s.notFilled} never reached the entry` : ''}
+            {s.notFilled ? ` · ${s.notFilled} never entered (not reached, or broke first)` : ''}
           </div>
         ) : null}
         {failed.length ? (
@@ -191,7 +239,7 @@ export function PocTracked({ items: all, market, side, onChange, onOpen, active 
           t={t}
           e={evalOf(t)}
           active={t.symbol === active}
-          onOpen={() => onOpen(t.row)}
+          onOpen={() => onOpen(t.row, tradeOf(t, evalOf(t)))}
           onRemove={() => onChange((cur) => cur.filter((x) => x.id !== t.id))}
         />
       ))}
@@ -230,6 +278,8 @@ function verdict(e: Evaluation | null): { text: string; color: string } {
       return { text: 'Waiting for entry', color: GREY };
     case 'not filled':
       return { text: 'Never reached entry', color: GREY };
+    case 'cancelled':
+      return { text: 'Broke before entry', color: GREY };
     case 'open':
       return { text: `Open ${fmtR(e.r ?? 0)}`, color: (e.r ?? 0) >= 0 ? GREEN : RED };
     case 'target':
@@ -258,12 +308,12 @@ function TrackedRow({
   const v = verdict(e);
   const risk = Math.abs(t.entry - t.stop);
   const riskPct = (risk / t.entry) * 100;
-  // measured from the fill once there is one, as the evaluation does
-  const target = (e?.fillPrice ?? t.entry) + (t.long ? 1 : -1) * TARGET_R * risk;
+  const target = t.entry + (t.long ? 1 : -1) * TARGET_R * risk;
   const costR = t.market === 'in' ? IN_COST_PCT / riskPct : null;
   const done = e?.done ?? false;
   return (
     <div
+      data-poc-symbol={t.symbol}
       role="button"
       tabIndex={0}
       onClick={onOpen}
@@ -324,7 +374,11 @@ function TrackedRow({
       <div className="mt-1 text-[11px] text-[#868993]">
         {e?.fillPrice != null && e.fillTime != null
           ? `Filled ${fmtPx(e.fillPrice)} at ${when(e.fillTime, tz)}`
-          : 'Not filled yet'}
+          : e?.outcome === 'cancelled' && e.exitTime != null
+            ? `Reached the stop at ${when(e.exitTime, tz)} before it could enter`
+            : done
+              ? 'Price never came back to the entry'
+              : 'Not filled yet'}
         {e?.bestR != null ? ` · best ${fmtR(e.bestR)}` : ''}
         {e?.endDay
           ? ` · ${done ? 'checked' : 'checking'} to the close of ${dayLabel(e.endDay)}`

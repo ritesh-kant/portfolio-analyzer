@@ -95,6 +95,7 @@ import {
 import { zoneClock } from '../../lib/screener/relvol';
 import { PocSettingsDialog, POC_VIEW_DEFAULTS, type PocView } from './poc-settings';
 import { PocScannerPanel } from './poc-scanner-panel';
+import type { TradeMarks } from '../../lib/screener/poc-eval';
 import { DrawingsPrimitive } from './drawings-primitive';
 import { NewsPrimitive } from './news-primitive';
 import { foldTrailingTick, intervalSecs } from '../../lib/tv/clean-bars';
@@ -500,8 +501,13 @@ export function TvChart() {
   };
   /** The setup picked in the POC scanner: drawn on the chart while its symbol is shown and the panel is open. */
   const [pocPick, setPocPick] = useState<ScreenerRow | null>(null);
+  /** With a pick from the Tracked tab: that setup's fill and exit, drawn over its zone. */
+  const [pocTrade, setPocTrade] = useState<TradeMarks | null>(null);
   /** The pick the chart last centred on, so a refresh of the bars does not yank the view back. */
   const pocJumped = useRef<ScreenerRow | null>(null);
+  /** First bar's time when it centred, and when the pick was clicked: see the pick effect. */
+  const pocJumpedFirst = useRef(0);
+  const pocOpenedAt = useRef(0);
   // POC retest indicator: on the chart (legend row) with its own eye, settings and dialog.
   const [pocOn, setPocOn] = useState(false);
   const [pocMarks, setPocMarks] = useState(true);
@@ -1895,8 +1901,43 @@ export function TvChart() {
       p.pocPrice != null;
     if (!shown) {
       pocPrimRef.current?.setState(null);
+      pocPrimRef.current?.setTrade(null);
       return;
     }
+    // the tracked trade: fill and exit on the candles that contain them (the last one starting at or before)
+    const upTo = (t: number) => {
+      let i = -1;
+      for (let k = 0; k < bars.length && bars[k]!.time <= t; k += 1) i = k;
+      return i < 0 ? null : i;
+    };
+    const clockOf = (t: number) =>
+      new Date(t * 1000).toLocaleString('en-GB', {
+        timeZone,
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+    const tr = pocTrade;
+    const fillIndex = tr ? upTo(tr.fillTime) : null;
+    const tradeMark =
+      tr && fillIndex != null
+        ? {
+            long: tr.long,
+            outcome: tr.outcome,
+            fillIndex,
+            fillPrice: tr.fillPrice,
+            exitIndex: tr.exitTime == null ? bars.length - 1 : (upTo(tr.exitTime) ?? fillIndex),
+            exitPrice: tr.exitPrice,
+            stop: tr.stop,
+            target: tr.target,
+            r: tr.r,
+            fillAt: clockOf(tr.fillTime),
+            exitAt: tr.exitTime == null ? null : clockOf(tr.exitTime),
+          }
+        : null;
+    pocPrimRef.current?.setTrade(tradeMark);
     const at = (t: number | null | undefined) => {
       if (t == null) return null;
       const i = bars.findIndex((b) => b.time >= t);
@@ -1930,17 +1971,32 @@ export function TvChart() {
       sessionsAgo: p.pocSessionsAgo ?? null,
       long,
     });
-    if (pocJumped.current === p) return;
+    // Older candles can arrive a few seconds after the stock loads (prepended, so every bar index shifts): soon
+    // after the click, centre again on them; later, a user who has scrolled away is left alone.
+    const firstTime = bars[0]?.time ?? 0;
+    const shifted =
+      pocJumpedFirst.current !== firstTime && Date.now() - pocOpenedAt.current < 20_000;
+    if (pocJumped.current === p && !shifted) return;
     const ts = chartRef.current?.timeScale();
     const range = ts?.getVisibleLogicalRange();
     if (!ts || !range) return;
     pocJumped.current = p;
-    // show the whole story: the profile's session through the last bar, with a little room on the right
+    pocJumpedFirst.current = firstTime;
     const last = bars.length - 1;
-    const span = Math.max(range.to - range.from, last - fromIndex + 10);
-    showRange(ts, last + 6 - span, last + 6);
+    if (tradeMark) {
+      // a tracked trade: the trade itself, with some candles before the fill and after the exit
+      showRange(
+        ts,
+        tradeMark.fillIndex - 30,
+        Math.min(last + 6, Math.max(tradeMark.exitIndex, tradeMark.fillIndex) + 60),
+      );
+    } else {
+      // show the whole story: the profile's session through the last bar, with a little room on the right
+      const span = Math.max(range.to - range.from, last - fromIndex + 10);
+      showRange(ts, last + 6 - span, last + 6);
+    }
     pocPrimRef.current?.pulse();
-  }, [pocPick, pocOpen, bars, meta, chartType]);
+  }, [pocPick, pocTrade, pocOpen, bars, meta, chartType, timeZone]);
   // POC retest indicator: the same detection as the scanner, run on this chart's regular-hours bars. A POC built
   // from candles longer than 15 minutes is too coarse, so it draws nothing there (the legend says so).
   const pocLevels = useMemo(() => {
@@ -3992,9 +4048,11 @@ export function TvChart() {
             {pocOpen && !compact ? (
               <PocScannerPanel
                 active={symbol}
-                onOpen={(row) => {
+                onOpen={(row, trade) => {
                   pocJumped.current = null;
+                  pocOpenedAt.current = Date.now();
                   setPocPick(row);
+                  setPocTrade(trade ?? null);
                   setSymbol(row.symbol);
                   // the zone is built from 5-minute bars: on a daily chart it would be one candle wide
                   if (!tf.intraday || tf.secs > 900) setTfId('5m');

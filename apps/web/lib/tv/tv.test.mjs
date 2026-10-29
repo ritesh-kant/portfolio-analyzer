@@ -4,7 +4,7 @@ import { aggregateBars, heikinAshi, mergeBars, sessionDay, wallClock } from './t
 import { atr, ema, macd, relativeVolume, rsi, sma, vwap } from './indicators.ts';
 import { autoStep, buildFootprints, niceStep, stepLadder } from './footprint.ts';
 import { makeTimeAxis } from './drawings.ts';
-import { dragPositionHandle, editPositionLevels, positionPts, positionStats } from './position.ts';
+import { dragPositionHandle, editPositionLevels, positionEnd, positionPts, positionSpan, positionStats } from './position.ts';
 import { aliasHits } from './aliases.ts';
 import { completedCount, endAfter, nextEnd } from './replay.ts';
 import { matchScore, rankHits, searchQueries } from './search-rank.ts';
@@ -1141,4 +1141,18 @@ test('findFvgs: atr filter drops gaps smaller than the multiple of ATR', () => {
   // gap is 2 tall; at 0.5 × 4 = 2 it stays, at 1 × 4 it goes
   assert.equal(findFvgs(bullGap(), { ...FVG_DEFAULTS, filter: 'atr', atrMult: 0.5 }, atrs).length, 1);
   assert.equal(findFvgs(bullGap(), { ...FVG_DEFAULTS, filter: 'atr', atrMult: 1 }, atrs).length, 0);
+});
+
+test('position keeps its width in candles across an overnight gap', () => {
+  const times = [];
+  for (let d = 0; d < 2; d += 1) for (let m = 0; m < 375; m += 1) times.push(d * 86400 + 33300 + m * 60);
+  const entry = times[360];
+  const created = makeTimeAxis(times.slice(0, 361), 60);
+  const widthSecs = created.toTime(created.toLogical(entry) + 40) - entry;
+  const d = { ...pos('long'), span: 40, pts: positionPts('long', { t: entry, p: 100 }, widthSecs, 5, 10) };
+  const later = makeTimeAxis(times, 60);
+  assert.equal(positionSpan(d, later), 40);
+  assert.ok(positionEnd(d, later) > entry + 3600 * 12);
+  const old = { ...d, span: undefined };
+  assert.ok(positionSpan(old, later) < 20); // legacy drawing: width as the axis now sees it
 });

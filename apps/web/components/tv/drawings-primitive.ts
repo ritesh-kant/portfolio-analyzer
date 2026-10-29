@@ -17,6 +17,8 @@ import {
   POSITION_PROFIT,
   POSITION_STOP,
   isPosition,
+  positionEnd,
+  positionSpan,
   positionStats,
 } from '../../lib/tv/position';
 
@@ -94,6 +96,9 @@ function fibLevelPrice(d: Drawing, v: number): number {
  * attached to a series of its own pane, so prices are read against that pane's scale, and it only draws and
  * hit-tests the drawings that belong to it.
  */
+/** A position box never gets narrower than this, whatever the zoom. */
+const MIN_POSITION_PX = 24;
+
 export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   constructor(private readonly paneKey: string | null = null) {}
 
@@ -235,7 +240,10 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   private positionGeometry(d: Drawing, w: number, h: number): Geometry | null {
     const [a, b, tp, sl] = d.pts as [Pt, Pt, Pt, Pt];
     const left = this.px(a.t, a.p);
-    const right = this.px(b.t, b.p);
+    if (!left || !this.chart) return null;
+    // The width is a candle count, so it survives the overnight gaps that crush a duration.
+    const rx = logicalX(this.chart, this.state.axis.toLogical(a.t) + positionSpan(d, this.state.axis));
+    const right = rx == null ? null : { x: Math.max(rx, left.x + MIN_POSITION_PX), y: left.y };
     const yT = this.series?.priceToCoordinate(tp.p);
     const yS = this.series?.priceToCoordinate(sl.p);
     if (!left || !right || yT == null || yS == null) return null;
@@ -593,7 +601,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   private paintPosition(ctx: CanvasRenderingContext2D, d: Drawing, g: Geometry, emphasis: boolean) {
     const [a, b, t, s] = g.pts as [Px, Px, Px, Px];
     const decimals = this.state.decimals;
-    const st = positionStats(d, this.state.bars, 10 ** -decimals);
+    const st = positionStats(d, this.state.bars, 10 ** -decimals, positionEnd(d, this.state.axis));
     const x0 = Math.min(a.x, b.x);
     const x1 = Math.max(a.x, b.x);
     const yE = a.y;

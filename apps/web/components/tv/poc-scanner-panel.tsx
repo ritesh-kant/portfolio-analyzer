@@ -11,13 +11,22 @@ import {
   PULLBACK_SHARE,
   type PocStage,
 } from '../../lib/screener/poc-retest';
+import { zoneClock } from '../../lib/screener/relvol';
 import type { FilterState, ScreenerResponse, ScreenerRow } from '../../lib/screener/types';
 import { load, save } from '../../lib/tv/storage';
 import { Icons } from './icons';
 import { PANEL_WIDTH_KEY } from './panel-width';
 import { addToWatchlist, watchlistSymbols } from './watchlist-panel';
 import { loadTracked, PocTracked, saveTracked } from './poc-tracked';
-import { TARGET_R, trackId, trackRow, type TrackedSetup } from '../../lib/screener/poc-eval';
+import {
+  OPEN_MIN,
+  TARGET_R,
+  WAIT_MIN,
+  trackId,
+  trackRow,
+  type TrackedSetup,
+  type TradeMarks,
+} from '../../lib/screener/poc-eval';
 
 const WIDTH_KEY = PANEL_WIDTH_KEY;
 const MIN_WIDTH = 260;
@@ -25,6 +34,8 @@ const MAX_WIDTH = 640;
 const DEFAULT_WIDTH = 300;
 const clampWidth = (w: number) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(w)));
 const VIEW_KEY = 'tv:pocScanView';
+const WAIT_KEY = 'tv:pocWaitMin';
+const TAB_KEY = 'tv:pocTab';
 const REFRESH_MS = 60_000;
 
 /**
@@ -102,7 +113,8 @@ const COLUMNS = [
 
 interface Props {
   active: string;
-  onOpen: (row: ScreenerRow) => void;
+  /** `trade` only from the Tracked tab: the tracked setup's fill and exit, drawn on the chart. */
+  onOpen: (row: ScreenerRow, trade?: TradeMarks | null) => void;
 }
 
 /**
@@ -138,7 +150,17 @@ export function PocScannerPanel({ active, onOpen }: Props) {
   const req = useRef(0);
 
   // setups saved for checking later (localStorage: read after mount, like the watchlist)
-  const [tab, setTab] = useState<'scan' | 'tracked'>('scan');
+  // the open tab survives the panel closing (another right panel, an indicator) and a reload
+  const [tab, setTab] = useState<'scan' | 'tracked'>(() =>
+    load<string>(TAB_KEY, 'scan') === 'tracked' ? 'tracked' : 'scan',
+  );
+  // no entries this many minutes after the open: shared by the scanner's notes and the Tracked tab's scoring
+  const [waitMin, setWaitMin] = useState(WAIT_MIN);
+  useEffect(() => setWaitMin(load<number>(WAIT_KEY, WAIT_MIN)), []);
+  const changeWait = (v: number) => {
+    setWaitMin(v);
+    save(WAIT_KEY, v);
+  };
   const [tracked, setTracked] = useState<TrackedSetup[]>([]);
   useEffect(() => setTracked(loadTracked()), []);
   const changeTracked = useCallback((fn: (cur: TrackedSetup[]) => TrackedSetup[]) => {
@@ -275,6 +297,43 @@ export function PocScannerPanel({ active, onOpen }: Props) {
       ))}
     </div>
   );
+  const openMin = OPEN_MIN[view.market] ?? 0;
+  const entriesFrom = hhmm(openMin + waitMin);
+  const waitInput = (
+    <label
+      className="flex items-center justify-between gap-2"
+      title="No entries in this many minutes after the open: the first minutes are the noisiest of the day. The Tracked tab only fills after it; the scanner flags touches inside it."
+    >
+      <span>Wait after the open (min)</span>
+      <WaitBox value={waitMin} onCommit={changeWait} />
+    </label>
+  );
+  const clock = zoneClock(MARKETS[view.market]?.tz ?? 'UTC');
+  const nowMin = clock(Math.floor(Date.now() / 1000)).min;
+  const inWait = waitMin > 0 && nowMin >= openMin && nowMin < openMin + waitMin;
+  // bring the chart's stock into view: centred when the list opens or changes (tab, market, side, first results),
+  // only nudged when the chart switches stock (clicking a card must not move the list under the pointer)
+  const listRef = useRef<HTMLDivElement>(null);
+  const reveal = useCallback(
+    (block: ScrollLogicalPosition) => {
+      const el = listRef.current?.querySelector<HTMLElement>(
+        `[data-poc-symbol="${CSS.escape(active)}"]`,
+      );
+      el?.scrollIntoView({ block });
+    },
+    [active],
+  );
+  const shownCount = tab === 'tracked' ? tracked.length : rows.length;
+  useEffect(() => {
+    // after layout; a timer, not requestAnimationFrame, which never fires in a background tab
+    const id = window.setTimeout(() => reveal('center'), 30);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, view.market, view.side, shownCount > 0]);
+  useEffect(() => {
+    const id = window.setTimeout(() => reveal('nearest'), 30);
+    return () => window.clearTimeout(id);
+  }, [reveal]);
   const untracked = rows.filter((r) => !trackedIds.has(trackId(r))).length;
   const updated = data ? new Date(data.asOf).toLocaleTimeString('en-GB', { hour12: false }) : '';
 
@@ -327,7 +386,10 @@ export function PocScannerPanel({ active, onOpen }: Props) {
             type="button"
             role="tab"
             aria-selected={tab === id}
-            onClick={() => setTab(id)}
+            onClick={() => {
+              setTab(id);
+              save(TAB_KEY, id);
+            }}
             className={`py-1.5 transition-colors ${
               tab === id
                 ? 'text-white shadow-[inset_0_-2px_0_#4fc3f7]'
@@ -344,21 +406,24 @@ export function PocScannerPanel({ active, onOpen }: Props) {
           <div className="space-y-2.5 border-b border-[#2a2e39] px-3 py-2.5 text-[12px] text-[#b2b5be]">
             {marketToggle(true)}
             {sideToggle}
+            {waitInput}
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
             <PocTracked
               items={tracked}
               market={view.market}
               side={view.side}
+              waitMin={waitMin}
               onChange={changeTracked}
               onOpen={onOpen}
               active={active}
             />
           </div>
           <div className="border-t border-[#2a2e39] px-3 py-2 text-[11px] leading-snug text-[#868993]">
-            Each setup is replayed on 5-minute candles until the close of the next session. A first
-            touch fills at the next candle&apos;s open; other stages wait for price to reach the
-            entry. It wins at +{TARGET_R}R before the stop (a candle reaching both counts as the
+            Each setup is replayed on 5-minute candles until the close of the next session. Nothing
+            fills in the first {waitMin} min after the open (from {entriesFrom}). Every setup waits
+            for price to reach its entry (never chased); hitting the stop first cancels it. It wins
+            at +{TARGET_R}R past the entry before the stop (a candle reaching both counts as the
             stop), else it closes at that last close. Before costs. Saved in this browser only.
           </div>
         </>
@@ -391,7 +456,13 @@ export function PocScannerPanel({ active, onOpen }: Props) {
                 className="h-3.5 w-3.5 accent-[#4fc3f7]"
               />
             </label>
+            {waitInput}
           </div>
+          {inWait ? (
+            <div className="border-b border-[#2a2e39] bg-[#ffb74d14] px-3 py-1.5 text-[11px] text-[#ffb74d]">
+              Inside the first {waitMin} min after the open: no entries until {entriesFrom}.
+            </div>
+          ) : null}
 
           {rows.length ? (
             <div className="flex items-center justify-between gap-2 border-b border-[#2a2e39] px-3 py-1.5 text-[11px] text-[#868993]">
@@ -413,7 +484,7 @@ export function PocScannerPanel({ active, onOpen }: Props) {
             </div>
           ) : null}
 
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
             {status === 'error' && !data ? (
               <p className="px-3 py-4 text-[12px] text-[#ef5350]">Scan failed: {error}</p>
             ) : !data ? (
@@ -435,6 +506,16 @@ export function PocScannerPanel({ active, onOpen }: Props) {
                   onWatch={watch}
                   tracked={trackedIds.has(trackId(r))}
                   onTrack={toggleTrack}
+                  earlyTouch={
+                    r.pocStage?.endsWith('first touch') && r.pocTouchAt != null
+                      ? (() => {
+                          const m = clock(r.pocTouchAt).min;
+                          return m >= openMin && m < openMin + waitMin ? hhmm(m) : null;
+                        })()
+                      : null
+                  }
+                  entriesFrom={entriesFrom}
+                  waitMin={waitMin}
                 />
               ))
             )}
@@ -482,6 +563,9 @@ function SetupRow({
   onWatch,
   tracked,
   onTrack,
+  earlyTouch,
+  entriesFrom,
+  waitMin,
 }: {
   row: ScreenerRow;
   currency: string;
@@ -491,6 +575,10 @@ function SetupRow({
   onWatch: (row: ScreenerRow) => void;
   tracked: boolean;
   onTrack: (row: ScreenerRow) => void;
+  /** Clock time of a first touch that came inside the wait after the open, else null. */
+  earlyTouch: string | null;
+  entriesFrom: string;
+  waitMin: number;
 }) {
   const long = row.pocStage?.startsWith('Long');
   const touching = row.pocStage?.endsWith('first touch');
@@ -501,6 +589,7 @@ function SetupRow({
       role="button"
       tabIndex={0}
       data-active={active}
+      data-poc-symbol={row.symbol}
       onClick={() => onOpen(row)}
       onKeyDown={(e) => {
         if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
@@ -582,7 +671,42 @@ function SetupRow({
           ? ` · furthest ${price(row.pocExtreme)}, gave back ${Math.round(row.pocPullbackPct ?? 0)}%`
           : ''}
       </div>
+      {earlyTouch ? (
+        <div className="mt-0.5 text-[11px] text-[#ffb74d]">
+          Touched at {earlyTouch}, inside the first {waitMin} min: no entry before {entriesFrom}
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+/** Minutes after midnight → "10:00". */
+const hhmm = (m: number) =>
+  `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+/** A minutes box that saves on Enter or blur, 0–180 in steps of 5. */
+function WaitBox({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const commit = () => {
+    const v = Number(text);
+    if (text.trim() !== '' && Number.isFinite(v)) {
+      onCommit(Math.min(180, Math.max(0, Math.round(v / 5) * 5)));
+    } else setText(String(value));
+  };
+  return (
+    <input
+      type="number"
+      min={0}
+      max={180}
+      step={5}
+      value={text}
+      aria-label="Minutes to wait after the open"
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === 'Enter' && commit()}
+      className="w-16 rounded border border-[#363a45] bg-[#131722] px-2 py-0.5 text-right text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+    />
   );
 }
 

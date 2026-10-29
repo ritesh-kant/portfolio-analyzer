@@ -50,6 +50,27 @@ export interface PocMark {
   endIndex?: number | null;
 }
 
+/** A tracked setup's trade, in chart bars: drawn over the pick as a position box from the fill to the exit. */
+export interface PocTradeMark {
+  long: boolean;
+  /** "stopped", "target", "closed" or "open". */
+  outcome: string;
+  fillIndex: number;
+  fillPrice: number;
+  /** The exit's bar; while still open, the last bar (with `exitPrice` the last close). */
+  exitIndex: number;
+  exitPrice: number;
+  stop: number;
+  target: number;
+  r: number | null;
+  /** Clock times for the labels, already formatted ("09:20"). */
+  fillAt: string;
+  exitAt: string | null;
+}
+
+const WIN = '38, 166, 154';
+const LOSS = '239, 83, 80';
+
 const fmt = (v: number) => (Math.abs(v) >= 100 ? v.toFixed(2) : v.toFixed(3));
 
 /**
@@ -62,6 +83,7 @@ export class PocPrimitive implements ISeriesPrimitive<Time> {
   private series: ISeriesApi<SeriesType, Time> | null = null;
   private requestUpdate: (() => void) | null = null;
   private marks: PocMark[] = [];
+  private trade: PocTradeMark | null = null;
   private pulseStart = 0;
   private pulsing = false;
   private raf = 0;
@@ -103,9 +125,17 @@ export class PocPrimitive implements ISeriesPrimitive<Time> {
     // only the traded setup: a quiet level far away must not squash the candles
     const m = this.marks.find((k) => k.primary);
     if (!m) return null;
-    const prices = [m.zoneLo, m.zoneHi, m.poc, m.entry, m.stop].filter(
-      (p): p is number => p != null,
-    );
+    const t = this.trade;
+    const prices = [
+      m.zoneLo,
+      m.zoneHi,
+      m.poc,
+      m.entry,
+      m.stop,
+      t?.fillPrice,
+      t?.exitPrice,
+      t?.stop,
+    ].filter((p): p is number => p != null);
     return {
       priceRange: { minValue: Math.min(...prices), maxValue: Math.max(...prices) },
       // room for the legend above and the labels below
@@ -121,6 +151,12 @@ export class PocPrimitive implements ISeriesPrimitive<Time> {
   /** Several levels; the ones flagged `primary` are drawn in full, the rest quietly. */
   setMarks(marks: PocMark[]) {
     this.marks = marks;
+    this.requestUpdate?.();
+  }
+
+  /** The tracked trade on top of the pick; null removes it. */
+  setTrade(trade: PocTradeMark | null) {
+    this.trade = trade;
     this.requestUpdate?.();
   }
 
@@ -184,6 +220,101 @@ export class PocPrimitive implements ISeriesPrimitive<Time> {
     // quiet levels first, so the traded setup's labels sit on top
     for (const m of this.marks) if (!m.primary) this.paintLevel(ctx, m, width, over);
     for (const m of this.marks) if (m.primary) this.paintSetup(ctx, m, width, height, over);
+    if (this.trade) this.paintTrade(ctx, this.trade, width, over);
+  }
+
+  /**
+   * The trade: under the candles, the risk (fill → stop, red) and reward (fill → target, green) bands faintly, and
+   * the realised part (fill → exit) stronger in the result's colour, all from the fill bar to the exit bar. On top,
+   * the fill and exit as markers with their price and time.
+   */
+  private paintTrade(ctx: CanvasRenderingContext2D, t: PocTradeMark, width: number, over: boolean) {
+    const chart = this.chart;
+    const series = this.series;
+    if (!chart || !series) return;
+    const half = (chart.timeScale().options().barSpacing ?? 8) / 2;
+    const xa = logicalX(chart, t.fillIndex);
+    const xb = logicalX(chart, t.exitIndex);
+    const yFill = series.priceToCoordinate(t.fillPrice);
+    const yExit = series.priceToCoordinate(t.exitPrice);
+    const yStop = series.priceToCoordinate(t.stop);
+    const yTarget = series.priceToCoordinate(t.target);
+    if (xa == null || xb == null || yFill == null || yExit == null) return;
+    const x0 = xa - half;
+    const x1 = Math.max(x0 + 6, xb + half);
+    if (x1 < 0 || x0 > width) return;
+    const won = (t.r ?? 0) >= 0;
+    const tone = won ? WIN : LOSS;
+    const box = (a: number, b: number, rgb: string, alpha: number) => {
+      ctx.fillStyle = `rgba(${rgb}, ${alpha})`;
+      ctx.fillRect(x0, Math.min(a, b), x1 - x0, Math.abs(b - a));
+    };
+
+    ctx.save();
+    if (!over) {
+      if (yStop != null) box(yFill, yStop, LOSS, 0.1);
+      if (yTarget != null) box(yFill, yTarget, WIN, 0.08);
+      box(yFill, yExit, tone, 0.28);
+      ctx.restore();
+      return;
+    }
+    // outline of the realised part, and the entry level across the trade
+    ctx.strokeStyle = `rgba(${tone}, 0.9)`;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x0 + 0.5, Math.min(yFill, yExit) + 0.5, x1 - x0 - 1, Math.abs(yExit - yFill));
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = 'rgba(209, 212, 220, 0.8)';
+    ctx.beginPath();
+    ctx.moveTo(x0, yFill);
+    ctx.lineTo(x1, yFill);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const tag = (text: string, x: number, y: number, rgb: string, above: boolean) => {
+      ctx.font = FONT;
+      const w = ctx.measureText(text).width + 10;
+      const bx = Math.max(2, Math.min(x - w / 2, width - w - 2));
+      const by = above ? y - 26 : y + 8;
+      ctx.fillStyle = 'rgba(19, 23, 34, 0.92)';
+      ctx.fillRect(bx, by, w, 18);
+      ctx.strokeStyle = `rgb(${rgb})`;
+      ctx.strokeRect(bx + 0.5, by + 0.5, w - 1, 17);
+      ctx.fillStyle = `rgb(${rgb})`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, bx + 5, by + 9.5);
+    };
+    const dot = (x: number, y: number, rgb: string) => {
+      ctx.beginPath();
+      ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = `rgb(${rgb})`;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(19, 23, 34, 1)';
+      ctx.stroke();
+    };
+    // labels go on the side away from the move, so the box stays readable
+    const up = t.exitPrice >= t.fillPrice;
+    dot(xa, yFill, '209, 212, 220');
+    tag(
+      `${t.long ? '▲ Bought' : '▼ Sold'} ${fmt(t.fillPrice)} · ${t.fillAt}`,
+      xa,
+      yFill,
+      '209, 212, 220',
+      !up,
+    );
+    const name =
+      t.outcome === 'stopped'
+        ? 'Stopped'
+        : t.outcome === 'target'
+          ? 'Target'
+          : t.outcome === 'closed'
+            ? 'Closed'
+            : 'Now';
+    const r = t.r == null ? '' : ` ${t.r >= 0 ? '+' : '−'}${Math.abs(t.r).toFixed(1)}R`;
+    dot(xb, yExit, tone);
+    tag(`${name} ${fmt(t.exitPrice)}${t.exitAt ? ` · ${t.exitAt}` : ''}${r}`, xb, yExit, tone, up);
+    ctx.restore();
   }
 
   /** Another untested POC: a light tint, a thin dashed outline, the POC line and a tag naming its age and state. */
@@ -220,7 +351,8 @@ export class PocPrimitive implements ISeriesPrimitive<Time> {
     ctx.stroke();
     ctx.setLineDash([]);
     if (x1 - x0 > 90) {
-      const age = m.sessionsAgo == null ? '' : m.sessionsAgo === 1 ? ' · 1d' : ` · ${m.sessionsAgo}d`;
+      const age =
+        m.sessionsAgo == null ? '' : m.sessionsAgo === 1 ? ' · 1d' : ` · ${m.sessionsAgo}d`;
       const text = `POC ${fmt(m.poc)}${age}${m.stage ? ` · ${m.stage}` : ''}`;
       ctx.font = FONT;
       ctx.textAlign = 'left';
@@ -308,7 +440,11 @@ export class PocPrimitive implements ISeriesPrimitive<Time> {
       ctx.textBaseline = 'bottom';
       ctx.fillStyle = `rgb(${ACCENT})`;
       const age =
-        m.sessionsAgo == null ? '' : m.sessionsAgo === 1 ? ' · yesterday' : ` · ${m.sessionsAgo} sessions ago`;
+        m.sessionsAgo == null
+          ? ''
+          : m.sessionsAgo === 1
+            ? ' · yesterday'
+            : ` · ${m.sessionsAgo} sessions ago`;
       // when the zone starts off-screen the label would sit under the legend (top-left): start it further in
       ctx.fillText(`Untested POC ${fmt(m.poc)}${age}`, Math.max(x0 + 6, width * 0.3), yp - 3);
     }

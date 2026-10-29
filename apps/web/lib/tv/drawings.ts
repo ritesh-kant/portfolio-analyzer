@@ -42,6 +42,8 @@ export interface Drawing {
   account?: number;
   lot?: number;
   riskPct?: number;
+  /** Long / short position: box width in candles (a duration in seconds collapses across overnight gaps). */
+  span?: number;
   locked?: boolean;
   /** Fib retracement settings; absent = TradingView defaults. */
   fib?: FibSettings;
