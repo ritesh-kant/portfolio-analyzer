@@ -8,6 +8,7 @@ export type DrawingKind =
   | 'fib'
   | 'measure'
   | 'vprofile'
+  | 'avprofile'
   | 'long'
   | 'short'
   | 'text'
@@ -34,9 +35,9 @@ export interface Drawing {
   color: string;
   width: number;
   text?: string;
-  /** Fixed range volume profile: number of price rows. */
+  /** Fixed range / anchored volume profile: number of price rows. */
   rows?: number;
-  /** Fixed range volume profile: look and inputs (see `vpOf`). */
+  /** Fixed range / anchored volume profile: look and inputs (see `vpOf`). */
   vp?: VpSettings;
   /** Long / short position: account size, lot size and the share of the account risked (percent). */
   account?: number;
@@ -56,6 +57,7 @@ export const PRICE_ONLY: ReadonlySet<DrawingKind> = new Set<DrawingKind>([
   'long',
   'short',
   'vprofile',
+  'avprofile',
 ]);
 
 export const POINTS_NEEDED: Record<DrawingKind, number> = {
@@ -68,6 +70,8 @@ export const POINTS_NEEDED: Record<DrawingKind, number> = {
   fib: 2,
   measure: 2,
   vprofile: 2,
+  /** Anchored: one click; the profile runs from there to the latest candle. */
+  avprofile: 1,
   long: 1,
   short: 1,
   text: 1,
@@ -92,6 +96,7 @@ export const KIND_LABEL: Record<DrawingKind, string> = {
   fib: 'Fib retracement',
   measure: 'Measure',
   vprofile: 'Fixed range volume profile',
+  avprofile: 'Anchored volume profile',
   long: 'Long position',
   short: 'Short position',
   text: 'Text',
@@ -116,6 +121,7 @@ export const DEFAULT_COLOR: Record<DrawingKind, string> = {
   fib: '#787b86',
   measure: '#2962ff',
   vprofile: '#2962ff',
+  avprofile: '#2962ff',
   long: '#089981',
   short: '#f23645',
   text: '#d1d4dc',
@@ -263,7 +269,28 @@ export const VP_DEFAULTS: VpSettings = {
   backgroundOpacity: 0.06,
 };
 
-export const vpOf = (d: Drawing): VpSettings => ({ ...VP_DEFAULTS, ...d.vp });
+/**
+ * TradingView's anchored volume profile: histogram pinned to the right edge of the pane and 30% of it wide
+ * (placement 'right'; 'left' grows it from the anchor line instead), teal (up) / pink (down), a thin full-width POC line (VAH/VAL lines are opt-in).
+ */
+export const AVP_DEFAULTS: Partial<VpSettings> = {
+  placement: 'right',
+  width: 30,
+  upColor: '#2fb6c4',
+  downColor: '#d9436f',
+  vaUpColor: '#2fb6c4',
+  vaDownColor: '#d9436f',
+  pocWidth: 1,
+  showVa: false,
+  backgroundColor: '#26a69a',
+  backgroundOpacity: 0.07,
+};
+
+export const vpOf = (d: Drawing): VpSettings => ({
+  ...VP_DEFAULTS,
+  ...(d.kind === 'avprofile' ? AVP_DEFAULTS : {}),
+  ...d.vp,
+});
 
 /** `#rrggbb` + alpha → `rgba()`. */
 export function withAlpha(hex: string, alpha: number): string {

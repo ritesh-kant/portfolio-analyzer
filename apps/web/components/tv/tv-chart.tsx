@@ -41,7 +41,9 @@ import {
   CATALOG,
   DEFAULT_INDICATORS,
   type IndicatorCfg,
+  AVP_VP,
   SVP_DEFAULTS,
+  avpOf,
   catalogOf,
   indicatorLabel,
   makeIndicator,
@@ -295,7 +297,8 @@ function computeIndicators(
         lines = [{ key: 'rsi', color: '#7e57c2', values: rsi(closes, cfg.length), kind: 'line' }];
         break;
       case 'svp':
-        // Drawn by SessionProfilePrimitive, not as a series.
+      case 'avp':
+        // Drawn by SessionProfilePrimitive / DrawingsPrimitive, not as a series.
         lines = [];
         break;
       case 'cvd': {
@@ -854,6 +857,8 @@ export function TvChart() {
     ...listOpen,
   });
   latest.current = { tool, magnet, keep, lockAll, drawings, selectedId, bars, ...listOpen };
+  const symbolRef = useRef(symbol);
+  symbolRef.current = symbol;
 
   // ── settings load / save ──────────────────────────────────────────────
   useEffect(() => {
@@ -896,6 +901,30 @@ export function TvChart() {
   useEffect(() => {
     if (drawState.symbol && drawState.symbol === symbol)
       save(`tv:drawings:${symbol}`, drawState.list);
+  }, [drawState, symbol]);
+
+  // Anchored profiles used to be saved as drawings; they are indicators now, so move any found into the indicator list.
+  const migratedAvp = useRef(new Set<string>());
+  useEffect(() => {
+    if (!drawState.symbol || drawState.symbol !== symbol) return;
+    const old = drawState.list.filter((d) => d.kind === 'avprofile' && !migratedAvp.current.has(d.id));
+    if (!old.length) return;
+    old.forEach((d) => migratedAvp.current.add(d.id));
+    setDrawState((cur) => ({ symbol: cur.symbol, list: cur.list.filter((d) => d.kind !== 'avprofile') }));
+    setIndicators((list) => {
+      let next = list;
+      for (const d of old)
+        next = [
+          ...next,
+          {
+            ...makeIndicator('avp', next),
+            length: d.rows ?? DEFAULT_ROWS,
+            vp: d.vp,
+            anchors: { [symbol]: d.pts[0]!.t },
+          },
+        ];
+      return next;
+    });
   }, [drawState, symbol]);
 
   const setDrawings = useCallback((next: Drawing[], record = true) => {
@@ -1028,9 +1057,11 @@ export function TvChart() {
 
   // Footprint needs 1-minute bars underneath coarser candles; so do volume profiles, the POC retest's included.
   const svpOn =
-    indicators.some((i) => i.type === 'svp') || drawings.some((d) => d.kind === 'vprofile');
+    indicators.some((i) => i.type === 'svp' || i.type === 'avp') ||
+    drawings.some((d) => d.kind === 'vprofile' || d.kind === 'avprofile');
   const pocFits = tf.intraday && tf.secs <= 900;
   const pocFine = pocOn && pocFits;
+  const fineOn = fp.on || svpOn || cvdOn || pocFine;
   useEffect(() => {
     if (!ready || (!fp.on && !svpOn && !cvdOn && !pocFine) || tf.source === '1m') return;
     const ctl = new AbortController();
@@ -1157,6 +1188,12 @@ export function TvChart() {
               a?.volume === b?.volume;
             return same ? cur : { key: cur.key, bars: merged };
           });
+          // The 1-minute bars under the volume profiles / footprint go stale otherwise: new volume would not reach them.
+          if (tf.intraday && tf.source !== '1m' && fineOn) {
+            const fineRes = await fetchBars(symbol, '1m', '1d', undefined, wantPrepost);
+            if (stopped) return;
+            setSubRaw((cur) => (cur.length ? mergeBars(cur, fineRes.bars) : cur));
+          }
         } catch {
           // transient — next tick retries
         } finally {
@@ -1169,7 +1206,7 @@ export function TvChart() {
       stopped = true;
       clearInterval(timer);
     };
-  }, [ready, replayEnd, symbol, tf.source, tf.intraday, wantPrepost, fetchBars]);
+  }, [ready, replayEnd, symbol, tf.source, tf.intraday, wantPrepost, fetchBars, fineOn]);
 
   // Company filings (NSE announcements / SEC EDGAR) across the loaded history.
   const firstBarTime = bars[0]?.time;
@@ -1505,7 +1542,7 @@ export function TvChart() {
 
   // Indicator series structure: rebuilt only when the indicator set / params change.
   const structKey = JSON.stringify(
-    indicators.map((cfg) => ({ ...cfg, hidden: undefined, collapsed: undefined })),
+    indicators.map((cfg) => ({ ...cfg, hidden: undefined, collapsed: undefined, anchors: undefined })),
   );
   useEffect(() => {
     const chart = chartRef.current;
@@ -2114,7 +2151,29 @@ export function TvChart() {
 
   // Drawings → primitive.
   useEffect(() => {
-    const all = measure ? [...drawings, measure] : drawings;
+    // Anchored volume profile indicators are drawn as `avprofile` drawings (id `avp:<indicator id>`) fed only to the primitive.
+    const last = bars[bars.length - 1];
+    const sessionStart = (() => {
+      if (!bars.length) return 0;
+      if (!tf.intraday) return Math.max(0, bars.length - 20);
+      const br = sessionBreaks(bars.map((b) => b.time), tf.secs);
+      return br[br.length - 1] ?? 0;
+    })();
+    const anchored: Drawing[] =
+      last == null
+        ? []
+        : indicators
+            .filter((i) => i.type === 'avp' && !i.hidden)
+            .map((i) => ({
+              id: `avp:${i.id}`,
+              kind: 'avprofile' as const,
+              pts: [{ t: i.anchors?.[symbol] ?? bars[sessionStart]!.time, p: last.close }],
+              color: i.color,
+              width: 2,
+              rows: i.length,
+              vp: avpOf(i),
+            }));
+    const all = [...drawings, ...anchored, ...(measure ? [measure] : [])];
     const next = {
       drawings: all,
       draft,
@@ -2139,7 +2198,10 @@ export function TvChart() {
     bars,
     profileFine,
     tf.secs,
+    tf.intraday,
     structKey,
+    indicators,
+    symbol,
   ]);
 
   // ── pointer interaction with drawings ─────────────────────────────────
@@ -2221,6 +2283,12 @@ export function TvChart() {
       if (!d) return;
       if (d.kind === 'measure') {
         setMeasure(d);
+      } else if (d.kind === 'avprofile') {
+        // The anchored profile is an indicator (legend, settings, hide, remove); the tool just sets its anchor.
+        const at = d.pts[0]!.t;
+        const sym = symbolRef.current;
+        setIndicators((list) => [...list, { ...makeIndicator('avp', list), anchors: { [sym]: at } }]);
+        setSelectedId(null);
       } else {
         setDrawings([...latest.current.drawings, d]);
         setSelectedId(d.id);
@@ -2336,7 +2404,7 @@ export function TvChart() {
           color: DEFAULT_COLOR[kind],
           width: DEFAULT_WIDTH[kind] ?? 2,
           text: kind === 'text' ? 'Text' : undefined,
-          rows: kind === 'vprofile' ? DEFAULT_ROWS : undefined,
+          rows: kind === 'vprofile' || kind === 'avprofile' ? DEFAULT_ROWS : undefined,
           pane: loc.key ?? undefined,
         };
         if (kind === 'text') {
@@ -2368,6 +2436,12 @@ export function TvChart() {
       e.stopImmediatePropagation();
       e.preventDefault();
       setSelectedId(hit.drawingId);
+      if (hit.drawingId.startsWith('avp:')) {
+        // An anchored profile indicator: its left line moves the anchor; the body only selects.
+        if (hit.handle !== 'body' && !L.lockAll)
+          drag = { mode: 'handle', id: hit.drawingId, pane: here.key, handle: 0, moved: false };
+        return;
+      }
       const d = L.drawings.find((v) => v.id === hit.drawingId);
       if (!d || d.locked || L.lockAll) return;
       const chart = chartRef.current;
@@ -2432,6 +2506,15 @@ export function TvChart() {
           const pt = toPt(x, y, true, dloc);
           if (!pt) return;
           const { id, handle } = drag;
+          if (id.startsWith('avp:')) {
+            const sym = symbolRef.current;
+            setIndicators((list) =>
+              list.map((i) =>
+                `avp:${i.id}` === id ? { ...i, anchors: { ...i.anchors, [sym]: pt.t } } : i,
+              ),
+            );
+            return;
+          }
           setDrawState((cur) => ({
             symbol: cur.symbol,
             list: cur.list.map((v) => {
@@ -2439,7 +2522,7 @@ export function TvChart() {
               if (isPosition(v.kind)) return dragPositionHandle(v, handle, pt);
               // A volume profile's lines only move in time; its price anchors are irrelevant.
               const pts = v.pts.map((q, i) =>
-                i === handle ? (v.kind === 'vprofile' ? { t: pt.t, p: q.p } : pt) : q,
+                i === handle ? (v.kind === 'vprofile' || v.kind === 'avprofile' ? { t: pt.t, p: q.p } : pt) : q,
               );
               return { ...v, pts };
             }),
@@ -2502,13 +2585,18 @@ export function TvChart() {
       const here = locate(x, y);
       const hit = here ? primFor(here.key)?.findHit(x, y - here.top) : null;
       if (!hit) return;
+      if (hit.drawingId.startsWith('avp:')) {
+        setSelectedId(hit.drawingId);
+        setSettingsId(hit.drawingId.slice(4));
+        return;
+      }
       const d = latest.current.drawings.find((v) => v.id === hit.drawingId);
       if (d && isPosition(d.kind)) {
         setSelectedId(d.id);
         setPosEditId(d.id);
         return;
       }
-      if (d?.kind === 'vprofile') {
+      if (d?.kind === 'vprofile' || d?.kind === 'avprofile') {
         setSelectedId(d.id);
         setVpEditId(d.id);
         return;
@@ -2575,6 +2663,11 @@ export function TvChart() {
         setMeasure(null);
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && latest.current.selectedId) {
         const id = latest.current.selectedId;
+        if (id.startsWith('avp:')) {
+          setIndicators((list) => list.filter((i) => `avp:${i.id}` !== id));
+          setSelectedId(null);
+          return;
+        }
         const d = latest.current.drawings.find((v) => v.id === id);
         if (d && !d.locked) {
           setDrawings(latest.current.drawings.filter((v) => v.id !== id));
@@ -3771,6 +3864,7 @@ export function TvChart() {
                 {selected.kind === 'fib' ||
                 selected.kind === 'measure' ||
                 selected.kind === 'vprofile' ||
+                selected.kind === 'avprofile' ||
                 isPosition(selected.kind)
                   ? null
                   : SWATCHES.map((c) => (
@@ -3783,7 +3877,7 @@ export function TvChart() {
                         style={{ background: c }}
                       />
                     ))}
-                {selected.kind === 'vprofile' ? (
+                {selected.kind === 'vprofile' || selected.kind === 'avprofile' ? (
                   <label className="flex items-center gap-1.5 px-1 text-[12px] text-[#b2b5be]">
                     Rows
                     <select
@@ -4279,6 +4373,9 @@ export function TvChart() {
         <VpSettingsDialog
           vp={vpOf(drawings.find((d) => d.id === vpEditId)!)}
           rows={drawings.find((d) => d.id === vpEditId)!.rows ?? DEFAULT_ROWS}
+          widthLabel={
+            drawings.find((d) => d.id === vpEditId)!.kind === 'avprofile' ? 'Width (% of pane)' : undefined
+          }
           onChange={({ vp, rows }) =>
             setDrawings(drawings.map((d) => (d.id === vpEditId ? { ...d, vp, rows } : d)))
           }
@@ -4292,7 +4389,21 @@ export function TvChart() {
           onClose={() => setFibEditId(null)}
         />
       ) : null}
-      {settingsId && indicators.find((i) => i.id === settingsId)?.type === 'svp' ? (
+      {settingsId && indicators.find((i) => i.id === settingsId)?.type === 'avp' ? (
+        <VpSettingsDialog
+          title="Anchored volume profile"
+          vp={avpOf(indicators.find((i) => i.id === settingsId)!)}
+          rows={indicators.find((i) => i.id === settingsId)!.length}
+          defaults={AVP_VP}
+          widthLabel="Width (% of pane)"
+          onChange={({ vp, rows }) =>
+            setIndicators((list) =>
+              list.map((i) => (i.id === settingsId ? { ...i, vp, length: rows } : i)),
+            )
+          }
+          onClose={() => setSettingsId(null)}
+        />
+      ) : settingsId && indicators.find((i) => i.id === settingsId)?.type === 'svp' ? (
         <VpSettingsDialog
           title="Session volume profile"
           vp={svpOf(indicators.find((i) => i.id === settingsId)!)}

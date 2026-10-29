@@ -180,6 +180,18 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         levels.push({ price: d.pts[0]!.p, color: '#787b86' });
         levels.push({ price: d.pts[3]!.p, color: POSITION_STOP });
       }
+      if (d.kind === 'avprofile') {
+        // VAH / VAL / POC tags on the price axis, as TradingView prints them.
+        const profile = this.profileOf(d);
+        const vp = vpOf(d);
+        if (profile) {
+          if (vp.showVa) {
+            levels.push({ price: profile.vah, color: vp.vaLineColor });
+            levels.push({ price: profile.val, color: vp.vaLineColor });
+          }
+          if (vp.showPoc) levels.push({ price: profile.pocPrice, color: vp.pocColor });
+        }
+      }
       for (const { price, color } of levels) {
         const y = this.series.priceToCoordinate(price);
         if (y == null) continue;
@@ -212,10 +224,13 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   /** Volume profile over the candles between a profile drawing's two anchors (memoised until the data or range changes). */
   private profileOf(d: Drawing): VolumeProfile | null {
     const { bars, fine, secs } = this.state;
-    if (!bars.length || d.pts.length < 2) return null;
+    if (!bars.length || d.pts.length < (d.kind === 'avprofile' ? 1 : 2)) return null;
     const clamp = (i: number) => Math.max(0, Math.min(bars.length - 1, i));
-    const a = clamp(Math.min(Math.round(this.state.axis.toLogical(d.pts[0]!.t)), Math.round(this.state.axis.toLogical(d.pts[1]!.t))));
-    const b = clamp(Math.max(Math.round(this.state.axis.toLogical(d.pts[0]!.t)), Math.round(this.state.axis.toLogical(d.pts[1]!.t))));
+    // An anchored profile's second edge is always the latest candle, so it grows as bars arrive.
+    const i0 = Math.round(this.state.axis.toLogical(d.pts[0]!.t));
+    const i1 = d.kind === 'avprofile' ? bars.length - 1 : Math.round(this.state.axis.toLogical(d.pts[1]!.t));
+    const a = clamp(Math.min(i0, i1));
+    const b = clamp(Math.max(i0, i1));
     return profileOver(bars, fine, secs, a, b, d.rows ?? DEFAULT_ROWS, vpOf(d).valueArea / 100, this.profiles);
   }
 
@@ -227,7 +242,14 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
       if (!px) return null;
       pts.push(px);
     }
-    if (d.kind === 'vprofile') {
+    if (d.kind === 'avprofile') {
+      // Synthetic right edge on the latest candle (never left of the anchor).
+      const last = this.state.bars[this.state.bars.length - 1];
+      const end = last ? this.px(last.time, d.pts[0]!.p) : null;
+      if (!end) return null;
+      pts.push({ x: Math.max(end.x, pts[0]!.x), y: end.y });
+    }
+    if (d.kind === 'vprofile' || d.kind === 'avprofile') {
       // Anchors sit on the top edge of the profile, whatever price the cursor was at.
       const profile = this.profileOf(d);
       const top = profile ? this.series?.priceToCoordinate(profile.hi) : null;
@@ -279,10 +301,11 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
           if (handles[i] && dist2(p, handles[i]!) <= 10 * 10) return { drawingId: d.id, handle: i };
         }
       }
-      if (d.kind === 'vprofile' && !d.locked) {
-        // Either boundary line can be grabbed anywhere along its length and dragged sideways.
+      if ((d.kind === 'vprofile' || d.kind === 'avprofile') && !d.locked) {
+        // Either boundary line can be grabbed anywhere along its length and dragged sideways
+        // (an anchored profile only has its left one: the right edge is the latest candle).
         const dx = [Math.abs(p.x - g.pts[0]!.x), Math.abs(p.x - g.pts[1]!.x)];
-        const nearest = dx[0]! <= dx[1]! ? 0 : 1;
+        const nearest = d.kind === 'avprofile' || dx[0]! <= dx[1]! ? 0 : 1;
         if (dx[nearest]! <= tol) return { drawingId: d.id, handle: nearest };
       }
       if (this.bodyHit(d, g, p, tol)) return { drawingId: d.id, handle: 'body' };
@@ -293,6 +316,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
   private handlePoints(d: Drawing, g: Geometry): (Px | null)[] {
     if (d.kind === 'hline') return [null];
     if (d.kind === 'vline') return [null];
+    if (d.kind === 'avprofile') return [g.pts[0]!];
     // A freehand stroke has hundreds of points: it is moved as a whole, never reshaped.
     if (FREEHAND.has(d.kind)) return [];
     return g.pts;
@@ -339,7 +363,8 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
           return y != null && Math.abs(p.y - y) <= tol;
         });
       }
-      case 'vprofile': {
+      case 'vprofile':
+      case 'avprofile': {
         const profile = this.profileOf(d);
         const bottom = profile ? this.series?.priceToCoordinate(profile.lo) : null;
         if (!profile || bottom == null) return false;
@@ -482,7 +507,8 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         this.paintMeasure(ctx, d, a, b!);
         break;
       case 'vprofile':
-        this.paintProfile(ctx, d, a, b!, g.h, selected || hovered);
+      case 'avprofile':
+        this.paintProfile(ctx, d, a, b!, g.w, g.h, selected || hovered);
         break;
       case 'long':
       case 'short':
@@ -683,6 +709,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     d: Drawing,
     a: Px,
     b: Px,
+    paneW: number,
     paneH: number,
     emphasis: boolean,
   ) {
@@ -714,7 +741,9 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     }
 
     // Histogram grows from the chosen edge; up volume then down volume (or one colour for total), value area brighter.
-    const maxLen = ((x1 - x0) * vp.width) / 100;
+    // Anchored: 'right' pins the histogram to the pane's right edge, sized off the pane; otherwise it hangs off the box.
+    const pinned = d.kind === 'avprofile' && vp.placement === 'right';
+    const maxLen = (((pinned ? paneW : x1 - x0)) * vp.width) / 100;
     const fromRight = vp.placement === 'right';
     profile.rows.forEach((row, i) => {
       const top = y(row.price + profile.step);
@@ -728,7 +757,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
       const upLen = vp.volume === 'total' ? len : (len * row.up) / total;
       const inValue = i >= profile.vaLo && i <= profile.vaHi;
       const alpha = inValue ? vp.opacity : vp.opacity * 0.45;
-      const edge = fromRight ? x1 : x0;
+      const edge = pinned ? paneW : fromRight ? x1 : x0;
       const sign = fromRight ? -1 : 1;
       const seg = (from: number, length: number) => {
         const sx = edge + sign * from;
@@ -754,8 +783,10 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
       ctx.fillStyle = color;
       ctx.lineWidth = lineWidth;
       ctx.beginPath();
+      // Anchored: the levels run the whole pane, from the anchor on (TradingView), not just across the box.
+      const lineTo = d.kind === 'avprofile' ? paneW : x1;
       ctx.moveTo(x0, ly);
-      ctx.lineTo(x1, ly);
+      ctx.lineTo(lineTo, ly);
       ctx.stroke();
       if (vp.showLabels) ctx.fillText(`${label} ${price.toFixed(decimals)}`, x1 - 4, ly - 2);
     };

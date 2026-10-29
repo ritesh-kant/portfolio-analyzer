@@ -1,4 +1,4 @@
-import { VP_DEFAULTS, type VpSettings } from './drawings';
+import { AVP_DEFAULTS, VP_DEFAULTS, type VpSettings } from './drawings';
 import { DEFAULT_ROWS } from './volume-profile';
 
 export type IndicatorType =
@@ -12,6 +12,7 @@ export type IndicatorType =
   | 'rsi'
   | 'atr'
   | 'svp'
+  | 'avp'
   | 'cvd';
 
 export interface IndicatorCfg {
@@ -23,8 +24,10 @@ export interface IndicatorCfg {
   length2?: number;
   /** MACD signal. */
   length3?: number;
-  /** Session volume profile: look and inputs on top of `SVP_DEFAULTS` (rows = `length`). */
+  /** Session / anchored volume profile: look and inputs on top of `SVP_DEFAULTS` / `AVP_VP` (rows = `length`). */
   vp?: Partial<VpSettings>;
+  /** Anchored volume profile: the anchor candle's time (unix seconds) per symbol; absent = the latest session's start. */
+  anchors?: Record<string, number>;
   /** Cumulative volume delta: the period the running total restarts in. */
   anchor?: 'session' | 'week' | 'month';
   /** CVD: mark price/CVD divergences. Absent = regular ones. */
@@ -123,6 +126,13 @@ export const CATALOG: CatalogEntry[] = [
     defaults: { type: 'svp', length: DEFAULT_ROWS },
   },
   {
+    type: 'avp',
+    name: 'Anchored Volume Profile',
+    description: 'Volume by price from an anchor candle to the latest bar, with POC and value area',
+    where: 'overlay',
+    defaults: { type: 'avp', length: DEFAULT_ROWS },
+  },
+  {
     type: 'cvd',
     name: 'Cumulative Volume Delta',
     description: 'Running total of buying minus selling volume, drawn as candles',
@@ -197,6 +207,8 @@ export function indicatorLabel(i: IndicatorCfg): string {
       return `RSI ${i.length} close`;
     case 'svp':
       return `SVP ${i.length}`;
+    case 'avp':
+      return `AVP ${i.length}`;
     case 'cvd':
       return 'CVD';
   }
@@ -205,3 +217,7 @@ export function indicatorLabel(i: IndicatorCfg): string {
 /** TradingView's session volume profile: the fixed-range look, but no box behind the histogram. */
 export const SVP_DEFAULTS: VpSettings = { ...VP_DEFAULTS, showBackground: false };
 export const svpOf = (cfg: IndicatorCfg): VpSettings => ({ ...SVP_DEFAULTS, ...cfg.vp });
+
+/** TradingView's anchored volume profile: histogram on the pane's right edge (see `AVP_DEFAULTS`). */
+export const AVP_VP: VpSettings = { ...VP_DEFAULTS, ...AVP_DEFAULTS };
+export const avpOf = (cfg: IndicatorCfg): VpSettings => ({ ...AVP_VP, ...cfg.vp });

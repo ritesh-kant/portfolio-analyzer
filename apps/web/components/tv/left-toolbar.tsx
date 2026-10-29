@@ -20,7 +20,7 @@ const GROUPS: { id: string; tools: Tool[]; actions?: Action[] }[] = [
   },
   { id: 'text', tools: ['text'] },
   { id: 'measure', tools: ['measure'] },
-  { id: 'volume', tools: ['vprofile'], actions: ['svp'] },
+  { id: 'volume', tools: ['vprofile', 'avprofile'], actions: ['svp'] },
 ];
 
 const ICON: Record<Tool, (p: { size?: number }) => ReactNode> = {
@@ -34,6 +34,7 @@ const ICON: Record<Tool, (p: { size?: number }) => ReactNode> = {
   fib: Icons.fib,
   measure: Icons.measure,
   vprofile: Icons.vprofile,
+  avprofile: Icons.vprofile,
   long: Icons.long,
   short: Icons.short,
   text: Icons.text,
@@ -67,6 +68,7 @@ export const TOOL_KEYS: Record<Tool, { code: string; shift?: boolean; label: str
   text: { code: 'KeyT', shift: true, label: 'Shift+T' },
   measure: { code: 'KeyM', label: 'M' },
   vprofile: { code: 'KeyV', shift: true, label: 'Shift+V' },
+  avprofile: { code: 'KeyA', shift: true, label: 'Shift+A' },
   brush: { code: 'KeyB', label: 'B' },
   highlighter: { code: 'KeyH', shift: true, label: 'Shift+H' },
   arrowmarker: { code: 'KeyM', shift: true, label: 'Shift+M' },

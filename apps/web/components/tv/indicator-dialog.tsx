@@ -204,7 +204,7 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
         </div>
         {cfg.type !== 'vwap' && cfg.type !== 'volume' && cfg.type !== 'cvd' ? (
           <NumberField
-            label={cfg.type === 'macd' ? 'Fast length' : cfg.type === 'svp' ? 'Rows' : 'Length'}
+            label={cfg.type === 'macd' ? 'Fast length' : cfg.type === 'svp' || cfg.type === 'avp' ? 'Rows' : 'Length'}
             value={cfg.length}
             min={1}
             onChange={(length) => onChange({ ...cfg, length })}
@@ -314,7 +314,7 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
             onChange={(mult) => onChange({ ...cfg, mult })}
           />
         ) : null}
-        {cfg.type !== 'volume' && cfg.type !== 'svp' && cfg.type !== 'cvd' ? (
+        {cfg.type !== 'volume' && cfg.type !== 'svp' && cfg.type !== 'avp' && cfg.type !== 'cvd' ? (
           <div className="flex items-center justify-between py-1.5 text-[13px] text-[#d1d4dc]">
             Colour
             <div className="flex gap-1.5">
