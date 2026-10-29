@@ -849,7 +849,7 @@ test('dropSpikeWicks: stray quotes in no-volume extended-hours bars are trimmed,
 });
 
 // ── CVD divergence ────────────────────────────────────────────────────────
-import { CVD_DIV_DEFAULTS, findCvdDivergences, intrabarUsable, nearSetup } from './cvd-divergence.ts';
+import { CVD_DIV_DEFAULTS, findCvdDivergences, intrabarUsable, nearSetup, divergenceSize } from './cvd-divergence.ts';
 
 const divCfg = { ...CVD_DIV_DEFAULTS, pivot: 1, tol: 0 };
 /** Candles from their highs (lows one under, closes half under the high). */
@@ -1155,4 +1155,14 @@ test('position keeps its width in candles across an overnight gap', () => {
   assert.ok(positionEnd(d, later) > entry + 3600 * 12);
   const old = { ...d, span: undefined };
   assert.ok(positionSpan(old, later) < 20); // legacy drawing: width as the axis now sees it
+});
+
+test('divergenceSize ranks a bigger price and CVD gap higher and is null on a flat CVD', () => {
+  const bars = Array.from({ length: 20 }, () => ({ time: 0, open: 100, high: 101, low: 99, close: 100, volume: 1 }));
+  const cvd = bars.map((_, i) => ({ open: 0, high: i * 10, low: -i * 10, close: 0 }));
+  const mk = (p2, c2) => ({ i1: 5, i2: 15, p1: 100, p2, c1: 0, c2 });
+  const small = divergenceSize(mk(99.9, 5), bars, cvd);
+  const large = divergenceSize(mk(95, 140), bars, cvd);
+  assert.ok(large.score > small.score && large.tier === 'large' && small.tier === 'small');
+  assert.equal(divergenceSize(mk(95, 140), bars, bars.map(() => ({ open: 0, high: 0, low: 0, close: 0 }))), null);
 });

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { CvdDivergence } from '../../lib/tv/cvd-divergence';
+import type { CvdDivergence, DivergenceSize } from '../../lib/tv/cvd-divergence';
 import { load, save } from '../../lib/tv/storage';
 import { PANEL_WIDTH_KEY } from './panel-width';
 
@@ -20,6 +20,8 @@ export interface CvdItem {
   /** Start of the candle holding the second swing, and the close of the candle that confirmed it (unix s). */
   time: number;
   confirmTime: number | null;
+  /** How pronounced it is (a size, not a forecast); null when the CVD range is flat. */
+  size: DivergenceSize | null;
 }
 
 export type CvdFilter = 'all' | 'bullish' | 'bearish';
@@ -53,6 +55,10 @@ const fmtVol = (v: number) => {
   return `${v < 0 ? '−' : ''}${s}`;
 };
 const fmtPrice = (v: number) => (Math.abs(v) >= 100 ? v.toFixed(2) : v.toFixed(3));
+
+type CvdSort = 'newest' | 'size';
+const SORT_KEY = 'tv:cvdSort';
+const TIER_COLOR = { large: 'text-[#26a69a]', medium: 'text-[#ffb74d]', small: 'text-[#787b86]' } as const;
 
 const FILTERS: { id: CvdFilter; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -89,13 +95,16 @@ export function CvdPanel({
     if (active == null) return;
     listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [active]);
+  const [sort, setSort] = useState<CvdSort>(() => load<CvdSort>(SORT_KEY, 'newest'));
   const rows = items
     .filter(
       (x) =>
         (filter === 'all' || (filter === 'bullish') === x.div.bullish) &&
         (showFailed || x.div.status !== 'failed'),
     )
-    .sort((a, b) => b.div.i2 - a.div.i2);
+    .sort((a, b) =>
+      sort === 'size' ? (b.size?.score ?? -1) - (a.size?.score ?? -1) : b.div.i2 - a.div.i2,
+    );
 
   // Read the saved width up front: a panel only mounts after a click (never during hydration), and starting at the
   // default then jumping to the saved width resized the chart twice, which flickered.
@@ -167,6 +176,23 @@ export function CvdPanel({
         </div>
         <label
           className="flex items-center justify-between gap-2"
+          title="Size = how far price moved and how far CVD disagreed, ranked against typical divergences. It describes how clear the divergence looks; in testing it did not predict the next move."
+        >
+          <span>Sort by</span>
+          <select
+            value={sort}
+            onChange={(e) => {
+              setSort(e.target.value as CvdSort);
+              save(SORT_KEY, e.target.value);
+            }}
+            className="rounded border border-[#2a2e39] bg-[#1e222d] px-1.5 py-0.5 text-[12px] text-[#d1d4dc] outline-none [color-scheme:dark]"
+          >
+            <option value="newest">Newest</option>
+            <option value="size">Size</option>
+          </select>
+        </label>
+        <label
+          className="flex items-center justify-between gap-2"
           title="Failed = price closed beyond the second swing's extreme, or no break of the swing between them came within the window. Also hides them on the chart."
         >
           <span>Show failed</span>
@@ -191,7 +217,7 @@ export function CvdPanel({
         <span className="w-16 text-right">Price Δ</span>
       </div>
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
-        {rows.map(({ key, div: d, near, time, confirmTime }) => {
+        {rows.map(({ key, div: d, near, time, confirmTime, size }) => {
           const color = d.bullish ? 'text-[#26a69a]' : 'text-[#ef5350]';
           const chip =
             d.status === 'confirmed'
@@ -229,6 +255,15 @@ export function CvdPanel({
                   <span className="text-[#787b86]"> · </span>
                   <span className={chipColor}>{chip}</span>
                   {near ? <span className="text-[#e879f9]"> · + Δ setup</span> : null}
+                {size ? (
+                  <span
+                    className={TIER_COLOR[size.tier]}
+                    title={`Price moved ${size.priceAtr.toFixed(2)}× the average candle range; CVD moved ${(size.cvdFrac * 100).toFixed(0)}% of its range across the swings`}
+                  >
+                    {' · '}
+                    {size.tier} {Math.round(size.score)}
+                  </span>
+                ) : null}
                 </span>
                 <span className="block truncate text-[11px] text-[#787b86]">
                   price {fmtPrice(d.p1)} → {fmtPrice(d.p2)} · CVD {fmtVol(d.c1)} → {fmtVol(d.c2)}

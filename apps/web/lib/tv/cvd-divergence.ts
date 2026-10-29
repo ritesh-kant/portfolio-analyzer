@@ -274,3 +274,55 @@ export function nearSetup(d: CvdDivergence, setups: SetupRef[], window: number):
   }
   return null;
 }
+
+/** How pronounced a divergence is, read only from candles up to its second swing. A size, not a forecast. */
+export interface DivergenceSize {
+  /** 0–100: the mean of the two percentiles below. */
+  score: number;
+  tier: 'small' | 'medium' | 'large';
+  /** Price move between the swings, in average candle ranges (14 candles ending at the second swing). */
+  priceAtr: number;
+  /** CVD move between the swings, as a share of the CVD's range across the span. */
+  cvdFrac: number;
+}
+
+// Quantile ladders (value → percentile) from 12,620 divergences on 120 NSE stocks, 15m, Oct 2025–Oct 2026.
+const PRICE_ATR_LADDER: [number, number][] = [[0, 0], [0.135, 5], [0.314, 25], [0.615, 50], [1.167, 75], [2.59, 95], [5, 100]];
+const CVD_FRAC_LADDER: [number, number][] = [[0, 0], [0.067, 5], [0.211, 25], [0.388, 50], [0.592, 75], [0.834, 95], [1, 100]];
+
+const percentile = (v: number, ladder: [number, number][]) => {
+  if (v >= ladder[ladder.length - 1]![0]) return 100;
+  for (let k = 1; k < ladder.length; k += 1) {
+    const [x1, p1] = ladder[k]!;
+    if (v <= x1) {
+      const [x0, p0] = ladder[k - 1]!;
+      return p0 + ((v - x0) / (x1 - x0)) * (p1 - p0);
+    }
+  }
+  return 100;
+};
+
+/**
+ * Size of a divergence: how far price moved and how far CVD disagreed, each ranked against typical divergences.
+ * ⚠ Measured on 12,620 divergences, neither (nor the gap, volume, time of day or hidden/regular) predicted the next
+ * hour's move (|rho| ≤ 0.02, mean directional return ≈ 0). It tells you how clear the divergence looks, not whether it pays.
+ */
+export function divergenceSize(d: CvdDivergence, bars: Bar[], cvd: CvdCandle[]): DivergenceSize | null {
+  const from = Math.max(0, d.i2 - 13);
+  let range = 0;
+  for (let i = from; i <= d.i2; i += 1) range += bars[i]!.high - bars[i]!.low;
+  const atr = range / (d.i2 - from + 1);
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = d.i1; i <= d.i2; i += 1) {
+    const c = cvd[i];
+    if (!c) continue;
+    lo = Math.min(lo, c.low);
+    hi = Math.max(hi, c.high);
+  }
+  if (!(atr > 0) || !(hi > lo)) return null;
+  const priceAtr = Math.abs(d.p2 - d.p1) / atr;
+  const cvdFrac = Math.abs(d.c2 - d.c1) / (hi - lo);
+  const score = (percentile(priceAtr, PRICE_ATR_LADDER) + percentile(cvdFrac, CVD_FRAC_LADDER)) / 2;
+  return { score, tier: score >= 59 ? 'large' : score >= 41 ? 'medium' : 'small', priceAtr, cvdFrac };
+}

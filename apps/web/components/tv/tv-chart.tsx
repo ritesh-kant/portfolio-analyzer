@@ -107,6 +107,7 @@ import {
   CVD_DIV_DEFAULTS,
   type CvdDivergence,
   findCvdDivergences,
+  divergenceSize,
   intrabarUsable,
   nearSetup,
 } from '../../lib/tv/cvd-divergence';
@@ -815,7 +816,9 @@ export function TvChart() {
         const t = bars[div.i2]?.time;
         if (t == null) continue;
         const ct = div.confirmIndex == null ? null : bars[div.confirmIndex]?.time;
+        const ohlc = computed.find((c) => c.cfg.id === id)?.lines[0]?.ohlc;
         out.push({
+          size: ohlc ? divergenceSize(div, bars, ohlc) : null,
           key: `${id}:${div.kind}:${div.i1}:${div.i2}`,
           div,
           near,
@@ -825,7 +828,7 @@ export function TvChart() {
       }
     }
     return out;
-  }, [cvdDivs, cvdShowFailed, bars, tf.secs]);
+  }, [cvdDivs, cvdShowFailed, bars, tf.secs, computed]);
   const axis = useMemo(
     () =>
       makeTimeAxis(
@@ -2348,7 +2351,11 @@ export function TvChart() {
           }
         }
         if (L.cvdOpen) {
-          const c = cvdDivMainRef.current?.findAt(x, y) ?? null;
+          // each pane's primitive hit-tests in its own coordinates (the price pane sits at the top of the wrap)
+          const c =
+            here.key == null
+              ? (cvdDivMainRef.current?.findAt(x, y) ?? null)
+              : (cvdDivSubRef.current.get(here.key)?.findAt(x, y - here.top) ?? null);
           if (c != null) {
             setCvdPick(c);
             cvdDivMainRef.current?.pulse(c);

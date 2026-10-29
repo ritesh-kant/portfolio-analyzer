@@ -51,6 +51,8 @@ export class CvdDivPrimitive implements ISeriesPrimitive<Time> {
   private pulseAt: number | null = null;
   private pulseStart = 0;
   private raf = 0;
+  /** Where each tag was last drawn (pane coordinates), so a click on the tag picks its divergence. */
+  private tags: { i2: number; x: number; y: number; w: number; h: number }[] = [];
   /** The price pane draws the broken level too; the CVD pane has no price for it. */
   constructor(private readonly showLevel: boolean) {}
   private view: IPrimitivePaneView = {
@@ -84,11 +86,14 @@ export class CvdDivPrimitive implements ISeriesPrimitive<Time> {
     this.requestUpdate?.();
   }
 
-  /** Second-swing bar of the divergence whose swing line passes within a few pixels of (x, y), or null. */
+  /** Second-swing bar of the divergence whose tag is under (x, y) or whose swing line passes within a few pixels of it, or null. x, y are in this pane's own coordinates. */
   findAt(x: number, y: number): number | null {
     const chart = this.chart;
     const series = this.series;
     if (!chart || !series) return null;
+    for (const t of this.tags) {
+      if (x >= t.x - 2 && x <= t.x + t.w + 2 && y >= t.y - 2 && y <= t.y + t.h + 2) return t.i2;
+    }
     const ts = chart.timeScale();
     let best: number | null = null;
     let bestDist = 7;
@@ -162,6 +167,7 @@ export class CvdDivPrimitive implements ISeriesPrimitive<Time> {
     const series = this.series;
     if (!chart || !series) return;
     const ts = chart.timeScale();
+    this.tags = [];
     for (const m of this.marks) {
       const x1 = ts.logicalToCoordinate(m.i1 as Logical);
       const x2 = ts.logicalToCoordinate(m.i2 as Logical);
@@ -241,6 +247,7 @@ export class CvdDivPrimitive implements ISeriesPrimitive<Time> {
         if (y != null) yEdge = m.bullish ? Math.max(yEdge, y) : Math.min(yEdge, y);
       }
       const ty = m.bullish ? yEdge + 8 : yEdge - 8 - h;
+      this.tags.push({ i2: m.i2, x: tx, y: ty, w, h });
       ctx.fillStyle = 'rgba(19, 23, 34, 0.92)';
       ctx.strokeStyle = m.near ? NEAR : color;
       ctx.lineWidth = 1;
