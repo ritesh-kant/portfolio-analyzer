@@ -68,6 +68,8 @@ import {
   nseClosingPrints,
 } from '../../lib/tv/cvd';
 import { load, save } from '../../lib/tv/storage';
+
+const VIEW_KEY = 'tv:view';
 import {
   TIMEFRAMES,
   aggregateBars,
@@ -448,6 +450,8 @@ export function TvChart() {
   const [raw, setRaw] = useState<{ key: string; bars: Bar[] }>({ key: '', bars: [] });
   const [subRaw, setSubRaw] = useState<Bar[]>([]);
   const firstWallRef = useRef<{ key: string; time: number } | null>(null);
+  // View to put back after a refresh: the candle times at the chart's edges (not indices: older bars arrive later).
+  const pendingViewRef = useRef<{ from: number; to: number } | null>(null);
   // NSE stocks: chart bars older than Yahoo's intraday history (60 days), from Upstox, while the delta panel is open
   const [older, setOlder] = useState<{ key: string; bars: Bar[] }>({ key: '', bars: [] });
   // Bars under the delta panel's 15-minute candles, tagged with the symbol they belong to: 1-minute (four 7-day
@@ -1491,10 +1495,54 @@ export function TvChart() {
     if (viewKeyRef.current !== viewKey) {
       viewKeyRef.current = viewKey;
       const n = bars.length;
+      const saved = load<Record<string, { from: number; to: number | null }>>(VIEW_KEY, {})[
+        `${symbol}|${tfId}`
+      ];
+      // `to` is null when the chart was at the live edge: then the default (latest candles) is the right view.
+      pendingViewRef.current = saved && saved.to != null ? { from: saved.from, to: saved.to } : null;
+      // Give up waiting for older bars after a while (the history may not reach that far), so saving resumes.
+      if (pendingViewRef.current) setTimeout(() => (pendingViewRef.current = null), 15000);
       chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, n - 140), to: n + 7 });
       chart.priceScale('right').applyOptions({ autoScale: true });
     }
+    // Put the remembered window back. Older bars may still be loading, so keep trying until they cover its left edge.
+    const pending = pendingViewRef.current;
+    if (pending) {
+      const i0 = wall.findIndex((t) => t >= pending.from);
+      const i1 = wall.findIndex((t) => t >= pending.to);
+      if (i0 >= 0 && i1 >= 0) {
+        chart.timeScale().setVisibleLogicalRange({ from: i0, to: i1 });
+        if (wall[0]! <= pending.from) pendingViewRef.current = null;
+      }
+    }
   }, [bars, wall, chartType, fp.on, decimals, symbol, raw.key, tfId]);
+
+  // Remember where the chart is looking (per symbol + timeframe) so a refresh lands on the same candles.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onRange = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (pendingViewRef.current || !wall.length) return; // still restoring
+        const r = chart.timeScale().getVisibleLogicalRange();
+        if (!r) return;
+        const at = (i: number) => wall[Math.min(wall.length - 1, Math.max(0, Math.round(i)))]!;
+        const all = load<Record<string, { from: number; to: number | null }>>(VIEW_KEY, {});
+        all[`${symbol}|${tfId}`] = {
+          from: at(r.from),
+          to: r.to >= wall.length - 2 ? null : at(r.to),
+        };
+        save(VIEW_KEY, all);
+      }, 400);
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
+    return () => {
+      clearTimeout(timer);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange);
+    };
+  }, [wall, symbol, tfId]);
 
   // Replay: recentre when a replay starts; follow the newest candle while stepping; show the live edge on exit.
   const wasReplaying = useRef(false);
