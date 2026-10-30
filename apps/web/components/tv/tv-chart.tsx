@@ -70,6 +70,8 @@ import {
 import { load, save } from '../../lib/tv/storage';
 
 const VIEW_KEY = 'tv:view';
+/** Saved chart window. Pinned = candle times at both edges; live = width and right padding in bars, so the chart keeps following the newest candle. */
+type SavedView = { from: number; to: number } | { live: true; span: number; pad: number };
 import {
   TIMEFRAMES,
   aggregateBars,
@@ -451,7 +453,7 @@ export function TvChart() {
   const [subRaw, setSubRaw] = useState<Bar[]>([]);
   const firstWallRef = useRef<{ key: string; time: number } | null>(null);
   // View to put back after a refresh: the candle times at the chart's edges (not indices: older bars arrive later).
-  const pendingViewRef = useRef<{ from: number; to: number } | null>(null);
+  const pendingViewRef = useRef<SavedView | null>(null);
   // NSE stocks: chart bars older than Yahoo's intraday history (60 days), from Upstox, while the delta panel is open
   const [older, setOlder] = useState<{ key: string; bars: Bar[] }>({ key: '', bars: [] });
   // Bars under the delta panel's 15-minute candles, tagged with the symbol they belong to: 1-minute (four 7-day
@@ -1495,11 +1497,10 @@ export function TvChart() {
     if (viewKeyRef.current !== viewKey) {
       viewKeyRef.current = viewKey;
       const n = bars.length;
-      const saved = load<Record<string, { from: number; to: number | null }>>(VIEW_KEY, {})[
-        `${symbol}|${tfId}`
-      ];
-      // `to` is null when the chart was at the live edge: then the default (latest candles) is the right view.
-      pendingViewRef.current = saved && saved.to != null ? { from: saved.from, to: saved.to } : null;
+      const saved = load<Record<string, SavedView>>(VIEW_KEY, {})[`${symbol}|${tfId}`];
+      // (entries from the first version stored `to: null` for live: ignore anything that is not one of the two shapes)
+      const ok = saved && ('live' in saved ? saved.span > 0 : typeof saved.to === 'number');
+      pendingViewRef.current = ok ? saved : null;
       // Stop re-applying after a while even if the user never touches the chart.
       if (pendingViewRef.current) setTimeout(() => (pendingViewRef.current = null), 20000);
       chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, n - 140), to: n + 7 });
@@ -1508,7 +1509,10 @@ export function TvChart() {
     // Put the remembered window back. The bars are swapped and extended a few times while loading, which moves the
     // view each time, so re-apply it on every change until the user takes over (or 20 s have passed).
     const pending = pendingViewRef.current;
-    if (pending) {
+    if (pending && 'live' in pending) {
+      const to = wall.length - 1 + pending.pad;
+      chart.timeScale().setVisibleLogicalRange({ from: to - pending.span, to });
+    } else if (pending) {
       const i0 = wall.findIndex((t) => t >= pending.from);
       const i1 = wall.findIndex((t) => t >= pending.to);
       if (i0 >= 0 && i1 >= 0) {
@@ -1520,9 +1524,14 @@ export function TvChart() {
   // Remember where the chart is looking (per symbol + timeframe) so a refresh lands on the same candles. Only
   // the user's own moves are saved: while loading, data swaps shift the range by themselves and must not count.
   const userMoveRef = useRef(0);
+  // Read through refs so the subscription survives live-poll / data-swap re-renders: a re-subscribe cancelled the
+  // pending save and a quick scroll to the live edge was never stored.
+  const viewCtxRef = useRef({ wall, symbol, tfId });
+  viewCtxRef.current = { wall, symbol, tfId };
+  const hasBars = wall.length > 0;
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart) return;
+    if (!chart || !hasBars) return;
     const el = chart.chartElement();
     const touch = () => {
       userMoveRef.current = Date.now();
@@ -1530,34 +1539,31 @@ export function TvChart() {
     };
     const evs = ['wheel', 'pointerdown', 'keydown'] as const;
     evs.forEach((e) => el.addEventListener(e, touch, { capture: true, passive: true }));
-    return () => evs.forEach((e) => el.removeEventListener(e, touch, { capture: true }));
-  }, [ready]);
-  useEffect(() => {
-    const chart = chartRef.current;
-    if (!chart) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const onRange = () => {
       if (Date.now() - userMoveRef.current > 3000) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
-        if (!wall.length) return;
+        const { wall: w, symbol: sym, tfId: tf } = viewCtxRef.current;
         const r = chart.timeScale().getVisibleLogicalRange();
-        if (!r) return;
-        const at = (i: number) => wall[Math.min(wall.length - 1, Math.max(0, Math.round(i)))]!;
-        const all = load<Record<string, { from: number; to: number | null }>>(VIEW_KEY, {});
-        all[`${symbol}|${tfId}`] = {
-          from: at(r.from),
-          to: r.to >= wall.length - 2 ? null : at(r.to),
-        };
+        if (!w.length || !r) return;
+        const at = (i: number) => w[Math.min(w.length - 1, Math.max(0, Math.round(i)))]!;
+        const all = load<Record<string, SavedView>>(VIEW_KEY, {});
+        // Near the newest candle counts as live, whatever the exact padding: new candles must keep being followed.
+        all[`${sym}|${tf}`] =
+          r.to >= w.length - 12
+            ? { live: true, span: r.to - r.from, pad: r.to - (w.length - 1) }
+            : { from: at(r.from), to: at(r.to) };
         save(VIEW_KEY, all);
       }, 400);
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
     return () => {
       clearTimeout(timer);
+      evs.forEach((e) => el.removeEventListener(e, touch, { capture: true }));
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange);
     };
-  }, [wall, symbol, tfId]);
+  }, [hasBars]);
 
   // Replay: recentre when a replay starts; follow the newest candle while stepping; show the live edge on exit.
   const wasReplaying = useRef(false);
