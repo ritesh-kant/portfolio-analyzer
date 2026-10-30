@@ -1500,32 +1500,47 @@ export function TvChart() {
       ];
       // `to` is null when the chart was at the live edge: then the default (latest candles) is the right view.
       pendingViewRef.current = saved && saved.to != null ? { from: saved.from, to: saved.to } : null;
-      // Give up waiting for older bars after a while (the history may not reach that far), so saving resumes.
-      if (pendingViewRef.current) setTimeout(() => (pendingViewRef.current = null), 15000);
+      // Stop re-applying after a while even if the user never touches the chart.
+      if (pendingViewRef.current) setTimeout(() => (pendingViewRef.current = null), 20000);
       chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, n - 140), to: n + 7 });
       chart.priceScale('right').applyOptions({ autoScale: true });
     }
-    // Put the remembered window back. Older bars may still be loading, so keep trying until they cover its left edge.
+    // Put the remembered window back. The bars are swapped and extended a few times while loading, which moves the
+    // view each time, so re-apply it on every change until the user takes over (or 20 s have passed).
     const pending = pendingViewRef.current;
     if (pending) {
       const i0 = wall.findIndex((t) => t >= pending.from);
       const i1 = wall.findIndex((t) => t >= pending.to);
       if (i0 >= 0 && i1 >= 0) {
         chart.timeScale().setVisibleLogicalRange({ from: i0, to: i1 });
-        if (wall[0]! <= pending.from) pendingViewRef.current = null;
       }
     }
   }, [bars, wall, chartType, fp.on, decimals, symbol, raw.key, tfId]);
 
-  // Remember where the chart is looking (per symbol + timeframe) so a refresh lands on the same candles.
+  // Remember where the chart is looking (per symbol + timeframe) so a refresh lands on the same candles. Only
+  // the user's own moves are saved: while loading, data swaps shift the range by themselves and must not count.
+  const userMoveRef = useRef(0);
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const el = chart.chartElement();
+    const touch = () => {
+      userMoveRef.current = Date.now();
+      pendingViewRef.current = null;
+    };
+    const evs = ['wheel', 'pointerdown', 'keydown'] as const;
+    evs.forEach((e) => el.addEventListener(e, touch, { capture: true, passive: true }));
+    return () => evs.forEach((e) => el.removeEventListener(e, touch, { capture: true }));
+  }, [ready]);
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const onRange = () => {
+      if (Date.now() - userMoveRef.current > 3000) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
-        if (pendingViewRef.current || !wall.length) return; // still restoring
+        if (!wall.length) return;
         const r = chart.timeScale().getVisibleLogicalRange();
         if (!r) return;
         const at = (i: number) => wall[Math.min(wall.length - 1, Math.max(0, Math.round(i)))]!;
@@ -2830,6 +2845,7 @@ export function TvChart() {
 
   // ── toolbar actions ───────────────────────────────────────────────────
   const rangeTo = (id: RangeId) => {
+    userMoveRef.current = Date.now();
     const chart = chartRef.current;
     if (!chart || !bars.length) return;
     const n = bars.length;
