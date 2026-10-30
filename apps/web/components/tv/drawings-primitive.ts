@@ -260,7 +260,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
 
   /** Handles in order: entry-left, entry-right, target (top-middle), stop (bottom-middle). */
   private positionGeometry(d: Drawing, w: number, h: number): Geometry | null {
-    const [a, b, tp, sl] = d.pts as [Pt, Pt, Pt, Pt];
+    const [a, , tp, sl] = d.pts as [Pt, Pt, Pt, Pt];
     const left = this.px(a.t, a.p);
     if (!left || !this.chart) return null;
     // The width is a candle count, so it survives the overnight gaps that crush a duration.
