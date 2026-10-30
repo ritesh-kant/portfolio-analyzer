@@ -1933,6 +1933,8 @@ export function TvChart() {
     const shown =
       p &&
       pocOpen &&
+      // the indicator's eye hides the scanner pick's zone too
+      (!pocOn || pocMarks) &&
       bars.length > 0 &&
       meta?.symbol?.toUpperCase() === p.symbol.toUpperCase() &&
       p.pocFrom != null &&
@@ -2036,7 +2038,7 @@ export function TvChart() {
       showRange(ts, last + 6 - span, last + 6);
     }
     pocPrimRef.current?.pulse();
-  }, [pocPick, pocTrade, pocOpen, bars, meta, chartType, timeZone]);
+  }, [pocPick, pocTrade, pocOpen, pocOn, pocMarks, bars, meta, chartType, timeZone]);
   // POC retest indicator: the same detection as the scanner, run on this chart's regular-hours bars. A POC built
   // from candles longer than 15 minutes is too coarse, so it draws nothing there (the legend says so).
   const pocLevels = useMemo(() => {

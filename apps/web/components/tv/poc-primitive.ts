@@ -415,20 +415,21 @@ export class PocPrimitive implements ISeriesPrimitive<Time> {
     }
     // the zone: under the candles a solid amber tint plus hatching, so it reads even behind volume-profile bars
     if (!over) {
-      ctx.fillStyle = `rgba(${ACCENT}, ${(0.14 + 0.16 * glow).toFixed(3)})`;
+      ctx.fillStyle = `rgba(${ACCENT}, ${(0.05 + 0.12 * glow).toFixed(3)})`;
       ctx.fillRect(x0, yt, width - x0, h);
-      this.hatch(ctx, x0, yt, width - x0, h, 0.5 + 0.3 * glow);
+      this.hatch(ctx, x0, yt, width - x0, h, 0.14 + 0.3 * glow);
       ctx.restore();
       return;
     }
-    // over everything: the outline, lines, labels and markers
-    ctx.strokeStyle = `rgba(${ACCENT}, ${(0.9 + 0.1 * glow).toFixed(3)})`;
-    ctx.lineWidth = glow > 0 ? 2.5 : 1.5;
+    // over everything: the outline, lines, labels and markers; kept soft so what is behind stays readable
+    ctx.strokeStyle = `rgba(${ACCENT}, ${(0.4 + 0.5 * glow).toFixed(3)})`;
+    ctx.lineWidth = glow > 0 ? 2.5 : 1;
     ctx.setLineDash([6, 4]);
     ctx.strokeRect(x0 + 0.5, yt + 0.5, width - x0 + 2, h - 1);
     // POC: dotted
     ctx.setLineDash([1, 3]);
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = `rgba(${ACCENT}, ${(0.55 + 0.4 * glow).toFixed(3)})`;
+    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(x0, yp);
     ctx.lineTo(width, yp);
@@ -438,7 +439,7 @@ export class PocPrimitive implements ISeriesPrimitive<Time> {
       ctx.font = FONT;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
-      ctx.fillStyle = `rgb(${ACCENT})`;
+      ctx.fillStyle = `rgba(${ACCENT}, 0.8)`;
       const age =
         m.sessionsAgo == null
           ? ''
@@ -458,8 +459,8 @@ export class PocPrimitive implements ISeriesPrimitive<Time> {
       if (price == null) continue;
       const y = series.priceToCoordinate(price);
       if (y == null) continue;
-      ctx.strokeStyle = `rgb(${ACCENT})`;
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = `rgba(${ACCENT}, 0.65)`;
+      ctx.lineWidth = 1;
       ctx.setLineDash(dash);
       ctx.beginPath();
       ctx.moveTo(x0, y);

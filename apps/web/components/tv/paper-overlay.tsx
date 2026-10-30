@@ -512,7 +512,12 @@ export function PaperOverlay(p: Props) {
             >
               {() => (
                 <>
-                  <Chip color={c} filled cursor="ns-resize">
+                  <Chip
+                    color={c}
+                    filled
+                    title="Execute now at market"
+                    onClick={() => flash(p.onOrderMarket(o.id))}
+                  >
                     {o.side === 'buy' ? 'Buy' : 'Sell'}
                   </Chip>
                   {ghostChips({ sl: o.sl != null, tp: o.tp != null }, (kind, v) =>
