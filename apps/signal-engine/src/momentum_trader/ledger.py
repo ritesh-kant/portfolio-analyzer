@@ -186,6 +186,7 @@ class PaperLedger:
         t: ClosedTrade,
         next_round_level: float | None = None,
         chart_bars: pd.DataFrame | None = None,
+        reconciled: bool = False,
     ) -> None:
         if self._db is not None:
             try:
@@ -198,6 +199,9 @@ class PaperLedger:
                         "exit_price": t.exit, "exit_reason": t.exit_reason,
                         "checkpoint": t.checkpoint, "checkpoint_hit": t.checkpoint_hit,
                         "gross_inr": t.gross_inr, "costs_inr": t.costs_inr, "net_inr": t.net_inr,
+                        # Closed after the fact by reconcile.py, not by the live
+                        # loop — so these rows can be told apart in any analysis.
+                        **({"reconciled": True} if reconciled else {}),
                         # Same entry-time levels as `opened` wrote; repeated
                         # here because a scanner restart can close a position it
                         # did not open.

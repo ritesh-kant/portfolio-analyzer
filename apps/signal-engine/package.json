@@ -19,6 +19,8 @@
     "nt:monitor": "uv run --extra dev python scripts/invoke_news_trader.py monitor",
     "nt:pipeline": "uv run --extra dev python scripts/invoke_news_trader.py pipeline",
 
+    "mt:reconcile": "uv run python -m src.momentum_trader.reconcile",
+
     "nt:refresh-universe": "uv run python scripts/refresh_nifty500.py"
   },
   "scriptsComments": {
