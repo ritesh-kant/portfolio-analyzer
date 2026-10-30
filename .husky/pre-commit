@@ -2,6 +2,8 @@
 . "$(dirname "$0")/_/husky.sh"
 
 # Source shell configuration to access NVM
+set +e
 [ -s "$HOME/.nvm/nvm.sh" ] && \. "$HOME/.nvm/nvm.sh"
+set -e
 
 exec pnpm lint-staged
