@@ -34,6 +34,7 @@ import {
   newId,
   translate,
   vpOf,
+  withAlpha,
 } from '../../lib/tv/drawings';
 import { dragPositionHandle, isPosition, positionPts } from '../../lib/tv/position';
 import { autoStep, buildFootprints, stepLadder } from '../../lib/tv/footprint';
@@ -43,6 +44,9 @@ import {
   type IndicatorCfg,
   AVP_VP,
   SVP_DEFAULTS,
+  VOL_DOWN_DEFAULT,
+  VOL_MA_DEFAULT,
+  VOL_UP_DEFAULT,
   avpOf,
   catalogOf,
   indicatorLabel,
@@ -173,7 +177,7 @@ import {
   type PaperState,
 } from '../../lib/tv/paper';
 import { DEFAULT_ROWS } from '../../lib/tv/volume-profile';
-import { completedCount, endAfter, nextEnd } from '../../lib/tv/replay';
+import { completedCount, formingCandle, nextReplayEnd, startReplayEnd } from '../../lib/tv/replay';
 import { groupByBar } from '../../lib/tv/news-markers';
 import type { NewsItem, NewsResponse } from '../../lib/tv/news-types';
 import { FootprintView, type FootprintData } from './footprint-series';
@@ -260,6 +264,14 @@ function computeIndicators(
     switch (cfg.type) {
       case 'volume':
         lines = [{ key: 'vol', color: VOL_UP, values: volumes, kind: 'hist' }];
+        if (cfg.volMa) {
+          lines.push({
+            key: 'ma',
+            color: cfg.volMaColor ?? VOL_MA_DEFAULT,
+            values: sma(volumes, cfg.length),
+            kind: 'line',
+          });
+        }
         break;
       case 'rvol':
         lines = [
@@ -453,6 +465,7 @@ export function TvChart() {
   const replaySymbolRef = useRef<string | null>(null);
   const replayPickRef = useRef(false);
   const fullTimesRef = useRef<number[]>([]);
+  const fineTimesRef = useRef<number[]>([]);
   const tfSecsRef = useRef(300);
 
   // scale
@@ -633,42 +646,43 @@ export function TvChart() {
     () => (tf.aggregateSecs ? aggregateBars(rawBars, tf.aggregateSecs, timeZone) : rawBars),
     [rawBars, tf.aggregateSecs, timeZone],
   );
-  // Replay: only candles complete at the cut-off exist as far as every indicator, drawing and badge is concerned.
-  const bars = useMemo(
-    () =>
-      replayEnd == null
-        ? fullBars
-        : fullBars.slice(
-            0,
-            completedCount(
-              fullBars.map((b) => b.time),
-              tf.secs,
-              replayEnd,
-            ),
-          ),
-    [fullBars, replayEnd, tf.secs],
-  );
-  fullTimesRef.current = useMemo(() => fullBars.map((b) => b.time), [fullBars]);
-  tfSecsRef.current = tf.secs;
-  replayEndRef.current = replayEnd;
-  replayPickRef.current = replayPick;
-  const replayAtEnd = replayEnd != null && bars.length >= fullBars.length;
-  const wall = useMemo(
-    () => bars.map((b) => wallClock(b.time, timeZone) as UTCTimestamp),
-    [bars, timeZone],
-  );
-  const decimals = pricePrecision(bars[bars.length - 1]?.close ?? meta?.price ?? 0);
   // The footprint's own 1-minute fetch reaches 7 days back; with the delta panel open, or CVD on the chart, the
   // ~4-week 1-minute bars (same symbol) are used instead, so the older candles have real intrabars too.
+  // Replay builds the forming candle from 1-minute bars, so it wants them too.
+  const replayWanted = replayEnd != null || replayPick;
   const cvdOn = indicators.some((i) => i.type === 'cvd');
   // On 1D and above the SVP is one profile per candle, built from the minute bars underneath (as TradingView does).
   const svpDaily = !tf.intraday && indicators.some((i) => i.type === 'svp' && !i.hidden);
   const subBars =
     tf.source === '1m'
       ? rawBars
-      : (deltaActive || cvdOn || svpDaily) && deltaSub.symbol === symbol && deltaSub.bars.length > subRaw.length
+      : (deltaActive || cvdOn || svpDaily || replayWanted) && deltaSub.symbol === symbol && deltaSub.bars.length > subRaw.length
         ? deltaSub.bars
         : subRaw;
+  // Replay: only candles complete at the cut-off exist as far as every indicator, drawing and badge is concerned.
+  // The candle still forming at the cut-off is rebuilt from the 1-minute bars played so far.
+  const fineTimes = useMemo(() => subBars.map((b) => b.time), [subBars]);
+  const fullTimes = useMemo(() => fullBars.map((b) => b.time), [fullBars]);
+  const bars = useMemo(() => {
+    if (replayEnd == null) return fullBars;
+    const n = completedCount(fullTimes, tf.secs, replayEnd);
+    const done = fullBars.slice(0, n);
+    const next = fullBars[n];
+    const forming = next ? formingCandle(next, tf.secs, subBars, fineTimes, replayEnd) : null;
+    return forming ? [...done, forming] : done;
+  }, [fullBars, fullTimes, subBars, fineTimes, replayEnd, tf.secs]);
+  fullTimesRef.current = fullTimes;
+  fineTimesRef.current = fineTimes;
+  tfSecsRef.current = tf.secs;
+  replayEndRef.current = replayEnd;
+  replayPickRef.current = replayPick;
+  const replayAtEnd =
+    replayEnd != null && nextReplayEnd(fullTimes, tf.secs, fineTimes, replayEnd) == null;
+  const wall = useMemo(
+    () => bars.map((b) => wallClock(b.time, timeZone) as UTCTimestamp),
+    [bars, timeZone],
+  );
+  const decimals = pricePrecision(bars[bars.length - 1]?.close ?? meta?.price ?? 0);
   // 1-minute candles for volume profiles (never past the replay cut-off); none when the chart already is 1-minute.
   const profileFine = useMemo(() => {
     if (tf.secs <= 60 || !subBars.length) return null;
@@ -1092,13 +1106,13 @@ export function TvChart() {
   const pocFine = pocOn && pocFits;
   const fineOn = fp.on || svpOn || cvdOn || pocFine;
   useEffect(() => {
-    if (!ready || (!fp.on && !svpOn && !cvdOn && !pocFine) || tf.source === '1m') return;
+    if (!ready || (!fp.on && !svpOn && !cvdOn && !pocFine && !replayWanted) || tf.source === '1m') return;
     const ctl = new AbortController();
     fetchBars(symbol, '1m', '7d', ctl.signal, wantPrepost)
       .then((res) => setSubRaw(res.bars))
       .catch(() => setSubRaw([]));
     return () => ctl.abort();
-  }, [ready, fp.on, svpOn, cvdOn, pocFine, symbol, tf.source, wantPrepost, fetchBars]);
+  }, [ready, fp.on, svpOn, cvdOn, pocFine, replayWanted, symbol, tf.source, wantPrepost, fetchBars]);
 
   // Delta divergence reads 1-minute bars further back than the footprint does. NSE stocks: Upstox's exchange
   // candles, as far back as the view needs (3 months at least). Everything else: Yahoo serves them ~4 weeks back,
@@ -1106,7 +1120,7 @@ export function TvChart() {
   const nse = symbol.endsWith('.NS');
   const deltaDays = deltaDepthDays(deltaView, Math.floor(Date.now() / 1000));
   useEffect(() => {
-    if (!ready || (!deltaActive && !cvdOn && !svpDaily)) return;
+    if (!ready || (!deltaActive && !cvdOn && !svpDaily && !replayWanted)) return;
     const ctl = new AbortController();
     const now = Math.floor(Date.now() / 1000);
     const yahoo = () => {
@@ -1155,6 +1169,7 @@ export function TvChart() {
     deltaActive,
     cvdOn,
     svpDaily,
+    replayWanted,
     symbol,
     nse,
     deltaDays,
@@ -1288,7 +1303,7 @@ export function TvChart() {
     const times = fullTimesRef.current;
     if (!times.length) return;
     replaySymbolRef.current = symbolRef.current;
-    setReplayEnd(endAfter(times, tfSecsRef.current, index));
+    setReplayEnd(startReplayEnd(times, tfSecsRef.current, fineTimesRef.current, index));
     setReplayPick(false);
     setReplayPlaying(false);
     setSelectedId(null);
@@ -1299,7 +1314,7 @@ export function TvChart() {
   const stepReplay = useCallback(() => {
     const cur = replayEndRef.current;
     if (cur == null) return false;
-    const next = nextEnd(fullTimesRef.current, tfSecsRef.current, cur);
+    const next = nextReplayEnd(fullTimesRef.current, tfSecsRef.current, fineTimesRef.current, cur);
     if (next == null) {
       setReplayPlaying(false);
       return false;
@@ -1312,6 +1327,14 @@ export function TvChart() {
     setReplayPlaying(false);
     setReplayPick(true);
     setTool('cursor');
+  };
+
+  const weeksBack = (weeks: number) => {
+    const times = fullTimesRef.current;
+    if (!times.length) return;
+    const target = times[times.length - 1]! - weeks * 7 * 86400;
+    const i = times.findIndex((t) => t >= target);
+    startReplayAt(i < 0 ? 0 : i);
   };
 
   const randomBar = () => {
@@ -1677,16 +1700,31 @@ export function TvChart() {
       for (const line of c.lines) {
         let series: ISeriesApi<SeriesType, Time>;
         if (c.cfg.type === 'volume') {
-          series = chart.addSeries(
-            HistogramSeries,
-            {
-              priceFormat: { type: 'volume' },
-              priceScaleId: 'vol',
-              lastValueVisible: false,
-              priceLineVisible: false,
-            },
-            0,
-          );
+          const labels = c.cfg.volLabels ?? false;
+          series =
+            line.kind === 'hist'
+              ? chart.addSeries(
+                  HistogramSeries,
+                  {
+                    priceFormat: { type: 'volume' },
+                    priceScaleId: 'vol',
+                    lastValueVisible: labels,
+                    priceLineVisible: false,
+                  },
+                  0,
+                )
+              : chart.addSeries(
+                  LineSeries,
+                  {
+                    ...flags,
+                    color: line.color,
+                    lineWidth: 1,
+                    priceFormat: { type: 'volume' },
+                    priceScaleId: 'vol',
+                    lastValueVisible: labels,
+                  },
+                  0,
+                );
           series.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
         } else if (line.kind === 'candle') {
           series = chart.addSeries(
@@ -1860,13 +1898,16 @@ export function TvChart() {
         const entry = entries[i];
         i += 1;
         if (!entry || entry.cfgId !== c.cfg.id) continue;
-        if (c.cfg.type === 'volume') {
+        if (c.cfg.type === 'volume' && line.kind === 'hist') {
+          const up = withAlpha(c.cfg.volUp ?? VOL_UP_DEFAULT, 0.5);
+          const down = withAlpha(c.cfg.volDown ?? VOL_DOWN_DEFAULT, 0.5);
           entry.series.setData(
-            bars.map((b, idx) => ({
-              time: wall[idx]!,
-              value: b.volume,
-              color: b.close >= b.open ? VOL_UP : VOL_DOWN,
-            })) as never,
+            bars.map((b, idx) => {
+              const rising = c.cfg.volPrevClose
+                ? b.close >= (bars[idx - 1]?.close ?? b.open)
+                : b.close >= b.open;
+              return { time: wall[idx]!, value: b.volume, color: rising ? up : down };
+            }) as never,
           );
         } else if (c.cfg.type === 'rvol') {
           const out: { time: UTCTimestamp; value: number; color: string }[] = [];
@@ -3072,7 +3113,7 @@ export function TvChart() {
       <span className={c.cfg.hidden || hiddenAll(c.cfg.id) ? 'text-[#5d606b]' : 'text-[#b2b5be]'}>
         {indicatorLabel(c.cfg)}
       </span>
-      {c.cfg.hidden || hiddenAll(c.cfg.id)
+      {c.cfg.hidden || hiddenAll(c.cfg.id) || (c.cfg.type === 'volume' && c.cfg.volStatus === false)
         ? null
         : c.lines.map((l) => {
             const k = l.ohlc?.[idx];
@@ -3109,7 +3150,14 @@ export function TvChart() {
                 key={l.key}
                 style={{
                   color:
-                    c.cfg.type === 'volume' ? (bar && bar.close >= bar.open ? UP : DOWN) : l.color,
+                    c.cfg.type === 'volume' && l.key === 'vol'
+                      ? bar &&
+                        (c.cfg.volPrevClose
+                          ? bar.close >= (bars[idx - 1]?.close ?? bar.open)
+                          : bar.close >= bar.open)
+                        ? (c.cfg.volUp ?? UP)
+                        : (c.cfg.volDown ?? DOWN)
+                      : l.color,
                 }}
               >
                 {valueText(c, l)}
@@ -3137,7 +3185,7 @@ export function TvChart() {
             <Icons.eye size={14} />
           )}
         </button>
-        {c.cfg.type !== 'volume' && c.cfg.type !== 'vwap' ? (
+        {c.cfg.type !== 'vwap' ? (
           <button
             type="button"
             title="Settings"
@@ -3980,6 +4028,7 @@ export function TvChart() {
                 onSpeed={setReplaySpeed}
                 onSelect={beginPick}
                 onRandom={randomBar}
+                onWeeksBack={weeksBack}
                 onExit={exitReplay}
               />
             ) : null}

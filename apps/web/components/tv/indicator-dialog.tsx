@@ -7,6 +7,9 @@ import {
   PALETTE,
   catalogOf,
   indicatorLabel,
+  VOL_DOWN_DEFAULT,
+  VOL_MA_DEFAULT,
+  VOL_UP_DEFAULT,
 } from '../../lib/tv/indicator-defs';
 import { CVD_ANCHORS, type CvdAnchor } from '../../lib/tv/cvd';
 import { Icons } from './icons';
@@ -179,6 +182,140 @@ const NumberField = ({
   </label>
 );
 
+const Check = ({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (on: boolean) => void;
+}) => (
+  <label className="flex items-center gap-2 py-1.5 text-[13px] text-[#d1d4dc]">
+    <input
+      type="checkbox"
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+      className="h-3.5 w-3.5 accent-[#2962ff]"
+    />
+    {label}
+  </label>
+);
+
+const ColorField = ({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (hex: string) => void;
+}) => (
+  <label className="flex items-center justify-between py-1.5 pl-6 text-[13px] text-[#d1d4dc]">
+    {label}
+    <input
+      type="color"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="h-6 w-10 cursor-pointer rounded border border-[#363a45] bg-transparent p-0.5"
+    />
+  </label>
+);
+
+/** Volume, laid out like TradingView's Vol dialog: Inputs (MA length, colouring) and Style (colours, MA, output). */
+function VolumeFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg: IndicatorCfg) => void }) {
+  const [tab, setTab] = useState<'inputs' | 'style'>('style');
+  return (
+    <div>
+      <div className="mb-2 flex gap-4 border-b border-[#2a2e39] text-[13px] font-medium">
+        {(['inputs', 'style'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`-mb-px border-b-2 pb-1.5 capitalize ${
+              tab === t ? 'border-[#2962ff] text-white' : 'border-transparent text-[#787b86] hover:text-white'
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      {tab === 'inputs' ? (
+        <>
+          <NumberField
+            label="Volume MA length"
+            value={cfg.length}
+            onChange={(length) => onChange({ ...cfg, length })}
+          />
+          <Check
+            label="Color based on previous close"
+            checked={cfg.volPrevClose ?? false}
+            onChange={(volPrevClose) => onChange({ ...cfg, volPrevClose })}
+          />
+        </>
+      ) : (
+        <>
+          <ColorField
+            label="Growing"
+            value={cfg.volUp ?? VOL_UP_DEFAULT}
+            onChange={(volUp) => onChange({ ...cfg, volUp })}
+          />
+          <ColorField
+            label="Falling"
+            value={cfg.volDown ?? VOL_DOWN_DEFAULT}
+            onChange={(volDown) => onChange({ ...cfg, volDown })}
+          />
+          <Check
+            label="Volume MA"
+            checked={cfg.volMa ?? false}
+            onChange={(volMa) => onChange({ ...cfg, volMa })}
+          />
+          {cfg.volMa ? (
+            <ColorField
+              label="MA colour"
+              value={cfg.volMaColor ?? VOL_MA_DEFAULT}
+              onChange={(volMaColor) => onChange({ ...cfg, volMaColor })}
+            />
+          ) : null}
+          <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-[#787b86]">
+            Output values
+          </div>
+          <Check
+            label="Labels on price scale"
+            checked={cfg.volLabels ?? false}
+            onChange={(volLabels) => onChange({ ...cfg, volLabels })}
+          />
+          <Check
+            label="Values in status line"
+            checked={cfg.volStatus ?? true}
+            onChange={(volStatus) => onChange({ ...cfg, volStatus })}
+          />
+          <button
+            type="button"
+            onClick={() =>
+              onChange({
+                ...cfg,
+                length: 20,
+                volUp: undefined,
+                volDown: undefined,
+                volPrevClose: undefined,
+                volMa: undefined,
+                volMaColor: undefined,
+                volLabels: undefined,
+                volStatus: undefined,
+              })
+            }
+            className="mt-2 text-[12px] text-[#787b86] hover:text-white"
+          >
+            Reset to defaults
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
   const entry = catalogOf(cfg.type);
   return (
@@ -202,6 +339,7 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
             <Icons.close size={20} />
           </button>
         </div>
+        {cfg.type === 'volume' ? <VolumeFields cfg={cfg} onChange={onChange} /> : null}
         {cfg.type !== 'vwap' && cfg.type !== 'volume' && cfg.type !== 'cvd' ? (
           <NumberField
             label={cfg.type === 'macd' ? 'Fast length' : cfg.type === 'svp' || cfg.type === 'avp' ? 'Rows' : 'Length'}

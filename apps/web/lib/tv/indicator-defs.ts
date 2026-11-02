@@ -36,6 +36,17 @@ export interface IndicatorCfg {
   divPivot?: number;
   /** CVD divergence: the two swings are at most this many candles apart (absent = 30). */
   divGap?: number;
+  /** Volume: growing / falling bar colours (hex; drawn at 50% opacity). Absent = green / red. */
+  volUp?: string;
+  volDown?: string;
+  /** Volume: colour by close vs the previous close instead of close vs open. */
+  volPrevClose?: boolean;
+  /** Volume: draw the moving average of volume (length = `length`) in `volMaColor`. */
+  volMa?: boolean;
+  volMaColor?: string;
+  /** Volume: show the last value on the price scale / the values in the status line (absent = off / on). */
+  volLabels?: boolean;
+  volStatus?: boolean;
   /** Bollinger std-dev multiplier. */
   mult?: number;
   color: string;
@@ -221,3 +232,7 @@ export const svpOf = (cfg: IndicatorCfg): VpSettings => ({ ...SVP_DEFAULTS, ...c
 /** TradingView's anchored volume profile: histogram on the pane's right edge (see `AVP_DEFAULTS`). */
 export const AVP_VP: VpSettings = { ...VP_DEFAULTS, ...AVP_DEFAULTS };
 export const avpOf = (cfg: IndicatorCfg): VpSettings => ({ ...AVP_VP, ...cfg.vp });
+
+export const VOL_UP_DEFAULT = '#089981';
+export const VOL_DOWN_DEFAULT = '#f23645';
+export const VOL_MA_DEFAULT = '#2962ff';

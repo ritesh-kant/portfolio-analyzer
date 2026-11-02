@@ -6,7 +6,7 @@ import { autoStep, buildFootprints, niceStep, stepLadder } from './footprint.ts'
 import { makeTimeAxis } from './drawings.ts';
 import { dragPositionHandle, editPositionLevels, positionEnd, positionPts, positionSpan, positionStats } from './position.ts';
 import { aliasHits } from './aliases.ts';
-import { completedCount, endAfter, nextEnd } from './replay.ts';
+import { completedCount, endAfter, formingCandle, nextEnd, nextReplayEnd, startReplayEnd } from './replay.ts';
 import { matchScore, rankHits, searchQueries } from './search-rank.ts';
 import { extendedMask, runs, sessionBreaks, sessionFor } from './sessions.ts';
 import { buildProfile } from './volume-profile.ts';
@@ -1165,4 +1165,24 @@ test('divergenceSize ranks a bigger price and CVD gap higher and is null on a fl
   const large = divergenceSize(mk(95, 140), bars, cvd);
   assert.ok(large.score > small.score && large.tier === 'large' && small.tier === 'small');
   assert.equal(divergenceSize(mk(95, 140), bars, bars.map(() => ({ open: 0, high: 0, low: 0, close: 0 }))), null);
+});
+
+test('replay forms a coarse candle minute by minute from 1-minute bars', () => {
+  const H = 3600;
+  const times = [0, H, 2 * H];
+  const fine = Array.from({ length: 180 }, (_, i) => ({
+    time: i * 60, open: 10 + i, high: 11 + i, low: 9 + i, close: 10.5 + i, volume: 1,
+  }));
+  const fineTimes = fine.map((b) => b.time);
+  const start = startReplayEnd(times, H, fineTimes, 1);
+  assert.equal(start, H); // candle 1 not drawn yet
+  assert.equal(formingCandle({ time: H, open: 70, high: 70, low: 70, close: 70, volume: 60 }, H, fine, fineTimes, start), null);
+  const e1 = nextReplayEnd(times, H, fineTimes, start);
+  assert.equal(e1, H + 60); // one minute later
+  const c = formingCandle({ time: H, open: 70, high: 99, low: 1, close: 99, volume: 60 }, H, fine, fineTimes, H + 180);
+  assert.equal(c.close, 10.5 + 62);
+  assert.equal(c.volume, 3);
+  assert.equal(c.open, 70);
+  // no minute bars at that point: whole candles, as before
+  assert.equal(nextReplayEnd(times, H, [], H), nextEnd(times, H, H));
 });

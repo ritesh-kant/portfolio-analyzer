@@ -16,6 +16,8 @@ interface Props {
   onSpeed: (speed: number) => void;
   onSelect: () => void;
   onRandom: () => void;
+  /** Start from the candle this many weeks before the latest one. */
+  onWeeksBack: (weeks: number) => void;
   onExit: () => void;
 }
 
@@ -43,6 +45,17 @@ export function ReplayBar(p: Props) {
           >
             Random bar
           </button>
+          {[1, 2, 4].map((w) => (
+            <button
+              key={w}
+              type="button"
+              className={btn}
+              onClick={() => p.onWeeksBack(w)}
+              title={`Start from the candle ${w} week${w > 1 ? 's' : ''} before the latest`}
+            >
+              {w}W back
+            </button>
+          ))}
         </>
       ) : (
         <>

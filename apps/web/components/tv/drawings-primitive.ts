@@ -683,12 +683,20 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     const money = (v: number) => String(Number(v.toFixed(2)));
     const level = (name: string, dist: number, pct: number, ticks: number) =>
       `${name}: ${dist.toFixed(decimals)} (${pct.toFixed(3)}%) ${ticks}, Amount: ${st.qty}`;
+    // What the trade makes at the target / loses at the stop, live while a level is dragged.
+    const gain = (v: number) => `${v >= 0 ? '+' : '−'}${money(Math.abs(v))}`;
 
-    const tLines = [level('Target', st.reward, st.targetPct, st.targetTicks)];
-    const sLines = [level('Stop', st.risk, st.stopPct, st.stopTicks)];
+    const tLines = [
+      level('Target', st.reward, st.targetPct, st.targetTicks),
+      `Profit if hit: ${gain(st.reward * st.qty)}`,
+    ];
+    const sLines = [
+      level('Stop', st.risk, st.stopPct, st.stopTicks),
+      `Loss if hit: ${gain(-st.risk * st.qty)}`,
+    ];
     // Outside the zones: above a long's target and below its stop, mirrored for a short.
-    pill(tLines, POSITION_PROFIT, st.isLong ? t.y - 26 : t.y + 2);
-    pill(sLines, POSITION_STOP, st.isLong ? s.y + 2 : s.y - 26);
+    pill(tLines, POSITION_PROFIT, st.isLong ? t.y - 41 : t.y + 2);
+    pill(sLines, POSITION_STOP, st.isLong ? s.y + 2 : s.y - 41);
     // Result pill inside the profit zone, hugging the entry line.
     const verb = st.status === 'open' ? 'Open' : 'Closed';
     const centreLines = [
