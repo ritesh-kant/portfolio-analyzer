@@ -149,11 +149,13 @@ export function profileOver(
   rows: number,
   valueArea: number,
   cache?: Map<string, VolumeProfile | null>,
+  fineOnly = false,
 ): VolumeProfile | null {
   const start = bars[a]!.time;
   const lastStart = bars[b]!.time;
   const useFine =
     !!fine && fine.length > 0 && fine[0]!.time <= start && fine[fine.length - 1]!.time >= lastStart;
+  if (fineOnly && !useFine) return null;
   const source = useFine ? fine! : bars;
   const i0 = useFine ? lowerBound(fine!, start) : a;
   const i1 = useFine ? lowerBound(fine!, lastStart + secs) - 1 : b;

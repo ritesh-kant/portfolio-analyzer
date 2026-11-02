@@ -24,6 +24,8 @@ export interface SvpOptions {
   secs: number;
   /** 1-minute candles for a finer profile, where they cover the session. */
   fine: Bar[] | null;
+  /** Draw a session only where the 1-minute candles cover it (1D and above: a candle alone has no shape). */
+  fineOnly?: boolean;
 }
 
 const NONE: SvpOptions = {
@@ -88,7 +90,7 @@ export class SessionProfilePrimitive implements ISeriesPrimitive<Time> {
 
   private profileOf(a: number, b: number, rows: number, valueArea: number): VolumeProfile | null {
     const { fine, secs } = this.opts;
-    return profileOver(this.bars, fine, secs, a, b, rows, valueArea, this.cache);
+    return profileOver(this.bars, fine, secs, a, b, rows, valueArea, this.cache, this.opts.fineOnly);
   }
 
   private paint(ctx: CanvasRenderingContext2D, w: number) {

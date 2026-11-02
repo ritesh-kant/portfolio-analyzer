@@ -70,6 +70,7 @@ import {
 import { load, save } from '../../lib/tv/storage';
 
 const VIEW_KEY = 'tv:view';
+const REPLAY_KEY = 'tv:replay';
 /** Saved chart window. Pinned = candle times at both edges; live = width and right padding in bars, so the chart keeps following the newest candle. */
 type SavedView = { from: number; to: number } | { live: true; span: number; pad: number };
 import {
@@ -448,6 +449,8 @@ export function TvChart() {
   const [replaySpeed, setReplaySpeed] = useState(3);
   const [replayStartTick, setReplayStartTick] = useState(0);
   const replayEndRef = useRef<number | null>(null);
+  /** The symbol the active replay belongs to. */
+  const replaySymbolRef = useRef<string | null>(null);
   const replayPickRef = useRef(false);
   const fullTimesRef = useRef<number[]>([]);
   const tfSecsRef = useRef(300);
@@ -658,10 +661,12 @@ export function TvChart() {
   // The footprint's own 1-minute fetch reaches 7 days back; with the delta panel open, or CVD on the chart, the
   // ~4-week 1-minute bars (same symbol) are used instead, so the older candles have real intrabars too.
   const cvdOn = indicators.some((i) => i.type === 'cvd');
+  // On 1D and above the SVP is one profile per candle, built from the minute bars underneath (as TradingView does).
+  const svpDaily = !tf.intraday && indicators.some((i) => i.type === 'svp' && !i.hidden);
   const subBars =
     tf.source === '1m'
       ? rawBars
-      : (deltaActive || cvdOn) && deltaSub.symbol === symbol && deltaSub.bars.length > subRaw.length
+      : (deltaActive || cvdOn || svpDaily) && deltaSub.symbol === symbol && deltaSub.bars.length > subRaw.length
         ? deltaSub.bars
         : subRaw;
   // 1-minute candles for volume profiles (never past the replay cut-off); none when the chart already is 1-minute.
@@ -889,6 +894,12 @@ export function TvChart() {
     if (saved.fp) setFp({ ...DEFAULT_SETTINGS.fp, ...saved.fp });
     if (typeof saved.news === 'boolean') setNewsOn(saved.news);
     if (typeof saved.sessions === 'boolean') setSessionsOn(saved.sessions);
+    // A replay survives a refresh: same symbol, same cut-off instant.
+    const rp = load<{ symbol: string; end: number } | null>(REPLAY_KEY, null);
+    if (rp && rp.symbol === (fromUrl || saved.symbol || DEFAULT_SETTINGS.symbol).toUpperCase()) {
+      replaySymbolRef.current = rp.symbol;
+      setReplayEnd(rp.end);
+    }
     setReady(true);
   }, []);
 
@@ -1095,7 +1106,7 @@ export function TvChart() {
   const nse = symbol.endsWith('.NS');
   const deltaDays = deltaDepthDays(deltaView, Math.floor(Date.now() / 1000));
   useEffect(() => {
-    if (!ready || (!deltaActive && !cvdOn)) return;
+    if (!ready || (!deltaActive && !cvdOn && !svpDaily)) return;
     const ctl = new AbortController();
     const now = Math.floor(Date.now() / 1000);
     const yahoo = () => {
@@ -1143,6 +1154,7 @@ export function TvChart() {
     ready,
     deltaActive,
     cvdOn,
+    svpDaily,
     symbol,
     nse,
     deltaDays,
@@ -1275,6 +1287,7 @@ export function TvChart() {
   const startReplayAt = useCallback((index: number) => {
     const times = fullTimesRef.current;
     if (!times.length) return;
+    replaySymbolRef.current = symbolRef.current;
     setReplayEnd(endAfter(times, tfSecsRef.current, index));
     setReplayPick(false);
     setReplayPlaying(false);
@@ -1317,10 +1330,16 @@ export function TvChart() {
     return () => clearInterval(timer);
   }, [replayPlaying, replayActive, replaySpeed, stepReplay]);
 
-  // A different symbol is a different history: leave replay.
+  // A different symbol is a different history: leave replay (not while settings are still loading, which may
+  // restore the saved replay).
   useEffect(() => {
-    exitReplay();
-  }, [symbol, exitReplay]);
+    if (!ready) return;
+    if (replaySymbolRef.current !== symbol) exitReplay();
+  }, [ready, symbol, exitReplay]);
+  useEffect(() => {
+    if (!ready) return;
+    save(REPLAY_KEY, replayEnd == null ? null : { symbol: replaySymbolRef.current, end: replayEnd });
+  }, [ready, replayEnd]);
 
   // ── chart lifecycle ───────────────────────────────────────────────────
   useEffect(() => {
@@ -1906,22 +1925,24 @@ export function TvChart() {
       !cfg ||
       cfg.hidden ||
       (hideDivs && !revealed.includes(cfg.id)) ||
-      !tf.intraday ||
       !bars.length
     ) {
       prim.setState([], []);
       return;
     }
-    const starts = [
-      0,
-      ...sessionBreaks(
-        bars.map((b) => b.time),
-        tf.secs,
-      ),
-    ];
+    // Intraday: one profile per trading session. 1D and above: one per candle, only where minute bars cover it.
+    const starts = tf.intraday
+      ? [
+          0,
+          ...sessionBreaks(
+            bars.map((b) => b.time),
+            tf.secs,
+          ),
+        ]
+      : bars.map((_, i) => i);
     const sessions = starts.map((s, i): [number, number] => [
       s,
-      (starts[i + 1] ?? bars.length) - 1,
+      tf.intraday ? (starts[i + 1] ?? bars.length) - 1 : s,
     ]);
     // Never let minutes after the replay cut-off into a profile.
     const fine = profileFine;
@@ -1931,6 +1952,7 @@ export function TvChart() {
       decimals,
       secs: tf.secs,
       fine: fine && fine.length ? fine : null,
+      fineOnly: !tf.intraday,
     });
   }, [
     indicators,
