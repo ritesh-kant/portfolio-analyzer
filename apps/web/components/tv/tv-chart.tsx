@@ -207,7 +207,16 @@ const DEFAULT_SETTINGS: Settings = {
   tfId: '5m',
   chartType: 'candles',
   indicators: DEFAULT_INDICATORS,
-  fp: { on: false, auto: true, step: 0.05, imbalance: 3, showDelta: true },
+  fp: {
+    on: false,
+    auto: true,
+    step: 0.05,
+    imbalance: 3,
+    showDelta: true,
+    valueAreaPct: 70,
+    highlight: true,
+    stackedLevels: 0,
+  },
   news: true,
   sessions: true,
 };
@@ -1593,7 +1602,13 @@ export function TvChart() {
     const series = footRef.current;
     const view = footViewRef.current;
     if (!series || !view) return;
-    view.setSettings({ imbalance: fp.imbalance, showDelta: fp.showDelta });
+    view.setSettings({
+      imbalance: fp.imbalance,
+      showDelta: fp.showDelta,
+      valueAreaPct: fp.valueAreaPct,
+      highlight: fp.highlight,
+      stackedLevels: fp.stackedLevels,
+    });
     series.applyOptions({
       priceFormat: { type: 'price', precision: decimals, minMove: 1 / 10 ** decimals },
     } as never);
@@ -1610,7 +1625,18 @@ export function TvChart() {
       fp: footprints[i] ?? null,
     }));
     series.setData(data);
-  }, [fp.on, fp.imbalance, fp.showDelta, bars, wall, footprints, decimals]);
+  }, [
+    fp.on,
+    fp.imbalance,
+    fp.showDelta,
+    fp.valueAreaPct,
+    fp.highlight,
+    fp.stackedLevels,
+    bars,
+    wall,
+    footprints,
+    decimals,
+  ]);
 
   // Indicator series structure: rebuilt only when the indicator set / params change.
   const structKey = JSON.stringify(

@@ -30,6 +30,9 @@ export interface FootprintUi {
   step: number;
   imbalance: number;
   showDelta: boolean;
+  valueAreaPct: number;
+  highlight: boolean;
+  stackedLevels: number;
 }
 
 const FAVORITES = ['1m', '5m', '15m', '1h', '1D'];
@@ -314,6 +317,49 @@ export function TopBar(p: Props) {
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="flex items-center justify-between">
+                Highlight imbalances
+                <input
+                  type="checkbox"
+                  checked={p.footprint.highlight}
+                  onChange={(e) => p.onFootprint({ highlight: e.target.checked })}
+                />
+              </label>
+              <label className="flex items-center justify-between">
+                Stacked levels
+                <select
+                  value={p.footprint.stackedLevels}
+                  disabled={!p.footprint.highlight}
+                  onChange={(e) => p.onFootprint({ stackedLevels: Number(e.target.value) })}
+                  className="rounded border border-[#363a45] bg-[#131722] px-2 py-0.5 disabled:opacity-40"
+                >
+                  <option value={0}>Off</option>
+                  {[2, 3, 4, 5].map((n) => (
+                    <option key={n} value={n}>
+                      {n}+ rows
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center justify-between">
+                Value area
+                <span className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={p.footprint.valueAreaPct}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isFinite(v)) {
+                        p.onFootprint({ valueAreaPct: Math.min(100, Math.max(1, Math.round(v))) });
+                      }
+                    }}
+                    className="w-14 rounded border border-[#363a45] bg-[#131722] px-2 py-0.5 text-right"
+                  />
+                  %
+                </span>
               </label>
               <label className="flex items-center justify-between">
                 Delta &amp; volume

@@ -19,8 +19,6 @@ const UP = '#089981';
 const DOWN = '#f23645';
 const POC_FILL = '#d1d4dc';
 const VA_LINE = 'rgba(255, 255, 255, 0.85)';
-/** Share of a candle's volume the value area holds. */
-const VALUE_AREA = 0.7;
 
 export interface FootprintData extends CustomData<Time> {
   open: number;
@@ -34,7 +32,21 @@ export interface FootprintSettings {
   /** Diagonal imbalance threshold, e.g. 3 = 300%. */
   imbalance: number;
   showDelta: boolean;
+  /** Share of a candle's volume the value area holds, in percent (TradingView's default is 70). */
+  valueAreaPct: number;
+  /** Mark imbalanced rows (edge bar + bold text). */
+  highlight: boolean;
+  /** 0 = off; N >= 2 = only mark imbalances that stack N or more rows in a row on the same side. */
+  stackedLevels: number;
 }
+
+export const DEFAULT_FOOTPRINT_SETTINGS: FootprintSettings = {
+  imbalance: 3,
+  showDelta: true,
+  valueAreaPct: 70,
+  highlight: true,
+  stackedLevels: 0,
+};
 
 type Target = Parameters<ICustomSeriesPaneRenderer['draw']>[0];
 
@@ -74,10 +86,10 @@ function coarsen(fp: FootprintCandle, k: number): Rows {
 
 /**
  * The candle's value area: rows around the POC, taking the busier neighbour each time, until they hold
- * `VALUE_AREA` of the candle's volume. Returns the lowest and highest row index, or null when there are
+ * `share` (0-1) of the candle's volume. Returns the lowest and highest row index, or null when there are
  * too few rows for it to say anything.
  */
-function valueArea(rows: Rows): { lo: number; hi: number } | null {
+function valueArea(rows: Rows, share: number): { lo: number; hi: number } | null {
   const { levels, poc } = rows;
   if (levels.length < 3) return null;
   const vol = (i: number) => levels[i]!.bid + levels[i]!.ask;
@@ -87,7 +99,7 @@ function valueArea(rows: Rows): { lo: number; hi: number } | null {
   let lo = poc;
   let hi = poc;
   let held = vol(poc);
-  while (held < VALUE_AREA * total && (lo > 0 || hi < levels.length - 1)) {
+  while (held < share * total && (lo > 0 || hi < levels.length - 1)) {
     const up = hi < levels.length - 1 ? vol(hi + 1) : -1;
     const down = lo > 0 ? vol(lo - 1) : -1;
     if (up >= down) {
@@ -103,7 +115,7 @@ function valueArea(rows: Rows): { lo: number; hi: number } | null {
 
 class FootprintRenderer implements ICustomSeriesPaneRenderer {
   data: PaneRendererCustomData<Time, FootprintData> | null = null;
-  settings: FootprintSettings = { imbalance: 3, showDelta: true };
+  settings: FootprintSettings = DEFAULT_FOOTPRINT_SETTINGS;
   chart: IChartApi | null = null;
 
   draw(target: Target, priceToY: PriceToCoordinateConverter) {
@@ -205,6 +217,31 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
     const showText = spacing >= 44 && rowH >= 9;
     const fontPx = Math.min(12, Math.max(8, Math.floor(rowH - 2)));
 
+    // Diagonal imbalance: asks against the bids one row down, bids against the asks one row up.
+    const askFlags = levels.map((l, i) => {
+      const b = levels[i - 1];
+      return b ? l.ask > 0 && l.ask >= imbalance * Math.max(b.bid, 1) : false;
+    });
+    const bidFlags = levels.map((l, i) => {
+      const a = levels[i + 1];
+      return a ? l.bid > 0 && l.bid >= imbalance * Math.max(a.ask, 1) : false;
+    });
+    // Stacked levels: keep only runs of at least N consecutive imbalanced rows on the same side.
+    const stackedOnly = (flags: boolean[]) => {
+      const n = this.settings.stackedLevels;
+      if (n < 2) return flags;
+      const out = flags.map(() => false);
+      let start = 0;
+      for (let i = 0; i <= flags.length; i += 1) {
+        if (i < flags.length && flags[i]) continue;
+        if (i - start >= n) for (let j = start; j < i; j += 1) out[j] = true;
+        start = i + 1;
+      }
+      return out;
+    };
+    const askMarks = this.settings.highlight ? stackedOnly(askFlags) : askFlags.map(() => false);
+    const bidMarks = this.settings.highlight ? stackedOnly(bidFlags) : bidFlags.map(() => false);
+
     levels.forEach((level, idx) => {
       const yt = rowTop(level.price);
       const yb = rowBottom(level.price);
@@ -212,11 +249,8 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
       const top = Math.round(yt * vr);
       const h = Math.max(1, Math.round((yb - yt) * vr) - (rowH > 4 ? 1 : 0));
       const isPoc = idx === rows.poc;
-      const below = levels[idx - 1];
-      const above = levels[idx + 1];
-      // Diagonal imbalance: asks against the bids one row down, bids against the asks one row up.
-      const askImb = below ? level.ask > 0 && level.ask >= imbalance * Math.max(below.bid, 1) : false;
-      const bidImb = above ? level.bid > 0 && level.bid >= imbalance * Math.max(above.ask, 1) : false;
+      const askImb = askMarks[idx]!;
+      const bidImb = bidMarks[idx]!;
       const tint = (side: number) => 0.12 + 0.6 * (side / maxSide);
 
       ctx.fillStyle = isPoc ? POC_FILL : `rgba(242,54,69,${tint(level.bid)})`;
@@ -255,7 +289,7 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
     });
 
     // Value area: dotted lines across the candle at the top of its highest row (VAH) and the bottom of its lowest (VAL).
-    const va = valueArea(rows);
+    const va = valueArea(rows, Math.min(100, Math.max(1, this.settings.valueAreaPct)) / 100);
     if (va) {
       const yVah = rowTop(levels[va.hi]!.price);
       const yVal = rowBottom(levels[va.lo]!.price);
