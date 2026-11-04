@@ -3,6 +3,7 @@ import { backfillOpeningVolume, dropSpikeWicks, intervalSecs } from '../../../..
 import { hasExtendedBars, sessionFor } from '../../../../lib/tv/sessions';
 import { sessionDay, wallClock } from '../../../../lib/tv/timeframes';
 import type { Bar, BarsResponse } from '../../../../lib/tv/types';
+import { futureBySymbol } from '../../../../lib/broker/upstox-instruments';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +37,7 @@ const RANGES = new Set([
   'ytd',
   'max',
 ]);
-const SYMBOL = /^[A-Za-z0-9.^=\-_&]{1,24}$/;
+const SYMBOL = /^[A-Za-z0-9.^=\-_&!]{1,24}$/;
 
 interface YahooResult {
   meta: Record<string, unknown>;
@@ -94,6 +95,79 @@ async function fetchDailyBars(symbol: string, range: string, window?: Window): P
   }
 }
 
+const UPSTOX = 'https://api.upstox.com';
+/** Chart interval → Upstox [unit, n]. */
+const UPSTOX_UNITS: Record<string, [string, number]> = {
+  '1m': ['minutes', 1],
+  '5m': ['minutes', 5],
+  '15m': ['minutes', 15],
+  '30m': ['minutes', 30],
+  '60m': ['hours', 1],
+  '1h': ['hours', 1],
+  '1d': ['days', 1],
+  '1wk': ['weeks', 1],
+  '1mo': ['months', 1],
+};
+const RANGE_DAYS: Record<string, number> = {
+  '1d': 1, '5d': 5, '7d': 7, '1mo': 31, '3mo': 92, '6mo': 183, '60d': 60, '1y': 366, '2y': 731, '5y': 1827, '10y': 3653, ytd: 366, max: 3653,
+};
+const istDay = (unix: number) => new Date((unix + 19_800) * 1000).toISOString().slice(0, 10);
+
+/** NSE futures (`NIFTY1!.NFO`, `NIFTY26NOVFUT.NFO`): Yahoo has none, so candles come from Upstox's public API. */
+async function futuresBars(symbol: string, interval: string, range: string, window?: Window) {
+  const fut = await futureBySymbol(symbol);
+  if (!fut) return NextResponse.json({ error: `no NSE future for ${symbol}` }, { status: 404 });
+  const unit = UPSTOX_UNITS[interval];
+  if (!unit) return NextResponse.json({ error: `interval ${interval} not available for futures` }, { status: 400 });
+  const [u, n] = unit;
+  const nowS = Math.floor(Date.now() / 1000);
+  const to = window?.to ?? nowS;
+  const from = window?.from ?? to - (RANGE_DAYS[range] ?? 7) * 86400;
+  const enc = encodeURIComponent(fut.key);
+  const paths: string[] = [];
+  const today = istDay(nowS);
+  // Upstox rejects a historical request longer than its per-interval cap ("Invalid date range"), which
+  // left a 60-day 15m chart with only today's intraday candles. Ask in chunks under the cap instead.
+  const chunkDays = u === 'minutes' && n <= 15 ? 28 : u === 'minutes' || u === 'hours' ? 88 : 3600;
+  const histTo = Math.min(to, nowS - 86400);
+  for (let end = histTo; istDay(from) < today && end >= from; end -= chunkDays * 86400) {
+    const start = Math.max(from, end - (chunkDays - 1) * 86400);
+    paths.push(`/v3/historical-candle/${enc}/${u}/${n}/${istDay(end)}/${istDay(start)}`);
+  }
+  if (istDay(to) >= today && (u === 'minutes' || u === 'hours')) paths.push(`/v3/historical-candle/intraday/${enc}/${u}/${n}`);
+  type Raw = [string, number, number, number, number, number, number?][];
+  const byTime = new Map<number, Bar>();
+  let ok = 0;
+  const responses = await Promise.all(
+    paths.map((path) =>
+      fetch(`${UPSTOX}${path}`, { headers: { Accept: 'application/json' }, cache: 'no-store' }).catch(() => null),
+    ),
+  );
+  for (const res of responses) {
+    if (!res?.ok) continue;
+    ok += 1;
+    const body = (await res.json()) as { data?: { candles?: Raw } };
+    for (const [t, open, high, low, close, volume] of body.data?.candles ?? []) {
+      const time = Math.floor(Date.parse(t) / 1000);
+      if (Number.isFinite(time) && time >= from && time <= to) byTime.set(time, { time, open, high, low, close, volume });
+    }
+  }
+  if (!ok) return NextResponse.json({ error: 'upstox unavailable' }, { status: 502 });
+  const bars = [...byTime.values()].sort((a, b) => a.time - b.time);
+  const last = bars[bars.length - 1];
+  const meta: BarsResponse['meta'] = {
+    symbol,
+    name: `${fut.name} Futures · ${new Date(fut.expiry + 19_800_000).toISOString().slice(0, 10)}`,
+    currency: 'INR',
+    exchange: 'NSE',
+    timezone: 'Asia/Kolkata',
+    instrumentType: 'FUTURE',
+    prevClose: null,
+    price: last?.close ?? null,
+  };
+  return NextResponse.json({ interval, bars, meta } satisfies BarsResponse, { headers: { 'Cache-Control': 'no-store' } });
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const symbol = (searchParams.get('symbol') ?? '').trim();
@@ -118,6 +192,13 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'bad period' }, { status: 400 });
     }
     window = { from, to };
+  }
+  if (/\.NFO$/i.test(symbol) || /1!$/.test(symbol)) {
+    try {
+      return await futuresBars(symbol, interval, range, window);
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : 'fetch failed' }, { status: 502 });
+    }
   }
   try {
     const result = await fetchYahoo(symbol, interval, range, prepost, window);

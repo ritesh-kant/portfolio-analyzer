@@ -96,6 +96,32 @@ async function call(url: string, s: Session, init?: RequestInit): Promise<unknow
   return res.json();
 }
 
+// ── option chains (gamma levels) ────────────────────────────────────────────
+
+export interface YahooOptionChain {
+  underlyingSymbol?: string;
+  /** Every listed expiry, unix seconds at 00:00 UTC of the day. */
+  expirationDates: number[];
+  quote?: { regularMarketPrice?: number };
+  options: {
+    expirationDate: number;
+    calls: import('../tv/gex.ts').YahooContract[];
+    puts: import('../tv/gex.ts').YahooContract[];
+  }[];
+}
+
+/** One expiry of a US option chain (`date` = a value from `expirationDates`; absent = the nearest). */
+export async function optionChain(symbol: string, date?: number): Promise<YahooOptionChain | null> {
+  return withSession(async (s) => {
+    const q = `crumb=${encodeURIComponent(s.crumb)}${date ? `&date=${date}` : ''}`;
+    const body = (await call(
+      `https://${HOSTS[0]}/v7/finance/options/${encodeURIComponent(symbol)}?${q}`,
+      s,
+    )) as { optionChain?: { result?: YahooOptionChain[] } };
+    return body.optionChain?.result?.[0] ?? null;
+  });
+}
+
 // ── screener ────────────────────────────────────────────────────────────────
 
 export interface ScreenPage {

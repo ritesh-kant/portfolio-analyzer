@@ -14,6 +14,7 @@ import { cotItems, metalRoot, parseBlsCalendar, parseFedRss, zonedInstant } from
 import { groupByBar } from './news-markers.ts';
 import { barContaining, deltaDepthDays, findDeltaDivergences, inDeltaView, DELTA_VIEW_DEFAULTS } from './delta-divergence.ts';
 import { FVG_DEFAULTS, findFvgs } from './fvg.ts';
+import { bsDelta, bsPrice, chainActivity, computeLevels, fmtGex, impliedVol, paritySpot, usExpiryInstant, usRows } from './gex.ts';
 import { backfillOpeningVolume, dropSpikeWicks, foldTrailingTick, intervalSecs } from './clean-bars.ts';
 
 const IST = 'Asia/Kolkata';
@@ -1185,4 +1186,148 @@ test('replay forms a coarse candle minute by minute from 1-minute bars', () => {
   assert.equal(c.open, 70);
   // no minute bars at that point: whole candles, as before
   assert.equal(nextReplayEnd(times, H, [], H), nextEnd(times, H, H));
+});
+
+// ── GEX: pinned to apps/signal-engine/src/options_trader/gex.py on the same chain ──
+test('gex levels match the Python implementation', () => {
+  const now = 1793766600; // 2026-11-04 10:00 IST
+  const e1 = 1794304800; // 2026-11-10 15:30 IST
+  const e2 = 1795514400; // 2026-11-24 15:30 IST
+  const row = (expiry, strike, kind, oi, iv) => ({ expiry, strike, kind, oi, iv });
+  const rows = [
+    row(e1, 24500, 'CE', 3e6, 0.12), row(e1, 24200, 'CE', 2e6, 0.125), row(e1, 24000, 'CE', 1.5e6, 0.13),
+    row(e1, 24000, 'PE', 1.2e6, 0.14), row(e1, 23800, 'PE', 2.5e6, 0.15), row(e1, 23500, 'PE', 4e6, 0.17),
+    row(e2, 24600, 'CE', 1e6, 0.13), row(e2, 23400, 'PE', 1e6, 0.18),
+  ];
+  const lv = computeLevels(rows, 24050, now);
+  assert.ok(Math.abs(lv.netGex / 4593166687.26451 - 1) < 1e-9);
+  assert.ok(Math.abs(lv.flip - 23987.448925655222) < 1e-6);
+  assert.deepEqual(lv.callWalls, [24200, 24500, 24600]);
+  assert.deepEqual(lv.putWalls, [23800, 23500, 24000]);
+  assert.equal(lv.gammaWall, 24200);
+  assert.deepEqual(lv.gexLevels, [24500, 23500, 24600, 24000, 23400]);
+  assert.ok(Math.abs(lv.range[0] - 23845.47397454288) < 1e-6);
+  assert.ok(Math.abs(lv.range[1] - 24254.52602545712) < 1e-6);
+});
+
+test('gex: short-all convention has no flip and expired rows are ignored', () => {
+  const now = 1793766600;
+  const rows = [
+    { expiry: now + 86400, strike: 24000, kind: 'CE', oi: 1e6, iv: 0.13 },
+    { expiry: now - 60, strike: 23900, kind: 'PE', oi: 9e6, iv: 0.13 },
+  ];
+  const lv = computeLevels(rows, 24000, now, 'dealer_short_all');
+  assert.equal(lv.flip, null);
+  assert.ok(lv.netGex < 0);
+  assert.deepEqual(lv.strikes.map((s) => s.strike), [24000]);
+});
+
+// ── GEX: US chains ──
+test('gex: implied vol inverts Black-Scholes', () => {
+  for (const kind of ['CE', 'PE']) {
+    const price = bsPrice(763, 765, 3 / 365, 0.16, kind, 0.04);
+    assert.ok(Math.abs(impliedVol(price, 763, 765, 3 / 365, kind, 0.04) - 0.16) < 1e-6);
+  }
+  assert.equal(impliedVol(0.01, 763, 700, 3 / 365, 'CE', 0.04), null); // below intrinsic
+});
+
+test('gex: put-call parity recovers the spot the options trade off', () => {
+  const now = 1793800000;
+  const expiry = now + 2 * 86400;
+  const t = (expiry - now) / (365 * 86400);
+  const spot = 763.3;
+  const q = (strike, kind) => {
+    const p = bsPrice(spot, strike, t, 0.16, kind, 0.04);
+    return { strike, bid: p - 0.05, ask: p + 0.05 };
+  };
+  const strikes = [755, 760, 765, 770, 775];
+  const calls = strikes.map((k) => q(k, 'CE'));
+  const puts = strikes.map((k) => q(k, 'PE'));
+  // the quote says yesterday's close (754.35); parity finds 763.3
+  assert.ok(Math.abs(paritySpot(calls, puts, expiry, 754.35, now) - spot) < 0.01);
+  assert.equal(paritySpot(calls.slice(0, 2), puts.slice(0, 2), expiry, 754.35, now), null);
+});
+
+test('gex: US rows count 100 shares per contract and expire 16:00 New York', () => {
+  // 2026-11-06 is after the US DST change (EST, UTC-5); 2026-10-30 is before it (EDT, UTC-4)
+  assert.equal(usExpiryInstant(Date.UTC(2026, 10, 6) / 1000), Date.UTC(2026, 10, 6, 21) / 1000);
+  assert.equal(usExpiryInstant(Date.UTC(2026, 9, 30) / 1000), Date.UTC(2026, 9, 30, 20) / 1000);
+  const now = 1793800000;
+  const expiry = now + 2 * 86400;
+  const tally = { mid: 0, last: 0, yahoo: 0 };
+  const rows = usRows(
+    [{ strike: 765, openInterest: 12, bid: 4.5, ask: 4.7 }, { strike: 770, openInterest: 0, bid: 2, ask: 2.2 }],
+    [{ strike: 760, openInterest: 3, lastPrice: 3.1 }],
+    expiry,
+    763,
+    now,
+    tally,
+  );
+  assert.deepEqual(rows.map((r) => [r.strike, r.kind, r.oi, r.r]), [[765, 'CE', 1200, 0.04], [760, 'PE', 300, 0.04]]);
+  assert.deepEqual(tally, { mid: 1, last: 1, yahoo: 0 });
+});
+
+test('gex: one-day range skips a same-day expiry', () => {
+  const now = 1793800000;
+  const row = (expiry, kind, iv) => ({ expiry, strike: 24000, kind, oi: 1e6, iv });
+  const rows = [row(now + 3600, 'CE', 0.3), row(now + 3600, 'PE', 0.3), row(now + 3 * 86400, 'CE', 0.15), row(now + 3 * 86400, 'PE', 0.15)];
+  const [lo, hi] = computeLevels(rows, 24000, now).range;
+  assert.ok(Math.abs((hi - lo) / 2 - (24000 * 0.15) / Math.sqrt(252)) < 1e-6);
+});
+
+test('gex: money formatting by currency', () => {
+  assert.equal(fmtGex(-3.46e9, 'USD'), '−$3.5B');
+  assert.equal(fmtGex(4.2e7, 'USD'), '+$42M');
+  assert.equal(fmtGex(5.413e10, 'INR'), '+5.4k cr');
+});
+
+test('gex: delta is the price slope; call − put delta = 1 (no dividends)', () => {
+  const [s, k, t, iv, r] = [100, 105, 30 / 365, 0.25, 0.04];
+  for (const kind of ['CE', 'PE']) {
+    const h = 0.01;
+    const slope = (bsPrice(s + h, k, t, iv, kind, r) - bsPrice(s - h, k, t, iv, kind, r)) / (2 * h);
+    assert.ok(Math.abs(bsDelta(s, k, t, iv, kind, r) - slope) < 1e-4, kind);
+  }
+  assert.ok(Math.abs(bsDelta(s, k, t, iv, 'CE', r) - bsDelta(s, k, t, iv, 'PE', r) - 1) < 1e-9);
+});
+
+test('gex: chain activity sums put/call OI and volume, and signs net delta by option type', () => {
+  const now = 1_800_000_000;
+  const exp = now + 7 * 86400;
+  const rows = [
+    { expiry: exp, strike: 100, kind: 'CE', oi: 1000, iv: 0.2, volume: 50 },
+    { expiry: exp, strike: 100, kind: 'PE', oi: 3000, iv: 0.2, volume: 150 },
+    // volume only (no OI, no IV): counts toward volume, never delta
+    { expiry: exp, strike: 110, kind: 'PE', oi: 0, iv: 0, volume: 25 },
+    // expired: ignored
+    { expiry: now - 1, strike: 100, kind: 'CE', oi: 9999, iv: 0.2, volume: 9999 },
+  ];
+  const a = chainActivity(rows, 100, now);
+  assert.deepEqual([a.callOi, a.putOi, a.callVol, a.putVol], [1000, 3000, 50, 175]);
+  // ATM: call delta ≈ 0.5, put ≈ −0.5 → 3× the puts make it net short, ≈ (0.5·1000 − 0.5·3000) × 100
+  assert.ok(a.netDelta < 0 && Math.abs(a.netDelta + 100_000) < 10_000, String(a.netDelta));
+  assert.ok(computeLevels(rows, 100, now).activity.putVol === 175);
+});
+
+test('gex: usRows keeps volume-only and IV-less contracts for the ratios, out of GEX', () => {
+  const now = 1_800_000_000;
+  const exp = now + 7 * 86400;
+  const tally = { mid: 0, last: 0, yahoo: 0 };
+  const rows = usRows(
+    [{ strike: 100, openInterest: 0, volume: 7 }],
+    [{ strike: 100, openInterest: 5, volume: 2 }],
+    exp,
+    100,
+    now,
+    tally,
+  );
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    rows.map((r) => [r.kind, r.oi, r.iv, r.volume]),
+    [
+      ['CE', 0, 0, 700],
+      ['PE', 500, 0, 200],
+    ],
+  );
+  assert.equal(computeLevels(rows, 100, now).netGex, 0);
 });

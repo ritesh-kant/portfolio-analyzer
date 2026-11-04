@@ -12,6 +12,7 @@ import {
   VOL_UP_DEFAULT,
 } from '../../lib/tv/indicator-defs';
 import { CVD_ANCHORS, type CvdAnchor } from '../../lib/tv/cvd';
+import { GEX_LINES, type GexConvention, gexLineColor, gexLineOn } from '../../lib/tv/gex';
 import { Icons } from './icons';
 
 /** Indicators that live in a docked side panel rather than a chart series: Add opens it, Remove closes it. */
@@ -222,6 +223,64 @@ const ColorField = ({
   </label>
 );
 
+/** Gamma levels: MenthorQ's Style tab, one row per level with show/hide and colour. */
+function GexLevelFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg: IndicatorCfg) => void }) {
+  const style = cfg.gexStyle;
+  const set = (key: string, patch: { on?: boolean; color?: string }) =>
+    onChange({ ...cfg, gexStyle: { ...style, [key]: { ...style?.[key], ...patch } } });
+  return (
+    <div className="mt-3 border-t border-[#363a45] pt-3">
+      <div className="mb-1 flex items-center justify-between text-[12px] uppercase tracking-wide text-[#787b86]">
+        Levels
+        <button
+          type="button"
+          onClick={() => onChange({ ...cfg, gexStyle: undefined })}
+          className="rounded border border-[#363a45] px-2 py-0.5 text-[11px] normal-case tracking-normal text-[#b2b5be] hover:text-white"
+        >
+          Defaults
+        </button>
+      </div>
+      {GEX_LINES.map((def) => {
+        const on = gexLineOn(def, style);
+        return (
+          <div key={def.key} className="flex items-center justify-between py-1 text-[13px] text-[#d1d4dc]">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={on}
+                onChange={(e) => set(def.key, { on: e.target.checked })}
+                className="h-3.5 w-3.5 accent-[#2962ff]"
+              />
+              <span className={on ? '' : 'text-[#787b86]'}>{def.name}</span>
+            </label>
+            <span className="flex items-center gap-2">
+              <svg width="28" height="6" aria-hidden>
+                <line
+                  x1="0"
+                  y1="3"
+                  x2="28"
+                  y2="3"
+                  stroke={gexLineColor(def, style)}
+                  strokeWidth="1.5"
+                  strokeDasharray={def.style === 'dashed' ? '5 3' : def.style === 'dotted' ? '1.5 2.5' : undefined}
+                  opacity={on ? 1 : 0.35}
+                />
+              </svg>
+              <input
+                type="color"
+                value={gexLineColor(def, style)}
+                onChange={(e) => set(def.key, { color: e.target.value })}
+                aria-label={`${def.name} colour`}
+                className={`h-6 w-10 cursor-pointer rounded border border-[#363a45] bg-transparent p-0.5 ${on ? '' : 'opacity-40'}`}
+              />
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Volume, laid out like TradingView's Vol dialog: Inputs (MA length, colouring) and Style (colours, MA, output). */
 function VolumeFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg: IndicatorCfg) => void }) {
   const [tab, setTab] = useState<'inputs' | 'style'>('style');
@@ -324,7 +383,7 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
       onMouseDown={onClose}
     >
       <div
-        className="w-[min(360px,94vw)] rounded-lg border border-[#363a45] bg-[#1e222d] p-5 shadow-2xl"
+        className="max-h-[90vh] w-[min(360px,94vw)] overflow-y-auto rounded-lg border border-[#363a45] bg-[#1e222d] p-5 shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === 'Escape' && onClose()}
       >
@@ -342,11 +401,88 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
         {cfg.type === 'volume' ? <VolumeFields cfg={cfg} onChange={onChange} /> : null}
         {cfg.type !== 'vwap' && cfg.type !== 'volume' && cfg.type !== 'cvd' ? (
           <NumberField
-            label={cfg.type === 'macd' ? 'Fast length' : cfg.type === 'svp' || cfg.type === 'avp' ? 'Rows' : 'Length'}
+            label={
+              cfg.type === 'macd'
+                ? 'Fast length'
+                : cfg.type === 'svp' || cfg.type === 'avp'
+                  ? 'Rows'
+                  : cfg.type === 'gex'
+                    ? 'Expiries within (days)'
+                    : 'Length'
+            }
             value={cfg.length}
             min={1}
-            onChange={(length) => onChange({ ...cfg, length })}
+            onChange={(length) =>
+              onChange({ ...cfg, length: cfg.type === 'gex' ? Math.min(120, length) : length })
+            }
           />
+        ) : null}
+        {cfg.type === 'gex' ? (
+          <>
+            <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+              Dealer position
+              <select
+                value={cfg.gexConvention ?? 'dealer_long_calls'}
+                onChange={(e) =>
+                  onChange({ ...cfg, gexConvention: e.target.value as GexConvention })
+                }
+                className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+              >
+                <option value="dealer_long_calls">Long calls, short puts</option>
+                <option value="dealer_short_all">Short everything</option>
+              </select>
+            </label>
+            <Check
+              label="Net GEX by strike (column beside the prices)"
+              checked={cfg.gexProfile !== false}
+              onChange={(gexProfile) => onChange({ ...cfg, gexProfile })}
+            />
+            <Check
+              label="Background: green above HVL, red below"
+              checked={cfg.gexZones !== false}
+              onChange={(gexZones) => onChange({ ...cfg, gexZones })}
+            />
+            {cfg.gexZones !== false ? (
+              <NumberField
+                label="Background strength (%)"
+                min={0}
+                value={cfg.gexZoneOpacity ?? 50}
+                onChange={(n) => onChange({ ...cfg, gexZoneOpacity: Math.min(200, n) })}
+              />
+            ) : null}
+            <Check
+              label="Info panel (regime, net delta, level distances, put/call ratios)"
+              checked={cfg.gexPanel !== false}
+              onChange={(gexPanel) => onChange({ ...cfg, gexPanel })}
+            />
+            <GexLevelFields cfg={cfg} onChange={onChange} />
+            <details className="mt-2 rounded border border-[#363a45] bg-[#131722] px-3 py-2 text-[12px] leading-relaxed text-[#b2b5be]">
+              <summary className="cursor-pointer text-[13px] text-[#d1d4dc]">What do these lines mean?</summary>
+              <p className="mt-2">
+                GEX estimates how much option writers must buy or sell to stay hedged as price moves, from
+                the live option chain. <b className="text-[#f4511e]">Call Resistance</b> is the strike with
+                the most call gamma above price; <b className="text-[#43a047]">Put Support</b> the most put
+                gamma below. <b className="text-[#448aff]">HVL</b> is the gamma flip: above it hedging tends
+                to damp moves, below it to amplify them. <b className="text-[#f4511e]">Gamma Wall</b> is the
+                single largest strike. <b className="text-[#26c6da]">GEX 1–10</b> are the next-largest strikes
+                after Call Resistance and Put Support. 0DTE levels use the nearest expiry only; 1D Min/Max is
+                the one-day range implied by at-the-money volatility. The bars in the column right of the
+                prices are net GEX at each strike per 1% move (₹ crore for NSE, $ for US): green damps
+                moves, red amplifies them.
+              </p>
+              <p className="mt-2">
+                NSE chains come from Upstox; US chains from Yahoo (~15 minutes delayed, implied volatility
+                re-solved from bid/ask). US futures have no free option chains, so ES uses SPX, NQ uses QQQ,
+                RTY uses IWM, YM uses DIA, GC uses GLD and SI uses SLV, scaled onto the future&rsquo;s price.
+              </p>
+              <p className="mt-2">
+                The sign rests on an assumption about who is short the options. &ldquo;Long calls, short
+                puts&rdquo; is the US convention most GEX tools use; in India retail mostly buys options,
+                so &ldquo;Short everything&rdquo; may be closer, and then there is no flip. The levels are a
+                snapshot of today&rsquo;s open interest, so they are hidden in replay.
+              </p>
+            </details>
+          </>
         ) : null}
         {cfg.type === 'cvd' ? (
           <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">

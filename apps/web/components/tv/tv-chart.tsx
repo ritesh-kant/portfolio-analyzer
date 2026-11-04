@@ -10,6 +10,7 @@ import {
   CrosshairMode,
   HistogramSeries,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type ITimeScaleApi,
   LineSeries,
@@ -139,6 +140,8 @@ import {
 } from '../../lib/tv/delta-divergence';
 import { SessionsPrimitive } from './sessions-primitive';
 import { SessionProfilePrimitive } from './session-profile-primitive';
+import { GexPanel } from './gex-panel';
+import { GEX_STRIP_WIDTH, GexProfilePrimitive } from './gex-profile-primitive';
 import {
   extendedMask,
   hasExtendedBars,
@@ -180,6 +183,7 @@ import { DEFAULT_ROWS } from '../../lib/tv/volume-profile';
 import { completedCount, formingCandle, nextReplayEnd, startReplayEnd } from '../../lib/tv/replay';
 import { groupByBar } from '../../lib/tv/news-markers';
 import type { NewsItem, NewsResponse } from '../../lib/tv/news-types';
+import { GEX_LINES, type GexResponse, fmtGex, gexLineColor, gexLineOn } from '../../lib/tv/gex';
 import { FootprintView, type FootprintData } from './footprint-series';
 import { Icons } from './icons';
 import { IndicatorPicker, IndicatorSettings } from './indicator-dialog';
@@ -193,6 +197,8 @@ import { type ChartType, type FootprintUi, TopBar } from './top-bar';
 const FONT = '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
 const UP = '#089981';
 const DOWN = '#f23645';
+/** Right price axis width without the GEX column. */
+const PRICE_AXIS_WIDTH = 72;
 const VOL_UP = 'rgba(8, 153, 129, 0.5)';
 const VOL_DOWN = 'rgba(242, 54, 69, 0.5)';
 const CLEAR = 'rgba(0,0,0,0)';
@@ -325,7 +331,8 @@ function computeIndicators(
         break;
       case 'svp':
       case 'avp':
-        // Drawn by SessionProfilePrimitive / DrawingsPrimitive, not as a series.
+      case 'gex':
+        // Drawn by SessionProfilePrimitive / DrawingsPrimitive / price lines, not as a series.
         lines = [];
         break;
       case 'cvd': {
@@ -421,6 +428,7 @@ export function TvChart() {
   const newsPrimRef = useRef<NewsPrimitive | null>(null);
   const sessionsPrimRef = useRef<SessionsPrimitive | null>(null);
   const svpPrimRef = useRef<SessionProfilePrimitive | null>(null);
+  const gexPrimRef = useRef<GexProfilePrimitive | null>(null);
   const deltaPrimRef = useRef<DeltaPrimitive | null>(null);
   const fvgPrimRef = useRef<FvgPrimitive | null>(null);
   const pocPrimRef = useRef<PocPrimitive | null>(null);
@@ -1253,6 +1261,71 @@ export function TvChart() {
     };
   }, [ready, replayEnd, symbol, tf.source, tf.intraday, wantPrepost, fetchBars, fineOn]);
 
+  // ── gamma levels (GEX) ────────────────────────────────────────────────
+  // A snapshot of the live option chain, refreshed every 2 minutes. It describes current open interest
+  // only, so it is not drawn while replaying history.
+  const gexCfg = indicators.find((i) => i.type === 'gex');
+  const gexDays = gexCfg?.length ?? 45;
+  const gexConvention = gexCfg?.gexConvention ?? 'dealer_long_calls';
+  const gexStyle = gexCfg?.gexStyle;
+  const gexKey = gexCfg ? `${symbol}|${gexDays}|${gexConvention}` : '';
+  const [gex, setGex] = useState<{ key: string; res: GexResponse } | null>(null);
+  useEffect(() => {
+    if (!ready || !gexKey) return;
+    const ctl = new AbortController();
+    const load = () =>
+      fetch(
+        `/api/chart/gex?symbol=${encodeURIComponent(symbol)}&days=${gexDays}&convention=${gexConvention}`,
+        { signal: ctl.signal, cache: 'no-store' },
+      )
+        .then((r) => r.json() as Promise<GexResponse>)
+        .then((res) => setGex({ key: gexKey, res }))
+        .catch(() => {
+          if (!ctl.signal.aborted)
+            setGex({ key: gexKey, res: { supported: false, reason: 'GEX request failed' } });
+        });
+    void load();
+    const timer = setInterval(load, 120_000);
+    return () => {
+      ctl.abort();
+      clearInterval(timer);
+    };
+  }, [ready, gexKey, symbol, gexDays, gexConvention]);
+  const gexRes = gex && gex.key === gexKey ? gex.res : null;
+  const gexShown =
+    !!gexCfg && !gexCfg.hidden && !hiddenAll(gexCfg.id) && replayEnd == null && !!gexRes?.supported;
+
+
+  const gexStatus = (): ReactNode => {
+    if (!gexRes) return <span className="text-[#787b86]">loading…</span>;
+    if (!gexRes.supported) return <span className="text-[#787b86]">{gexRes.reason}</span>;
+    if (replayEnd != null)
+      return <span className="text-[#787b86]">live snapshot only, hidden in replay</span>;
+    const all = gexRes.all!;
+    const at = new Date((gexRes.asOf ?? 0) * 1000).toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Asia/Kolkata',
+    });
+    return (
+      <span
+        className="tabular-nums"
+        style={{ color: all.netGex >= 0 ? UP : DOWN }}
+        title="Net GEX: money of hedging per 1% move (₹ crore for NSE, $ for US). Positive = dealer hedging damps moves; negative = it amplifies them. An estimate built on an assumed dealer position."
+      >
+        net GEX {fmtGex(all.netGex, gexRes.currency)}
+        <span className="text-[#787b86]">
+          {gexRes.proxy
+            ? ` · from ${gexRes.proxy} options${gexRes.scale ? ` ×${gexRes.scale.toFixed(gexRes.scale > 2 ? 2 : 4)}` : ''}`
+            : gexRes.scale && gexRes.futurePrice && gexRes.spot
+              ? ` · strikes moved ${(gexRes.futurePrice - gexRes.spot >= 0 ? '+' : '')}${(gexRes.futurePrice - gexRes.spot).toFixed(1)} to futures`
+              : ''}
+          {' '}· snapshot {at} IST{gexRes.source === 'yahoo' ? ' (Yahoo, ~15 min delayed)' : ''}
+        </span>
+      </span>
+    );
+  };
+
   // Company filings (NSE announcements / SEC EDGAR) across the loaded history.
   const firstBarTime = bars[0]?.time;
   useEffect(() => {
@@ -1267,7 +1340,10 @@ export function TvChart() {
       cache: 'no-store',
     })
       .then((r) => r.json() as Promise<NewsResponse>)
-      .then((res) => setNews({ symbol, res }))
+      .then((res) => {
+        if (!Array.isArray(res.items)) throw new Error('bad news response');
+        setNews({ symbol, res });
+      })
       .catch(() => {
         if (!ctl.signal.aborted)
           setNews({
@@ -1403,7 +1479,7 @@ export function TvChart() {
       rightPriceScale: {
         borderColor: '#2a2e39',
         scaleMargins: { top: 0.08, bottom: 0.08 },
-        minimumWidth: 72,
+        minimumWidth: PRICE_AXIS_WIDTH,
       },
       timeScale: {
         borderColor: '#2a2e39',
@@ -1436,6 +1512,7 @@ export function TvChart() {
     cvdDivMainRef.current = new CvdDivPrimitive(true);
     sessionsPrimRef.current = new SessionsPrimitive();
     svpPrimRef.current = new SessionProfilePrimitive();
+    gexPrimRef.current = new GexProfilePrimitive();
 
     chart.subscribeCrosshairMove((param) => {
       setHoverIdx(param.logical == null ? null : Math.round(param.logical));
@@ -1509,9 +1586,89 @@ export function TvChart() {
       if (cvdDivMainRef.current) series.attachPrimitive(cvdDivMainRef.current);
       if (sessionsPrimRef.current) series.attachPrimitive(sessionsPrimRef.current);
       if (svpPrimRef.current) series.attachPrimitive(svpPrimRef.current);
+      if (gexPrimRef.current) series.attachPrimitive(gexPrimRef.current);
       mainRef.current = { key, series };
     }
   }, [chartType, fp.on]);
+
+  // Gamma levels as price lines on the main series (after it is built, so a rebuild re-attaches them).
+  const gexLinesRef = useRef<{ series: ISeriesApi<SeriesType, Time>; lines: IPriceLine[] } | null>(
+    null,
+  );
+  useEffect(() => {
+    const main = mainRef.current;
+    const old = gexLinesRef.current;
+    if (old) {
+      // The main series may have been rebuilt (chart type change); its lines went with it.
+      try {
+        for (const l of old.lines) old.series.removePriceLine(l);
+      } catch {
+        /* series already removed */
+      }
+      gexLinesRef.current = null;
+    }
+    if (!main || !gexShown || !gexRes?.all) return;
+    // Same price for two levels → one line, both labels (e.g. "CR 0DTE | GW 0DTE").
+    const byPrice = new Map<number, { titles: string[]; color: string; style: LineStyle }>();
+    // Futures charts: strikes are cash prices, so move them up by the futures premium.
+    const scale = gexRes.scale ?? 1;
+    const add = (price: number | null | undefined, title: string, color: string, style: LineStyle) => {
+      if (price == null || !Number.isFinite(price)) return;
+      const k = Math.round(price * scale * 100) / 100;
+      const hit = byPrice.get(k);
+      if (hit) hit.titles.push(title);
+      else byPrice.set(k, { titles: [title], color, style });
+    };
+    const { all, nearest } = gexRes;
+    const lineStyle = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted };
+    for (const def of GEX_LINES) {
+      if (!gexLineOn(def, gexStyle)) continue;
+      add(def.price(all, nearest), def.title, gexLineColor(def, gexStyle), lineStyle[def.style]);
+    }
+    const lines = [...byPrice].map(([price, l]) =>
+      main.series.createPriceLine({
+        price,
+        color: l.color,
+        lineWidth: 1,
+        lineStyle: l.style,
+        axisLabelVisible: true,
+        title: l.titles.join(' | '),
+      }),
+    );
+    gexLinesRef.current = { series: main.series, lines };
+  }, [gexShown, gexRes, gexStyle, chartType, fp.on]);
+
+  // Net GEX by strike, as a histogram on the right edge (all expiries in the window).
+  const gexProfileOn = gexCfg?.gexProfile !== false;
+  // It lives in a strip of the price axis, so widen the axis while it is drawn.
+  useEffect(() => {
+    const prim = gexPrimRef.current;
+    if (!prim) return;
+    const all = gexRes?.all;
+    const on = gexShown && gexProfileOn && !!all;
+    chartRef.current
+      ?.priceScale('right')
+      .applyOptions({ minimumWidth: PRICE_AXIS_WIDTH + (on ? GEX_STRIP_WIDTH : 0) });
+    if (!on) {
+      prim.setState([]);
+      return;
+    }
+    const scale = gexRes.scale ?? 1;
+    prim.setState(
+      all.strikes.map((k) => ({ price: k.strike * scale, net: k.net })),
+      gexRes.currency ?? 'INR',
+    );
+  }, [gexShown, gexProfileOn, gexRes, chartType, fp.on]);
+
+  // Regime background: above the gamma flip dealers damp moves (green), below it they chase them (red).
+  const gexZonesOn = gexCfg?.gexZones !== false;
+  useEffect(() => {
+    const flip = gexRes?.all?.flip;
+    gexPrimRef.current?.setFlip(
+      gexShown && gexZonesOn && flip != null ? flip * (gexRes?.scale ?? 1) : null,
+      (gexCfg?.gexZoneOpacity ?? 50) / 100,
+    );
+  }, [gexShown, gexZonesOn, gexCfg?.gexZoneOpacity, gexRes, chartType, fp.on]);
 
   // Price data → main series (+ default view on a fresh load).
   useEffect(() => {
@@ -3164,6 +3321,7 @@ export function TvChart() {
               </span>
             );
           })}
+      {c.cfg.type === 'gex' && !c.cfg.hidden && !hiddenAll(c.cfg.id) ? gexStatus() : null}
       <span
         className={`flex gap-1 transition-opacity group-hover:opacity-100 ${c.cfg.hidden || hiddenAll(c.cfg.id) ? 'opacity-100' : 'opacity-0'}`}
       >
@@ -4211,6 +4369,9 @@ export function TvChart() {
             }}
           />
         </div>
+        {!compact && gexShown && gexCfg?.gexPanel !== false && gexRes ? (
+          <GexPanel res={gexRes} price={bars[bars.length - 1]?.close} symbol={symbol} />
+        ) : null}
         <div className={compact ? 'contents' : 'flex min-h-0 shrink-0 flex-col'}>
           <div className={compact ? 'contents' : 'flex min-h-0 flex-1'}>
             {deltaOpen && !compact ? (

@@ -1,4 +1,5 @@
 import { AVP_DEFAULTS, VP_DEFAULTS, type VpSettings } from './drawings';
+import type { GexConvention, GexStyle } from './gex';
 import { DEFAULT_ROWS } from './volume-profile';
 
 export type IndicatorType =
@@ -13,7 +14,8 @@ export type IndicatorType =
   | 'atr'
   | 'svp'
   | 'avp'
-  | 'cvd';
+  | 'cvd'
+  | 'gex';
 
 export interface IndicatorCfg {
   id: string;
@@ -47,6 +49,18 @@ export interface IndicatorCfg {
   /** Volume: show the last value on the price scale / the values in the status line (absent = off / on). */
   volLabels?: boolean;
   volStatus?: boolean;
+  /** Gamma levels: who is assumed short the options (absent = dealers long calls, short puts). */
+  gexConvention?: GexConvention;
+  /** Gamma levels: draw net GEX by strike in a column right of the prices (absent = on). */
+  gexProfile?: boolean;
+  /** Gamma levels: tint the pane green above the gamma flip (HVL) and red below it (absent = on). */
+  gexZones?: boolean;
+  /** Gamma levels: background strength, % of the default tint (absent = 50). */
+  gexZoneOpacity?: number;
+  /** Gamma levels: the read-out panel at the chart's top right (absent = on). */
+  gexPanel?: boolean;
+  /** Gamma levels: per-level show / colour overrides, by `GEX_LINES` key. */
+  gexStyle?: GexStyle;
   /** Bollinger std-dev multiplier. */
   mult?: number;
   color: string;
@@ -150,6 +164,13 @@ export const CATALOG: CatalogEntry[] = [
     where: 'pane',
     defaults: { type: 'cvd', length: 0, anchor: 'session' },
   },
+  {
+    type: 'gex',
+    name: 'Gamma Levels (GEX)',
+    description: 'Option walls, gamma flip and 1-day range from the option chain (NSE and US)',
+    where: 'overlay',
+    defaults: { type: 'gex', length: 45 },
+  },
 ];
 
 export const catalogOf = (type: IndicatorType): CatalogEntry =>
@@ -222,6 +243,8 @@ export function indicatorLabel(i: IndicatorCfg): string {
       return `AVP ${i.length}`;
     case 'cvd':
       return 'CVD';
+    case 'gex':
+      return `GEX ${i.length}d`;
   }
 }
 

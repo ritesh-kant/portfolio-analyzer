@@ -6,7 +6,7 @@ import type { NewsResponse } from '../../../../lib/tv/news-types';
 export const dynamic = 'force-dynamic';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const SYMBOL = /^[A-Za-z0-9.^=\-_&]{1,24}$/;
+const SYMBOL = /^[A-Za-z0-9.^=\-_&!]{1,24}$/;
 
 const none = (reason: string): NewsResponse => ({
   source: 'none',
