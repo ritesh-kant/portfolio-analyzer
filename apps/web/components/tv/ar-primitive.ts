@@ -10,6 +10,7 @@ import type {
 } from 'lightweight-charts';
 import type { AvrDay, Pivot, RangeFib, SessionBox, StructureLabel } from '../../lib/tv/ar';
 import type { ArSkip, ArTrade } from '../../lib/tv/ar-strategy';
+import type { StackZone } from '../../lib/tv/stacked-imbalance';
 import { logicalX } from './coords';
 
 /** What the AR overlays draw; each part is empty when its indicator is off. */
@@ -23,6 +24,9 @@ export interface ArDrawState {
   /** Strategy: trades (entry → exit with stop and target boxes) and setups it skipped. */
   trades: ArTrade[];
   skips: ArSkip[];
+  /** Stacked-imbalance zones; traded-through ones are drawn only when `stackUsed`. */
+  stacks: StackZone[];
+  stackUsed: boolean;
   /** Trade to emphasise (hovered in the panel). */
   focusTrade: number | null;
   decimals: number;
@@ -36,6 +40,8 @@ const EMPTY: ArDrawState = {
   swings: [],
   trades: [],
   skips: [],
+  stacks: [],
+  stackUsed: false,
   focusTrade: null,
   decimals: 2,
 };
@@ -47,6 +53,7 @@ const SESSION_STYLE: Record<SessionBox['key'], { fill: string; edge: string; tex
   asia: { fill: 'rgba(126, 87, 194, 0.16)', edge: 'rgba(126, 87, 194, 0.55)', text: '#b39ddb' },
   london: { fill: 'rgba(242, 54, 69, 0.12)', edge: 'rgba(242, 54, 69, 0.5)', text: '#ef9a9a' },
   ny: { fill: 'rgba(178, 181, 190, 0.10)', edge: 'rgba(178, 181, 190, 0.45)', text: '#b2b5be' },
+  open: { fill: 'rgba(178, 181, 190, 0.10)', edge: 'rgba(178, 181, 190, 0.45)', text: '#b2b5be' },
 };
 
 const AVR_STYLE: Record<string, { fill: string; line: string }> = {
@@ -62,6 +69,10 @@ const ZONE_DIM = 'rgba(120, 123, 134, 0.12)';
 const FIB_LINE = 'rgba(255, 213, 79, 0.75)';
 const PREMIUM = 'rgba(242, 54, 69, 0.06)';
 const DISCOUNT = 'rgba(8, 153, 129, 0.06)';
+const STACK_STYLE = {
+  buy: { fill: 'rgba(38, 166, 154, 0.22)', used: 'rgba(38, 166, 154, 0.08)', edge: 'rgba(38, 166, 154, 0.85)', text: '#4db6ac' },
+  sell: { fill: 'rgba(239, 83, 80, 0.22)', used: 'rgba(239, 83, 80, 0.08)', edge: 'rgba(239, 83, 80, 0.85)', text: '#ef9a9a' },
+};
 const LABEL_FONT = '10px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
 
 /**
@@ -80,6 +91,7 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
       draw: (target) =>
         target.useMediaCoordinateSpace(({ context, mediaSize }) => {
           this.paintBack(context, mediaSize.width);
+          this.paintStacks(context, mediaSize.width);
           this.paintTradesBack(context, mediaSize.width);
         }),
     }),
@@ -193,6 +205,26 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
         const live = f.status !== 'invalidated' && f.status !== 'extended';
         const zx = this.span(f.to.index, s.lastIndex, w, true);
         if (zx) this.band(ctx, zx, f.zoneBottom, f.zoneTop, live ? ZONE_FILL : ZONE_DIM);
+      }
+    }
+  }
+
+  /** Stacked-imbalance zones: a box from the stack's candle to where price traded through it (or the right edge). */
+  private paintStacks(ctx: CanvasRenderingContext2D, w: number) {
+    ctx.font = LABEL_FONT;
+    for (const z of this.state.stacks) {
+      const used = z.usedAt != null;
+      if (used && !this.state.stackUsed) continue;
+      const x = this.span(z.index, z.usedAt ?? this.state.lastIndex, w, !used);
+      if (!x) continue;
+      const st = STACK_STYLE[z.side];
+      this.band(ctx, x, z.lo, z.hi, used ? st.used : st.fill);
+      if (used) continue;
+      // the edge price comes back to: the top of a buy zone, the bottom of a sell zone
+      this.hline(ctx, x, z.side === 'buy' ? z.hi : z.lo, st.edge);
+      const lx = this.x(z.index);
+      if (lx != null && lx > -40 && lx < w) {
+        this.label(ctx, `${z.side === 'buy' ? '▲' : '▼'} ${z.rows} stacked`, lx, z.side === 'buy' ? z.lo : z.hi, st.text, z.side !== 'buy');
       }
     }
   }

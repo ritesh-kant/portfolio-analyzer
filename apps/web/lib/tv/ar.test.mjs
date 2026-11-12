@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   AR_SESSIONS,
+  arMarket,
   avrDays,
   avrUnits,
   biasLadder,
@@ -205,4 +206,31 @@ test('default sessions are the documented New York windows', () => {
       ['ny', 570, 660],
     ],
   );
+});
+
+test('sessions stay on the New York clock whatever time zone the chart is in', () => {
+  const bars = flat(9, 18, 0, 18 * 12);
+  const ny = sessionBoxes(bars, TZ);
+  for (const tz of ['UTC', 'Europe/London']) {
+    assert.deepEqual(
+      sessionBoxes(bars, tz).map((b) => [b.key, b.day, b.from, b.to]),
+      ny.map((b) => [b.key, b.day, b.from, b.to]),
+      tz,
+    );
+  }
+});
+
+test('NSE charts get one "NSE open" box, 09:15–10:45 India time, and no Asia / London / New York', () => {
+  assert.equal(arMarket('Asia/Kolkata').key, 'nse');
+  assert.equal(arMarket('America/New_York').key, 'us');
+  // Tue 10 Nov 2026, 09:15 → 15:30 IST (03:45 → 10:00 UTC), 5-minute bars
+  const t0 = Date.parse('2026-11-10T09:15:00+05:30') / 1000;
+  const bars = Array.from({ length: 75 }, (_, i) => bar(t0 + i * 300, 100, 101, 99, 100));
+  const boxes = sessionBoxes(bars, 'Asia/Kolkata');
+  assert.deepEqual(
+    boxes.map((b) => [b.key, b.day, b.from, b.to]),
+    [['open', '2026-11-10', 0, 17]], // 09:15 … 10:40 start times = 18 candles
+  );
+  // so the Asia-range levels have nothing to hang off
+  assert.deepEqual(avrDays(bars, boxes, new Map([['2026-11-09', 300], ['2026-11-10', 300]])), []);
 });

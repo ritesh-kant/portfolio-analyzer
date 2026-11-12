@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { arSummary, runArStrategy } from './ar-strategy.ts';
+import { AR_STRATEGY_DEFAULTS, arStrategyDefaults, arSummary, runArStrategy } from './ar-strategy.ts';
 
 const TZ = 'America/New_York';
 const H = 3600;
@@ -140,4 +140,64 @@ test('a still-forming last candle never confirms', () => {
   });
   assert.equal(live.trades.length, 0);
   assert.equal(live.reads[confirm].checks.confirmation.state, 'wait');
+});
+
+test('NSE: the window is 09:15–10:45 India time and the Asia-range path step is skipped, not failed', () => {
+  assert.deepEqual(arStrategyDefaults('America/New_York'), AR_STRATEGY_DEFAULTS);
+  const d = arStrategyDefaults('Asia/Kolkata');
+  assert.deepEqual([d.windowStart, d.windowEnd, d.flatAt], [555, 645, 915]);
+
+  const IST = 'Asia/Kolkata';
+  const ist = (t) => {
+    const p = new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(t * 1000));
+    return Number(p.find((x) => x.type === 'hour').value) * 60 + Number(p.find((x) => x.type === 'minute').value);
+  };
+  const bars = segments(50, UP);
+  // only the window is the default here: every hour is otherwise allowed and nothing is closed at a time of day
+  const { trades, skips, reads } = runArStrategy(bars, {
+    timeZone: IST,
+    chartSecs: H,
+    cfg: { flatAt: 99999, envWindow: 6, entry: 'close' },
+  });
+  const confirmations = [...trades.map((t) => t.confirmIndex), ...skips.filter((k) => k.step === 'confirmation').map((k) => k.index)];
+  assert.ok(confirmations.length > 0, 'the scenario must reach confirmation');
+  for (const t of trades) {
+    const m = ist(bars[t.confirmIndex].time);
+    assert.ok(m >= 555 && m < 645, `trade confirmed at ${m} min IST, outside 09:15–10:45`);
+  }
+  for (const k of skips.filter((k) => k.step === 'confirmation' && /outside/.test(k.reason))) {
+    assert.match(k.reason, /09:15–10:45 India time/);
+  }
+  assert.ok(reads.some((r) => r.checks.path.state === 'warn' && /NSE/.test(r.checks.path.text)));
+  assert.ok(!reads.some((r) => r.checks.path.state === 'fail'));
+});
+
+test('stacked imbalances: each trade records a zone at the fill; "require" skips without one; later zones do not count', () => {
+  const bars = segments(50, UP);
+  const base = run(bars, { entry: 'close' }).trades[0];
+  assert.equal(base.stack, null, 'no stacked data given → null');
+  const zone = (index) => ({ index, side: 'buy', lo: base.entry - 1, hi: base.entry + 1, rows: 3, usedAt: null, estimated: true });
+  const covered = bars.map(() => true);
+  const withStacks = (zones, cov = covered, cfg = {}) =>
+    runArStrategy(bars, { timeZone: TZ, chartSecs: H, stacks: { zones, covered: cov }, cfg: { ...ALL_DAY, entry: 'close', ...cfg } });
+
+  const inZone = withStacks([zone(base.confirmIndex)]);
+  assert.equal(inZone.trades[0].stack, 'zone');
+  assert.equal(withStacks([zone(base.confirmIndex)], covered, { requireStack: true }).trades.length, 1);
+
+  // the same zone printed one candle AFTER the decision is unknown at the fill
+  assert.equal(withStacks([zone(base.confirmIndex + 1)]).trades[0].stack, 'none');
+  // a sell zone does not help a long
+  assert.equal(withStacks([{ ...zone(base.confirmIndex), side: 'sell' }]).trades[0].stack, 'none');
+  // already traded through before the fill
+  assert.equal(withStacks([{ ...zone(base.confirmIndex - 2), usedAt: base.confirmIndex - 1 }]).trades[0].stack, 'none');
+
+  const none = withStacks([], covered, { requireStack: true });
+  assert.equal(none.trades.length, 0);
+  assert.ok(none.skips.some((s) => s.step === 'entry' && /no stacked-imbalance zone/.test(s.reason)));
+  const blind = withStacks([zone(base.confirmIndex)], bars.map(() => false), { requireStack: true });
+  assert.equal(blind.trades.length, 0);
+  assert.ok(blind.skips.some((s) => /no footprint data/.test(s.reason)));
+  // off by default: the zone is only recorded
+  assert.equal(withStacks([]).trades.length, 1);
 });

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import type { AvrDay, Bias, EnvironmentRead, RangeFib } from '../../lib/tv/ar';
+import type { ArMarket, AvrDay, Bias, EnvironmentRead, RangeFib } from '../../lib/tv/ar';
 import { type ArStrategyResult, type CheckState, STEPS, arSummary } from '../../lib/tv/ar-strategy';
+import type { StackZone } from '../../lib/tv/stacked-imbalance';
 
 /** What the panel reads from the chart's AR state (tv-chart.tsx `arState`). */
 export interface ArPanelState {
@@ -12,6 +13,12 @@ export interface ArPanelState {
   fib: RangeFib | null;
   avr: AvrDay[];
   dailyMissing: boolean;
+  /** The chart's market (sessions, window, clock); absent = US. */
+  market?: ArMarket;
+  /** "Asia Range Levels" is on but the market has no overnight Asia session (NSE). */
+  avrNA?: boolean;
+  /** "Stacked Imbalances" on: its zones, and how many candles had a footprint (from ticks: `ticks`). */
+  stack?: { zones: StackZone[]; showUsed: boolean; covered: number; ticks: number } | null;
   /** The strategy's run, when "AR Strategy" is on. */
   strat: ArStrategyResult | null;
 }
@@ -238,12 +245,18 @@ export function ArPanel({
                   onMouseEnter={() => onFocusTrade(t.id)}
                   onMouseLeave={() => onFocusTrade(null)}
                   onClick={() => onGoTo(t.entryIndex)}
-                  title={t.warnings.length ? `Taken with warnings:\n${t.warnings.join('\n')}` : 'All four steps passed'}
+                  title={[
+                    t.warnings.length ? `Taken with warnings:\n${t.warnings.join('\n')}` : 'All four steps passed',
+                    t.stack ? `Stacked-imbalance zone at the fill: ${t.stack === 'zone' ? 'yes' : t.stack === 'none' ? 'no' : 'no footprint data'}` : '',
+                  ]
+                    .filter(Boolean)
+                    .join('\n')}
                 >
                   <span>
                     <span style={{ color: t.dir === 'long' ? UP : DOWN }}>{t.dir === 'long' ? '▲' : '▼'}</span>{' '}
                     {mmdd(times[t.entryIndex])} {hhmm(times[t.entryIndex])}
                     {t.warnings.length ? <span className="text-[#ffb74d]"> △</span> : null}
+                    {t.stack === 'zone' ? <span className="text-[#4db6ac]"> ≡</span> : null}
                   </span>
                   <span>
                     <span className="text-[#787b86]">{t.outcome} </span>
@@ -337,6 +350,16 @@ export function ArPanel({
         </div>
       ) : null}
 
+      {state.avrNA ? (
+        <div className={section}>
+          <div className={head}>3 · Path (Asia range)</div>
+          <div className="leading-snug text-[#787b86]">
+            Not used on NSE: the levels hang off the overnight Asia session, and NSE only trades 09:15–15:30 India
+            time. The strategy’s Path step is skipped (shown as a warning).
+          </div>
+        </div>
+      ) : null}
+
       {day || state.dailyMissing ? (
         <div className={section}>
           <div className={head}>3 · Path (Asia range)</div>
@@ -366,11 +389,70 @@ export function ArPanel({
         </div>
       ) : null}
 
+      {state.stack ? <StackSection stack={state.stack} price={price} fmt={fmt} section={section} head={head} /> : null}
+
       {!strat ? (
         <div className={`${section} text-[10px] leading-snug text-[#5d606b]`}>
           Add “AR Strategy” for the 4-step checklist, entries and exits. Nothing here is a signal on its own.
         </div>
       ) : null}
     </aside>
+  );
+}
+
+/** Stacked imbalances: what stands nearest above and below price, and how far the footprint data reaches. */
+function StackSection({
+  stack,
+  price,
+  fmt,
+  section,
+  head,
+}: {
+  stack: NonNullable<ArPanelState['stack']>;
+  price: number | undefined;
+  fmt: (v: number) => string;
+  section: string;
+  head: string;
+}) {
+  // not yet traded through as of the latest candle
+  const standing = stack.zones.filter((z) => z.usedAt == null);
+  const below = price == null ? [] : standing.filter((z) => z.side === 'buy' && z.hi <= price).sort((a, b) => b.hi - a.hi);
+  const above = price == null ? [] : standing.filter((z) => z.side === 'sell' && z.lo >= price).sort((a, b) => a.lo - b.lo);
+  const row = (label: string, z: StackZone | undefined, color: string) => (
+    <>
+      <dt className="text-[#787b86]">{label}</dt>
+      <dd className="text-right" style={{ color: z ? color : MUTED }}>
+        {z ? `${fmt(z.lo)} – ${fmt(z.hi)} · ${z.rows} rows` : 'none'}
+      </dd>
+    </>
+  );
+  return (
+    <div className={section}>
+      <div className={head}>Stacked imbalances</div>
+      {!stack.covered ? (
+        <div className="leading-snug text-[#787b86]">
+          No footprint data on these candles yet: it needs 1-minute bars (about the last 4 weeks) or recorded ticks.
+        </div>
+      ) : (
+        <>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 tabular-nums">
+            {row('Sellers above', above[0], DOWN)}
+            {row('Buyers below', below[0], UP)}
+            <dt className="text-[#787b86]">Standing</dt>
+            <dd className="text-right">
+              {standing.filter((z) => z.side === 'buy').length} buy · {standing.filter((z) => z.side === 'sell').length} sell
+            </dd>
+          </dl>
+          <div className="mt-1 text-[10px] leading-snug text-[#5d606b]">
+            A zone holds until price trades through it. His use: an entry that pulls back into one is better, never a
+            signal alone. Found on {stack.covered} candle{stack.covered === 1 ? '' : 's'} with a footprint
+            {stack.ticks
+              ? `, ${stack.ticks} from recorded ticks, the rest estimated from 1-minute bars`
+              : ', all estimated from 1-minute bars (buyers vs sellers guessed from each minute’s close)'}
+            .
+          </div>
+        </>
+      )}
+    </div>
   );
 }

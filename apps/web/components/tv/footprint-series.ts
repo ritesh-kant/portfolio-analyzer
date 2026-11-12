@@ -13,6 +13,7 @@ import {
   customSeriesDefaultOptions,
 } from 'lightweight-charts';
 import type { FootprintCandle } from '../../lib/tv/types';
+import { diagonalImbalances, stackedOnly as stackedRows } from '../../lib/tv/stacked-imbalance';
 
 const FONT = '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
 const UP = '#089981';
@@ -217,28 +218,12 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
     const showText = spacing >= 44 && rowH >= 9;
     const fontPx = Math.min(12, Math.max(8, Math.floor(rowH - 2)));
 
-    // Diagonal imbalance: asks against the bids one row down, bids against the asks one row up.
-    const askFlags = levels.map((l, i) => {
-      const b = levels[i - 1];
-      return b ? l.ask > 0 && l.ask >= imbalance * Math.max(b.bid, 1) : false;
-    });
-    const bidFlags = levels.map((l, i) => {
-      const a = levels[i + 1];
-      return a ? l.bid > 0 && l.bid >= imbalance * Math.max(a.ask, 1) : false;
-    });
-    // Stacked levels: keep only runs of at least N consecutive imbalanced rows on the same side.
-    const stackedOnly = (flags: boolean[]) => {
-      const n = this.settings.stackedLevels;
-      if (n < 2) return flags;
-      const out = flags.map(() => false);
-      let start = 0;
-      for (let i = 0; i <= flags.length; i += 1) {
-        if (i < flags.length && flags[i]) continue;
-        if (i - start >= n) for (let j = start; j < i; j += 1) out[j] = true;
-        start = i + 1;
-      }
-      return out;
-    };
+    // Diagonal imbalance: asks against the bids one row down, bids against the asks one row up; stacked levels keep
+    // only runs of at least N rows on the same side (same rule as the Stacked Imbalances indicator).
+    const flags = diagonalImbalances(levels, imbalance, rows.step);
+    const askFlags = flags.ask;
+    const bidFlags = flags.bid;
+    const stackedOnly = (f: boolean[]) => stackedRows(f, this.settings.stackedLevels);
     const askMarks = this.settings.highlight ? stackedOnly(askFlags) : askFlags.map(() => false);
     const bidMarks = this.settings.highlight ? stackedOnly(bidFlags) : bidFlags.map(() => false);
 

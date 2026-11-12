@@ -1,14 +1,17 @@
 import {
+  type ArMarket,
   type AvrDay,
   type Bias,
   type EnvironmentRead,
   FIB_LEVELS,
   type Pivot,
+  arMarket,
   environment,
   structureBias,
   swings,
 } from './ar.ts';
 import { atr } from './indicators.ts';
+import { type StackZone, zoneAt } from './stacked-imbalance.ts';
 import { aggregateBars, wallClock } from './timeframes.ts';
 import type { Bar } from './types';
 import { buildProfile } from './volume-profile.ts';
@@ -29,11 +32,15 @@ import { buildProfile } from './volume-profile.ts';
  *                  tends to tire there), price already past Max in the trade's direction fails.
  *   4 Confirmation ESTIMATED from candles (no bid/ask data): after the touch, a candle that closes in the trade's
  *                  direction AND beyond the extreme candle's other end (aggression failed, pressure flipped), inside
- *                  his New York window. Entry: a pull-back to the middle of that candle within a few candles (his
+ *                  his window (New York 09:30–11:00; NSE's own first 90 minutes, see `arMarket`). Entry: a pull-back to the middle of that candle within a few candles (his
  *                  "entry candle pulls back into the confirmation candle"), or its close.
  *
+ * Optional (off by default, his "stacked imbalances at that spot make it better"): the fill must sit in a stacked-
+ * imbalance zone on the trade's side (lib/tv/stacked-imbalance.ts) that stood when the order was placed. Every trade
+ * records whether it did (`stack`), so the two groups can be compared.
+ *
  * Stop: beyond the extreme since the touch, plus a small buffer. Target: the leg's end. One trade per leg, one at a
- * time, flat by the end of the New York session. Results are in points, before costs.
+ * time, flat by the end of the session. Results are in points, before costs.
  */
 
 export interface ArStrategyCfg {
@@ -43,10 +50,10 @@ export interface ArStrategyCfg {
   valueRows: number;
   /** Candles the environment read looks at. */
   envWindow: number;
-  /** Confirmation candles must START inside this window, minutes after midnight New York time. */
+  /** Confirmation candles must START inside this window, minutes after midnight on the market's clock (`arMarket`). */
   windowStart: number;
   windowEnd: number;
-  /** Close any open trade at the close of the candle that ends at or after this minute (New York). */
+  /** Close any open trade at the close of the candle that ends at or after this minute (market's clock). */
   flatAt: number;
   /** Skip setups whose reward ÷ risk to the target is below this. */
   minRR: number;
@@ -62,8 +69,11 @@ export interface ArStrategyCfg {
   requireOutsideValue: boolean;
   /** Take a setup even when a step only warns (never when one fails). */
   allowWarnings: boolean;
+  /** Only fill inside a same-side stacked-imbalance zone (needs footprint data on the confirmation candle). */
+  requireStack: boolean;
 }
 
+/** His defaults (US: New York clock). For a chart, use `arStrategyDefaults(timeZone)`. */
 export const AR_STRATEGY_DEFAULTS: ArStrategyCfg = {
   swingMult: 2,
   valueRows: 30,
@@ -78,7 +88,14 @@ export const AR_STRATEGY_DEFAULTS: ArStrategyCfg = {
   stopBuffer: 0.1,
   requireOutsideValue: false,
   allowWarnings: true,
+  requireStack: false,
 };
+
+/** The defaults for a chart's market: the trade window and flat time follow `arMarket`. */
+export function arStrategyDefaults(timeZone: string): ArStrategyCfg {
+  const m = arMarket(timeZone);
+  return { ...AR_STRATEGY_DEFAULTS, windowStart: m.window.start, windowEnd: m.window.end, flatAt: m.flatAt };
+}
 
 export type CheckState = 'pass' | 'warn' | 'fail' | 'wait';
 export interface Check {
@@ -119,7 +136,14 @@ export interface ArTrade {
   r: number | null;
   /** Steps that only warned when the trade was taken. */
   warnings: string[];
+  /**
+   * The fill was inside a same-side stacked-imbalance zone ('zone'), was not ('none'), or the confirmation candle had
+   * no footprint to tell ('no data'). Null when the run got no stacked-imbalance data at all.
+   */
+  stack: StackFlag | null;
 }
+
+export type StackFlag = 'zone' | 'none' | 'no data';
 
 /** A zone touch that did not become a trade, and the first reason why. */
 export interface ArSkip {
@@ -232,11 +256,16 @@ export function runArStrategy(
     avr?: AvrDay[];
     /** The last candle is still forming (live): it may not confirm anything yet. */
     formingLast?: boolean;
+    /** Stacked-imbalance zones and which candles had a footprint to find them in (index-aligned with `bars`). */
+    stacks?: { zones: StackZone[]; covered: boolean[] };
     cfg?: Partial<ArStrategyCfg>;
   },
 ): ArStrategyResult {
-  const cfg = { ...AR_STRATEGY_DEFAULTS, ...opts.cfg };
-  const { timeZone: tz, chartSecs } = opts;
+  const cfg = { ...arStrategyDefaults(opts.timeZone), ...opts.cfg };
+  const { timeZone, chartSecs } = opts;
+  const market = arMarket(timeZone);
+  // the window, flat time and every time shown are on the market's clock, not the chart's
+  const tz = market.tz;
   const avr = opts.avr ?? [];
   const reads: ArRead[] = [];
   const trades: ArTrade[] = [];
@@ -244,7 +273,7 @@ export function runArStrategy(
   if (bars.length < 3) return { reads, trades, skips };
 
   const pivots = swings(bars, cfg.swingMult).pivots;
-  const bias = biasAsOf(bars, chartSecs, tz, cfg.swingMult);
+  const bias = biasAsOf(bars, chartSecs, timeZone, cfg.swingMult);
   const a14 = atr(bars, 14);
   const legs = new Map<string, Leg>();
   let known = 0; // pivots confirmed so far
@@ -254,6 +283,23 @@ export function runArStrategy(
   let nextId = 1;
 
   const lastDecidable = opts.formingLast ? bars.length - 2 : bars.length - 1;
+
+  /** Was a same-side zone standing at the close of `asOf` under (long) / over (short) `price`? */
+  const stackAt = (dir: 'long' | 'short', price: number, confirmIndex: number, asOf: number): StackFlag | null => {
+    if (!opts.stacks) return null;
+    if (!opts.stacks.covered[confirmIndex]) return 'no data';
+    // about one footprint row of slack: 0.1 × ATR 14
+    const tol = (a14[asOf] ?? 0) * 0.1;
+    return zoneAt(opts.stacks.zones, dir === 'long' ? 'buy' : 'sell', price, asOf, tol) ? 'zone' : 'none';
+  };
+  const stackSkip = (flag: StackFlag | null) =>
+    !cfg.requireStack
+      ? null
+      : flag === 'zone'
+        ? null
+        : flag === 'none'
+          ? 'no stacked-imbalance zone at the fill'
+          : 'no footprint data to check for stacked imbalances';
 
   for (let i = 0; i < bars.length; i++) {
     const b = bars[i]!;
@@ -301,13 +347,21 @@ export function runArStrategy(
         pending = null;
       } else if (long ? b.low <= pending.limit : b.high >= pending.limit) {
         const fill = long ? Math.min(pending.limit, b.open) : Math.max(pending.limit, b.open);
-        open = openTrade(pending.leg, pending.dir, fill, pending.stop, pending.confirmIndex, i, pending.warnings);
-        pending = null;
-        // the fill candle can still stop out (conservatively, never reach the target on the same candle)
-        const hitStop = long ? b.low <= open.stop : b.high >= open.stop;
-        if (hitStop) {
-          closeTrade(open, i, open.stop, 'stop');
-          open = null;
+        // zones known when the order was resting: at the previous candle's close
+        const flag = stackAt(pending.dir, fill, pending.confirmIndex, i - 1);
+        const why = stackSkip(flag);
+        if (why) {
+          skips.push({ index: i, price: fill, dir: pending.dir, step: 'entry', reason: why });
+          pending = null;
+        } else {
+          open = openTrade(pending.leg, pending.dir, fill, pending.stop, pending.confirmIndex, i, pending.warnings, flag);
+          pending = null;
+          // the fill candle can still stop out (conservatively, never reach the target on the same candle)
+          const hitStop = long ? b.low <= open.stop : b.high >= open.stop;
+          if (hitStop) {
+            closeTrade(open, i, open.stop, 'stop');
+            open = null;
+          }
         }
       }
     }
@@ -341,7 +395,7 @@ export function runArStrategy(
     const checks: Record<StepKey, Check> = {
       environment: envCheck(env, trend, leg),
       location: locationCheck(leg, b, cfg),
-      path: pathCheck(leg, b.close, avrAt(avr, i)),
+      path: pathCheck(leg, b.close, avrAt(avr, i), market),
       confirmation: { state: 'wait', text: 'waiting for price to reach the zone' },
     };
     if (open) {
@@ -365,8 +419,8 @@ export function runArStrategy(
             : `in the zone; waiting for a red candle closing below ${ext.low.toFixed(2)}`,
         };
       } else if (!inWindow) {
-        checks.confirmation = { state: 'fail', text: `confirmed at ${fmtTime(b.time, tz)}, outside his ${windowText(cfg)} window` };
-        skips.push({ index: i, price: bars[i]!.close, dir: long ? 'long' : 'short', step: 'confirmation', reason: `confirmation outside ${windowText(cfg)} New York` });
+        checks.confirmation = { state: 'fail', text: `confirmed at ${fmtTime(b.time, tz)}, outside his ${windowText(cfg)} ${market.clock} window` };
+        skips.push({ index: i, price: bars[i]!.close, dir: long ? 'long' : 'short', step: 'confirmation', reason: `confirmation outside ${windowText(cfg)} ${market.clock} time` });
         leg.dead = 'used';
       } else {
         checks.confirmation = { state: 'pass', text: `pressure flipped at ${fmtTime(b.time, tz)} (estimated from candles)` };
@@ -383,7 +437,10 @@ export function runArStrategy(
           skips.push({ index: i, price: bars[i]!.close, dir, step: 'entry', reason: `reward ÷ risk ${rr.toFixed(2)} below ${cfg.minRR}` });
         } else if (cfg.entry === 'close') {
           // market order at this (complete) close: managed from the next candle
-          open = openTrade(leg, dir, b.close, stop, i, i, decision.warnings);
+          const flag = stackAt(dir, b.close, i, i);
+          const why = stackSkip(flag);
+          if (why) skips.push({ index: i, price: b.close, dir, step: 'entry', reason: why });
+          else open = openTrade(leg, dir, b.close, stop, i, i, decision.warnings, flag);
         } else {
           pending = { leg, dir, limit: entryPx, stop, confirmIndex: i, until: i + cfg.entryWait, warnings: decision.warnings };
         }
@@ -405,7 +462,16 @@ export function runArStrategy(
     t.r = risk > 0 ? t.points / risk : null;
   }
 
-  function openTrade(leg: Leg, dir: 'long' | 'short', entry: number, stop: number, confirmIndex: number, entryIndex: number, warnings: string[]): ArTrade {
+  function openTrade(
+    leg: Leg,
+    dir: 'long' | 'short',
+    entry: number,
+    stop: number,
+    confirmIndex: number,
+    entryIndex: number,
+    warnings: string[],
+    stack: StackFlag | null,
+  ): ArTrade {
     const t: ArTrade = {
       id: nextId++,
       dir,
@@ -421,6 +487,7 @@ export function runArStrategy(
       points: null,
       r: null,
       warnings,
+      stack,
     };
     trades.push(t);
     return t;
@@ -480,8 +547,9 @@ function locationCheck(leg: Leg | null, b: Bar, cfg: ArStrategyCfg): Check {
   return { state: value.state, text: `price reached the ${side} zone; ${value.note}` };
 }
 
-function pathCheck(leg: Leg | null, price: number, day: AvrDay | null): Check {
+function pathCheck(leg: Leg | null, price: number, day: AvrDay | null, market: ArMarket): Check {
   if (!leg) return { state: 'wait', text: 'no target yet' };
+  if (!market.hasAsia) return { state: 'warn', text: 'not checked: Asia-range levels need an overnight session, which NSE does not have' };
   if (!day) return { state: 'warn', text: 'no Asia-range levels for today (needs daily candles)' };
   const up = leg.dir === 'up';
   const max = day.levels.find((l) => l.key === 'max' && l.side === (up ? 'up' : 'down'));

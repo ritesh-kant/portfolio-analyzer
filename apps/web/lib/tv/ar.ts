@@ -15,25 +15,77 @@ import { buildProfile } from './volume-profile.ts';
 
 // ── sessions ────────────────────────────────────────────────────────────────────
 
-export type SessionKey = 'asia' | 'london' | 'ny';
+export type SessionKey = 'asia' | 'london' | 'ny' | 'open';
 
 export interface SessionSpec {
   key: SessionKey;
   label: string;
-  /** Minutes after midnight in the exchange's time zone; `end` is exclusive. start > end crosses midnight. */
+  /** Minutes after midnight on `tz`'s clock; `end` is exclusive. start > end crosses midnight. */
   start: number;
   end: number;
+  /** The clock the times are on. Omitted: the chart's exchange time zone. */
+  tz?: string;
 }
 
+const NEW_YORK = 'America/New_York';
+const INDIA = 'Asia/Kolkata';
+
 /**
- * Defaults in New York time. He never states his windows; these are the common ICT "kill zones" and his own
- * trading window (the first 90 minutes after the 09:30 open). Editable per chart later.
+ * Defaults on the New York clock, whatever market the chart shows: these are global sessions. He never states his
+ * windows; these are the common ICT "kill zones" and his own trading window (the first 90 minutes after the 09:30
+ * open).
  */
 export const AR_SESSIONS: SessionSpec[] = [
-  { key: 'asia', label: 'Asia', start: 20 * 60, end: 24 * 60 },
-  { key: 'london', label: 'London', start: 2 * 60, end: 5 * 60 },
-  { key: 'ny', label: 'New York', start: 9 * 60 + 30, end: 11 * 60 },
+  { key: 'asia', label: 'Asia', start: 20 * 60, end: 24 * 60, tz: NEW_YORK },
+  { key: 'london', label: 'London', start: 2 * 60, end: 5 * 60, tz: NEW_YORK },
+  { key: 'ny', label: 'New York', start: 9 * 60 + 30, end: 11 * 60, tz: NEW_YORK },
 ];
+
+/**
+ * How the AR model maps onto the market a chart shows. The course trades US index futures; elsewhere the session
+ * parts are OUR adaptation:
+ * - `us` (everything that is not NSE): his New York sessions, window 09:30–11:00 and flat by 16:00 New York.
+ * - `nse`: NSE trades 09:15–15:30 India time only, so New York's open (19:00–20:00 India) and the overnight Asia
+ *   session never happen on it. The window is NSE's own first 90 minutes (09:15–10:45), flat by 15:15 (before the
+ *   broker's intraday square-off), and the Asia-range levels do not apply.
+ */
+export interface ArMarket {
+  key: 'us' | 'nse';
+  /** The clock the sessions, trade window and flat time are on. */
+  tz: string;
+  /** That clock in words, for the UI ("New York time"). */
+  clock: string;
+  sessions: SessionSpec[];
+  window: { start: number; end: number };
+  flatAt: number;
+  /** Has an overnight Asia session to hang the AVR levels off. */
+  hasAsia: boolean;
+}
+
+const US_MARKET: ArMarket = {
+  key: 'us',
+  tz: NEW_YORK,
+  clock: 'New York',
+  sessions: AR_SESSIONS,
+  window: { start: 9 * 60 + 30, end: 11 * 60 },
+  flatAt: 16 * 60,
+  hasAsia: true,
+};
+
+const NSE_MARKET: ArMarket = {
+  key: 'nse',
+  tz: INDIA,
+  clock: 'India',
+  sessions: [{ key: 'open', label: 'NSE open', start: 9 * 60 + 15, end: 10 * 60 + 45, tz: INDIA }],
+  window: { start: 9 * 60 + 15, end: 10 * 60 + 45 },
+  flatAt: 15 * 60 + 15,
+  hasAsia: false,
+};
+
+/** The market profile for a chart, from its exchange time zone. */
+export function arMarket(timeZone: string): ArMarket {
+  return timeZone === INDIA || timeZone === 'Asia/Calcutta' ? NSE_MARKET : US_MARKET;
+}
 
 export interface SessionBox {
   key: SessionKey;
@@ -54,14 +106,18 @@ function inSession(m: number, s: SessionSpec): boolean {
   return s.start < s.end ? m >= s.start && m < s.end : m >= s.start || m < s.end;
 }
 
-/** One box per session occurrence on the chart's candles (intraday only). */
-export function sessionBoxes(bars: Bar[], timeZone: string, specs: SessionSpec[] = AR_SESSIONS): SessionBox[] {
+/** One box per session occurrence on the chart's candles (intraday only). Default sessions: `arMarket`'s. */
+export function sessionBoxes(
+  bars: Bar[],
+  timeZone: string,
+  specs: SessionSpec[] = arMarket(timeZone).sessions,
+): SessionBox[] {
   const out: SessionBox[] = [];
   const open = new Map<SessionKey, SessionBox>();
   bars.forEach((b, i) => {
-    const wall = wallClock(b.time, timeZone);
-    const m = minuteOfDay(wall);
     for (const s of specs) {
+      const wall = wallClock(b.time, s.tz ?? timeZone);
+      const m = minuteOfDay(wall);
       if (!inSession(m, s)) continue;
       // a session that crosses midnight belongs to the day it started on
       const startWall = s.start > s.end && m < s.end ? wall - 86400 : wall;
@@ -79,8 +135,8 @@ export function sessionBoxes(bars: Bar[], timeZone: string, specs: SessionSpec[]
   });
   const last = bars[bars.length - 1];
   if (last) {
-    const m = minuteOfDay(wallClock(last.time, timeZone));
     for (const s of specs) {
+      const m = minuteOfDay(wallClock(last.time, s.tz ?? timeZone));
       const box = open.get(s.key);
       if (box && box.to === bars.length - 1 && inSession(m, s)) box.open = true;
     }

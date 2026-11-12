@@ -23,7 +23,8 @@ export type IndicatorType =
   | 'arfib'
   | 'arstruct'
   | 'arenv'
-  | 'arstrat';
+  | 'arstrat'
+  | 'arstack';
 
 export interface IndicatorCfg {
   id: string;
@@ -69,6 +70,8 @@ export interface IndicatorCfg {
   gexPanel?: boolean;
   /** Gamma levels: per-level show / colour overrides, by `GEX_LINES` key. */
   gexStyle?: GexStyle;
+  /** Stacked imbalances: also draw zones price has already traded through (absent = off). */
+  stackUsed?: boolean;
   /** AR strategy: overrides of `AR_STRATEGY_DEFAULTS`. */
   arStrat?: Partial<ArStrategyCfg>;
   /** Bollinger std-dev multiplier. */
@@ -231,10 +234,20 @@ export const CATALOG: CatalogEntry[] = [
     defaults: { type: 'arstrat', length: 0 },
     group: 'AR Model',
   },
+  {
+    type: 'arstack',
+    name: 'Stacked Imbalances',
+    description:
+      'Zones where 3+ footprint rows in a row show buyers (or sellers) overwhelming the other side; they hold until price trades through',
+    where: 'overlay',
+    // length = rows that must stack, mult = imbalance ratio (3 = 300 %)
+    defaults: { type: 'arstack', length: 3, mult: 3 },
+    group: 'AR Model',
+  },
 ];
 
 /** The "AR Model" template: everything the course uses that can be drawn from candles alone. */
-export const AR_TEMPLATE: IndicatorType[] = ['arsess', 'avr', 'arfib', 'arstruct', 'arenv', 'arstrat'];
+export const AR_TEMPLATE: IndicatorType[] = ['arsess', 'avr', 'arfib', 'arstruct', 'arenv', 'arstack', 'arstrat'];
 export const isArType = (t: IndicatorType) => AR_TEMPLATE.includes(t);
 
 export const catalogOf = (type: IndicatorType): CatalogEntry =>
@@ -321,6 +334,8 @@ export function indicatorLabel(i: IndicatorCfg): string {
       return `Environment ${i.length}`;
     case 'arstrat':
       return 'AR Strategy';
+    case 'arstack':
+      return `Stacked Imbalances ${i.length || 3}×${Math.round((i.mult ?? 3) * 100)}%`;
   }
 }
 

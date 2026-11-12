@@ -14,7 +14,8 @@ import {
   VOL_MA_DEFAULT,
   VOL_UP_DEFAULT,
 } from '../../lib/tv/indicator-defs';
-import { AR_STRATEGY_DEFAULTS, type ArStrategyCfg } from '../../lib/tv/ar-strategy';
+import { arMarket } from '../../lib/tv/ar';
+import { AR_STRATEGY_DEFAULTS, type ArStrategyCfg, arStrategyDefaults } from '../../lib/tv/ar-strategy';
 import { CVD_ANCHORS, type CvdAnchor } from '../../lib/tv/cvd';
 import { GEX_LINES, type GexConvention, gexLineColor, gexLineOn } from '../../lib/tv/gex';
 import { Icons } from './icons';
@@ -186,9 +187,11 @@ interface SettingsProps {
   cfg: IndicatorCfg;
   onChange: (cfg: IndicatorCfg) => void;
   onClose: () => void;
+  /** The chart's exchange time zone (AR settings follow its market). */
+  timeZone?: string;
 }
 
-const NumberField = ({
+export const NumberField = ({
   label,
   value,
   onChange,
@@ -407,17 +410,33 @@ function VolumeFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg: In
 }
 
 /** Settings for the AR-model indicators, in plain words. */
-function ArFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg: IndicatorCfg) => void }) {
+function ArFields({
+  cfg,
+  onChange,
+  timeZone,
+}: {
+  cfg: IndicatorCfg;
+  onChange: (cfg: IndicatorCfg) => void;
+  /** The chart's exchange time zone: picks the market's sessions (`arMarket`). */
+  timeZone?: string;
+}) {
   const note = (text: string) => <div className="mb-2 text-[12px] leading-snug text-[#787b86]">{text}</div>;
+  const nse = timeZone != null && arMarket(timeZone).key === 'nse';
   switch (cfg.type) {
     case 'arsess':
       return note(
-        'Asia 20:00–00:00, London 02:00–05:00 and New York 09:30–11:00, New York time (his trading window is the first 90 minutes after the open).',
+        nse
+          ? 'NSE: one box for the first 90 minutes, 09:15–10:45 India time (our stand-in for his New York window). Asia, London and New York happen while NSE is closed.'
+          : 'Asia 20:00–00:00, London 02:00–05:00 and New York 09:30–11:00, New York time, on every market (his trading window is the first 90 minutes after the open).',
       );
     case 'avr':
       return (
         <>
-          {note('Levels hang off the Asia high and low, sized from the daily ATR known when Asia started.')}
+          {note(
+            nse
+              ? 'Not used on NSE: the levels hang off the overnight Asia session, which NSE does not trade.'
+              : 'Levels hang off the Asia high and low, sized from the daily ATR known when Asia started.',
+          )}
           <NumberField
             label="Daily ATR length (days)"
             value={cfg.length || 20}
@@ -469,7 +488,32 @@ function ArFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg: Indica
         </>
       );
     case 'arstrat':
-      return <ArStrategyFields cfg={cfg} onChange={onChange} />;
+      return <ArStrategyFields cfg={cfg} onChange={onChange} timeZone={timeZone} />;
+    case 'arstack':
+      return (
+        <>
+          {note(
+            'Built from the footprint: a row is imbalanced when buyers beat the sellers one row lower (or sellers beat the buyers one row higher) by the ratio. Enough rows in a row = a zone, kept until price trades through it. Estimated from 1-minute bars except on recorded-tick candles; works on candles from about the last 4 weeks.',
+          )}
+          <NumberField
+            label="Rows that must stack"
+            value={cfg.length || 3}
+            min={2}
+            onChange={(length) => onChange({ ...cfg, length: Math.min(10, Math.max(2, length)) })}
+          />
+          <NumberField
+            label="Imbalance ratio (3 = 300 %)"
+            value={cfg.mult ?? 3}
+            min={1.5}
+            onChange={(mult) => onChange({ ...cfg, mult: Math.min(10, Math.max(1.5, mult)) })}
+          />
+          <Check
+            label="Also show zones price traded through"
+            checked={!!cfg.stackUsed}
+            onChange={(on) => onChange({ ...cfg, stackUsed: on })}
+          />
+        </>
+      );
     default:
       return null;
   }
@@ -482,8 +526,18 @@ const fromHhmm = (s: string) => {
 };
 
 /** The AR strategy's rules, editable, in plain words. */
-function ArStrategyFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg: IndicatorCfg) => void }) {
-  const v: ArStrategyCfg = { ...AR_STRATEGY_DEFAULTS, ...cfg.arStrat };
+export function ArStrategyFields({
+  cfg,
+  onChange,
+  timeZone,
+}: {
+  cfg: IndicatorCfg;
+  onChange: (cfg: IndicatorCfg) => void;
+  /** The chart's exchange time zone: the default window and the clock follow the market (`arMarket`). */
+  timeZone?: string;
+}) {
+  const v: ArStrategyCfg = { ...(timeZone ? arStrategyDefaults(timeZone) : AR_STRATEGY_DEFAULTS), ...cfg.arStrat };
+  const market = arMarket(timeZone ?? 'America/New_York');
   const set = (patch: Partial<ArStrategyCfg>) => onChange({ ...cfg, arStrat: { ...cfg.arStrat, ...patch } });
   const time = (label: string, value: number, key: 'windowStart' | 'windowEnd' | 'flatAt') => (
     <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
@@ -503,7 +557,9 @@ function ArStrategyFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg
     <>
       <div className="mb-2 text-[12px] leading-snug text-[#787b86]">
         Each candle is checked against his four steps (environment, location, path, confirmation). Confirmation is
-        estimated from candles. Times are New York time. Results are in points before costs.
+        estimated from candles. Times are {market.clock} time
+        {market.key === 'nse' ? ' (NSE: his New York window becomes the first 90 minutes after 09:15)' : ''}. Results
+        are in points before costs.
       </div>
       <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
         Entry
@@ -541,6 +597,11 @@ function ArStrategyFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg
         checked={v.requireOutsideValue}
         onChange={(on) => set({ requireOutsideValue: on })}
       />
+      <Check
+        label="Fill must be in a stacked-imbalance zone (estimated)"
+        checked={v.requireStack}
+        onChange={(on) => set({ requireStack: on })}
+      />
       <button
         type="button"
         onClick={() => onChange({ ...cfg, arStrat: undefined })}
@@ -552,7 +613,7 @@ function ArStrategyFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg
   );
 }
 
-export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
+export function IndicatorSettings({ cfg, onChange, onClose, timeZone }: SettingsProps) {
   const entry = catalogOf(cfg.type);
   return (
     <div
@@ -576,7 +637,7 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
           </button>
         </div>
         {cfg.type === 'volume' ? <VolumeFields cfg={cfg} onChange={onChange} /> : null}
-        {isArType(cfg.type) ? <ArFields cfg={cfg} onChange={onChange} /> : null}
+        {isArType(cfg.type) ? <ArFields cfg={cfg} onChange={onChange} timeZone={timeZone} /> : null}
         {cfg.type !== 'vwap' && cfg.type !== 'volume' && cfg.type !== 'cvd' && !isArType(cfg.type) ? (
           <NumberField
             label={

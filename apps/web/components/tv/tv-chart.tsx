@@ -179,8 +179,10 @@ import {
   structureBias,
   structureLabels,
   swings,
+  arMarket,
 } from '../../lib/tv/ar';
-import { runArStrategy } from '../../lib/tv/ar-strategy';
+import { type ArStrategyCfg, runArStrategy } from '../../lib/tv/ar-strategy';
+import { stackedZones } from '../../lib/tv/stacked-imbalance';
 import { GEX_STRIP_WIDTH, GexProfilePrimitive } from './gex-profile-primitive';
 import {
   extendedMask,
@@ -379,6 +381,7 @@ function computeIndicators(
       case 'arstruct':
       case 'arenv':
       case 'arstrat':
+      case 'arstack':
         // Drawn by SessionProfilePrimitive / DrawingsPrimitive / ArPrimitive / price lines, not as a series.
         lines = [];
         break;
@@ -727,12 +730,16 @@ export function TvChart({
   // Replay builds the forming candle from 1-minute bars, so it wants them too.
   const replayWanted = replayEnd != null || replayPick;
   const cvdOn = indicators.some((i) => i.type === 'cvd');
+  // Stacked imbalances (and the AR strategy's optional check on them) read the footprint, so they want the ~4-week
+  // 1-minute bars and footprints even with the footprint display off.
+  const stackWanted = indicators.some((i) => i.type === 'arstack' || i.type === 'arstrat');
+  const fpData = fp.on || stackWanted;
   // On 1D and above the SVP is one profile per candle, built from the minute bars underneath (as TradingView does).
   const svpDaily = !tf.intraday && indicators.some((i) => i.type === 'svp' && !i.hidden);
   const subBars =
     tf.source === '1m'
       ? rawBars
-      : (deltaActive || cvdOn || svpDaily || replayWanted) &&
+      : (deltaActive || cvdOn || svpDaily || replayWanted || stackWanted) &&
           deltaSub.symbol === symbol &&
           deltaSub.bars.length > subRaw.length
         ? deltaSub.bars
@@ -856,10 +863,10 @@ export function TvChart({
   );
   // NSE futures: candles the tick recorder covered get a footprint from recorded volume (exact per ~1 s) instead
   // of the 1-minute estimate. See lib/tv/tick-footprint.ts.
-  const tickSteps = useTickSteps(symbol, fp.on, replayEnd == null);
+  const tickSteps = useTickSteps(symbol, fpData, replayEnd == null);
   const tickFootprints = useMemo(() => {
     const { steps, segments } = tickSteps.series;
-    if (!fp.on || !steps.length) return [] as (TickFootprint | null)[];
+    if (!fpData || !steps.length) return [] as (TickFootprint | null)[];
     const cut = replayEnd == null ? Infinity : replayEnd * 1000;
     const series =
       cut === Infinity
@@ -871,13 +878,13 @@ export function TvChart({
               .map(([a, b]) => [a, Math.min(b, cut)] as [number, number]),
           };
     return buildTickFootprints(bars, series, tf.secs, effectiveStep);
-  }, [fp.on, tickSteps.series, bars, tf.secs, effectiveStep, replayEnd]);
+  }, [fpData, tickSteps.series, bars, tf.secs, effectiveStep, replayEnd]);
   const footprints = useMemo(
     () =>
-      fp.on
+      fpData
         ? mergeFootprints(buildFootprints(bars, subBars, tf.secs, effectiveStep), tickFootprints)
         : [],
-    [fp.on, bars, subBars, tf.secs, effectiveStep, tickFootprints],
+    [fpData, bars, subBars, tf.secs, effectiveStep, tickFootprints],
   );
   const tickFpStats = useMemo(() => {
     let n = 0;
@@ -1260,9 +1267,9 @@ export function TvChart({
     drawings.some((d) => d.kind === 'vprofile' || d.kind === 'avprofile');
   const pocFits = tf.intraday && tf.secs <= 900;
   const pocFine = pocOn && pocFits;
-  const fineOn = fp.on || svpOn || cvdOn || pocFine;
+  const fineOn = fpData || svpOn || cvdOn || pocFine;
   useEffect(() => {
-    if (!ready || (!fp.on && !svpOn && !cvdOn && !pocFine && !replayWanted) || tf.source === '1m')
+    if (!ready || (!fpData && !svpOn && !cvdOn && !pocFine && !replayWanted) || tf.source === '1m')
       return;
     const ctl = new AbortController();
     fetchBars(symbol, '1m', '7d', ctl.signal, wantPrepost)
@@ -1271,7 +1278,7 @@ export function TvChart({
     return () => ctl.abort();
   }, [
     ready,
-    fp.on,
+    fpData,
     svpOn,
     cvdOn,
     pocFine,
@@ -1288,7 +1295,7 @@ export function TvChart({
   const nse = symbol.endsWith('.NS');
   const deltaDays = deltaDepthDays(deltaView, Math.floor(Date.now() / 1000));
   useEffect(() => {
-    if (!ready || (!deltaActive && !cvdOn && !svpDaily && !replayWanted)) return;
+    if (!ready || (!deltaActive && !cvdOn && !svpDaily && !replayWanted && !stackWanted)) return;
     const ctl = new AbortController();
     const now = Math.floor(Date.now() / 1000);
     const yahoo = () => {
@@ -1338,6 +1345,7 @@ export function TvChart({
     cvdOn,
     svpDaily,
     replayWanted,
+    stackWanted,
     symbol,
     nse,
     deltaDays,
@@ -1431,7 +1439,8 @@ export function TvChart({
   const arStructCfg = arOn('arstruct');
   const arEnvCfg = arOn('arenv');
   const arStratCfg = arOn('arstrat');
-  const arAny = !!(arSessCfg || arAvrCfg || arFibCfg || arStructCfg || arEnvCfg || arStratCfg);
+  const arStackCfg = arOn('arstack');
+  const arAny = !!(arSessCfg || arAvrCfg || arFibCfg || arStructCfg || arEnvCfg || arStratCfg || arStackCfg);
   // AVR needs daily candles for its 20-day ATR (the chart's own candles rarely reach back 20 days).
   const [arDaily, setArDaily] = useState<{ symbol: string; bars: Bar[] }>({ symbol: '', bars: [] });
   useEffect(() => {
@@ -1457,9 +1466,16 @@ export function TvChart({
     // The newest candle may still be forming (live, or replay's partial candle): it may not confirm a setup.
     const lastBar = bars[bars.length - 1]!;
     const formingLast = lastBar.time + tf.secs > (replayEnd ?? Date.now() / 1000);
-    const strat = arStratCfg
-      ? runArStrategy(bars, { timeZone, chartSecs: tf.secs, avr: avrAll, formingLast, cfg: arStratCfg.arStrat })
-      : null;
+    // Stacked-imbalance zones from the footprint (estimated from 1-minute bars unless recorded ticks exist).
+    const covered = footprints.length === bars.length ? footprints.map((f) => f != null) : [];
+    const stackZones =
+      (arStackCfg || arStratCfg) && covered.some(Boolean)
+        ? stackedZones(bars, footprints, { ratio: arStackCfg?.mult ?? 3, minRows: arStackCfg?.length || 3 })
+        : [];
+    const stacks = covered.some(Boolean) ? { zones: stackZones, covered } : undefined;
+    const runStrat = (cfg: Partial<ArStrategyCfg> | undefined) =>
+      runArStrategy(bars, { timeZone, chartSecs: tf.secs, avr: avrAll, formingLast, stacks, cfg });
+    const strat = arStratCfg ? runStrat(arStratCfg.arStrat) : null;
     const structMult = arStructCfg?.mult ?? 2;
     const fibMult = arFibCfg?.mult ?? 2;
     const structSwings = arStructCfg || arFibCfg ? swings(bars, structMult) : null;
@@ -1479,7 +1495,17 @@ export function TvChart({
       ladder: arStructCfg ? ladder : [],
       swings: arStructCfg && structSwings ? structSwings.pivots.map((pivot, k) => ({ pivot, label: labels[k] ?? null })) : [],
       env: arEnvCfg ? environment(bars, arEnvCfg.length || 24) : null,
-      dailyMissing: !!arAvrCfg && !daily.length,
+      dailyMissing: !!arAvrCfg && !daily.length && arMarket(timeZone).hasAsia,
+      market: arMarket(timeZone),
+      avrNA: !!arAvrCfg && !arMarket(timeZone).hasAsia,
+      stack: arStackCfg
+        ? {
+            zones: stackZones,
+            showUsed: !!arStackCfg.stackUsed,
+            covered: covered.filter(Boolean).length,
+            ticks: footprints.filter((f) => f?.source === 'ticks').length,
+          }
+        : null,
       strat,
     };
   }, [
@@ -1490,6 +1516,8 @@ export function TvChart({
     arStructCfg,
     arEnvCfg,
     arStratCfg,
+    arStackCfg,
+    footprints,
     tf.intraday,
     tf.secs,
     bars,
@@ -2452,6 +2480,8 @@ export function TvChart({
             swings: arState.swings,
             trades: arState.strat?.trades ?? [],
             skips: arState.strat?.skips ?? [],
+            stacks: arState.stack?.zones ?? [],
+            stackUsed: arState.stack?.showUsed ?? false,
             focusTrade: arFocus,
             decimals,
           }
@@ -5175,6 +5205,7 @@ export function TvChart({
         />
       ) : settingsId && indicators.find((i) => i.id === settingsId) ? (
         <IndicatorSettings
+          timeZone={timeZone}
           cfg={indicators.find((i) => i.id === settingsId)!}
           onChange={(next) =>
             setIndicators((list) => list.map((i) => (i.id === next.id ? next : i)))
