@@ -45,6 +45,14 @@ const positionIcon = (letter: string, size?: number) =>
   );
 
 export const Icons = {
+  star: ({ size, filled }: IconProps & { filled?: boolean }) =>
+    wrap(
+      <path
+        d="m10 2.5 2.3 4.7 5.2.8-3.8 3.7.9 5.2-4.6-2.5-4.6 2.5.9-5.2L2.5 8l5.2-.8Z"
+        fill={filled ? 'currentColor' : 'none'}
+      />,
+      size,
+    ),
   cross: ({ size }: IconProps) =>
     wrap(
       <>

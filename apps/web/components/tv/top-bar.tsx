@@ -108,6 +108,8 @@ interface Props {
   onNews: () => void;
   replay: boolean;
   onReplay: () => void;
+  /** Extra control rendered right after Replay (the Big Trades switch). */
+  extra?: React.ReactNode;
   footprint: FootprintUi;
   onFootprint: (patch: Partial<FootprintUi>) => void;
   onFootprintStep: (dir: 1 | -1) => void;
@@ -261,6 +263,7 @@ export function TopBar(p: Props) {
         <Icons.replay size={20} />
         <span className="hidden md:inline">Replay</span>
       </button>
+      {p.extra}
       {p.footprint.on ? (
         <Menu
           trigger={() => (

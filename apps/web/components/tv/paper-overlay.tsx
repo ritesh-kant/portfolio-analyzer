@@ -258,6 +258,8 @@ export function PaperOverlay(p: Props) {
   const [hover, setHover] = useState<{ y: number; price: number } | null>(null);
   const [ghost, setGhost] = useState<{ y: number; price: number; kind: 'sl' | 'tp' } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const hoverRef = useRef(hover);
+  hoverRef.current = hover;
 
   const pos = state.positions[symbol];
   const orders = state.orders.filter((o) => o.symbol === symbol);
@@ -310,11 +312,26 @@ export function PaperOverlay(p: Props) {
     const down = (e: MouseEvent) => {
       if (!(e.target as HTMLElement).closest('[data-tv-paper-menu]')) setMenu(null);
     };
+    // The "+" is pointer-events-none (so the chart keeps its crosshair); a click near it opens the menu.
+    const plusClick = (e: MouseEvent) => {
+      const h = hoverRef.current;
+      const chart = chartRef.current;
+      const el = host.current;
+      if (!h || !chart || !el || (e.target as HTMLElement).closest('[data-tv-ui]')) return;
+      const r = el.getBoundingClientRect();
+      const cx = r.right - chart.priceScale('right').width() - 4 - 10;
+      if (Math.hypot(e.clientX - cx, e.clientY - (r.top + h.y)) > 11) return;
+      e.stopPropagation();
+      e.preventDefault();
+      setMenu({ x: e.clientX - r.left, y: h.y, price: h.price });
+    };
+    wrap.addEventListener('click', plusClick, true);
     wrap.addEventListener('mousemove', move);
     wrap.addEventListener('mouseleave', leave);
     wrap.addEventListener('contextmenu', ctx);
     window.addEventListener('mousedown', down);
     return () => {
+      wrap.removeEventListener('click', plusClick, true);
       wrap.removeEventListener('mousemove', move);
       wrap.removeEventListener('mouseleave', leave);
       wrap.removeEventListener('contextmenu', ctx);
@@ -604,7 +621,7 @@ export function PaperOverlay(p: Props) {
             const r = host.current!.getBoundingClientRect();
             setMenu({ x: e.clientX - r.left, y: hover.y, price: hover.price });
           }}
-          className="pointer-events-auto absolute flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-[#d1d4dc] bg-[#131722] text-[15px] leading-none text-white hover:bg-[#2a2e39]"
+          className="pointer-events-none absolute flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-[#d1d4dc] bg-[#131722] text-[15px] leading-none text-white hover:bg-[#2a2e39]"
           style={{
             top: hover.y,
             right: (chartRef.current?.priceScale('right').width() ?? 56) + 4,

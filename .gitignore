@@ -29,3 +29,6 @@ research/backtests/.cache_nse_news/
 
 # local broker access tokens (daily, mode 600)
 apps/web/.broker-sessions.json
+
+# sampled tick tape written by apps/signal-engine/scripts/capture_ticks.py
+apps/signal-engine/data/ticks/
