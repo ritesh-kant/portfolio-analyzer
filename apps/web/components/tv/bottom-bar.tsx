@@ -1,11 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { HistoryChip } from './history-chip';
 
 export const RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'All'] as const;
 export type RangeId = (typeof RANGES)[number];
 
 interface Props {
+  /** Chart symbol: Yahoo futures (NQ=F …) get the saved-history chip. */
+  symbol: string;
   paperOpen: boolean;
   onPaper: () => void;
   onRange: (r: RangeId) => void;
@@ -76,6 +79,7 @@ export function BottomBar(p: Props) {
         </button>
       ))}
       <div className="flex-1" />
+      <HistoryChip symbol={p.symbol} />
       {p.live && p.updatedAt ? (
         <Freshness lastBarEnd={p.lastBarEnd} updatedAt={p.updatedAt} />
       ) : null}

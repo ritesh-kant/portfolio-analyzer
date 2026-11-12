@@ -1,4 +1,8 @@
 import { NextResponse } from 'next/server';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { cacheInterval, cacheSymbolDir, monthsBetween, parseCacheCsv, unionBars } from '../../../../lib/tv/bar-cache';
+import { FUTURES_CACHE, readManifest } from '../../../../lib/tv/futures-cache.server';
 import { backfillOpeningVolume, dropSpikeWicks, intervalSecs } from '../../../../lib/tv/clean-bars';
 import { hasExtendedBars, sessionFor } from '../../../../lib/tv/sessions';
 import { sessionDay, wallClock } from '../../../../lib/tv/timeframes';
@@ -93,6 +97,30 @@ async function fetchDailyBars(symbol: string, range: string, window?: Window): P
   } catch {
     return [];
   }
+}
+
+/*
+ * Local futures bar cache (`pnpm bt:nq` → research/backtests/.cache_yahoo_futures). Yahoo only keeps a sliding
+ * window of intraday futures history (1m: 4 weeks, 5m/15m: ~70 days); the cache keeps everything it ever saw.
+ * Local only: on Vercel the folder is absent and every request is plain Yahoo.
+ */
+interface CachedBars {
+  bars: Bar[];
+  meta?: Record<string, unknown>;
+}
+
+async function readFuturesCache(symbol: string, interval: string, from: number, to: number): Promise<CachedBars> {
+  const dir = cacheSymbolDir(symbol);
+  const iv = cacheInterval(interval);
+  if (!dir || !iv) return { bars: [] };
+  const base = path.join(FUTURES_CACHE, dir);
+  const files = await Promise.all(
+    monthsBetween(from, to).map((m) => fs.readFile(path.join(base, iv, `${m}.csv`), 'utf8').catch(() => '')),
+  );
+  const bars = files.flatMap((text) => (text ? parseCacheCsv(text) : [])).filter((b) => b.time >= from && b.time <= to);
+  if (!bars.length) return { bars };
+  const manifest = (await readManifest(dir)) as { meta?: Record<string, unknown> } | null;
+  return { bars, meta: manifest?.meta };
 }
 
 const UPSTOX = 'https://api.upstox.com';
@@ -200,18 +228,31 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: e instanceof Error ? e.message : 'fetch failed' }, { status: 502 });
     }
   }
+  // Yahoo futures (NQ=F …): bars saved by `pnpm bt:nq` + whatever Yahoo still serves, as one series.
+  const nowS = Math.floor(Date.now() / 1000);
+  const cached = /=F$/i.test(symbol)
+    ? await readFuturesCache(symbol, interval, window?.from ?? nowS - (RANGE_DAYS[range] ?? 7) * 86400, window?.to ?? nowS)
+    : { bars: [] as Bar[], meta: undefined };
   try {
-    const result = await fetchYahoo(symbol, interval, range, prepost, window);
+    let result: YahooResult;
+    try {
+      result = await fetchYahoo(symbol, interval, range, prepost, window);
+    } catch (e) {
+      // Older than Yahoo's intraday limit (it answers 422): serve the cache alone when it has the window.
+      if (!cached.bars.length) throw e;
+      result = { meta: cached.meta ?? { symbol }, timestamp: [], indicators: { quote: [{}] } };
+    }
     const quote = result.indicators.quote[0] ?? {};
-    const bars: Bar[] = [];
+    const live: Bar[] = [];
     (result.timestamp ?? []).forEach((time, i) => {
       const open = quote.open?.[i];
       const high = quote.high?.[i];
       const low = quote.low?.[i];
       const close = quote.close?.[i];
       if (open == null || high == null || low == null || close == null) return;
-      bars.push({ time, open, high, low, close, volume: quote.volume?.[i] ?? 0 });
+      live.push({ time, open, high, low, close, volume: quote.volume?.[i] ?? 0 });
     });
+    const bars = unionBars(cached.bars, live);
     const m = result.meta;
     const meta: BarsResponse['meta'] = {
       symbol: String(m.symbol ?? symbol),
@@ -221,7 +262,7 @@ export async function GET(req: Request) {
       timezone: String(m.exchangeTimezoneName ?? 'UTC'),
       instrumentType: String(m.instrumentType ?? ''),
       prevClose: typeof m.chartPreviousClose === 'number' ? m.chartPreviousClose : null,
-      price: typeof m.regularMarketPrice === 'number' ? m.regularMarketPrice : null,
+      price: typeof m.regularMarketPrice === 'number' ? m.regularMarketPrice : (bars[bars.length - 1]?.close ?? null),
     };
     // US stocks: stray quotes in the no-volume pre/post-market bars draw as wicks off the scale
     const def = hasExtendedBars({ ...meta, symbol }) ? sessionFor({ ...meta, symbol }) : null;

@@ -4553,6 +4553,7 @@ export function TvChart({
                 />
               ) : null}
               <BottomBar
+                symbol={symbol}
                 paperOpen={paperOpen}
                 onPaper={() => {
                   const next = !paperOpen;

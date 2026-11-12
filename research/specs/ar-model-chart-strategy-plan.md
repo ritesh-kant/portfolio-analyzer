@@ -1,9 +1,11 @@
 # Auction Resolution (AR) model in /chart — build plan
 
 Goal: the course's strategy (rules in `orderflow-course-ar-model.md`) as a strategy in the web chart, backtested on
-**NQ (Nasdaq-100) and GC (gold) futures**, with every indicator he uses, and a UI a non-quant can drive.
+**NQ (Nasdaq-100) futures** (gold deferred until there is COMEX data), with every indicator he uses, and a UI a
+non-quant can drive.
 
-Status: proposal, 2026-11-12. Nothing built.
+Status 2026-11-12: **phase 0 done** (NQ cache + recorder `pnpm bt:nq` + `/api/chart/bars` serving it, see
+`research/backtests/README-nq-futures-cache.md`). The recorder is not scheduled yet. Phases 1–5 not started.
 
 ## Design in one paragraph
 
@@ -34,6 +36,29 @@ same trade list.
 | "Darkpool decoder" | — | His private indicator; skipped |
 
 ## Data — the real constraint
+
+**Decision 2026-11-12: NQ only for now.** Gold is dropped. The IBKR account has no CME or COMEX market data, and NQ
+is a CME contract, so IBKR can't supply NQ history either. NQ comes from **Yahoo `NQ=F`**. Measured 2026-11-12
+(continuous front month, all 24 hours incl. the Asia session, real volume):
+
+| Interval | History Yahoo serves | Enough for |
+|---|---|---|
+| 1 m | last ~7 days per request (a `30d` range returns HTTP 422; 7-day chunks back to ~30 days probably work, untested) | estimated footprint/delta, going forward only |
+| 5 m / 15 m | ~70 days (2026-09-02 → 11-12) | **his execution timeframe**: ~50 sessions to test the mechanical rules now |
+| 60 m | ~2.4 years (2024-06-23 → 11-12) | structure, ATR(20), Asia-range levels, 1 h ranges over a long window |
+
+So the history has to be **recorded**: a daily job appends Yahoo's 1 m and 5 m NQ bars to a local cache, and the
+backtest window grows by ~21 sessions a month. Yahoo's futures quotes are delayed (~10 min), which is fine for
+backtests but means the live chart lags.
+
+Options to get long history sooner, all optional:
+- **QQQ as a proxy** via the IBKR stock data already in use: years of 1 m bars and native QQQ gamma, but no
+  overnight session, so it can only test the New York-session rules (fib zone, value area, structure), not the
+  Asia-range levels.
+- **Buy NQ history** later: an IBKR CME subscription or a one-off 1 m history file from a data vendor. Either
+  would load into the same cache.
+
+The original plan, kept for when CME data exists:
 
 1. **1-minute bars, multi-year, including overnight** (the Asia session needs it): IB Gateway, already used for US
    stocks (`research/backtests/ibkr_us_history.py`). Add continuous-futures contracts (NQ, GC; MNQ/MGC share
@@ -66,7 +91,7 @@ same trade list.
 
 | # | Deliverable | Depends on |
 |---|---|---|
-| 0 | IBKR futures downloader (NQ, GC, 24 h, 2–3 years) and `/api/chart/bars` serving that cache for `NQ1!`/`GC1!`; decide on the tick vendor | IBKR permissions |
+| 0 | **NQ only:** backfill Yahoo `NQ=F` (1 m ~7–30 days, 5 m/15 m ~70 days, 60 m ~2.4 years) into a local cache, a daily recorder that appends new 1 m/5 m bars, and `/api/chart/bars` serving cache + live Yahoo as one series. (Later, with CME data: the IBKR downloader for NQ and GC.) | nothing |
 | 1 | The mechanical indicators: auto range-fib zone, premium/discount, market structure, environment, session boxes, AVR levels | 0 for history; works on Yahoo bars meanwhile |
 | 2 | Strategy engine + chart overlays + checklist card | 1 |
 | 3 | Strategy Tester (browser) + Node runner over the cache, trade list in bt17 column names | 2 |
