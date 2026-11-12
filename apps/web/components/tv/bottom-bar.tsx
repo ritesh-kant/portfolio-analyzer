@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { HistoryChip } from './history-chip';
+import { TicksChip } from './ticks-chip';
 
 export const RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'All'] as const;
 export type RangeId = (typeof RANGES)[number];
 
 interface Props {
-  /** Chart symbol: Yahoo futures (NQ=F …) get the saved-history chip. */
+  /** Chart symbol: Yahoo futures (NQ=F …) get the saved-history chip, NSE futures the tick-recorder chip. */
   symbol: string;
   paperOpen: boolean;
   onPaper: () => void;
@@ -80,6 +81,7 @@ export function BottomBar(p: Props) {
       ))}
       <div className="flex-1" />
       <HistoryChip symbol={p.symbol} />
+      <TicksChip symbol={p.symbol} />
       {p.live && p.updatedAt ? (
         <Freshness lastBarEnd={p.lastBarEnd} updatedAt={p.updatedAt} />
       ) : null}

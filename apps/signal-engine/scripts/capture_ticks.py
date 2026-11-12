@@ -3,6 +3,10 @@
     cd apps/signal-engine
     .venv/bin/python scripts/capture_ticks.py --symbols RELIANCE,INFY --until 15:30
     .venv/bin/python scripts/capture_ticks.py --keys 'MCX_FO|573422'
+    .venv/bin/python scripts/capture_ticks.py --futures NIFTY,BANKNIFTY --until 15:30
+
+NSE futures feed the chart's footprint from these ticks (lib/tv/tick-footprint.ts): `v` (day volume) is exact on
+every line, so the volume between two lines is known exactly even though most individual trades are not seen.
 
 ⚠ The V3 feed is SNAPSHOT-based (~1 message/s per instrument): `ltq` is the last
 trade only, so trades between snapshots are lost (measured 50-70% of lots seen on
@@ -56,6 +60,29 @@ def resolve(symbols: list[str]) -> list[str]:
     return [by[s] for s in symbols]
 
 
+def resolve_futures(underlyings: list[str]) -> list[str]:
+    """Front-month (nearest unexpired) NSE future for each underlying, e.g. NIFTY → NSE_FO|61471."""
+    with urllib.request.urlopen(NSE_MASTER, timeout=30) as r:
+        rows = json.loads(gzip.decompress(r.read()))
+    now_ms = time.time() * 1000
+    front: dict[str, tuple[int, str]] = {}
+    for x in rows:
+        if x.get("segment") != "NSE_FO" or x.get("instrument_type") != "FUT":
+            continue
+        u, exp, key = x.get("underlying_symbol"), x.get("expiry") or 0, x.get("instrument_key")
+        if not u or not key or exp < now_ms:
+            continue
+        if u not in front or exp < front[u][0]:
+            front[u] = (exp, key)
+    missing = [u for u in underlyings if u not in front]
+    if missing:
+        raise SystemExit(f"no unexpired NSE future for: {missing}")
+    for u in underlyings:
+        exp = datetime.fromtimestamp(front[u][0] / 1000, IST).strftime("%d %b %Y")
+        print(f"{u}: {front[u][1]} (expires {exp})", flush=True)
+    return [front[u][1] for u in underlyings]
+
+
 def parse_record(key: str, ff: dict, recv_ms: int) -> dict | None:
     """A tick record from one `marketFF` feed, or None when it has no price."""
     ltpc = ff.get("ltpc") or {}
@@ -81,13 +108,16 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbols", default="", help="comma-separated NSE equity symbols")
     ap.add_argument("--keys", default="", help="comma-separated Upstox instrument keys")
+    ap.add_argument("--futures", default="", help="comma-separated underlyings (NIFTY,BANKNIFTY,RELIANCE): front-month future")
     ap.add_argument("--until", default="", help="stop at HH:MM IST (default: run until Ctrl-C)")
     a = ap.parse_args()
     keys = [k for k in a.keys.split(",") if k]
     if a.symbols:
         keys += resolve([s for s in a.symbols.split(",") if s])
+    if a.futures:
+        keys += resolve_futures([s.strip().upper() for s in a.futures.split(",") if s.strip()])
     if not keys:
-        raise SystemExit("give --symbols or --keys")
+        raise SystemExit("give --symbols, --futures or --keys")
     tok = token()
     if not tok:
         raise SystemExit("no UPSTOX_ANALYTICS_TOKEN / UPSTOX_ACCESS_TOKEN configured")

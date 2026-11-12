@@ -338,7 +338,7 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
         ctx.textAlign = 'center';
         ctx.font = `700 ${11 * vr}px ${FONT}`;
         ctx.fillStyle = deltaColor;
-        ctx.fillText(`Δ ${deltaText}`, mid, baseY);
+        ctx.fillText(`${fp.source === 'ticks' ? '•' : ''}Δ ${deltaText}`, mid, baseY);
         ctx.font = `${11 * vr}px ${FONT}`;
         ctx.fillStyle = '#b2b5be';
         ctx.fillText(fmtVol(fp.total), mid, baseY + 13 * vr);
@@ -372,7 +372,8 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
       ctx.fillStyle = 'rgba(19,23,34,0.94)';
       ctx.fill();
       ctx.lineWidth = Math.max(1, hr);
-      ctx.strokeStyle = '#2a2e39';
+      // Blue outline: built from recorded ticks, not estimated from 1-minute bars.
+      ctx.strokeStyle = fp.source === 'ticks' ? '#2962ff' : '#2a2e39';
       ctx.stroke();
       ctx.font = `${11 * vr}px ${FONT}`;
       ctx.fillStyle = '#d1d4dc';

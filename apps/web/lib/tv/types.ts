@@ -56,4 +56,6 @@ export interface FootprintCandle {
   total: number;
   /** Row height in price units the levels were bucketed to. */
   step: number;
+  /** 'ticks' = built from the recorded feed (lib/tv/tick-footprint.ts); absent = estimated from 1-minute bars. */
+  source?: 'ticks';
 }

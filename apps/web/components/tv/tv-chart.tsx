@@ -39,6 +39,7 @@ import {
 } from '../../lib/tv/drawings';
 import { dragPositionHandle, isPosition, positionPts } from '../../lib/tv/position';
 import { autoStep, buildFootprints, stepLadder } from '../../lib/tv/footprint';
+import { buildTickFootprints, mergeFootprints, type TickFootprint } from '../../lib/tv/tick-footprint';
 import {
   CATALOG,
   DEFAULT_INDICATORS,
@@ -224,6 +225,7 @@ import { groupByBar } from '../../lib/tv/news-markers';
 import type { NewsItem, NewsResponse } from '../../lib/tv/news-types';
 import { GEX_LINES, type GexResponse, fmtGex, gexLineColor, gexLineOn } from '../../lib/tv/gex';
 import { FootprintView, type FootprintData } from './footprint-series';
+import { useTickSteps } from './use-tick-steps';
 import { Icons } from './icons';
 import { IndicatorPicker, IndicatorSettings } from './indicator-dialog';
 import { LeftToolbar, type Tool, SVP_KEY, ZOOM_IN_KEY, toolForKey } from './left-toolbar';
@@ -852,10 +854,43 @@ export function TvChart({
       ),
     [fvgAll, fvgView],
   );
+  // NSE futures: candles the tick recorder covered get a footprint from recorded volume (exact per ~1 s) instead
+  // of the 1-minute estimate. See lib/tv/tick-footprint.ts.
+  const tickSteps = useTickSteps(symbol, fp.on, replayEnd == null);
+  const tickFootprints = useMemo(() => {
+    const { steps, segments } = tickSteps.series;
+    if (!fp.on || !steps.length) return [] as (TickFootprint | null)[];
+    const cut = replayEnd == null ? Infinity : replayEnd * 1000;
+    const series =
+      cut === Infinity
+        ? tickSteps.series
+        : {
+            steps: steps.filter((x) => x.t < cut),
+            segments: segments
+              .filter(([a]) => a < cut)
+              .map(([a, b]) => [a, Math.min(b, cut)] as [number, number]),
+          };
+    return buildTickFootprints(bars, series, tf.secs, effectiveStep);
+  }, [fp.on, tickSteps.series, bars, tf.secs, effectiveStep, replayEnd]);
   const footprints = useMemo(
-    () => (fp.on ? buildFootprints(bars, subBars, tf.secs, effectiveStep) : []),
-    [fp.on, bars, subBars, tf.secs, effectiveStep],
+    () =>
+      fp.on
+        ? mergeFootprints(buildFootprints(bars, subBars, tf.secs, effectiveStep), tickFootprints)
+        : [],
+    [fp.on, bars, subBars, tf.secs, effectiveStep, tickFootprints],
   );
+  const tickFpStats = useMemo(() => {
+    let n = 0;
+    let vol = 0;
+    let quoted = 0;
+    for (const f of tickFootprints) {
+      if (!f) continue;
+      n += 1;
+      vol += f.total;
+      quoted += f.quoteShare * f.total;
+    }
+    return { n, quoteShare: vol > 0 ? quoted / vol : 0 };
+  }, [tickFootprints]);
   // US stocks: Yahoo reports no volume before 09:30 or after 16:00 (bar for bar, apart from the closing cross
   // stamped 16:00), so CVD only counts regular hours there.
   const regularHours = useMemo(() => {
@@ -4338,13 +4373,25 @@ export function TvChart({
                 No data for {symbol} on {tf.label}.
               </div>
             ) : null}
-            {fp.on && bars.length && footprintCoverage < 1 && !fpNoteClosed ? (
+            {fp.on && bars.length && (footprintCoverage < 1 || tickFpStats.n > 0) && !fpNoteClosed ? (
               <div
                 className="absolute bottom-3 left-3 z-10 flex max-w-sm items-start gap-2 rounded bg-[#1e222d]/90 py-1.5 pl-3 pr-1.5 text-[11px] text-[#b2b5be]"
                 data-tv-ui
               >
                 <span>
-                  Footprint is estimated from 1-minute bars and only exists for the last ~
+                  {tickFpStats.n > 0 ? (
+                    <>
+                      <span className="text-[#5b8def]">
+                        {tickFpStats.n} candle{tickFpStats.n === 1 ? '' : 's'} from recorded ticks
+                      </span>{' '}
+                      (blue box): volume exact per ~1 s, buyer/seller from the bid/ask for{' '}
+                      {Math.round(tickFpStats.quoteShare * 100)}% and from price direction for the rest.
+                      The others are estimated from{' '}
+                    </>
+                  ) : (
+                    'Footprint is estimated from '
+                  )}
+                  1-minute bars, which only reach back ~
                   {subBars.length
                     ? Math.max(1, Math.round((Date.now() / 1000 - subBars[0]!.time) / 86400))
                     : 7}{' '}
