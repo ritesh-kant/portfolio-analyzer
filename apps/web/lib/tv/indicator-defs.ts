@@ -1,3 +1,4 @@
+import type { ArStrategyCfg } from './ar-strategy';
 import { AVP_DEFAULTS, VP_DEFAULTS, type VpSettings } from './drawings';
 import type { GexConvention, GexStyle } from './gex';
 import { DEFAULT_ROWS } from './volume-profile';
@@ -21,7 +22,8 @@ export type IndicatorType =
   | 'avr'
   | 'arfib'
   | 'arstruct'
-  | 'arenv';
+  | 'arenv'
+  | 'arstrat';
 
 export interface IndicatorCfg {
   id: string;
@@ -67,6 +69,8 @@ export interface IndicatorCfg {
   gexPanel?: boolean;
   /** Gamma levels: per-level show / colour overrides, by `GEX_LINES` key. */
   gexStyle?: GexStyle;
+  /** AR strategy: overrides of `AR_STRATEGY_DEFAULTS`. */
+  arStrat?: Partial<ArStrategyCfg>;
   /** Bollinger std-dev multiplier. */
   mult?: number;
   color: string;
@@ -219,10 +223,18 @@ export const CATALOG: CatalogEntry[] = [
     defaults: { type: 'arenv', length: 24 },
     group: 'AR Model',
   },
+  {
+    type: 'arstrat',
+    name: 'AR Strategy',
+    description: 'His 4-step checklist on every candle, with entries, stops, targets and skipped setups marked',
+    where: 'overlay',
+    defaults: { type: 'arstrat', length: 0 },
+    group: 'AR Model',
+  },
 ];
 
 /** The "AR Model" template: everything the course uses that can be drawn from candles alone. */
-export const AR_TEMPLATE: IndicatorType[] = ['arsess', 'avr', 'arfib', 'arstruct', 'arenv'];
+export const AR_TEMPLATE: IndicatorType[] = ['arsess', 'avr', 'arfib', 'arstruct', 'arenv', 'arstrat'];
 export const isArType = (t: IndicatorType) => AR_TEMPLATE.includes(t);
 
 export const catalogOf = (type: IndicatorType): CatalogEntry =>
@@ -307,6 +319,8 @@ export function indicatorLabel(i: IndicatorCfg): string {
       return `Structure ${i.mult ?? 2}×ATR`;
     case 'arenv':
       return `Environment ${i.length}`;
+    case 'arstrat':
+      return 'AR Strategy';
   }
 }
 

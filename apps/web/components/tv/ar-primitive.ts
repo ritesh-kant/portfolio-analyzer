@@ -9,6 +9,7 @@ import type {
   Time,
 } from 'lightweight-charts';
 import type { AvrDay, Pivot, RangeFib, SessionBox, StructureLabel } from '../../lib/tv/ar';
+import type { ArSkip, ArTrade } from '../../lib/tv/ar-strategy';
 import { logicalX } from './coords';
 
 /** What the AR overlays draw; each part is empty when its indicator is off. */
@@ -19,10 +20,28 @@ export interface ArDrawState {
   /** Index of the last candle (zone lines run to it, then on to the right edge). */
   lastIndex: number;
   swings: { pivot: Pivot; label: StructureLabel | null }[];
+  /** Strategy: trades (entry → exit with stop and target boxes) and setups it skipped. */
+  trades: ArTrade[];
+  skips: ArSkip[];
+  /** Trade to emphasise (hovered in the panel). */
+  focusTrade: number | null;
   decimals: number;
 }
 
-const EMPTY: ArDrawState = { sessions: [], avr: [], fib: null, lastIndex: 0, swings: [], decimals: 2 };
+const EMPTY: ArDrawState = {
+  sessions: [],
+  avr: [],
+  fib: null,
+  lastIndex: 0,
+  swings: [],
+  trades: [],
+  skips: [],
+  focusTrade: null,
+  decimals: 2,
+};
+
+const TRADE_WIN = 'rgba(8, 153, 129, 0.16)';
+const TRADE_RISK = 'rgba(242, 54, 69, 0.16)';
 
 const SESSION_STYLE: Record<SessionBox['key'], { fill: string; edge: string; text: string }> = {
   asia: { fill: 'rgba(126, 87, 194, 0.16)', edge: 'rgba(126, 87, 194, 0.55)', text: '#b39ddb' },
@@ -59,7 +78,10 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
     zOrder: () => 'bottom',
     renderer: (): IPrimitivePaneRenderer => ({
       draw: (target) =>
-        target.useMediaCoordinateSpace(({ context, mediaSize }) => this.paintBack(context, mediaSize.width)),
+        target.useMediaCoordinateSpace(({ context, mediaSize }) => {
+          this.paintBack(context, mediaSize.width);
+          this.paintTradesBack(context, mediaSize.width);
+        }),
     }),
   };
 
@@ -67,7 +89,10 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
     zOrder: () => 'normal',
     renderer: (): IPrimitivePaneRenderer => ({
       draw: (target) =>
-        target.useMediaCoordinateSpace(({ context, mediaSize }) => this.paintFront(context, mediaSize.width)),
+        target.useMediaCoordinateSpace(({ context, mediaSize }) => {
+          this.paintFront(context, mediaSize.width);
+          this.paintTradesFront(context, mediaSize.width);
+        }),
     }),
   };
 
@@ -170,6 +195,74 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
         if (zx) this.band(ctx, zx, f.zoneBottom, f.zoneTop, live ? ZONE_FILL : ZONE_DIM);
       }
     }
+  }
+
+  private paintTradesBack(ctx: CanvasRenderingContext2D, w: number) {
+    for (const t of this.state.trades) {
+      const x = this.span(t.entryIndex, t.exitIndex ?? this.state.lastIndex, w, t.exitIndex == null);
+      if (!x) continue;
+      const focus = this.state.focusTrade === t.id;
+      this.band(ctx, x, Math.min(t.entry, t.target), Math.max(t.entry, t.target), focus ? 'rgba(8, 153, 129, 0.3)' : TRADE_WIN);
+      this.band(ctx, x, Math.min(t.entry, t.stop), Math.max(t.entry, t.stop), focus ? 'rgba(242, 54, 69, 0.3)' : TRADE_RISK);
+    }
+  }
+
+  private paintTradesFront(ctx: CanvasRenderingContext2D, w: number) {
+    const fmtR = (r: number | null) => (r == null ? '' : `${r >= 0 ? '+' : ''}${r.toFixed(1)}R`);
+    ctx.font = LABEL_FONT;
+    for (const t of this.state.trades) {
+      const x = this.span(t.entryIndex, t.exitIndex ?? this.state.lastIndex, w, t.exitIndex == null);
+      if (x) {
+        this.hline(ctx, x, t.entry, 'rgba(209, 212, 220, 0.8)');
+        this.hline(ctx, x, t.stop, 'rgba(242, 54, 69, 0.8)');
+        this.hline(ctx, x, t.target, 'rgba(8, 153, 129, 0.8)');
+      }
+      // entry: a triangle under (long) / over (short) the entry price
+      const ex = this.x(t.entryIndex);
+      const ey = this.y(t.entry);
+      const long = t.dir === 'long';
+      if (ex != null && ey != null && ex > -10 && ex < w + 10) {
+        ctx.fillStyle = long ? '#26a69a' : '#ef5350';
+        ctx.beginPath();
+        const s = 6;
+        const tip = long ? ey + 3 : ey - 3;
+        const base = long ? tip + s : tip - s;
+        ctx.moveTo(ex, tip);
+        ctx.lineTo(ex - s, base);
+        ctx.lineTo(ex + s, base);
+        ctx.closePath();
+        ctx.fill();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = long ? 'top' : 'bottom';
+        ctx.fillText(`AR ${t.dir}`, ex, long ? base + 2 : base - 2);
+      }
+      // exit: a dot coloured by the result, with R
+      if (t.exitIndex != null && t.exit != null) {
+        const xx = this.x(t.exitIndex);
+        const xy = this.y(t.exit);
+        if (xx != null && xy != null && xx > -10 && xx < w + 40) {
+          const won = (t.points ?? 0) > 0;
+          ctx.fillStyle = won ? '#26a69a' : '#ef5350';
+          ctx.beginPath();
+          ctx.arc(xx, xy, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`${t.outcome} ${fmtR(t.r)}`, xx + 6, xy);
+        }
+      }
+    }
+    // skipped setups: a small grey ✕ (hover the candle to read why in the panel)
+    ctx.fillStyle = 'rgba(149, 152, 161, 0.85)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const k of this.state.skips) {
+      const kx = this.x(k.index);
+      const ky = this.y(k.price);
+      if (kx == null || ky == null || kx < -10 || kx > w + 10) continue;
+      ctx.fillText('✕', kx, k.dir === 'long' ? ky + 12 : ky - 12);
+    }
+    ctx.textAlign = 'start';
   }
 
   private paintFront(ctx: CanvasRenderingContext2D, w: number) {

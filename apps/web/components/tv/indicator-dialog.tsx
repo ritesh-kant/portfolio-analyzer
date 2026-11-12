@@ -14,6 +14,7 @@ import {
   VOL_MA_DEFAULT,
   VOL_UP_DEFAULT,
 } from '../../lib/tv/indicator-defs';
+import { AR_STRATEGY_DEFAULTS, type ArStrategyCfg } from '../../lib/tv/ar-strategy';
 import { CVD_ANCHORS, type CvdAnchor } from '../../lib/tv/cvd';
 import { GEX_LINES, type GexConvention, gexLineColor, gexLineOn } from '../../lib/tv/gex';
 import { Icons } from './icons';
@@ -467,9 +468,88 @@ function ArFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg: Indica
           />
         </>
       );
+    case 'arstrat':
+      return <ArStrategyFields cfg={cfg} onChange={onChange} />;
     default:
       return null;
   }
+}
+
+const toHhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const fromHhmm = (s: string) => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s);
+  return m ? Math.min(1439, Number(m[1]) * 60 + Number(m[2])) : null;
+};
+
+/** The AR strategy's rules, editable, in plain words. */
+function ArStrategyFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg: IndicatorCfg) => void }) {
+  const v: ArStrategyCfg = { ...AR_STRATEGY_DEFAULTS, ...cfg.arStrat };
+  const set = (patch: Partial<ArStrategyCfg>) => onChange({ ...cfg, arStrat: { ...cfg.arStrat, ...patch } });
+  const time = (label: string, value: number, key: 'windowStart' | 'windowEnd' | 'flatAt') => (
+    <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+      {label}
+      <input
+        type="time"
+        value={toHhmm(value)}
+        onChange={(e) => {
+          const m = fromHhmm(e.target.value);
+          if (m != null) set({ [key]: m });
+        }}
+        className="w-24 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+      />
+    </label>
+  );
+  return (
+    <>
+      <div className="mb-2 text-[12px] leading-snug text-[#787b86]">
+        Each candle is checked against his four steps (environment, location, path, confirmation). Confirmation is
+        estimated from candles. Times are New York time. Results are in points before costs.
+      </div>
+      <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+        Entry
+        <select
+          value={v.entry}
+          onChange={(e) => set({ entry: e.target.value as ArStrategyCfg['entry'] })}
+          className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+        >
+          <option value="pullback">Pull-back to mid-candle (his)</option>
+          <option value="close">At the confirmation close</option>
+        </select>
+      </label>
+      {v.entry === 'pullback' ? (
+        <NumberField label="Order waits (candles)" value={v.entryWait} min={1} onChange={(n) => set({ entryWait: Math.min(20, n) })} />
+      ) : null}
+      {time('Trade window from', v.windowStart, 'windowStart')}
+      {time('Trade window to', v.windowEnd, 'windowEnd')}
+      {time('Flat by', v.flatAt, 'flatAt')}
+      <NumberField label="Min reward ÷ risk" value={v.minRR} min={0} onChange={(n) => set({ minRR: Math.min(10, n) })} />
+      <NumberField label="Swing size (× ATR 14)" value={v.swingMult} min={0.5} onChange={(n) => set({ swingMult: Math.min(10, n) })} />
+      <NumberField
+        label="Confirm within (candles of the touch)"
+        value={v.confirmWithin}
+        min={1}
+        onChange={(n) => set({ confirmWithin: Math.min(50, n) })}
+      />
+      <NumberField label="Stop buffer (× ATR 14)" value={v.stopBuffer} min={0} onChange={(n) => set({ stopBuffer: Math.min(2, n) })} />
+      <Check
+        label="Take setups where a step only warns"
+        checked={v.allowWarnings}
+        onChange={(on) => set({ allowWarnings: on })}
+      />
+      <Check
+        label="Zone must sit outside the value area"
+        checked={v.requireOutsideValue}
+        onChange={(on) => set({ requireOutsideValue: on })}
+      />
+      <button
+        type="button"
+        onClick={() => onChange({ ...cfg, arStrat: undefined })}
+        className="mt-1 text-[12px] text-[#7ea4ff] hover:underline"
+      >
+        Reset to his defaults
+      </button>
+    </>
+  );
 }
 
 export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {

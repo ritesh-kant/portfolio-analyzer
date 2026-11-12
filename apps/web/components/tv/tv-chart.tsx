@@ -179,6 +179,7 @@ import {
   structureLabels,
   swings,
 } from '../../lib/tv/ar';
+import { runArStrategy } from '../../lib/tv/ar-strategy';
 import { GEX_STRIP_WIDTH, GexProfilePrimitive } from './gex-profile-primitive';
 import {
   extendedMask,
@@ -375,6 +376,7 @@ function computeIndicators(
       case 'arfib':
       case 'arstruct':
       case 'arenv':
+      case 'arstrat':
         // Drawn by SessionProfilePrimitive / DrawingsPrimitive / ArPrimitive / price lines, not as a series.
         lines = [];
         break;
@@ -1393,11 +1395,12 @@ export function TvChart({
   const arFibCfg = arOn('arfib');
   const arStructCfg = arOn('arstruct');
   const arEnvCfg = arOn('arenv');
-  const arAny = !!(arSessCfg || arAvrCfg || arFibCfg || arStructCfg || arEnvCfg);
+  const arStratCfg = arOn('arstrat');
+  const arAny = !!(arSessCfg || arAvrCfg || arFibCfg || arStructCfg || arEnvCfg || arStratCfg);
   // AVR needs daily candles for its 20-day ATR (the chart's own candles rarely reach back 20 days).
   const [arDaily, setArDaily] = useState<{ symbol: string; bars: Bar[] }>({ symbol: '', bars: [] });
   useEffect(() => {
-    if (!ready || !arAvrCfg || arDaily.symbol === symbol) return;
+    if (!ready || !(arAvrCfg || arStratCfg) || arDaily.symbol === symbol) return;
     const ctl = new AbortController();
     fetchBars(symbol, '1d', '2y', ctl.signal)
       .then((res) => setArDaily({ symbol, bars: res.bars }))
@@ -1405,14 +1408,23 @@ export function TvChart({
         if (!ctl.signal.aborted) setArDaily({ symbol, bars: [] });
       });
     return () => ctl.abort();
-  }, [ready, arAvrCfg, symbol, arDaily.symbol, fetchBars]);
+  }, [ready, arAvrCfg, arStratCfg, symbol, arDaily.symbol, fetchBars]);
   const arState = useMemo(() => {
     if (!arAny || !tf.intraday || bars.length < 2) return null;
-    const needSessions = !!(arSessCfg || arAvrCfg);
+    const needSessions = !!(arSessCfg || arAvrCfg || arStratCfg);
     const boxes = needSessions ? sessionBoxes(bars, timeZone) : [];
     const daily = arDaily.symbol === symbol ? arDaily.bars : [];
-    const avr =
-      arAvrCfg && daily.length ? avrDays(bars, boxes, dailyAtrByDay(daily, timeZone, arAvrCfg.length || 20)) : [];
+    const avrAll =
+      (arAvrCfg || arStratCfg) && daily.length
+        ? avrDays(bars, boxes, dailyAtrByDay(daily, timeZone, arAvrCfg?.length || 20))
+        : [];
+    const avr = arAvrCfg ? avrAll : [];
+    // The newest candle may still be forming (live, or replay's partial candle): it may not confirm a setup.
+    const lastBar = bars[bars.length - 1]!;
+    const formingLast = lastBar.time + tf.secs > (replayEnd ?? Date.now() / 1000);
+    const strat = arStratCfg
+      ? runArStrategy(bars, { timeZone, chartSecs: tf.secs, avr: avrAll, formingLast, cfg: arStratCfg.arStrat })
+      : null;
     const structMult = arStructCfg?.mult ?? 2;
     const fibMult = arFibCfg?.mult ?? 2;
     const structSwings = arStructCfg || arFibCfg ? swings(bars, structMult) : null;
@@ -1433,6 +1445,7 @@ export function TvChart({
       swings: arStructCfg && structSwings ? structSwings.pivots.map((pivot, k) => ({ pivot, label: labels[k] ?? null })) : [],
       env: arEnvCfg ? environment(bars, arEnvCfg.length || 24) : null,
       dailyMissing: !!arAvrCfg && !daily.length,
+      strat,
     };
   }, [
     arAny,
@@ -1441,12 +1454,14 @@ export function TvChart({
     arFibCfg,
     arStructCfg,
     arEnvCfg,
+    arStratCfg,
     tf.intraday,
     tf.secs,
     bars,
     timeZone,
     arDaily,
     symbol,
+    replayEnd,
   ]);
 
   // ── gamma levels (GEX) ────────────────────────────────────────────────
@@ -2389,7 +2404,8 @@ export function TvChart({
     );
   }, [sessionsOn, tf.intraday, tf.secs, bars, wall, sessionInfo, chartType, fp.on]);
 
-  // AR model layers → primitive.
+  // AR model layers → primitive. `arFocus`: the trade hovered in the AR panel.
+  const [arFocus, setArFocus] = useState<number | null>(null);
   useEffect(() => {
     arPrimRef.current?.setState(
       arState
@@ -2399,11 +2415,14 @@ export function TvChart({
             fib: arState.fib,
             lastIndex: bars.length - 1,
             swings: arState.swings,
+            trades: arState.strat?.trades ?? [],
+            skips: arState.strat?.skips ?? [],
+            focusTrade: arFocus,
             decimals,
           }
         : null,
     );
-  }, [arState, bars.length, decimals, chartType, fp.on]);
+  }, [arState, arFocus, bars.length, decimals, chartType, fp.on]);
 
   // News badges → primitive.
   useEffect(() => {
@@ -4693,8 +4712,25 @@ export function TvChart({
             {!compact && gexShown && gexCfg?.gexPanel !== false && gexRes ? (
               <GexPanel res={gexRes} price={bars[bars.length - 1]?.close} symbol={symbol} />
             ) : null}
-            {!compact && arState && (arStructCfg || arEnvCfg || arFibCfg || arAvrCfg) ? (
-              <ArPanel state={arState} price={bars[bars.length - 1]?.close} decimals={decimals} />
+            {!compact && arState && (arStructCfg || arEnvCfg || arFibCfg || arAvrCfg || arStratCfg) ? (
+              <ArPanel
+                state={arState}
+                price={bars[bars.length - 1]?.close}
+                decimals={decimals}
+                hoverIndex={hoverIdx != null && hoverIdx >= 0 && hoverIdx < bars.length ? hoverIdx : null}
+                times={wall as number[]}
+                onFocusTrade={setArFocus}
+                onGoTo={(index) => {
+                  const ts = chartRef.current?.timeScale();
+                  if (!ts) return;
+                  const r = ts.getVisibleLogicalRange();
+                  const half = r ? (r.to - r.from) / 2 : 60;
+                  ts.setVisibleLogicalRange({ from: index - half, to: index + half });
+                  // re-fit prices to the trade's candles, like the bottom bar's "auto"
+                  chartRef.current?.priceScale('right').applyOptions({ autoScale: true });
+                  setAutoScale(true);
+                }}
+              />
             ) : null}
             <div className={compact ? 'contents' : 'flex min-h-0 shrink-0 flex-col'}>
               <div className={compact ? 'contents' : 'flex min-h-0 flex-1'}>

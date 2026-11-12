@@ -11,7 +11,18 @@ Environment) with an "Add all" button and an AR read-out panel. Maths in `apps/w
 no-look-ahead check on swings), drawing in `components/tv/ar-primitive.ts`, panel in `components/tv/ar-panel.tsx`.
 Our own definitions where he gives none: session windows, swing size (2 × ATR 14), environment thresholds, and the
 AVR unit (fitted to two screen readings; at today's ATR of ~750 it runs at its 12 % floor, outside the calibrated
-range). Phases 2–5 not started.
+range). **Phase 2 built**: "AR Strategy" (sixth AR indicator, in "Add all"): `apps/web/lib/tv/ar-strategy.ts`
+walks the candles in order (tests prove any prefix gives the same checklist and finished trades, for both entry
+modes) and draws trades (reward/risk boxes, entry ▲▼, exit with R), skipped setups (✕) and a 4-step checklist for
+the candle under the cursor in the AR panel, plus a trade list that jumps the chart to a trade. Rules and their
+OUR-definition parts are in the file header and the settings dialog.
+
+First look on ~50 sessions of NQ 5 m (2026-09-03 → 11-12), exploratory, in points before costs: pull-back entry
+2 trades (2 stops, −92 pts); close entry 3 trades (1 target, 2 stops, +80 pts). The rules are very selective:
+230 confirmations fell outside his 09:30–11:00 New York window (NQ trades round the clock; most touches are
+overnight), 52 touches got no confirmation in time, 15–21 failed the 1.5 reward ÷ risk minimum. Far too few
+trades to judge anything. Phase 3 (Strategy Tester over the growing cache, costs, compare runs) is next.
+Phases 3–5 not started.
 
 ## Design in one paragraph
 

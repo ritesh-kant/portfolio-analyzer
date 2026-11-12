@@ -490,11 +490,13 @@ export interface EnvironmentRead {
 /**
  * Our definition of his three environments (he gives no numbers): over the last `window` candles,
  * expansion = efficient AND wide, compression = narrow AND inefficient, rotation = everything else.
+ * Only candles before `end` are read.
  */
-export function environment(bars: Bar[], window = 24): EnvironmentRead | null {
-  if (bars.length < window * 3) return null;
-  const n = bars.length;
-  const slice = bars.slice(n - window);
+export function environment(bars: Bar[], window = 24, end = bars.length): EnvironmentRead | null {
+  // `end`: read as of the candle before it (exclusive), so a replay never sees later candles
+  const n = Math.min(end, bars.length);
+  if (n < window * 3) return null;
+  const slice = bars.slice(n - window, n);
   let path = 0;
   let overlapSum = 0;
   for (let i = 1; i < slice.length; i++) {

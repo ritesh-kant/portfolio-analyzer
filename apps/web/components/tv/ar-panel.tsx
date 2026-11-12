@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { AvrDay, Bias, EnvironmentRead, RangeFib } from '../../lib/tv/ar';
+import { type ArStrategyResult, type CheckState, STEPS, arSummary } from '../../lib/tv/ar-strategy';
 
 /** What the panel reads from the chart's AR state (tv-chart.tsx `arState`). */
 export interface ArPanelState {
@@ -11,7 +12,20 @@ export interface ArPanelState {
   fib: RangeFib | null;
   avr: AvrDay[];
   dailyMissing: boolean;
+  /** The strategy's run, when "AR Strategy" is on. */
+  strat: ArStrategyResult | null;
 }
+
+const MARK: Record<CheckState, { glyph: string; color: string }> = {
+  pass: { glyph: '✓', color: '#089981' },
+  warn: { glyph: '△', color: '#ffb74d' },
+  fail: { glyph: '✕', color: '#f23645' },
+  wait: { glyph: '…', color: '#787b86' },
+};
+
+/** "HH:MM" of a wall-clock timestamp (the chart's exchange-time seconds). */
+const hhmm = (wall: number | undefined) => (wall == null ? '' : new Date(wall * 1000).toISOString().slice(11, 16));
+const mmdd = (wall: number | undefined) => (wall == null ? '' : new Date(wall * 1000).toISOString().slice(5, 10));
 
 const UP = '#089981';
 const DOWN = '#f23645';
@@ -74,10 +88,20 @@ export function ArPanel({
   state,
   price,
   decimals,
+  hoverIndex,
+  times,
+  onFocusTrade,
+  onGoTo,
 }: {
   state: ArPanelState;
   price: number | undefined;
   decimals: number;
+  /** Candle under the crosshair: the checklist shows that candle instead of the latest. */
+  hoverIndex: number | null;
+  /** Wall-clock time of each candle, for labels. */
+  times: number[];
+  onFocusTrade: (id: number | null) => void;
+  onGoTo: (index: number) => void;
 }) {
   const [open, setOpenState] = useState(readOpen);
   const setOpen = (v: boolean) => {
@@ -113,6 +137,13 @@ export function ArPanel({
 
   const section = 'border-t border-[#2a2e39] px-2.5 py-2';
   const head = 'mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#787b86]';
+  const strat = state.strat;
+  const readIndex = strat ? (hoverIndex != null && strat.reads[hoverIndex] ? hoverIndex : strat.reads.length - 1) : -1;
+  const read = strat?.reads[readIndex];
+  const skipHere = strat?.skips.filter((k) => k.index === readIndex) ?? [];
+  const tradeHere = read?.tradeId != null ? strat?.trades.find((t) => t.id === read.tradeId) : null;
+  const sum = strat ? arSummary(strat.trades) : null;
+  const fmtR = (r: number | null) => (r == null ? '—' : `${r >= 0 ? '+' : ''}${r.toFixed(2)}R`);
   return (
     <aside
       data-tv-ui
@@ -132,6 +163,102 @@ export function ArPanel({
           ▸
         </button>
       </div>
+
+      {strat && read ? (
+        <div className={section}>
+          <div className={head}>
+            Checklist · {mmdd(times[readIndex])} {hhmm(times[readIndex])}{' '}
+            <span className="normal-case tracking-normal">
+              {hoverIndex != null && readIndex === hoverIndex ? '(candle under the cursor)' : '(latest candle)'}
+            </span>
+          </div>
+          <ul className="space-y-1">
+            {STEPS.map((s, n) => {
+              const c = read.checks[s.key];
+              return (
+                <li key={s.key} className="flex gap-1.5 leading-snug">
+                  <span className="w-3 shrink-0 text-center font-semibold" style={{ color: MARK[c.state].color }}>
+                    {MARK[c.state].glyph}
+                  </span>
+                  <span>
+                    <span className="text-[#d1d4dc]">
+                      {n + 1} {s.label}
+                    </span>{' '}
+                    <span className="text-[#9598a1]">{c.text}</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          {skipHere.map((k, n) => (
+            <div key={n} className="mt-1 rounded bg-[#2a2e39] px-1.5 py-1 leading-snug text-[#b2b5be]">
+              ✕ Skipped {k.dir}: {k.reason}
+            </div>
+          ))}
+          {tradeHere ? (
+            <div className="mt-1 rounded bg-[#1e222d] px-1.5 py-1 leading-snug">
+              In a {tradeHere.dir} from {fmt(tradeHere.entry)} · stop {fmt(tradeHere.stop)} · target {fmt(tradeHere.target)}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {strat && sum ? (
+        <div className={section}>
+          <div className={head}>Trades on this chart · before costs</div>
+          {sum.trades ? (
+            <div className="mb-1.5 grid grid-cols-3 gap-1 text-center tabular-nums">
+              <div className="rounded bg-[#1e222d] py-1">
+                <div className="text-[13px] text-[#d1d4dc]">{sum.trades}</div>
+                <div className="text-[10px] text-[#787b86]">
+                  trades · {Math.round((100 * sum.wins) / sum.trades)}% won
+                </div>
+              </div>
+              <div className="rounded bg-[#1e222d] py-1">
+                <div className="text-[13px]" style={{ color: sum.points >= 0 ? UP : DOWN }}>
+                  {sum.points >= 0 ? '+' : ''}
+                  {fmt(sum.points)}
+                </div>
+                <div className="text-[10px] text-[#787b86]">points</div>
+              </div>
+              <div className="rounded bg-[#1e222d] py-1">
+                <div className="text-[13px] text-[#d1d4dc]">{fmtR(sum.medianR)}</div>
+                <div className="text-[10px] text-[#787b86]">median · avg {fmtR(sum.avgR)}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="mb-1 text-[#787b86]">No finished trades in the loaded candles yet.</div>
+          )}
+          <ul className="max-h-40 space-y-0.5 overflow-y-auto">
+            {[...strat.trades].reverse().slice(0, 30).map((t) => (
+              <li key={t.id}>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between rounded px-1 py-0.5 text-left tabular-nums hover:bg-[#2a2e39]"
+                  onMouseEnter={() => onFocusTrade(t.id)}
+                  onMouseLeave={() => onFocusTrade(null)}
+                  onClick={() => onGoTo(t.entryIndex)}
+                  title={t.warnings.length ? `Taken with warnings:\n${t.warnings.join('\n')}` : 'All four steps passed'}
+                >
+                  <span>
+                    <span style={{ color: t.dir === 'long' ? UP : DOWN }}>{t.dir === 'long' ? '▲' : '▼'}</span>{' '}
+                    {mmdd(times[t.entryIndex])} {hhmm(times[t.entryIndex])}
+                    {t.warnings.length ? <span className="text-[#ffb74d]"> △</span> : null}
+                  </span>
+                  <span>
+                    <span className="text-[#787b86]">{t.outcome} </span>
+                    <span style={{ color: t.r == null ? MUTED : t.r >= 0 ? UP : DOWN }}>{fmtR(t.r)}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-1 text-[10px] leading-snug text-[#5d606b]">
+            {strat.skips.length} setups skipped (✕ on the chart; hover one to read why). Confirmation is estimated
+            from candles, not real order flow. Exploratory only: proper tests and costs come in phase 3.
+          </div>
+        </div>
+      ) : null}
 
       {state.ladder.length ? (
         <div className={section}>
@@ -239,10 +366,11 @@ export function ArPanel({
         </div>
       ) : null}
 
-      <div className={`${section} text-[10px] leading-snug text-[#5d606b]`}>
-        Step 4, confirmation from order flow, and the entry come with the strategy (phase 2). Nothing here is a
-        signal on its own.
-      </div>
+      {!strat ? (
+        <div className={`${section} text-[10px] leading-snug text-[#5d606b]`}>
+          Add “AR Strategy” for the 4-step checklist, entries and exits. Nothing here is a signal on its own.
+        </div>
+      ) : null}
     </aside>
   );
 }
