@@ -15,7 +15,13 @@ export type IndicatorType =
   | 'svp'
   | 'avp'
   | 'cvd'
-  | 'gex';
+  | 'gex'
+  // Auction Resolution (AR) model — research/specs/orderflow-course-ar-model.md
+  | 'arsess'
+  | 'avr'
+  | 'arfib'
+  | 'arstruct'
+  | 'arenv';
 
 export interface IndicatorCfg {
   id: string;
@@ -77,6 +83,8 @@ export interface CatalogEntry {
   /** Where it draws: on the price pane, as a volume overlay, or in its own pane. */
   where: 'overlay' | 'volume' | 'pane';
   defaults: Omit<IndicatorCfg, 'id' | 'color'>;
+  /** Listed under this heading in the picker (absent = the general list). */
+  group?: 'AR Model';
 }
 
 export const CATALOG: CatalogEntry[] = [
@@ -171,7 +179,51 @@ export const CATALOG: CatalogEntry[] = [
     where: 'overlay',
     defaults: { type: 'gex', length: 45 },
   },
+  {
+    type: 'arsess',
+    name: 'Sessions: Asia · London · New York',
+    description: 'A box per session (New York time): Asia sets the range, London fakes, New York resolves',
+    where: 'overlay',
+    defaults: { type: 'arsess', length: 0 },
+    group: 'AR Model',
+  },
+  {
+    type: 'avr',
+    name: 'Asia Range Levels (AVR)',
+    description: 'Asia high/low, midpoint, quarters and the expected expansion levels from the 20-day ATR',
+    where: 'overlay',
+    defaults: { type: 'avr', length: 20 },
+    group: 'AR Model',
+  },
+  {
+    type: 'arfib',
+    name: 'Range Fib Zone',
+    description: 'Latest swing leg: 0.705–0.886 zone, value area, premium/discount, target and invalidation',
+    where: 'overlay',
+    defaults: { type: 'arfib', length: 30, mult: 2 },
+    group: 'AR Model',
+  },
+  {
+    type: 'arstruct',
+    name: 'Market Structure',
+    description: 'Swing highs and lows labelled HH / HL / LH / LL, and the trend on 4h · 1h · 15m · 5m',
+    where: 'overlay',
+    defaults: { type: 'arstruct', length: 14, mult: 2 },
+    group: 'AR Model',
+  },
+  {
+    type: 'arenv',
+    name: 'Market Environment',
+    description: 'Trending (expansion), ranging (rotation) or choppy (compression), and which setups fit',
+    where: 'overlay',
+    defaults: { type: 'arenv', length: 24 },
+    group: 'AR Model',
+  },
 ];
+
+/** The "AR Model" template: everything the course uses that can be drawn from candles alone. */
+export const AR_TEMPLATE: IndicatorType[] = ['arsess', 'avr', 'arfib', 'arstruct', 'arenv'];
+export const isArType = (t: IndicatorType) => AR_TEMPLATE.includes(t);
 
 export const catalogOf = (type: IndicatorType): CatalogEntry =>
   CATALOG.find((c) => c.type === type)!;
@@ -245,6 +297,16 @@ export function indicatorLabel(i: IndicatorCfg): string {
       return 'CVD';
     case 'gex':
       return `GEX ${i.length}d`;
+    case 'arsess':
+      return 'Sessions';
+    case 'avr':
+      return `AVR ${i.length}`;
+    case 'arfib':
+      return `Range Fib ${i.mult ?? 2}×ATR`;
+    case 'arstruct':
+      return `Structure ${i.mult ?? 2}×ATR`;
+    case 'arenv':
+      return `Environment ${i.length}`;
   }
 }
 

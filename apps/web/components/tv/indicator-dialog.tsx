@@ -2,8 +2,11 @@
 
 import { useState } from 'react';
 import {
+  AR_TEMPLATE,
   CATALOG,
+  type CatalogEntry,
   type IndicatorCfg,
+  isArType,
   PALETTE,
   catalogOf,
   indicatorLabel,
@@ -28,15 +31,42 @@ interface PickerProps {
   active: IndicatorCfg[];
   panels?: PanelEntry[];
   onAdd: (type: IndicatorCfg['type']) => void;
+  /** Add every AR-model indicator not on the chart yet (one click). */
+  onAddTemplate?: () => void;
   onRemove: (id: string) => void;
   onClose: () => void;
 }
 
-export function IndicatorPicker({ active, panels = [], onAdd, onRemove, onClose }: PickerProps) {
+export function IndicatorPicker({ active, panels = [], onAdd, onAddTemplate, onRemove, onClose }: PickerProps) {
   const [q, setQ] = useState('');
-  const list = CATALOG.filter((c) =>
-    `${c.name} ${c.description} ${c.type}`.toLowerCase().includes(q.toLowerCase()),
-  );
+  const matches = (c: CatalogEntry) =>
+    `${c.name} ${c.description} ${c.type} ${c.group ?? ''}`.toLowerCase().includes(q.toLowerCase());
+  const list = CATALOG.filter((c) => !c.group && matches(c));
+  const arList = CATALOG.filter((c) => c.group === 'AR Model' && matches(c));
+  const arMissing = AR_TEMPLATE.filter((t) => !active.some((a) => a.type === t)).length;
+  const row = (c: CatalogEntry) => {
+    const count = active.filter((a) => a.type === c.type).length;
+    return (
+      <div key={c.type} className="flex items-center gap-3 px-5 py-2 hover:bg-[#2a2e39]">
+        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onAdd(c.type)}>
+          <div className="text-[14px] font-medium text-[#d1d4dc]">{c.name}</div>
+          <div className="text-[12px] text-[#787b86]">{c.description}</div>
+        </button>
+        {count > 0 ? (
+          <span className="rounded bg-[#2962ff]/20 px-2 py-0.5 text-[11px] text-[#7ea4ff]">
+            {count} on chart
+          </span>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => onAdd(c.type)}
+          className="rounded border border-[#363a45] px-2 py-1 text-[12px] text-[#d1d4dc] hover:border-[#2962ff]"
+        >
+          Add
+        </button>
+      </div>
+    );
+  };
   const panelList = panels.filter((p) =>
     `${p.name} ${p.description}`.toLowerCase().includes(q.toLowerCase()),
   );
@@ -72,33 +102,33 @@ export function IndicatorPicker({ active, panels = [], onAdd, onRemove, onClose 
           />
         </div>
         <div className="overflow-y-auto pb-2">
-          {list.map((c) => {
-            const count = active.filter((a) => a.type === c.type).length;
-            return (
-              <div key={c.type} className="flex items-center gap-3 px-5 py-2 hover:bg-[#2a2e39]">
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 text-left"
-                  onClick={() => onAdd(c.type)}
-                >
-                  <div className="text-[14px] font-medium text-[#d1d4dc]">{c.name}</div>
-                  <div className="text-[12px] text-[#787b86]">{c.description}</div>
-                </button>
-                {count > 0 ? (
-                  <span className="rounded bg-[#2962ff]/20 px-2 py-0.5 text-[11px] text-[#7ea4ff]">
-                    {count} on chart
-                  </span>
+          {arList.length ? (
+            <div className="border-b border-[#2a2e39] pb-1">
+              <div className="flex items-center justify-between gap-3 px-5 pb-1 pt-3">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-[#ffb74d]">
+                    AR Model · Auction Resolution
+                  </div>
+                  <div className="text-[12px] text-[#787b86]">
+                    The orderflow course’s trend, location and path tools. Intraday charts.
+                  </div>
+                </div>
+                {onAddTemplate ? (
+                  <button
+                    type="button"
+                    disabled={!arMissing}
+                    onClick={onAddTemplate}
+                    title="Add every AR Model indicator with his settings"
+                    className="shrink-0 rounded bg-[#2962ff] px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-[#1e4fd6] disabled:bg-[#2a2e39] disabled:text-[#787b86]"
+                  >
+                    {arMissing ? `Add all ${arMissing}` : 'All on chart'}
+                  </button>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => onAdd(c.type)}
-                  className="rounded border border-[#363a45] px-2 py-1 text-[12px] text-[#d1d4dc] hover:border-[#2962ff]"
-                >
-                  Add
-                </button>
               </div>
-            );
-          })}
+              {arList.map(row)}
+            </div>
+          ) : null}
+          {list.map(row)}
           {panelList.map((p) => (
             <div key={p.id} className="flex items-center gap-3 px-5 py-2 hover:bg-[#2a2e39]">
               <button type="button" className="min-w-0 flex-1 text-left" onClick={p.onToggle}>
@@ -375,6 +405,73 @@ function VolumeFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg: In
   );
 }
 
+/** Settings for the AR-model indicators, in plain words. */
+function ArFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (cfg: IndicatorCfg) => void }) {
+  const note = (text: string) => <div className="mb-2 text-[12px] leading-snug text-[#787b86]">{text}</div>;
+  switch (cfg.type) {
+    case 'arsess':
+      return note(
+        'Asia 20:00–00:00, London 02:00–05:00 and New York 09:30–11:00, New York time (his trading window is the first 90 minutes after the open).',
+      );
+    case 'avr':
+      return (
+        <>
+          {note('Levels hang off the Asia high and low, sized from the daily ATR known when Asia started.')}
+          <NumberField
+            label="Daily ATR length (days)"
+            value={cfg.length || 20}
+            min={5}
+            onChange={(length) => onChange({ ...cfg, length: Math.min(60, length) })}
+          />
+        </>
+      );
+    case 'arfib':
+      return (
+        <>
+          {note('A swing counts once price moves this many ATRs away from it. Bigger = fewer, larger legs.')}
+          <NumberField
+            label="Swing size (× ATR 14)"
+            value={cfg.mult ?? 2}
+            min={0.5}
+            onChange={(mult) => onChange({ ...cfg, mult: Math.min(10, mult) })}
+          />
+          <NumberField
+            label="Value-area rows"
+            value={cfg.length || 30}
+            min={8}
+            onChange={(length) => onChange({ ...cfg, length: Math.min(200, length) })}
+          />
+        </>
+      );
+    case 'arstruct':
+      return (
+        <>
+          {note('Swing size for HH/HL/LH/LL labels and for the trend on each timeframe.')}
+          <NumberField
+            label="Swing size (× ATR 14)"
+            value={cfg.mult ?? 2}
+            min={0.5}
+            onChange={(mult) => onChange({ ...cfg, mult: Math.min(10, mult) })}
+          />
+        </>
+      );
+    case 'arenv':
+      return (
+        <>
+          {note('Reads the last N candles. Our definition: he gives no numbers.')}
+          <NumberField
+            label="Window (candles)"
+            value={cfg.length || 24}
+            min={8}
+            onChange={(length) => onChange({ ...cfg, length: Math.min(500, length) })}
+          />
+        </>
+      );
+    default:
+      return null;
+  }
+}
+
 export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
   const entry = catalogOf(cfg.type);
   return (
@@ -399,7 +496,8 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
           </button>
         </div>
         {cfg.type === 'volume' ? <VolumeFields cfg={cfg} onChange={onChange} /> : null}
-        {cfg.type !== 'vwap' && cfg.type !== 'volume' && cfg.type !== 'cvd' ? (
+        {isArType(cfg.type) ? <ArFields cfg={cfg} onChange={onChange} /> : null}
+        {cfg.type !== 'vwap' && cfg.type !== 'volume' && cfg.type !== 'cvd' && !isArType(cfg.type) ? (
           <NumberField
             label={
               cfg.type === 'macd'
@@ -588,7 +686,11 @@ export function IndicatorSettings({ cfg, onChange, onClose }: SettingsProps) {
             onChange={(mult) => onChange({ ...cfg, mult })}
           />
         ) : null}
-        {cfg.type !== 'volume' && cfg.type !== 'svp' && cfg.type !== 'avp' && cfg.type !== 'cvd' ? (
+        {cfg.type !== 'volume' &&
+        cfg.type !== 'svp' &&
+        cfg.type !== 'avp' &&
+        cfg.type !== 'cvd' &&
+        !isArType(cfg.type) ? (
           <div className="flex items-center justify-between py-1.5 text-[13px] text-[#d1d4dc]">
             Colour
             <div className="flex gap-1.5">

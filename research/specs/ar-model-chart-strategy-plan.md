@@ -5,7 +5,13 @@ Goal: the course's strategy (rules in `orderflow-course-ar-model.md`) as a strat
 non-quant can drive.
 
 Status 2026-11-12: **phase 0 done** (NQ cache + recorder `pnpm bt:nq` + `/api/chart/bars` serving it, see
-`research/backtests/README-nq-futures-cache.md`). The recorder is not scheduled yet. Phases 1–5 not started.
+`research/backtests/README-nq-futures-cache.md`; save from the chart's History chip). **Phase 1 built**: five
+indicators under "AR Model" in the picker (Sessions, Asia Range Levels, Range Fib Zone, Market Structure, Market
+Environment) with an "Add all" button and an AR read-out panel. Maths in `apps/web/lib/tv/ar.ts` (tested, with a
+no-look-ahead check on swings), drawing in `components/tv/ar-primitive.ts`, panel in `components/tv/ar-panel.tsx`.
+Our own definitions where he gives none: session windows, swing size (2 × ATR 14), environment thresholds, and the
+AVR unit (fitted to two screen readings; at today's ATR of ~750 it runs at its 12 % floor, outside the calibrated
+range). Phases 2–5 not started.
 
 ## Design in one paragraph
 

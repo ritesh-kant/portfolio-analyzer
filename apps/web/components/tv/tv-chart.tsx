@@ -52,6 +52,7 @@ import {
   catalogOf,
   indicatorLabel,
   makeIndicator,
+  AR_TEMPLATE,
   svpOf,
 } from '../../lib/tv/indicator-defs';
 import {
@@ -165,6 +166,19 @@ import {
 import { SessionsPrimitive } from './sessions-primitive';
 import { SessionProfilePrimitive } from './session-profile-primitive';
 import { GexPanel } from './gex-panel';
+import { ArPrimitive } from './ar-primitive';
+import { ArPanel } from './ar-panel';
+import {
+  avrDays,
+  biasLadder,
+  dailyAtrByDay,
+  environment,
+  rangeFib,
+  sessionBoxes,
+  structureBias,
+  structureLabels,
+  swings,
+} from '../../lib/tv/ar';
 import { GEX_STRIP_WIDTH, GexProfilePrimitive } from './gex-profile-primitive';
 import {
   extendedMask,
@@ -356,7 +370,12 @@ function computeIndicators(
       case 'svp':
       case 'avp':
       case 'gex':
-        // Drawn by SessionProfilePrimitive / DrawingsPrimitive / price lines, not as a series.
+      case 'arsess':
+      case 'avr':
+      case 'arfib':
+      case 'arstruct':
+      case 'arenv':
+        // Drawn by SessionProfilePrimitive / DrawingsPrimitive / ArPrimitive / price lines, not as a series.
         lines = [];
         break;
       case 'cvd': {
@@ -462,6 +481,7 @@ export function TvChart({
   const sessionsPrimRef = useRef<SessionsPrimitive | null>(null);
   const svpPrimRef = useRef<SessionProfilePrimitive | null>(null);
   const gexPrimRef = useRef<GexProfilePrimitive | null>(null);
+  const arPrimRef = useRef<ArPrimitive | null>(null);
   const deltaPrimRef = useRef<DeltaPrimitive | null>(null);
   const fvgPrimRef = useRef<FvgPrimitive | null>(null);
   const btPrimRef = useRef<BigTradesPrimitive | null>(null);
@@ -1364,6 +1384,71 @@ export function TvChart({
     };
   }, [ready, replayEnd, symbol, tf.source, tf.intraday, wantPrepost, fetchBars, fineOn]);
 
+  // ── Auction Resolution (AR) model ─────────────────────────────────────
+  // Sessions, Asia-range levels, range fib zone, structure and environment (lib/tv/ar.ts). Intraday charts only.
+  // hidden one by one, or by the right rail's "hide all indicators" (unless revealed on its own)
+  const arOn = (t: IndicatorCfg['type']) => indicators.find((i) => i.type === t && !i.hidden && !hiddenAll(i.id));
+  const arSessCfg = arOn('arsess');
+  const arAvrCfg = arOn('avr');
+  const arFibCfg = arOn('arfib');
+  const arStructCfg = arOn('arstruct');
+  const arEnvCfg = arOn('arenv');
+  const arAny = !!(arSessCfg || arAvrCfg || arFibCfg || arStructCfg || arEnvCfg);
+  // AVR needs daily candles for its 20-day ATR (the chart's own candles rarely reach back 20 days).
+  const [arDaily, setArDaily] = useState<{ symbol: string; bars: Bar[] }>({ symbol: '', bars: [] });
+  useEffect(() => {
+    if (!ready || !arAvrCfg || arDaily.symbol === symbol) return;
+    const ctl = new AbortController();
+    fetchBars(symbol, '1d', '2y', ctl.signal)
+      .then((res) => setArDaily({ symbol, bars: res.bars }))
+      .catch(() => {
+        if (!ctl.signal.aborted) setArDaily({ symbol, bars: [] });
+      });
+    return () => ctl.abort();
+  }, [ready, arAvrCfg, symbol, arDaily.symbol, fetchBars]);
+  const arState = useMemo(() => {
+    if (!arAny || !tf.intraday || bars.length < 2) return null;
+    const needSessions = !!(arSessCfg || arAvrCfg);
+    const boxes = needSessions ? sessionBoxes(bars, timeZone) : [];
+    const daily = arDaily.symbol === symbol ? arDaily.bars : [];
+    const avr =
+      arAvrCfg && daily.length ? avrDays(bars, boxes, dailyAtrByDay(daily, timeZone, arAvrCfg.length || 20)) : [];
+    const structMult = arStructCfg?.mult ?? 2;
+    const fibMult = arFibCfg?.mult ?? 2;
+    const structSwings = arStructCfg || arFibCfg ? swings(bars, structMult) : null;
+    const fibSwings = arFibCfg ? (fibMult === structMult && structSwings ? structSwings : swings(bars, fibMult)) : null;
+    const ladder = arStructCfg || arFibCfg ? biasLadder(bars, tf.secs, timeZone, structMult) : [];
+    // His rule: draw the range in the direction of the higher-timeframe trend (1h, else the chart's own).
+    const prefer =
+      ladder.find((r) => r.label === '1h')?.bias ?? (structSwings ? structureBias(structSwings.pivots) : 'neutral');
+    const fib = fibSwings ? rangeFib(bars, fibSwings.pivots, prefer ?? 'neutral', arFibCfg?.length || 30) : null;
+    const labels = arStructCfg && structSwings ? structureLabels(structSwings.pivots) : [];
+    return {
+      boxes,
+      sessions: arSessCfg ? boxes : [],
+      avr,
+      fib,
+      prefer: prefer ?? 'neutral',
+      ladder: arStructCfg ? ladder : [],
+      swings: arStructCfg && structSwings ? structSwings.pivots.map((pivot, k) => ({ pivot, label: labels[k] ?? null })) : [],
+      env: arEnvCfg ? environment(bars, arEnvCfg.length || 24) : null,
+      dailyMissing: !!arAvrCfg && !daily.length,
+    };
+  }, [
+    arAny,
+    arSessCfg,
+    arAvrCfg,
+    arFibCfg,
+    arStructCfg,
+    arEnvCfg,
+    tf.intraday,
+    tf.secs,
+    bars,
+    timeZone,
+    arDaily,
+    symbol,
+  ]);
+
   // ── gamma levels (GEX) ────────────────────────────────────────────────
   // A snapshot of the live option chain, refreshed every 2 minutes. It describes current open interest
   // only, so it is not drawn while replaying history.
@@ -1619,6 +1704,7 @@ export function TvChart({
     sessionsPrimRef.current = new SessionsPrimitive();
     svpPrimRef.current = new SessionProfilePrimitive();
     gexPrimRef.current = new GexProfilePrimitive();
+    arPrimRef.current = new ArPrimitive();
 
     chart.subscribeCrosshairMove((param) => {
       setHoverIdx(param.logical == null ? null : Math.round(param.logical));
@@ -1694,6 +1780,7 @@ export function TvChart({
       if (sessionsPrimRef.current) series.attachPrimitive(sessionsPrimRef.current);
       if (svpPrimRef.current) series.attachPrimitive(svpPrimRef.current);
       if (gexPrimRef.current) series.attachPrimitive(gexPrimRef.current);
+      if (arPrimRef.current) series.attachPrimitive(arPrimRef.current);
       mainRef.current = { key, series };
     }
   }, [chartType, fp.on]);
@@ -2301,6 +2388,22 @@ export function TvChart({
       ),
     );
   }, [sessionsOn, tf.intraday, tf.secs, bars, wall, sessionInfo, chartType, fp.on]);
+
+  // AR model layers → primitive.
+  useEffect(() => {
+    arPrimRef.current?.setState(
+      arState
+        ? {
+            sessions: arState.sessions,
+            avr: arState.avr,
+            fib: arState.fib,
+            lastIndex: bars.length - 1,
+            swings: arState.swings,
+            decimals,
+          }
+        : null,
+    );
+  }, [arState, bars.length, decimals, chartType, fp.on]);
 
   // News badges → primitive.
   useEffect(() => {
@@ -4590,6 +4693,9 @@ export function TvChart({
             {!compact && gexShown && gexCfg?.gexPanel !== false && gexRes ? (
               <GexPanel res={gexRes} price={bars[bars.length - 1]?.close} symbol={symbol} />
             ) : null}
+            {!compact && arState && (arStructCfg || arEnvCfg || arFibCfg || arAvrCfg) ? (
+              <ArPanel state={arState} price={bars[bars.length - 1]?.close} decimals={decimals} />
+            ) : null}
             <div className={compact ? 'contents' : 'flex min-h-0 shrink-0 flex-col'}>
               <div className={compact ? 'contents' : 'flex min-h-0 flex-1'}>
                 {deltaOpen && !compact ? (
@@ -4913,6 +5019,14 @@ export function TvChart({
             if (type === 'volume' && indicators.some((i) => i.type === 'volume')) return;
             setIndicators((list) => [...list, makeIndicator(type, list)]);
           }}
+          onAddTemplate={() =>
+            setIndicators((list) =>
+              AR_TEMPLATE.reduce(
+                (acc, type) => (acc.some((i) => i.type === type) ? acc : [...acc, makeIndicator(type, acc)]),
+                list,
+              ),
+            )
+          }
           onRemove={(id) => setIndicators((list) => list.filter((i) => i.id !== id))}
           onClose={() => setShowIndicators(false)}
         />
