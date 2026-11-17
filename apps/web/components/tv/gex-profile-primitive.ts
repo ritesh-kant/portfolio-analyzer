@@ -113,20 +113,20 @@ export class GexProfilePrimitive implements ISeriesPrimitive<Time> {
     const k = this.zoneStrength;
     const pos = (a: number) => ZONE_POS(Math.min(1, a * k));
     const neg = (a: number) => ZONE_NEG(Math.min(1, a * k));
-    // Strongest next to the flip, fading away from it (MenthorQ / Tanuki look).
+    // Strongest next to the flip, fading to a floor that still reads clearly when the flip is off-screen.
     if (y > 0) {
       const g = ctx.createLinearGradient(0, y, 0, 0);
-      g.addColorStop(0, pos(0.22));
-      g.addColorStop(Math.min(1, 200 / y), pos(0.1));
-      g.addColorStop(1, pos(0.07));
+      g.addColorStop(0, pos(0.24));
+      g.addColorStop(Math.min(1, 200 / y), pos(0.15));
+      g.addColorStop(1, pos(0.12));
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, y);
     }
     if (y < h) {
       const g = ctx.createLinearGradient(0, y, 0, h);
-      g.addColorStop(0, neg(0.22));
-      g.addColorStop(Math.min(1, 200 / (h - y)), neg(0.1));
-      g.addColorStop(1, neg(0.07));
+      g.addColorStop(0, neg(0.24));
+      g.addColorStop(Math.min(1, 200 / (h - y)), neg(0.15));
+      g.addColorStop(1, neg(0.12));
       ctx.fillStyle = g;
       ctx.fillRect(0, y, w, h - y);
     }

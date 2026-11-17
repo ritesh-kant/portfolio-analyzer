@@ -192,6 +192,8 @@ async function futuresBars(symbol: string, interval: string, range: string, wind
     instrumentType: 'FUTURE',
     prevClose: null,
     price: last?.close ?? null,
+    lotSize: fut.lotSize || undefined,
+    tickSize: fut.tickSize || undefined,
   };
   return NextResponse.json({ interval, bars, meta } satisfies BarsResponse, { headers: { 'Cache-Control': 'no-store' } });
 }

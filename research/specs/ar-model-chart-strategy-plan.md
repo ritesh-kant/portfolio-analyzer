@@ -21,8 +21,51 @@ First look on ~50 sessions of NQ 5 m (2026-09-03 → 11-12), exploratory, in poi
 2 trades (2 stops, −92 pts); close entry 3 trades (1 target, 2 stops, +80 pts). The rules are very selective:
 230 confirmations fell outside his 09:30–11:00 New York window (NQ trades round the clock; most touches are
 overnight), 52 touches got no confirmation in time, 15–21 failed the 1.5 reward ÷ risk minimum. Far too few
-trades to judge anything. Phase 3 (Strategy Tester over the growing cache, costs, compare runs) is next.
-Phases 3–5 not started.
+trades to judge anything.
+
+**Phase 3 built**: a **Strategy Tester** bottom panel on the chart (Overview: net after costs, median beside mean,
+profit factor, drawdown, equity curve, how trades ended, why setups were skipped; Trades: click to jump; Compare: A =
+the chart vs B = any settings, with which trades each took; Costs: NQ/MNQ/ES/MES/GC/MGC, contracts, fees, slippage),
+and **`pnpm bt:ar`**, which runs the same engine over every saved candle and saves each run to
+`research/backtests/ar_runs/` with a ledger (`research/backtests/README-ar-backtest.md`). Costs/stats in
+`apps/web/lib/tv/strategy-tester.ts`, shared by both, so they print the same numbers. On the saved 5 m history
+(2026-09-03 → 11-12) at NQ × 1 and 0.725 pts a round trip: his defaults 2 trades, −$1,865; entry at the close 3
+trades, +$1,564 (median −$696): too few to read.
+
+**Phase 4 started (order-flow trigger, 2026-11-12)**: `apps/web/lib/tv/ar-orderflow.ts` codifies his step 4 on any
+footprint: **absorption** on the candle holding the extreme since the touch (≥ 1.5 × the median volume of the 12
+candles before it, POC in the third at the rejection end, close in the other half), then a **delta flip** on a later
+candle (delta ≥ 10 % of its volume on the trade's side, closing in the trade's direction beyond the absorption
+candle's close), and the **two-candle LVN entry** (limit at the confirmation candle's thinnest inner row). Thresholds
+are ours. In the strategy: `confirm: 'orderflow'`, `entry: 'lvn'` (settings dialog, Compare, `pnpm bt:ar --set
+confirm=orderflow --set entry=lvn`); each trade records `flow.source` = `ticks` (recorded NSE feed) or `estimated`
+(1-minute bars), and the chart marks the absorption candle. First look, NQ 5 m with the footprint estimated from
+1-minute bars (2026-10-14 → 11-12): his window gives **0 trades** (109 of 118 touches had no absorption + flip; the
+other 7 confirmations were outside 09:30–11:00); the binding rule is "POC at the rejection end", which an estimate
+that spreads each minute over the rows it traded rarely produces. Not loosened to manufacture trades. **Still open
+in phase 4:** real aggressor-side data for NQ (no source: Yahoo has no bid/ask, IBKR has no CME), NSE ticks only
+from 2026-11-12 and only while the recorder runs (schedule it), and big trades on futures (the Upstox feed
+aggregates ~73 % of volume per snapshot, so single large prints are not seen).
+
+**Phase 5 built (gamma regime, 2026-11-14)**: the history has to be recorded, so phase 5 is a recorder plus the
+strategy hook, ready for when weeks of snapshots exist.
+- **Recorder.** `pnpm bt:gex` (`research/backtests/gex_snapshot.mjs`) reads the same QQQ chain and maths as the
+  chart's Gamma Levels indicator. That code moved out of the route into `apps/web/lib/tv/gex-us.ts`. Each run
+  appends one line (flip, C1–C3, P1–P3, gamma wall, net GEX, QQQ→NQ scale) to
+  `research/backtests/gamma_snapshots/NQ_F.jsonl`, which is committed, not cached: it cannot be re-fetched.
+- **Strategy.** `lib/tv/gamma-history.ts` picks, at each candle, the newest snapshot read before that candle closed
+  (at most 4 days old). The regime is price vs the flip, or the net GEX sign when no flip is in range. Every trade
+  and every candle's read carries it: the AR panel shows a γ line, the Strategy Tester a Gamma column and a
+  by-regime split, and `bt:ar` prints the split and CSV columns. `gamma: 'targets'` is OUR codification of his
+  "positive gamma: take profit quickly": in positive gamma the target moves to the first gamma level before the
+  leg's end, and the reward ÷ risk check uses it. Tests cover no look-ahead (a snapshot read after the candle
+  closed is ignored) and prefix stability.
+- **Free history checked and rejected.** SqueezeMetrics publishes daily SPX GEX back to 2011, but it was negative on
+  only 18 days since mid-2024 and on none in the 5 m window. It is S&P, not Nasdaq, and has no levels, so it cannot
+  separate the regimes here.
+- **First snapshot 2026-11-14** (Friday's chain): flip 28,613, NQ 28,035, so negative gamma. **Open:** run
+  `pnpm bt:gex` every pre-market (not scheduled yet). A gamma test needs a few months of snapshots and a
+  pre-registered BT number.
 
 ## Design in one paragraph
 
@@ -50,7 +93,7 @@ same trade list.
 | Absorption, delta flip, two-candle LVN entry | No | Detectors; honest only with tick data |
 | Big trades | In progress (NSE only, uncommitted, another session) | Extend to futures once tick data exists |
 | DOM / liquidity heatmap | No | Needs live order-book data; out of scope for backtests |
-| "Darkpool decoder" | — | His private indicator; skipped |
+| "Darkpool decoder" | Fitted stand-in (built 2026-11-12) | His private indicator. Read off 5 uses in the video (course notes §2a′): a box at ≈ 0.62 / 0.75 / 0.81 of the leg, not a fixed ratio. Drawn by Range Fib Zone; `zone: 'decoder'` in the strategy. First look on NQ: worse than his zone |
 
 ## Data — the real constraint
 
@@ -113,7 +156,7 @@ The original plan, kept for when CME data exists:
 | 2 | Strategy engine + chart overlays + checklist card | 1 |
 | 3 | Strategy Tester (browser) + Node runner over the cache, trade list in bt17 column names | 2 |
 | 4 | Real order flow: tick import, absorption / delta-flip / two-candle entry, big trades on futures | tick data |
-| 5 | Gamma regime in the backtest | months of recorded snapshots |
+| 5 | Gamma regime in the backtest: **built 2026-11-14** (recorder `pnpm bt:gex`, regime on every trade, `gamma: 'targets'`); waiting on history | months of recorded snapshots |
 
 ## Honesty rules carried over from this repo
 

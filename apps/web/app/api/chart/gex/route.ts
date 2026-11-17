@@ -1,15 +1,7 @@
 import { NextResponse } from 'next/server';
-import {
-  computeLevels,
-  type GexConvention,
-  type GexResponse,
-  type OptionRow,
-  paritySpot,
-  usExpiryInstant,
-  usRows,
-} from '../../../../lib/tv/gex';
+import { computeLevels, type GexConvention, type GexResponse, type OptionRow } from '../../../../lib/tv/gex';
+import { noGex as none, usLevels } from '../../../../lib/tv/gex-us';
 import { futureBySymbol, instrumentKey } from '../../../../lib/broker/upstox-instruments';
-import { mapPool, optionChain } from '../../../../lib/screener/yahoo';
 
 /**
  * Gamma-exposure levels for a chart symbol, as a snapshot of *current* open interest: it says nothing
@@ -17,9 +9,8 @@ import { mapPool, optionChain } from '../../../../lib/screener/yahoo';
  * source.
  *  - NSE (indices, F&O stocks, futures): Upstox's option chain, with `UPSTOX_ANALYTICS_TOKEN` (read-only,
  *    server-side only). One call for the expiry list plus one per expiry.
- *  - US (stocks, ETFs, ^SPX/^NDX/^RUT): Yahoo's option chain, ~15 minutes delayed. Futures have no options
- *    on Yahoo, so ES/NQ/RTY/GC/SI use their index or ETF (`US_PROXY`) and the levels are scaled onto the
- *    future's price, the way MenthorQ "converts" SPX levels to ES.
+ *  - US (stocks, ETFs, ^SPX/^NDX/^RUT, and futures via an index/ETF proxy): Yahoo's option chain, ~15 minutes
+ *    delayed, computed in lib/tv/gex-us.ts (shared with the snapshot recorder `pnpm bt:gex`).
  */
 export const dynamic = 'force-dynamic';
 
@@ -67,91 +58,6 @@ async function resolve(symbol: string): Promise<Underlying | undefined> {
 const isNseSymbol = (symbol: string) =>
   symbol in YAHOO_INDEX || symbol.endsWith('.NS') || symbol.endsWith('.NFO') || symbol.endsWith('1!');
 
-// ── US (Yahoo) ───────────────────────────────────────────────────────────────
-
-/** Chart symbol → the Yahoo chain its levels come from, when it is not its own. */
-const US_PROXY: Record<string, string> = {
-  '^GSPC': '^SPX',
-  'ES=F': '^SPX',
-  'MES=F': '^SPX',
-  // NDX / RUT options barely have bid/ask quotes on Yahoo; QQQ and IWM are liquid and track them.
-  'NQ=F': 'QQQ',
-  'MNQ=F': 'QQQ',
-  'RTY=F': 'IWM',
-  'M2K=F': 'IWM',
-  'YM=F': 'DIA',
-  'MYM=F': 'DIA',
-  'GC=F': 'GLD',
-  'MGC=F': 'GLD',
-  'SI=F': 'SLV',
-};
-/** At most this many expiries per chain: SPX lists one every trading day, and each is a request. */
-const MAX_US_EXPIRIES = 20;
-
-/** Last price of a chart symbol (the chart endpoint needs no session). */
-async function yahooPrice(symbol: string): Promise<number | undefined> {
-  const res = await fetch(
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`,
-    { headers: { 'User-Agent': 'Mozilla/5.0' }, cache: 'no-store' },
-  );
-  if (!res.ok) return undefined;
-  const body = (await res.json()) as {
-    chart?: { result?: { meta?: { regularMarketPrice?: number } }[] };
-  };
-  return body.chart?.result?.[0]?.meta?.regularMarketPrice;
-}
-
-async function usLevels(symbol: string, days: number, convention: GexConvention): Promise<GexResponse> {
-  if (symbol.endsWith('=F') && !US_PROXY[symbol]) {
-    return none(`no options source for ${symbol}: Yahoo has no options on futures`);
-  }
-  const chainSymbol = US_PROXY[symbol] ?? symbol;
-  const first = await optionChain(chainSymbol);
-  if (!first || !first.expirationDates?.length) return none(`${chainSymbol} has no listed options`);
-  const quoteSpot = first.quote?.regularMarketPrice;
-  if (!quoteSpot) return none(`no price for ${chainSymbol}`);
-
-  const now = Date.now() / 1000;
-  // The quote can be yesterday's close while the options already trade off pre-market: take the
-  // price the nearest expiry's quotes imply (put–call parity), falling back to the quote.
-  const front = first.options[0];
-  const spot =
-    (front &&
-      paritySpot(front.calls, front.puts, usExpiryInstant(front.expirationDate), quoteSpot, now)) ||
-    quoteSpot;
-  const horizon = now + days * 86_400;
-  const dates = first.expirationDates
-    .filter((d) => usExpiryInstant(d) > now && usExpiryInstant(d) <= horizon)
-    .slice(0, MAX_US_EXPIRIES);
-  if (!dates.length) return none('no live expiries in the window');
-
-  const tally = { mid: 0, last: 0, yahoo: 0 };
-  const chunks = await mapPool(dates, 4, async (d) => {
-    const chain = first.options[0]?.expirationDate === d ? first : await optionChain(chainSymbol, d);
-    const leg = chain?.options[0];
-    return leg ? usRows(leg.calls, leg.puts, usExpiryInstant(d), spot, now, tally) : [];
-  });
-  const rows = chunks.flat();
-  if (!rows.length) return none('empty option chain');
-
-  const chartPrice = chainSymbol === symbol ? undefined : await yahooPrice(symbol);
-  return {
-    supported: true,
-    source: 'yahoo',
-    currency: 'USD',
-    symbol,
-    asOf: Math.floor(now),
-    spot,
-    ...(chainSymbol !== symbol ? { proxy: chainSymbol } : {}),
-    ...(chartPrice ? { futurePrice: chartPrice, scale: chartPrice / spot } : {}),
-    convention,
-    expiries: dates.map((d) => new Date(d * 1000).toISOString().slice(0, 10)),
-    ivSources: tally,
-    all: computeLevels(rows, spot, now, convention),
-    nearest: computeLevels(chunks[0] ?? [], spot, now, convention),
-  };
-}
-
 async function lastPrice(key: string, token: string): Promise<number | undefined> {
   const res = await fetch(`${UPSTOX}/v2/market-quote/ltp?instrument_key=${encodeURIComponent(key)}`, {
     headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
@@ -166,7 +72,6 @@ const CONVENTIONS: GexConvention[] = ['dealer_long_calls', 'dealer_short_all'];
 
 const cache = new Map<string, { at: number; body: GexResponse }>();
 
-const none = (reason: string): GexResponse => ({ supported: false, reason });
 
 interface ChainItem {
   strike_price: number;

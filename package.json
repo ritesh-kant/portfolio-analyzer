@@ -27,6 +27,8 @@
     "bt:check": "python3 research/backtests/check_dashboard_registry.py && apps/signal-engine/.venv/bin/python research/backtests/bt_dashboard.py --unlabelled",
     "bt:serve": "python3 -m http.server 8899 --directory research/backtests",
     "bt:nq": "python3 -I research/backtests/yahoo_futures_history.py",
+    "bt:ar": "node research/backtests/ar_backtest.mjs",
+    "bt:gex": "node research/backtests/gex_snapshot.mjs",
     "gex": "cd apps/signal-engine && .venv/bin/python scripts/nifty_gex.py",
     "bt:import":"apps/signal-engine/.venv/bin/python research/backtests/import_trades_to_mongo.py"
   },

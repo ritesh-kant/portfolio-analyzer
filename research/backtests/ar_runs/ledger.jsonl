@@ -1,0 +1,3 @@
+{"id":"20261112-113726_5m_p4_allday_check","created":"2026-11-12T11:37:26.313Z","symbol":"NQ=F","interval":"5m","a":{"confirm":"orderflow","entry":"lvn","windowStart":0,"windowEnd":1439,"absorbVol":1},"b":null,"trades":4,"net":-1747.9553512165585}
+{"id":"20261112-163638_5m_decoder_vs_fib_5m","created":"2026-11-12T16:36:38.604Z","symbol":"NQ=F","interval":"5m","a":{},"b":{"zone":"decoder"},"trades":2,"net":-1865.455123396663}
+{"id":"20261112-163644_5m_decoder_vs_fib_5m_allday","created":"2026-11-12T16:36:44.321Z","symbol":"NQ=F","interval":"5m","a":{"windowStart":0,"windowEnd":1439,"flatAt":1439},"b":{"windowStart":0,"windowEnd":1439,"flatAt":1439,"zone":"decoder"},"trades":58,"net":-7193.540677698853}

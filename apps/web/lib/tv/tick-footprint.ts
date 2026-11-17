@@ -3,7 +3,8 @@ import type { Bar, FootprintCandle, FootprintLevel } from './types';
 
 /**
  * Footprint (bid × ask volume by price) built from the recorded Upstox feed instead of estimated from 1-minute
- * bars. Used for NSE futures, which `apps/signal-engine/scripts/capture_ticks.py --futures …` records.
+ * bars. Used for NSE futures and NSE stocks that `apps/signal-engine/scripts/capture_ticks.py` recorded (the chart's
+ * "Ticks" chip starts it).
  *
  * What the feed gives (measured on NIFTY / RELIANCE futures, 2026-11-12): an update about every 0.8 s (NIFTY) to
  * 3 s (RELIANCE), each carrying the LAST trade (price, quantity), the best bid/ask and the day's cumulative

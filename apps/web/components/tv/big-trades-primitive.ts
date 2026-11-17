@@ -85,33 +85,82 @@ export class BigTradesPrimitive implements ISeriesPrimitive<Time> {
     let max = 0;
     for (const b of this.bubbles) max = Math.max(max, b.q);
     if (!(max > 0)) return;
-    // largest first, so the small ones sit on top of them
+    // largest first: they keep their spot, smaller ones are nudged sideways off them
     const drawn = [...this.bubbles].sort((a, b) => b.q - a.q).slice(0, MAX_DRAWN);
+    const placed: Placed[] = [];
     for (const b of drawn) {
       const sec = b.t / 1000;
       if (sec < first || sec >= last) continue;
       const i = barIndexAt(this.barTimes, sec);
-      const x = ts.logicalToCoordinate(i as Logical);
+      const x0 = ts.logicalToCoordinate(i as Logical);
       const y = this.series.priceToCoordinate(b.p);
-      if (x == null || y == null || x < -R_MAX || x > width + R_MAX) continue;
+      if (x0 == null || y == null || x0 < -R_MAX || x0 > width + R_MAX) continue;
       const r = R_MIN + (R_MAX - R_MIN) * Math.sqrt(b.q / max);
-      const rgb = b.side === 'buy' ? BUY : SELL;
+      placed.push({ x: nudge(placed, x0, y, r), x0, y, r, q: b.q, rgb: b.side === 'buy' ? BUY : SELL });
+    }
+    // paint smallest last so nothing large covers a small one's label
+    for (const p of placed) {
+      if (p.x !== p.x0) {
+        // tie a nudged bubble back to its candle
+        ctx.beginPath();
+        ctx.moveTo(p.x0, p.y);
+        ctx.lineTo(p.x, p.y);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = `rgba(${p.rgb}, 0.9)`;
+        ctx.stroke();
+      }
       ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(${rgb}, 0.55)`;
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      // opaque: footprint cell numbers under the bubble must not bleed through its label
+      ctx.fillStyle = '#131722';
       ctx.fill();
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = `rgba(${rgb}, 0.95)`;
+      ctx.fillStyle = `rgba(${p.rgb}, 0.8)`;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = `rgb(${p.rgb})`;
       ctx.stroke();
-      if (r >= 9) {
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `${Math.round(Math.min(12, r * 0.8))}px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif`;
+      if (p.r >= 9) {
+        ctx.font = `600 ${Math.round(Math.min(12, p.r * 0.8))}px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(fmtQty(b.q), x, y + 0.5);
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.strokeText(fmtQty(p.q), p.x, p.y + 0.5);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(fmtQty(p.q), p.x, p.y + 0.5);
       }
     }
   }
+}
+
+interface Placed {
+  x: number;
+  x0: number;
+  y: number;
+  r: number;
+  q: number;
+  rgb: string;
+}
+
+/**
+ * x for a new bubble that overlaps none already placed: its candle's x if free, else the nearest
+ * free spot to the right or left (a few tries; past that it stays put rather than wander off).
+ */
+export function nudge(placed: { x: number; y: number; r: number }[], x0: number, y: number, r: number): number {
+  const free = (x: number) => placed.every((p) => Math.hypot(p.x - x, p.y - y) >= p.r + r + 1);
+  if (free(x0)) return x0;
+  const hits = placed.filter((p) => Math.hypot(p.x - x0, p.y - y) < p.r + r + 1);
+  const cands: number[] = [];
+  for (const p of hits) {
+    const dy = p.y - y;
+    const need = p.r + r + 1;
+    const dx = Math.sqrt(Math.max(0, need * need - dy * dy)) + 0.5;
+    cands.push(p.x + dx, p.x - dx);
+  }
+  cands.sort((a, b) => Math.abs(a - x0) - Math.abs(b - x0) || b - a);
+  for (const x of cands.slice(0, 6)) if (free(x)) return x;
+  return x0;
 }
 
 function fmtQty(q: number): string {

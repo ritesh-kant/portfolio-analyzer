@@ -3,6 +3,7 @@ import {
   type AvrDay,
   type Bias,
   type EnvironmentRead,
+  DECODER_LEVELS,
   FIB_LEVELS,
   type Pivot,
   arMarket,
@@ -10,10 +11,12 @@ import {
   structureBias,
   swings,
 } from './ar.ts';
+import { type FlowSide, absorption, deltaFlip, lvnPrice } from './ar-orderflow.ts';
+import { type GammaRegime, type GammaSnap, firstLevelBefore, gammaRegime, snapAt } from './gamma-history.ts';
 import { atr } from './indicators.ts';
 import { type StackZone, zoneAt } from './stacked-imbalance.ts';
 import { aggregateBars, wallClock } from './timeframes.ts';
-import type { Bar } from './types';
+import type { Bar, FootprintCandle } from './types';
 import { buildProfile } from './volume-profile.ts';
 
 /**
@@ -27,17 +30,28 @@ import { buildProfile } from './volume-profile.ts';
  *                  compression from `environment()`. Compression fails; rotation or a flat trend only warns.
  *   2 Location     the latest swing leg in the trend's direction; price must reach its 0.705–0.886 zone. A close
  *                  past 0.886 cancels it, price beyond the leg's end before any retracement retires it. A zone
- *                  inside the leg's value area warns (fails when `requireOutsideValue`).
+ *                  inside the leg's value area warns (fails when `requireOutsideValue`). `zone: 'decoder'` uses the
+ *                  "dark pool decoder" stand-in instead (0.62–0.81, fitted to his screen; `DECODER_LEVELS`).
  *   3 Path         from the day's Asia-range levels: an AVR+ / Max band between entry and target warns (the move
  *                  tends to tire there), price already past Max in the trade's direction fails.
  *   4 Confirmation ESTIMATED from candles (no bid/ask data): after the touch, a candle that closes in the trade's
  *                  direction AND beyond the extreme candle's other end (aggression failed, pressure flipped), inside
  *                  his window (New York 09:30–11:00; NSE's own first 90 minutes, see `arMarket`). Entry: a pull-back to the middle of that candle within a few candles (his
  *                  "entry candle pulls back into the confirmation candle"), or its close.
+ *                  `confirm: 'orderflow'` (phase 4) uses the footprint instead: absorption on the candle holding the
+ *                  extreme, then a delta flip (lib/tv/ar-orderflow.ts), and `entry: 'lvn'` rests the order at the
+ *                  confirmation candle's low-volume node. Each trade says whether its footprint was recorded ticks
+ *                  or estimated from 1-minute bars (`flow.source`).
  *
  * Optional (off by default, his "stacked imbalances at that spot make it better"): the fill must sit in a stacked-
  * imbalance zone on the trade's side (lib/tv/stacked-imbalance.ts) that stood when the order was placed. Every trade
  * records whether it did (`stack`), so the two groups can be compared.
+ *
+ * Gamma (phase 5, lib/tv/gamma-history.ts): given recorded snapshots, every trade and every candle's read carries the
+ * regime as known at that candle's close (price vs the gamma flip of the newest snapshot read before it). With
+ * `gamma: 'targets'`, his "positive gamma: take profit quickly" becomes OUR rule: in positive gamma the target moves to
+ * the first gamma level (flip, call/put wall, gamma wall) between entry and the leg's end; negative gamma keeps the
+ * leg's end ("hold winners toward the targets"). The reward ÷ risk check uses the target the trade will have.
  *
  * Stop: beyond the extreme since the touch, plus a small buffer. Target: the leg's end. One trade per leg, one at a
  * time, flat by the end of the session. Results are in points, before costs.
@@ -57,9 +71,9 @@ export interface ArStrategyCfg {
   flatAt: number;
   /** Skip setups whose reward ÷ risk to the target is below this. */
   minRR: number;
-  /** How to enter after confirmation. */
-  entry: 'pullback' | 'close';
-  /** Pull-back entry: candles the order waits before it is cancelled. */
+  /** How to enter after confirmation: mid-candle pull-back, the close, or the confirmation candle's LVN. */
+  entry: 'pullback' | 'close' | 'lvn';
+  /** Pull-back / LVN entry: candles the order waits before it is cancelled. */
   entryWait: number;
   /** Candles after the first touch that a confirmation may still come in. */
   confirmWithin: number;
@@ -71,6 +85,22 @@ export interface ArStrategyCfg {
   allowWarnings: boolean;
   /** Only fill inside a same-side stacked-imbalance zone (needs footprint data on the confirmation candle). */
   requireStack: boolean;
+  /** Confirmation from candles (estimated) or from the footprint: absorption, then a delta flip. */
+  confirm: 'candles' | 'orderflow';
+  /** Order flow: the absorption candle trades at least this × the usual volume. */
+  absorbVol: number;
+  /** Order flow: the flip candle's delta is at least this share of its volume on the trade's side. */
+  flipShare: number;
+  /**
+   * Which zone is the location: his 0.705–0.886, or the "dark pool decoder" stand-in (0.62–0.81 of the leg, fitted
+   * to his screen, see `DECODER_LEVELS`). Either way a close past the far edge cancels it.
+   */
+  zone: 'fib' | 'decoder';
+  /**
+   * Gamma regime (needs recorded snapshots, `opts.gamma`): 'off' only labels trades with the regime; 'targets' takes
+   * profit at the first gamma level before the leg's end when gamma is positive.
+   */
+  gamma: 'off' | 'targets';
 }
 
 /** His defaults (US: New York clock). For a chart, use `arStrategyDefaults(timeZone)`. */
@@ -89,6 +119,11 @@ export const AR_STRATEGY_DEFAULTS: ArStrategyCfg = {
   requireOutsideValue: false,
   allowWarnings: true,
   requireStack: false,
+  confirm: 'candles',
+  absorbVol: 1.5,
+  flipShare: 0.1,
+  zone: 'fib',
+  gamma: 'off',
 };
 
 /** The defaults for a chart's market: the trade window and flat time follow `arMarket`. */
@@ -116,6 +151,25 @@ export interface ArRead {
   checks: Record<StepKey, Check>;
   /** The trade open at this candle, if any. */
   tradeId: number | null;
+  /** Gamma regime at this candle's close; null without a snapshot that covers it (absent when the run had none). */
+  gamma?: GammaRead | null;
+}
+
+export interface GammaRead {
+  regime: GammaRegime;
+  /** 'flip': price vs the gamma flip; 'net': no flip in range, the sign of the net GEX. */
+  basis: 'flip' | 'net';
+  /** The flip in chart prices, when there is one. */
+  flip: number | null;
+  /** When the snapshot behind it was read (unix seconds). */
+  asOf: number;
+}
+
+export interface TradeGamma extends GammaRead {
+  /** The leg's end: the target without the gamma rule. */
+  legTarget: number;
+  /** The gamma level the target moved to (`gamma: 'targets'`, positive gamma), else null. */
+  level: string | null;
 }
 
 export interface ArTrade {
@@ -141,6 +195,24 @@ export interface ArTrade {
    * no footprint to tell ('no data'). Null when the run got no stacked-imbalance data at all.
    */
   stack: StackFlag | null;
+  /** Where the order rested: mid-candle, the close, or the confirmation candle's LVN ('mid' when it had none). */
+  entryRule: 'mid' | 'close' | 'lvn';
+  /** Order-flow confirmation (`confirm: 'orderflow'`); null for the candle rule. */
+  flow: TradeFlow | null;
+  /** Gamma regime when it was confirmed; null when no snapshot covers it (or the run had none). */
+  gamma: TradeGamma | null;
+}
+
+export interface TradeFlow {
+  /** Recorded ticks on both the absorption and the flip candle, else estimated from 1-minute bars. */
+  source: 'ticks' | 'estimated';
+  absorbIndex: number;
+  /** The absorption candle's extreme: its low for a long, its high for a short. */
+  absorbPrice: number;
+  /** Absorption candle volume ÷ usual. */
+  volRatio: number;
+  /** Flip candle delta as a share of its volume, on the trade's side. */
+  flipShare: number;
 }
 
 export type StackFlag = 'zone' | 'none' | 'no data';
@@ -166,13 +238,17 @@ interface Leg {
   from: Pivot;
   to: Pivot;
   dir: 'up' | 'down';
-  zoneNear: number; // 0.705: the edge price reaches first
-  zoneFar: number; // 0.886: the cancel level
+  zoneNear: number; // 0.705 (decoder: 0.62): the edge price reaches first
+  zoneFar: number; // 0.886 (decoder: 0.81): the cancel level
+  /** Name of the far edge in the checklist: "0.886" or "the decoder's far edge". */
+  farName: string;
   target: number;
   insideValue: boolean | null;
   touchIndex: number | null;
   /** Candle with the extreme since the touch (the "absorption" candle). */
   extremeIndex: number | null;
+  /** Order flow: the last check lacked a footprint. */
+  flowNoData: boolean;
   dead: 'invalidated' | 'extended' | 'used' | 'expired' | null;
 }
 
@@ -182,11 +258,12 @@ const fmtTime = (t: number, tz: string) => {
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 };
 
-function makeLeg(bars: Bar[], from: Pivot, to: Pivot, rows: number): Leg {
+function makeLeg(bars: Bar[], from: Pivot, to: Pivot, rows: number, zone: ArStrategyCfg['zone']): Leg {
   const span = to.price - from.price;
   const at = (lvl: number) => to.price - lvl * span;
-  const zoneNear = at(FIB_LEVELS[2]); // 0.705
-  const zoneFar = at(FIB_LEVELS[4]); // 0.886
+  const decoder = zone === 'decoder';
+  const zoneNear = at(decoder ? DECODER_LEVELS.near : FIB_LEVELS[2]);
+  const zoneFar = at(decoder ? DECODER_LEVELS.far : FIB_LEVELS[4]);
   const dir = to.kind === 'H' ? 'up' : 'down';
   // value area of the leg's own candles (all before the leg ended: no look-ahead)
   const profile = buildProfile(bars, from.index, to.index, rows);
@@ -202,10 +279,12 @@ function makeLeg(bars: Bar[], from: Pivot, to: Pivot, rows: number): Leg {
     dir,
     zoneNear,
     zoneFar,
+    farName: decoder ? "the decoder's far edge" : '0.886',
     target: to.price,
     insideValue,
     touchIndex: null,
     extremeIndex: null,
+    flowNoData: false,
     dead: null,
   };
 }
@@ -258,6 +337,10 @@ export function runArStrategy(
     formingLast?: boolean;
     /** Stacked-imbalance zones and which candles had a footprint to find them in (index-aligned with `bars`). */
     stacks?: { zones: StackZone[]; covered: boolean[] };
+    /** Footprint per candle (index-aligned with `bars`, null where none): needed by `confirm: 'orderflow'` / `entry: 'lvn'`. */
+    footprints?: (FootprintCandle | null)[];
+    /** Recorded gamma snapshots for this symbol, oldest first (`parseSnapshots`); levels are scaled to the chart. */
+    gamma?: GammaSnap[];
     cfg?: Partial<ArStrategyCfg>;
   },
 ): ArStrategyResult {
@@ -279,7 +362,25 @@ export function runArStrategy(
   let known = 0; // pivots confirmed so far
   let active: Leg | null = null;
   let open: ArTrade | null = null;
-  let pending: { leg: Leg; dir: 'long' | 'short'; limit: number; stop: number; confirmIndex: number; until: number; warnings: string[] } | null = null;
+  let pending: {
+    leg: Leg;
+    dir: 'long' | 'short';
+    limit: number;
+    stop: number;
+    target: number;
+    confirmIndex: number;
+    until: number;
+    warnings: string[];
+    rule: ArTrade['entryRule'];
+    flow: TradeFlow | null;
+    gamma: TradeGamma | null;
+  } | null = null;
+  const fps = opts.footprints;
+  const snaps = opts.gamma;
+  /** The newest snapshot read by candle i's close, and the regime it gives at that close. */
+  const snapFor = (i: number) => (snaps ? snapAt(snaps, bars[i]!.time + chartSecs) : null);
+  const readOf = (snap: GammaSnap | null, price: number): GammaRead | null =>
+    snap ? { ...gammaRegime(snap, price), asOf: snap.asOf } : null;
   let nextId = 1;
 
   const lastDecidable = opts.formingLast ? bars.length - 2 : bars.length - 1;
@@ -354,7 +455,7 @@ export function runArStrategy(
           skips.push({ index: i, price: fill, dir: pending.dir, step: 'entry', reason: why });
           pending = null;
         } else {
-          open = openTrade(pending.leg, pending.dir, fill, pending.stop, pending.confirmIndex, i, pending.warnings, flag);
+          open = openTrade(pending.leg, pending.dir, fill, pending.stop, pending.target, pending.confirmIndex, i, pending.warnings, flag, pending.rule, pending.flow, pending.gamma);
           pending = null;
           // the fill candle can still stop out (conservatively, never reach the target on the same candle)
           const hitStop = long ? b.low <= open.stop : b.high >= open.stop;
@@ -378,7 +479,7 @@ export function runArStrategy(
         const key = `${pivots[k - 1]!.index}-${to.index}`;
         let leg = legs.get(key);
         if (!leg) {
-          leg = makeLeg(bars, pivots[k - 1]!, to, cfg.valueRows);
+          leg = makeLeg(bars, pivots[k - 1]!, to, cfg.valueRows, cfg.zone);
           // catch up on the candles between the leg's end and now (all in the past)
           for (let j = to.index + 1; j < i; j++) stepLeg(leg, bars, j);
           legs.set(key, leg);
@@ -404,52 +505,83 @@ export function runArStrategy(
       checks.confirmation = { state: 'pass', text: `confirmed; order waiting at ${pending.limit.toFixed(2)}` };
     } else if (leg && !leg.dead && leg.touchIndex != null && leg.extremeIndex != null) {
       const long = leg.dir === 'up';
+      const side: FlowSide = long ? 'long' : 'short';
       const ext = bars[leg.extremeIndex]!;
-      const flips = i > leg.extremeIndex && (long ? b.close > b.open && b.close > ext.high : b.close < b.open && b.close < ext.low);
+      let flips: boolean;
+      let waitText: string;
+      let flow: TradeFlow | null = null;
+      if (cfg.confirm === 'orderflow') {
+        const r = flowRead(i, leg, side);
+        flips = r.flow != null;
+        waitText = r.text;
+        flow = r.flow;
+      } else {
+        flips = i > leg.extremeIndex && (long ? b.close > b.open && b.close > ext.high : b.close < b.open && b.close < ext.low);
+        waitText = long
+          ? `in the zone; waiting for a green candle closing above ${ext.high.toFixed(2)}`
+          : `in the zone; waiting for a red candle closing below ${ext.low.toFixed(2)}`;
+      }
       const inWindow = minute >= cfg.windowStart && minute < cfg.windowEnd;
       if (i - leg.touchIndex > cfg.confirmWithin) {
         leg.dead = 'expired';
-        skips.push({ index: i, price: bars[i]!.close, dir: long ? 'long' : 'short', step: 'confirmation', reason: `no confirmation within ${cfg.confirmWithin} candles of the touch` });
+        const reason =
+          cfg.confirm !== 'orderflow'
+            ? `no confirmation within ${cfg.confirmWithin} candles of the touch`
+            : leg.flowNoData
+              ? 'no footprint data for the order-flow check'
+              : `no absorption + delta flip within ${cfg.confirmWithin} candles of the touch`;
+        skips.push({ index: i, price: bars[i]!.close, dir: long ? 'long' : 'short', step: 'confirmation', reason });
         checks.confirmation = { state: 'fail', text: 'no confirmation came in time' };
       } else if (!flips || i > lastDecidable) {
-        checks.confirmation = {
-          state: 'wait',
-          text: long
-            ? `in the zone; waiting for a green candle closing above ${ext.high.toFixed(2)}`
-            : `in the zone; waiting for a red candle closing below ${ext.low.toFixed(2)}`,
-        };
+        checks.confirmation = { state: 'wait', text: waitText };
       } else if (!inWindow) {
         checks.confirmation = { state: 'fail', text: `confirmed at ${fmtTime(b.time, tz)}, outside his ${windowText(cfg)} ${market.clock} window` };
         skips.push({ index: i, price: bars[i]!.close, dir: long ? 'long' : 'short', step: 'confirmation', reason: `confirmation outside ${windowText(cfg)} ${market.clock} time` });
         leg.dead = 'used';
       } else {
-        checks.confirmation = { state: 'pass', text: `pressure flipped at ${fmtTime(b.time, tz)} (estimated from candles)` };
+        checks.confirmation = {
+          state: 'pass',
+          text: flow ? waitText : `pressure flipped at ${fmtTime(b.time, tz)} (estimated from candles)`,
+        };
         const decision = decide(checks, cfg);
         const dir = long ? 'long' : 'short';
         const buffer = (a14[i] ?? Math.abs(ext.high - ext.low)) * cfg.stopBuffer;
         const stop = long ? ext.low - buffer : ext.high + buffer;
-        const entryPx = cfg.entry === 'close' ? b.close : (b.high + b.low) / 2;
-        const rr = Math.abs(leg.target - entryPx) / Math.max(1e-9, Math.abs(entryPx - stop));
+        const lvn = cfg.entry === 'lvn' ? lvnPrice(b, fps?.[i], side) : null;
+        const rule: ArTrade['entryRule'] = cfg.entry === 'close' ? 'close' : lvn != null ? 'lvn' : 'mid';
+        const entryPx = rule === 'close' ? b.close : (lvn ?? (b.high + b.low) / 2);
+        // gamma: the regime at this close; in positive gamma, 'targets' takes profit at the first level on the way
+        const snap = snapFor(i);
+        const g = readOf(snap, b.close);
+        let target = leg.target;
+        let gamma: TradeGamma | null = null;
+        if (snap && g) {
+          const lvl = cfg.gamma === 'targets' && g.regime === 'positive' ? firstLevelBefore(snap, dir, entryPx, leg.target) : null;
+          if (lvl) target = lvl.price;
+          gamma = { ...g, legTarget: leg.target, level: lvl?.name ?? null };
+        }
+        const rr = Math.abs(target - entryPx) / Math.max(1e-9, Math.abs(entryPx - stop));
         leg.dead = 'used';
         if (decision.fail) {
           skips.push({ index: i, price: bars[i]!.close, dir, step: decision.fail.step, reason: decision.fail.text });
         } else if (rr < cfg.minRR) {
-          skips.push({ index: i, price: bars[i]!.close, dir, step: 'entry', reason: `reward ÷ risk ${rr.toFixed(2)} below ${cfg.minRR}` });
+          const why = gamma?.level ? ` (target moved to ${gamma.level} ${target.toFixed(2)}: positive gamma)` : '';
+          skips.push({ index: i, price: bars[i]!.close, dir, step: 'entry', reason: `reward ÷ risk ${rr.toFixed(2)} below ${cfg.minRR}${why}` });
         } else if (cfg.entry === 'close') {
           // market order at this (complete) close: managed from the next candle
           const flag = stackAt(dir, b.close, i, i);
           const why = stackSkip(flag);
           if (why) skips.push({ index: i, price: b.close, dir, step: 'entry', reason: why });
-          else open = openTrade(leg, dir, b.close, stop, i, i, decision.warnings, flag);
+          else open = openTrade(leg, dir, b.close, stop, target, i, i, decision.warnings, flag, rule, flow, gamma);
         } else {
-          pending = { leg, dir, limit: entryPx, stop, confirmIndex: i, until: i + cfg.entryWait, warnings: decision.warnings };
+          pending = { leg, dir, limit: entryPx, stop, target, confirmIndex: i, until: i + cfg.entryWait, warnings: decision.warnings, rule, flow, gamma };
         }
       }
     } else if (leg?.dead === 'invalidated') {
       checks.confirmation = { state: 'fail', text: 'zone cancelled' };
     }
 
-    reads.push({ index: i, checks, tradeId: open?.id ?? null });
+    reads.push(snaps ? { index: i, checks, tradeId: open?.id ?? null, gamma: readOf(snapFor(i), b.close) } : { index: i, checks, tradeId: open?.id ?? null });
   }
   return { reads, trades, skips };
 
@@ -467,10 +599,14 @@ export function runArStrategy(
     dir: 'long' | 'short',
     entry: number,
     stop: number,
+    target: number,
     confirmIndex: number,
     entryIndex: number,
     warnings: string[],
     stack: StackFlag | null,
+    entryRule: ArTrade['entryRule'],
+    flow: TradeFlow | null,
+    gamma: TradeGamma | null,
   ): ArTrade {
     const t: ArTrade = {
       id: nextId++,
@@ -480,7 +616,7 @@ export function runArStrategy(
       entryIndex,
       entry,
       stop,
-      target: leg.target,
+      target,
       exitIndex: null,
       exit: null,
       outcome: 'open',
@@ -488,9 +624,49 @@ export function runArStrategy(
       r: null,
       warnings,
       stack,
+      entryRule,
+      flow,
+      gamma,
     };
     trades.push(t);
     return t;
+  }
+
+  /**
+   * Order-flow confirmation at candle i (lib/tv/ar-orderflow.ts): is the extreme candle since the touch absorption,
+   * and does candle i flip the delta? `flow` is set only when both hold; `text` is the checklist line either way.
+   */
+  function flowRead(i: number, leg: Leg, side: FlowSide): { flow: TradeFlow | null; text: string } {
+    const e = leg.extremeIndex!;
+    const end = side === 'long' ? 'low' : 'high';
+    const at = fmtTime(bars[e]!.time, tz);
+    const abs = absorption(bars, fps?.[e], e, side, cfg.absorbVol);
+    if (!abs) {
+      leg.flowNoData = true;
+      return { flow: null, text: `in the zone; no footprint for the ${end} candle (${at}) to check for absorption` };
+    }
+    leg.flowNoData = false;
+    if (!abs.ok) return { flow: null, text: `in the zone; the ${end} candle (${at}) is not absorption: ${abs.why.join(', ')}` };
+    const absText = `absorption at ${at} (${abs.volRatio.toFixed(1)}× volume, POC at the ${end})`;
+    if (i <= e) return { flow: null, text: `${absText}; waiting for the delta to flip` };
+    const flip = deltaFlip(bars, fps?.[i], i, e, side, cfg.flipShare);
+    if (!flip) {
+      leg.flowNoData = true;
+      return { flow: null, text: `${absText}; no footprint for this candle` };
+    }
+    if (!flip.ok) return { flow: null, text: `${absText}; waiting for the flip: ${flip.why}` };
+    const ticks = fps?.[e]?.source === 'ticks' && fps[i]?.source === 'ticks';
+    const d = fps![i]!.delta;
+    return {
+      flow: {
+        source: ticks ? 'ticks' : 'estimated',
+        absorbIndex: e,
+        absorbPrice: side === 'long' ? bars[e]!.low : bars[e]!.high,
+        volRatio: abs.volRatio,
+        flipShare: flip.share,
+      },
+      text: `${absText}, delta flipped ${d >= 0 ? '+' : '−'}${Math.abs(Math.round(d))} at ${fmtTime(bars[i]!.time, tz)} (${ticks ? 'recorded ticks' : 'estimated footprint'})`,
+    };
   }
 }
 
@@ -534,7 +710,7 @@ function envCheck(env: EnvironmentRead | null, trend: Bias, leg: Leg | null): Ch
 function locationCheck(leg: Leg | null, b: Bar, cfg: ArStrategyCfg): Check {
   if (!leg) return { state: 'wait', text: 'no swing leg in the trend’s direction yet' };
   const side = leg.dir === 'up' ? 'discount' : 'premium';
-  if (leg.dead === 'invalidated') return { state: 'fail', text: `closed past 0.886 (${leg.zoneFar.toFixed(2)}): zone cancelled` };
+  if (leg.dead === 'invalidated') return { state: 'fail', text: `closed past ${leg.farName} (${leg.zoneFar.toFixed(2)}): zone cancelled` };
   if (leg.dead === 'extended') return { state: 'wait', text: 'price ran past the swing before retracing: waiting for a new leg' };
   if (leg.dead === 'used' || leg.dead === 'expired') return { state: 'wait', text: 'this leg’s setup is done: waiting for a new leg' };
   const value = leg.insideValue
@@ -542,7 +718,7 @@ function locationCheck(leg: Leg | null, b: Bar, cfg: ArStrategyCfg): Check {
     : { state: 'pass' as CheckState, note: `zone outside value (${leg.dir === 'up' ? 'below VAL' : 'above VAH'})` };
   if (leg.touchIndex == null) {
     const away = Math.abs(b.close - leg.zoneNear);
-    return { state: 'wait', text: `${side} zone ${Math.min(leg.zoneNear, leg.zoneFar).toFixed(2)}–${Math.max(leg.zoneNear, leg.zoneFar).toFixed(2)}, ${away.toFixed(2)} away` };
+    return { state: 'wait', text: `${side} ${leg.farName === '0.886' ? 'zone' : 'decoder box'} ${Math.min(leg.zoneNear, leg.zoneFar).toFixed(2)}–${Math.max(leg.zoneNear, leg.zoneFar).toFixed(2)}, ${away.toFixed(2)} away` };
   }
   return { state: value.state, text: `price reached the ${side} zone; ${value.note}` };
 }

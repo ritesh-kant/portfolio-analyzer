@@ -1,7 +1,15 @@
 /**
- * The chart's "Ticks" chip for NSE futures: when recording makes sense and what the recorder's state means.
- * Shared by the record route and the chip (no Node imports here).
+ * The chart's "Ticks" chip for NSE futures and NSE stocks: when recording makes sense and what the recorder's state
+ * means. Shared by the record route and the chip (no Node imports here).
  */
+
+/** Chart symbols whose live Upstox feed can be recorded: NSE futures (NIFTY1!.NFO, NIFTY26NOVFUT.NFO) and NSE
+ *  stocks (TCS.NS). */
+export const isTickRecordable = (symbol: string) =>
+  /\.NFO$/i.test(symbol) || /1!$/.test(symbol) || /\.NS$/i.test(symbol);
+
+/** The shared recorder's list of instrument keys, in each day's folder (capture_ticks.py --watch). */
+export const RECORDER_LIST = 'recorder.json';
 
 const IST_MS = 19_800_000;
 export const NSE_OPEN_MIN = 9 * 60 + 15;
@@ -42,7 +50,7 @@ export interface TickRecordStatus {
   available: boolean;
   key: string | null;
   clock: NseClock;
-  /** A recorder this app started is running for this instrument. */
+  /** A recorder this app started is running and records this instrument. */
   running: boolean;
   /** Something (this app's recorder, or one started by hand) wrote a line in the last STALE_MS. */
   fresh: boolean;

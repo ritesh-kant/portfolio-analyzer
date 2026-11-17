@@ -1,0 +1,99 @@
+{
+  "id": "20261112-113726_5m_p4_allday_check",
+  "created": "2026-11-12T11:37:26.313Z",
+  "symbol": "NQ=F",
+  "interval": "5m",
+  "window": {
+    "from": "2026-10-13 20:00",
+    "to": "2026-11-12 00:30",
+    "days": 27,
+    "candles": 5808,
+    "formingLast": false
+  },
+  "footprint": {
+    "candles": 5741,
+    "from": "2026-10-14 01:30",
+    "source": "estimated from 1m bars",
+    "rowStep": 5
+  },
+  "engine": "apps/web/lib/tv/ar-strategy.ts",
+  "costs": {
+    "instrument": "NQ",
+    "contracts": 1,
+    "commission": null,
+    "slipTicks": 1,
+    "roundTripPts": 0.725
+  },
+  "a": {
+    "settings": {
+      "swingMult": 2,
+      "valueRows": 30,
+      "envWindow": 24,
+      "windowStart": 0,
+      "windowEnd": 1439,
+      "flatAt": 960,
+      "minRR": 1.5,
+      "entry": "lvn",
+      "entryWait": 3,
+      "confirmWithin": 6,
+      "stopBuffer": 0.1,
+      "requireOutsideValue": false,
+      "allowWarnings": true,
+      "requireStack": false,
+      "confirm": "orderflow",
+      "absorbVol": 1,
+      "flipShare": 0.1
+    },
+    "changed": {
+      "confirm": "orderflow",
+      "entry": "lvn",
+      "windowStart": 0,
+      "windowEnd": 1439,
+      "absorbVol": 1
+    },
+    "stats": {
+      "trades": 4,
+      "wins": 1,
+      "losses": 3,
+      "winRate": 0.25,
+      "gross": -1689.9553512165585,
+      "cost": 58,
+      "net": -1747.9553512165585,
+      "avgNet": -436.9888378041396,
+      "medianNet": -524.1126391352664,
+      "avgR": -0.6506781358223033,
+      "medianR": -1.0198475329451182,
+      "profitFactor": 0.20128352161954174,
+      "avgWin": 440.5,
+      "avgLoss": -729.4851170721862,
+      "best": 440.5,
+      "worst": -1140.2300729460258,
+      "maxDrawdown": 2188.4553512165585,
+      "netWithoutTop3": -1140.2300729460258,
+      "byOutcome": {
+        "time": {
+          "n": 1,
+          "net": 440.5
+        },
+        "stop": {
+          "n": 3,
+          "net": -2188.4553512165585
+        }
+      },
+      "byDir": {
+        "long": {
+          "n": 2,
+          "net": -1633.2038696078089,
+          "wins": 0
+        },
+        "short": {
+          "n": 2,
+          "net": -114.7514816087496,
+          "wins": 1
+        }
+      }
+    },
+    "skips": 115
+  },
+  "b": null
+}

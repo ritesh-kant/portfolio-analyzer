@@ -21,6 +21,12 @@ export interface ArPanelState {
   stack?: { zones: StackZone[]; showUsed: boolean; covered: number; ticks: number } | null;
   /** The strategy's run, when "AR Strategy" is on. */
   strat: ArStrategyResult | null;
+  /** The strategy's confirmation rule, for the note under the trade list. */
+  confirm?: 'candles' | 'orderflow';
+  /** Range Fib Zone draws the "dark pool decoder" stand-in box. */
+  decoder?: boolean;
+  /** AR Strategy on: how many gamma snapshots are on file (`pnpm bt:gex`). */
+  gamma?: { snapshots: number } | null;
 }
 
 const MARK: Record<CheckState, { glyph: string; color: string }> = {
@@ -197,6 +203,27 @@ export function ArPanel({
               );
             })}
           </ul>
+          {state.gamma ? (
+            <div
+              className="mt-1 flex gap-1.5 leading-snug"
+              title="From the newest recorded gamma snapshot read before this candle closed (QQQ options scaled to NQ, pnpm bt:gex). Above the flip: positive gamma (he takes profit quickly); below: negative (hold toward the target)."
+            >
+              <span className="w-3 shrink-0 text-center" style={{ color: read.gamma ? (read.gamma.regime === 'positive' ? UP : DOWN) : MUTED }}>
+                γ
+              </span>
+              <span className="text-[#9598a1]">
+                {read.gamma
+                  ? `${read.gamma.regime === 'positive' ? 'Positive' : 'Negative'} gamma: ${
+                      read.gamma.flip != null
+                        ? `${read.gamma.regime === 'positive' ? 'above' : 'below'} the flip ${fmt(read.gamma.flip)}`
+                        : 'no flip in range (net GEX sign)'
+                    } · snapshot ${new Date(read.gamma.asOf * 1000).toISOString().slice(5, 10)}`
+                  : state.gamma.snapshots
+                    ? 'Gamma: no snapshot covers this candle (recording started later, or it is over 4 days old)'
+                    : 'Gamma: no snapshots recorded for this symbol (pnpm bt:gex)'}
+              </span>
+            </div>
+          ) : null}
           {skipHere.map((k, n) => (
             <div key={n} className="mt-1 rounded bg-[#2a2e39] px-1.5 py-1 leading-snug text-[#b2b5be]">
               ✕ Skipped {k.dir}: {k.reason}
@@ -248,6 +275,10 @@ export function ArPanel({
                   title={[
                     t.warnings.length ? `Taken with warnings:\n${t.warnings.join('\n')}` : 'All four steps passed',
                     t.stack ? `Stacked-imbalance zone at the fill: ${t.stack === 'zone' ? 'yes' : t.stack === 'none' ? 'no' : 'no footprint data'}` : '',
+                    t.flow
+                      ? `Order flow (${t.flow.source === 'ticks' ? 'recorded ticks' : 'estimated footprint'}): absorption ${t.flow.volRatio.toFixed(1)}× volume, flip ${Math.round(t.flow.flipShare * 100)}% of volume`
+                      : '',
+                    t.entryRule === 'lvn' ? 'Filled at the confirmation candle’s LVN' : '',
                   ]
                     .filter(Boolean)
                     .join('\n')}
@@ -267,8 +298,11 @@ export function ArPanel({
             ))}
           </ul>
           <div className="mt-1 text-[10px] leading-snug text-[#5d606b]">
-            {strat.skips.length} setups skipped (✕ on the chart; hover one to read why). Confirmation is estimated
-            from candles, not real order flow. Exploratory only: proper tests and costs come in phase 3.
+            {strat.skips.length} setups skipped (✕ on the chart; hover one to read why).{' '}
+            {state.confirm === 'orderflow'
+              ? 'Confirmation reads the footprint (absorption, then a delta flip): from recorded ticks only where a trade says so, else estimated from 1-minute bars.'
+              : 'Confirmation is estimated from candles, not real order flow.'}{' '}
+            Costs, drawdown and A/B comparisons: Strategy Tester (bottom bar).
           </div>
         </div>
       ) : null}
@@ -329,6 +363,16 @@ export function ArPanel({
             <dd className="text-right">
               {fmt(state.fib.zoneBottom)} – {fmt(state.fib.zoneTop)}
             </dd>
+            {state.decoder ? (
+              <>
+                <dt className="text-[#787b86]" title="Stand-in for his private dark pool decoder: 0.62 / 0.75 / 0.81 of the leg, the median of five boxes measured off his screen. Not his formula.">
+                  Decoder 1 · 2 · 3 (fitted)
+                </dt>
+                <dd className="text-right">
+                  {fmt(state.fib.decoder.near)} · {fmt(state.fib.decoder.mid)} · {fmt(state.fib.decoder.far)}
+                </dd>
+              </>
+            ) : null}
             <dt className="text-[#787b86]">Target</dt>
             <dd className="text-right">{fmt(state.fib.target)}</dd>
             <dt className="text-[#787b86]">Cancel if close past</dt>

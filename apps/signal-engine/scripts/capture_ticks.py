@@ -4,9 +4,17 @@
     .venv/bin/python scripts/capture_ticks.py --symbols RELIANCE,INFY --until 15:30
     .venv/bin/python scripts/capture_ticks.py --keys 'MCX_FO|573422'
     .venv/bin/python scripts/capture_ticks.py --futures NIFTY,BANKNIFTY --until 15:30
+    .venv/bin/python scripts/capture_ticks.py --watch data/ticks/<day>/recorder.json --until 15:30
 
-NSE futures feed the chart's footprint from these ticks (lib/tv/tick-footprint.ts): `v` (day volume) is exact on
-every line, so the volume between two lines is known exactly even though most individual trades are not seen.
+NSE futures and NSE stocks feed the chart's footprint from these ticks (lib/tv/tick-footprint.ts):
+`v` (day volume) is exact on every line, so the volume between two lines is known exactly even
+though most individual trades are not seen.
+
+`--watch FILE` is the chart's shared recorder: ONE websocket for every symbol the chart's "Record"
+buttons asked for. FILE holds {"keys": [...]}; it is re-read every few seconds, new keys are
+subscribed and dropped keys unsubscribed on the same connection, and the recorder exits once the
+list is empty. A normal Upstox account gets only 2 websocket connections, so one process per
+symbol would cap recording at two symbols. A lock on FILE + ".lock" stops a second watcher.
 
 ⚠ The V3 feed is SNAPSHOT-based (~1 message/s per instrument): `ltq` is the last
 trade only, so trades between snapshots are lost (measured 50-70% of lots seen on
@@ -22,6 +30,7 @@ Token: UPSTOX_ANALYTICS_TOKEN (falls back to UPSTOX_ACCESS_TOKEN) from the repo 
 from __future__ import annotations
 
 import argparse
+import fcntl
 import gzip
 import json
 import os
@@ -29,6 +38,7 @@ import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import TextIO
 
 IST = timezone(timedelta(hours=5, minutes=30))
 ROOT = Path(__file__).resolve().parents[3]
@@ -104,11 +114,21 @@ def parse_record(key: str, ff: dict, recv_ms: int) -> dict | None:
     }
 
 
+def read_watch_list(path: Path) -> list[str]:
+    """Instrument keys in the shared recorder's list file; [] when missing or unreadable."""
+    try:
+        keys = json.loads(path.read_text()).get("keys") or []
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [k for k in keys if isinstance(k, str) and "|" in k]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbols", default="", help="comma-separated NSE equity symbols")
     ap.add_argument("--keys", default="", help="comma-separated Upstox instrument keys")
     ap.add_argument("--futures", default="", help="comma-separated underlyings (NIFTY,BANKNIFTY,RELIANCE): front-month future")
+    ap.add_argument("--watch", default="", help='JSON {"keys": [...]}: record what it lists')
     ap.add_argument("--until", default="", help="stop at HH:MM IST (default: run until Ctrl-C)")
     a = ap.parse_args()
     keys = [k for k in a.keys.split(",") if k]
@@ -116,8 +136,17 @@ def main() -> None:
         keys += resolve([s for s in a.symbols.split(",") if s])
     if a.futures:
         keys += resolve_futures([s.strip().upper() for s in a.futures.split(",") if s.strip()])
+    watch = Path(a.watch) if a.watch else None
+    lock = None
+    if watch:
+        lock = open(str(watch) + ".lock", "w")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise SystemExit(f"another recorder is already watching {watch}") from None
+        keys = list(dict.fromkeys(keys + read_watch_list(watch)))
     if not keys:
-        raise SystemExit("give --symbols, --futures or --keys")
+        raise SystemExit("give --symbols, --futures, --keys or a --watch file that lists keys")
     tok = token()
     if not tok:
         raise SystemExit("no UPSTOX_ANALYTICS_TOKEN / UPSTOX_ACCESS_TOKEN configured")
@@ -127,22 +156,31 @@ def main() -> None:
     day = datetime.now(IST).strftime("%Y-%m-%d")
     folder = OUT / day
     folder.mkdir(parents=True, exist_ok=True)
-    files = {k: open(folder / (k.replace("|", "_") + ".jsonl"), "a", buffering=1) for k in keys}
+    files: dict[str, TextIO] = {}
+    wanted: set[str] = set(keys)
     last_ltt: dict[str, int] = {}
-    counts = {k: 0 for k in keys}
+    counts: dict[str, int] = {}
+
+    def out(key: str) -> TextIO:
+        f = files.get(key)
+        if f is None:
+            f = files[key] = open(folder / (key.replace("|", "_") + ".jsonl"), "a", buffering=1)
+            counts.setdefault(key, 0)
+        return f
 
     def on_message(m: dict) -> None:
         recv = int(time.time() * 1000)
         for key, feed in (m.get("feeds") or {}).items():
             ff = (feed.get("fullFeed") or {}).get("marketFF")
-            if not ff or key not in files:
+            if not ff or key not in wanted:
                 continue
             rec = parse_record(key, ff, recv)
             if rec is None or rec["t"] == last_ltt.get(key):
                 continue  # repeated snapshot of the same trade
             last_ltt[key] = rec["t"]
-            files[key].write(json.dumps(rec, separators=(",", ":")) + "\n")
-            counts[key] += 1
+            line = json.dumps(rec, separators=(",", ":"))
+            out(key).write(line + "\n")
+            counts[key] = counts.get(key, 0) + 1
 
     cfg = upstox_client.Configuration()
     cfg.access_token = tok
@@ -151,11 +189,34 @@ def main() -> None:
     s.on("error", lambda e, *_: print("error:", str(e)[:200], flush=True))
     s.auto_reconnect(True, 5, 20)
     s.connect()
-    print(f"recording {len(keys)} instrument(s) to {folder}", flush=True)
+    subscribed: set[str] = set(keys)  # the constructor's keys are sent when the socket opens
+    watching = f", watching {watch}" if watch else ""
+    print(f"recording {len(keys)} instrument(s) to {folder}{watching}", flush=True)
+    next_report = time.time() + 30
     try:
         while True:
-            time.sleep(30)
-            print(datetime.now(IST).strftime("%H:%M:%S"), counts, flush=True)
+            time.sleep(3 if watch else 30)
+            if watch:
+                listed = set(read_watch_list(watch))
+                if not listed:
+                    print("list is empty, stopping", flush=True)
+                    break
+                wanted.clear()
+                wanted.update(listed)
+                add, drop = sorted(listed - subscribed), sorted(subscribed - listed)
+                try:
+                    if add:
+                        s.subscribe(add, "full")
+                        print("subscribed", add, flush=True)
+                    if drop:
+                        s.unsubscribe(drop)
+                        print("unsubscribed", drop, flush=True)
+                    subscribed = set(listed)
+                except Exception as e:  # socket reconnecting: retry on the next read
+                    print("subscription change failed, will retry:", str(e)[:200], flush=True)
+            if time.time() >= next_report:
+                next_report = time.time() + 30
+                print(datetime.now(IST).strftime("%H:%M:%S"), counts, flush=True)
             if a.until and datetime.now(IST).strftime("%H:%M") >= a.until:
                 break
     except KeyboardInterrupt:
@@ -164,6 +225,8 @@ def main() -> None:
         s.disconnect()
         for f in files.values():
             f.close()
+        if lock:
+            lock.close()
 
 
 if __name__ == "__main__":

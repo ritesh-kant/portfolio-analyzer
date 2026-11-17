@@ -9,6 +9,9 @@ import {
   dailyAtrByDay,
   environment,
   rangeFib,
+  decoderBox,
+  decoderZones,
+  DECODER_LEVELS,
   sessionBoxes,
   structureBias,
   structureLabels,
@@ -179,6 +182,21 @@ test('rangeFib: up leg gives a discount zone, then touch → target, or a close 
   assert.ok(s.zoneBottom > s.to.price && s.zoneTop < s.from.price);
 });
 
+test('decoder stand-in: 0.62 / 0.75 / 0.81 of the leg, measured back from its end, on both sides', () => {
+  assert.deepEqual(DECODER_LEVELS, { near: 0.62, mid: 0.75, far: 0.81 });
+  const close = (a, b) => Math.abs(a - b) < 1e-9;
+  const up = decoderBox({ index: 0, price: 100, kind: 'L' }, { index: 5, price: 200, kind: 'H' });
+  assert.ok(close(up.near, 138) && close(up.mid, 125) && close(up.far, 119), JSON.stringify(up));
+  assert.ok(close(up.top, 138) && close(up.bottom, 119));
+  const down = decoderBox({ index: 0, price: 200, kind: 'H' }, { index: 5, price: 100, kind: 'L' });
+  assert.ok(close(down.near, 162) && close(down.mid, 175) && close(down.far, 181), JSON.stringify(down));
+  assert.ok(close(down.top, 181) && close(down.bottom, 162));
+  // the range fib carries the same box for its leg
+  const won = path([100, 200, 125, 205]);
+  const f = rangeFib(won, swings(won, 2, 5).pivots, 'bull');
+  assert.deepEqual(f.decoder, decoderBox(f.from, f.to));
+});
+
 test('environment: a straight run is expansion, a tight flat market is compression', () => {
   const quiet = [];
   let t = ny(2, 9, 30);
@@ -233,4 +251,75 @@ test('NSE charts get one "NSE open" box, 09:15–10:45 India time, and no Asia /
   );
   // so the Asia-range levels have nothing to hang off
   assert.deepEqual(avrDays(bars, boxes, new Map([['2026-11-09', 300], ['2026-11-10', 300]])), []);
+});
+
+test('decoderZones: a box per leg, held when price returns to the leg end, broken on a close through the far edge', () => {
+  // up 100→200 (box 119–138), back to 125 (inside, no close below 119), then on to 205: held.
+  // the down leg 200→125 has its box at 171.5–185.75; the rally closes above 185.75: broken.
+  const bars = path([100, 200, 125, 205, 190]);
+  const piv = swings(bars, 2, 5).pivots;
+  const zones = decoderZones(bars, piv, { count: 5 });
+  const up = zones.find((z) => z.from.price === 100 && z.to.price === 200);
+  const down = zones.find((z) => z.from.price === 200 && z.to.price === 125);
+  assert.ok(up && down, JSON.stringify(zones.map((z) => [z.from.price, z.to.price])));
+  assert.equal(up.dir, 'up');
+  assert.equal(up.status, 'held');
+  assert.ok(up.touchedAt > up.to.index && up.endAt > up.touchedAt);
+  assert.ok(bars[up.touchedAt].low <= up.box.top);
+  assert.ok(bars[up.endAt].high >= 200);
+  assert.equal(down.dir, 'down');
+  assert.equal(down.status, 'broken');
+  assert.ok(bars[down.endAt].close > down.box.top);
+  // oldest first
+  assert.ok(zones.every((z, k) => k === 0 || zones[k - 1].to.index < z.to.index));
+});
+
+test('decoderZones: a close below the far edge breaks a long box; side and count filter the legs', () => {
+  const bars = path([100, 200, 110, 170, 150]);
+  const piv = swings(bars, 2, 5).pivots;
+  const all = decoderZones(bars, piv, { count: 10 });
+  const up = all.find((z) => z.from.price === 100 && z.to.price === 200);
+  assert.ok(up);
+  assert.equal(up.status, 'broken');
+  assert.ok(bars[up.endAt].close < up.box.bottom);
+  const longs = decoderZones(bars, piv, { count: 10, side: 'up' });
+  assert.ok(longs.length >= 1 && longs.every((z) => z.dir === 'up'));
+  const shorts = decoderZones(bars, piv, { count: 10, side: 'down' });
+  assert.ok(shorts.every((z) => z.dir === 'down'));
+  assert.equal(longs.length + shorts.length, all.length);
+  const last = decoderZones(bars, piv, { count: 1 });
+  assert.equal(last.length, 1);
+  assert.deepEqual(last[0], all[all.length - 1]);
+});
+
+test('decoderZones: custom levels move the box; untouched boxes stay waiting', () => {
+  const bars = path([100, 200, 150]);
+  const piv = [
+    { index: 0, price: 100, kind: 'L', confirmedAt: 5 },
+    { index: 9, price: 200, kind: 'H', confirmedAt: 14 },
+  ];
+  const z = decoderZones(bars, piv, { levels: { near: 0.5, mid: 0.6, far: 0.7 } });
+  assert.equal(z.length, 1);
+  assert.deepEqual(z[0].box, decoderBox(piv[0], piv[1], { near: 0.5, mid: 0.6, far: 0.7 }));
+  assert.ok(Math.abs(z[0].box.top - 150) < 1e-9 && Math.abs(z[0].box.bottom - 130) < 1e-9);
+  assert.equal(z[0].status, 'in box'); // 150 reaches the 0.5 edge
+  const z2 = decoderZones(bars, piv);
+  assert.equal(z2[0].status, 'waiting'); // 150 never reaches 138
+  assert.equal(z2[0].endAt, null);
+});
+
+test('decoderZones: no look-ahead, a decided box in any prefix is decided the same way on the full chart', () => {
+  const bars = path([100, 200, 125, 205, 140, 230, 120, 180]);
+  const full = decoderZones(bars, swings(bars, 2, 5).pivots, { count: 20 });
+  const key = (z) => `${z.from.index}-${z.to.index}`;
+  const byKey = new Map(full.map((z) => [key(z), z]));
+  for (let n = 10; n <= bars.length; n++) {
+    const pre = bars.slice(0, n);
+    for (const z of decoderZones(pre, swings(pre, 2, 5).pivots, { count: 20 })) {
+      const f = byKey.get(key(z));
+      if (!f) continue; // the leg's end swing moved on the full chart
+      if (z.endAt != null) assert.deepEqual([z.status, z.endAt, z.touchedAt], [f.status, f.endAt, f.touchedAt], key(z));
+      else if (z.touchedAt != null) assert.equal(z.touchedAt, f.touchedAt);
+    }
+  }
 });

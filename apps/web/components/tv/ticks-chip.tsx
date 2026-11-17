@@ -1,11 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { chipState, RECORD_UNTIL, type ChipState, type TickRecordStatus } from '../../lib/tv/tick-recorder';
-import { isNseFuture } from './use-tick-steps';
+import {
+  chipState,
+  isTickRecordable,
+  RECORD_UNTIL,
+  type ChipState,
+  type TickRecordStatus,
+} from '../../lib/tv/tick-recorder';
 
 /**
- * Bottom-bar chip for NSE futures: is the live feed being recorded (it feeds the footprint, see
+ * Bottom-bar chip for NSE futures and stocks: is the live feed being recorded (it feeds the footprint, see
  * lib/tv/tick-footprint.ts), with a button that starts or stops the recorder (/api/chart/ticks/record). Hidden for
  * other symbols and when the app is not running locally.
  */
@@ -28,7 +33,7 @@ export function TicksChip({ symbol }: { symbol: string }) {
   const [status, setStatus] = useState<TickRecordStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const eligible = isNseFuture(symbol);
+  const eligible = isTickRecordable(symbol);
 
   useEffect(() => {
     setStatus(null);
@@ -91,9 +96,11 @@ export function TicksChip({ symbol }: { symbol: string }) {
               ? `Ticks: ${status.days.length} day${status.days.length === 1 ? '' : 's'} recorded · last ${dayLabel(status.days[status.days.length - 1]!)}`
               : 'Ticks: none recorded';
   const title = [
-    'Records the live Upstox feed for this contract so the footprint uses real volume (exact per ~1 s, blue box)',
-    'instead of the estimate from 1-minute bars. It only covers the time it was running: start it before 09:15',
-    `to get the whole session. It stops by itself at ${RECORD_UNTIL}. Needs a valid Upstox token in the repo .env.`,
+    'Records the live Upstox feed for this symbol so the footprint uses real volume (exact per ~1 s, blue box)',
+    'instead of the estimate from 1-minute bars. Buyer/seller is still a guess from the bid/ask and price moves:',
+    'NSE does not tag who started each trade. It only covers the time it was running: start it before 09:15',
+    `to get the whole session. It stops by itself at ${RECORD_UNTIL}. Every symbol you record shares one Upstox`,
+    'connection (an account gets two). Needs a valid Upstox token in the repo .env.',
     status.days.length ? `Recorded: ${status.days.join(', ')}` : '',
     error ? `\nError: ${error}` : '',
     status.log && (state === 'stalled' || error || state === 'idle') ? `\nRecorder log:\n${status.log}` : '',
@@ -113,7 +120,7 @@ export function TicksChip({ symbol }: { symbol: string }) {
           disabled={busy}
           onClick={() => void act(canStop ? 'DELETE' : 'POST')}
           className="rounded border border-[#363a45] px-1.5 py-0.5 text-[11px] font-medium text-[#b2b5be] transition-colors hover:bg-[#2a2e39] hover:text-white disabled:opacity-50"
-          title={canStop ? 'Stop recording this contract' : `Record this contract's feed until ${RECORD_UNTIL}`}
+          title={canStop ? 'Stop recording this symbol' : `Record this symbol's feed until ${RECORD_UNTIL}`}
         >
           {busy ? '…' : canStop ? 'Stop' : `Record till ${RECORD_UNTIL}`}
         </button>

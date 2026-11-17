@@ -404,6 +404,127 @@ export function biasLadder(
 /** His retracement levels; 0.705–0.886 is the zone he trades, a close beyond 0.886 cancels it. */
 export const FIB_LEVELS = [0.5, 0.62, 0.705, 0.788, 0.886, 1.1] as const;
 
+/**
+ * Stand-in for his private "dark pool decoder" (research/specs/orderflow-course-ar-model.md §2a′): a box inside the
+ * leg's retracement with three levels, the near edge, the line where his shading changes, and the far edge. A close
+ * past the far edge cancels it.
+ *
+ * NOT his formula. These are the medians of five boxes measured off his screen (1:25–1:42 in the video): near 0.54–0.73,
+ * change 0.71–0.83, far 0.77–0.87. His real box moves between those ranges for a reason the video does not show.
+ */
+export const DECODER_LEVELS = { near: 0.62, mid: 0.75, far: 0.81 } as const;
+
+export interface DecoderBox {
+  /** Prices of the three levels, measured back from the leg's end like the Fib levels. */
+  near: number;
+  mid: number;
+  far: number;
+  top: number;
+  bottom: number;
+}
+
+export interface DecoderLevels {
+  near: number;
+  mid: number;
+  far: number;
+}
+
+/** The decoder stand-in for the leg `from` → `to`. */
+export function decoderBox(from: Pivot, to: Pivot, levels: DecoderLevels = DECODER_LEVELS): DecoderBox {
+  const span = to.price - from.price;
+  const at = (lvl: number) => to.price - lvl * span;
+  const near = at(levels.near);
+  const mid = at(levels.mid);
+  const far = at(levels.far);
+  return { near, mid, far, top: Math.max(near, far), bottom: Math.min(near, far) };
+}
+
+/**
+ * waiting: price has not come back to the box yet. in box: it has, and nothing is decided.
+ * held: after touching the box, price went back to the leg's end (his target). broken: a candle closed past the far
+ * edge. extended: price ran past the leg's end before ever retracing, so a new leg forms and the box never came
+ * into play.
+ */
+export type DecoderStatus = 'waiting' | 'in box' | 'held' | 'broken' | 'extended';
+
+export interface DecoderZone {
+  from: Pivot;
+  to: Pivot;
+  /** up leg → box below, a long idea (discount); down leg → box above, a short idea (premium). */
+  dir: 'up' | 'down';
+  box: DecoderBox;
+  status: DecoderStatus;
+  /** First candle that reached the box. */
+  touchedAt: number | null;
+  /** Candle that decided it (held / broken / extended); null while it is still open. */
+  endAt: number | null;
+}
+
+/**
+ * The "Dark Pool Decoder" indicator: a decoder box on each of the last `count` swing legs, the way he drags it by
+ * hand from one swing to the next, followed candle by candle until it is decided. `side` keeps only up legs (longs),
+ * only down legs (shorts) or both. A box exists only once its end swing is confirmed (`swings` has no look-ahead).
+ */
+export function decoderZones(
+  bars: Bar[],
+  pivots: Pivot[],
+  opts: { levels?: DecoderLevels; count?: number; side?: 'both' | 'up' | 'down' } = {},
+): DecoderZone[] {
+  const levels = opts.levels ?? DECODER_LEVELS;
+  const count = Math.max(1, opts.count ?? 3);
+  const side = opts.side ?? 'both';
+  const out: DecoderZone[] = [];
+  for (let k = pivots.length - 1; k >= 1 && out.length < count; k--) {
+    const to = pivots[k]!;
+    const from = pivots[k - 1]!;
+    const dir = to.kind === 'H' ? 'up' : 'down';
+    if (side !== 'both' && side !== dir) continue;
+    if (to.price === from.price) continue;
+    const box = decoderBox(from, to, levels);
+    let status: DecoderStatus = 'waiting';
+    let touchedAt: number | null = null;
+    let endAt: number | null = null;
+    for (let i = to.index + 1; i < bars.length && endAt == null; i++) {
+      const b = bars[i]!;
+      if (dir === 'up') {
+        if (touchedAt == null && b.high > to.price) {
+          status = 'extended';
+          endAt = i;
+        } else if (touchedAt != null && i > touchedAt && b.high >= to.price) {
+          status = 'held';
+          endAt = i;
+        } else {
+          if (touchedAt == null && b.low <= box.top) {
+            touchedAt = i;
+            status = 'in box';
+          }
+          if (b.close < box.bottom) {
+            status = 'broken';
+            endAt = i;
+          }
+        }
+      } else if (touchedAt == null && b.low < to.price) {
+        status = 'extended';
+        endAt = i;
+      } else if (touchedAt != null && i > touchedAt && b.low <= to.price) {
+        status = 'held';
+        endAt = i;
+      } else {
+        if (touchedAt == null && b.high >= box.bottom) {
+          touchedAt = i;
+          status = 'in box';
+        }
+        if (b.close > box.top) {
+          status = 'broken';
+          endAt = i;
+        }
+      }
+    }
+    out.push({ from, to, dir, box, status, touchedAt, endAt });
+  }
+  return out.reverse();
+}
+
 /** extended: price ran past the leg's end before retracing, so this zone never came into play. */
 export type ZoneStatus = 'waiting' | 'in zone' | 'reacted' | 'target hit' | 'invalidated' | 'extended';
 
@@ -419,6 +540,8 @@ export interface RangeFib {
   zoneBottom: number;
   /** Where he aims: the leg's end (the opposite liquidity, "DOL"). */
   target: number;
+  /** The "dark pool decoder" stand-in box for this leg (`decoderBox`). */
+  decoder: DecoderBox;
   /** Where a close cancels the idea, and where price then tends to run (1.1). */
   invalidation: number;
   extension: number;
@@ -514,6 +637,7 @@ export function rangeFib(bars: Bar[], pivots: Pivot[], prefer: Bias = 'neutral',
       zoneTop,
       zoneBottom,
       target: to.price,
+      decoder: decoderBox(from, to),
       invalidation,
       extension: at(1.1),
       vah: profile?.vah ?? null,

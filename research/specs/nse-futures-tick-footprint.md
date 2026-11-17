@@ -1,20 +1,31 @@
-# NSE futures footprint from recorded ticks
+# NSE futures and stocks footprint from recorded ticks
 
-For NSE futures (`NIFTY1!.NFO`, `BANKNIFTY1!.NFO`, `RELIANCE1!.NFO`, …) the chart's footprint (bid × ask volume
+For NSE futures (`NIFTY1!.NFO`, `BANKNIFTY1!.NFO`, `RELIANCE1!.NFO`, …) and, since 2026-11-17, NSE stocks
+(`TCS.NS`, `RELIANCE.NS`, …) the chart's footprint (bid × ask volume
 per price row, delta, imbalances) can now come from the **recorded Upstox feed** instead of the estimate from
 1-minute bars. A recorded candle draws its Delta/Total box with a **blue outline**, and the footprint banner says
 how many candles are recorded. Every other candle keeps the old estimate.
 
 ## How to record
 
-In /chart, open an NSE future. The bottom bar shows **"Ticks: …"** with a **Record till 15:30** button. It starts
-`apps/signal-engine/scripts/capture_ticks.py` for that contract in the background (it survives a dev-server
-reload and stops by itself at 15:30). **Stop** ends it. Only the time it runs is covered, so start it **before
-09:15** to get the whole session. From a terminal, for several contracts at once:
+In /chart, open an NSE future or stock. The bottom bar shows **"Ticks: …"** with a **Record till 15:30** button.
+It adds the symbol to today's list (`data/ticks/<day>/recorder.json`) and, if needed, starts **one shared
+recorder**, `capture_ticks.py --watch <that list>`, in the background. The recorder survives a dev-server reload
+and stops by itself at 15:30. Every symbol recorded from the chart shares its one Upstox websocket. That matters
+because a normal Upstox account gets only **two** connections, so a process per symbol would allow two symbols at
+most. The recorder re-reads the list every 3 s. **Stop** takes the symbol off the list, and the recorder exits when
+the list is empty. Only the time it runs is covered, so start it **before 09:15** to get the whole session.
+
+From a terminal, without the chart (this opens its own connection):
 
 ```bash
-cd apps/signal-engine && .venv/bin/python scripts/capture_ticks.py --futures NIFTY,BANKNIFTY --until 15:30
+cd apps/signal-engine && .venv/bin/python scripts/capture_ticks.py --futures NIFTY,BANKNIFTY --symbols TCS,INFY --until 15:30
 ```
+
+**Stocks: still not his footprint.** Recording fixes the volume per price (exact per update), but NSE does not tag
+which side started each trade. Buyer/seller still comes from the bid/ask where the feed shows it, else from the
+tick rule ("price went up → buyer"). Stock updates had not been measured when this was written. The futures
+figures below (side from bid/ask on ~25 % of volume) are the best guide until a stock session is recorded.
 
 It needs a valid Upstox token in the repo `.env` (`UPSTOX_ANALYTICS_TOKEN` or `UPSTOX_ACCESS_TOKEN`). With an
 expired token the chip turns red ("running but no data"), and the recorder's log is in its tooltip. Data goes to
@@ -60,7 +71,7 @@ So:
 | Start / stop / status of the recorder | `/api/chart/ticks/record`, `lib/tv/tick-recorder.ts`, `lib/tv/ticks.server.ts` |
 | Chart wiring (recorded where covered, estimate elsewhere; replay-safe) | `useTickSteps` in `components/tv/use-tick-steps.ts`, `tickFootprints` in `tv-chart.tsx` |
 | Chip | `components/tv/ticks-chip.tsx` |
-| Recorder (`--futures` = front-month contract by underlying) | `apps/signal-engine/scripts/capture_ticks.py` |
+| Recorder (`--futures` = front-month contract by underlying, `--symbols` = stocks, `--watch` = the chart's shared list) | `apps/signal-engine/scripts/capture_ticks.py` |
 
 Not done: scheduling the recorder for every session (launchd/cron) and the stacked-imbalance extension lines
 and min-volume filter from the course (drawing features, independent of the data source).

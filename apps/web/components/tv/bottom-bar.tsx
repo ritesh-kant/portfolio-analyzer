@@ -8,10 +8,12 @@ export const RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'All'] a
 export type RangeId = (typeof RANGES)[number];
 
 interface Props {
-  /** Chart symbol: Yahoo futures (NQ=F …) get the saved-history chip, NSE futures the tick-recorder chip. */
+  /** Chart symbol: Yahoo futures (NQ=F …) get the saved-history chip, NSE futures and stocks the tick-recorder chip. */
   symbol: string;
   paperOpen: boolean;
   onPaper: () => void;
+  testerOpen: boolean;
+  onTester: () => void;
   onRange: (r: RangeId) => void;
   timeZone: string;
   /** Unix seconds when the latest candle closes. */
@@ -73,6 +75,14 @@ export function BottomBar(p: Props) {
         title="Paper trading: practise with a simulated account on this chart"
       >
         Paper Trading
+      </button>
+      <button
+        type="button"
+        className={`${b(p.testerOpen)} mr-2 border border-[#363a45]`}
+        onClick={p.onTester}
+        title="Strategy Tester: the AR Strategy's trades on this chart, after costs"
+      >
+        Strategy Tester
       </button>
       {RANGES.map((r) => (
         <button key={r} type="button" className={b()} onClick={() => p.onRange(r)}>

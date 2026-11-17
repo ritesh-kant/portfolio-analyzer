@@ -51,6 +51,7 @@ import {
   VOL_UP_DEFAULT,
   avpOf,
   catalogOf,
+  dpdOf,
   indicatorLabel,
   makeIndicator,
   AR_TEMPLATE,
@@ -169,10 +170,13 @@ import { SessionProfilePrimitive } from './session-profile-primitive';
 import { GexPanel } from './gex-panel';
 import { ArPrimitive } from './ar-primitive';
 import { ArPanel } from './ar-panel';
+import { StrategyTesterPanel } from './strategy-tester-panel';
 import {
   avrDays,
   biasLadder,
   dailyAtrByDay,
+  type DecoderZone,
+  decoderZones,
   environment,
   rangeFib,
   sessionBoxes,
@@ -182,6 +186,7 @@ import {
   arMarket,
 } from '../../lib/tv/ar';
 import { type ArStrategyCfg, runArStrategy } from '../../lib/tv/ar-strategy';
+import type { GammaSnap } from '../../lib/tv/gamma-history';
 import { stackedZones } from '../../lib/tv/stacked-imbalance';
 import { GEX_STRIP_WIDTH, GexProfilePrimitive } from './gex-profile-primitive';
 import {
@@ -382,6 +387,7 @@ function computeIndicators(
       case 'arenv':
       case 'arstrat':
       case 'arstack':
+      case 'ardpd':
         // Drawn by SessionProfilePrimitive / DrawingsPrimitive / ArPrimitive / price lines, not as a series.
         lines = [];
         break;
@@ -522,6 +528,24 @@ export function TvChart({
   const [newsPinned, setNewsPinned] = useState<number | null>(null);
   const [deltaTip, setDeltaTip] = useState<number | null>(null);
   const [newsExpanded, setNewsExpanded] = useState(false);
+  // "News unavailable" notice: the reason is the same for every unsupported
+  // symbol, so one dismissal hides it everywhere (remembered per browser).
+  const [newsNoticeHidden, setNewsNoticeHidden] = useState(false);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('tv.newsNoticeHidden') === '1') setNewsNoticeHidden(true);
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+  const dismissNewsNotice = useCallback(() => {
+    setNewsNoticeHidden(true);
+    try {
+      localStorage.setItem('tv.newsNoticeHidden', '1');
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
 
   // replay: `replayEnd` is the cut-off instant (unix s); null = live chart
   const [replayEnd, setReplayEnd] = useState<number | null>(null);
@@ -861,7 +885,7 @@ export function TvChart({
       ),
     [fvgAll, fvgView],
   );
-  // NSE futures: candles the tick recorder covered get a footprint from recorded volume (exact per ~1 s) instead
+  // NSE futures and stocks: candles the tick recorder covered get a footprint from recorded volume (exact per ~1 s) instead
   // of the 1-minute estimate. See lib/tv/tick-footprint.ts.
   const tickSteps = useTickSteps(symbol, fpData, replayEnd == null);
   const tickFootprints = useMemo(() => {
@@ -1440,7 +1464,8 @@ export function TvChart({
   const arEnvCfg = arOn('arenv');
   const arStratCfg = arOn('arstrat');
   const arStackCfg = arOn('arstack');
-  const arAny = !!(arSessCfg || arAvrCfg || arFibCfg || arStructCfg || arEnvCfg || arStratCfg || arStackCfg);
+  const arDpdCfg = arOn('ardpd');
+  const arAny = !!(arSessCfg || arAvrCfg || arFibCfg || arStructCfg || arEnvCfg || arStratCfg || arStackCfg || arDpdCfg);
   // AVR needs daily candles for its 20-day ATR (the chart's own candles rarely reach back 20 days).
   const [arDaily, setArDaily] = useState<{ symbol: string; bars: Bar[] }>({ symbol: '', bars: [] });
   useEffect(() => {
@@ -1453,6 +1478,19 @@ export function TvChart({
       });
     return () => ctl.abort();
   }, [ready, arAvrCfg, arStratCfg, symbol, arDaily.symbol, fetchBars]);
+  // Recorded gamma snapshots (`pnpm bt:gex`): the AR strategy's gamma regime on past candles (phase 5).
+  const [arGamma, setArGamma] = useState<{ symbol: string; snaps: GammaSnap[] }>({ symbol: '', snaps: [] });
+  useEffect(() => {
+    if (!ready || !arStratCfg || arGamma.symbol === symbol) return;
+    const ctl = new AbortController();
+    fetch(`/api/chart/gex/history?symbol=${encodeURIComponent(symbol)}`, { signal: ctl.signal })
+      .then((r) => r.json() as Promise<{ snaps: GammaSnap[] }>)
+      .then((res) => setArGamma({ symbol, snaps: res.snaps ?? [] }))
+      .catch(() => {
+        if (!ctl.signal.aborted) setArGamma({ symbol, snaps: [] });
+      });
+    return () => ctl.abort();
+  }, [ready, arStratCfg, symbol, arGamma.symbol]);
   const arState = useMemo(() => {
     if (!arAny || !tf.intraday || bars.length < 2) return null;
     const needSessions = !!(arSessCfg || arAvrCfg || arStratCfg);
@@ -1473,24 +1511,58 @@ export function TvChart({
         ? stackedZones(bars, footprints, { ratio: arStackCfg?.mult ?? 3, minRows: arStackCfg?.length || 3 })
         : [];
     const stacks = covered.some(Boolean) ? { zones: stackZones, covered } : undefined;
+    const gammaSnaps = arGamma.symbol === symbol && arGamma.snaps.length ? arGamma.snaps : undefined;
     const runStrat = (cfg: Partial<ArStrategyCfg> | undefined) =>
-      runArStrategy(bars, { timeZone, chartSecs: tf.secs, avr: avrAll, formingLast, stacks, cfg });
+      runArStrategy(bars, {
+        timeZone,
+        chartSecs: tf.secs,
+        avr: avrAll,
+        formingLast,
+        stacks,
+        footprints: covered.length ? footprints : undefined,
+        gamma: gammaSnaps,
+        cfg,
+      });
     const strat = arStratCfg ? runStrat(arStratCfg.arStrat) : null;
     const structMult = arStructCfg?.mult ?? 2;
     const fibMult = arFibCfg?.mult ?? 2;
-    const structSwings = arStructCfg || arFibCfg ? swings(bars, structMult) : null;
+    const dpd = arDpdCfg ? dpdOf(arDpdCfg) : null;
+    const dpdMult = arDpdCfg?.mult ?? 2;
+    const structSwings = arStructCfg || arFibCfg || dpd?.side === 'trend' ? swings(bars, structMult) : null;
     const fibSwings = arFibCfg ? (fibMult === structMult && structSwings ? structSwings : swings(bars, fibMult)) : null;
-    const ladder = arStructCfg || arFibCfg ? biasLadder(bars, tf.secs, timeZone, structMult) : [];
+    const ladder =
+      arStructCfg || arFibCfg || dpd?.side === 'trend' ? biasLadder(bars, tf.secs, timeZone, structMult) : [];
     // His rule: draw the range in the direction of the higher-timeframe trend (1h, else the chart's own).
     const prefer =
       ladder.find((r) => r.label === '1h')?.bias ?? (structSwings ? structureBias(structSwings.pivots) : 'neutral');
     const fib = fibSwings ? rangeFib(bars, fibSwings.pivots, prefer ?? 'neutral', arFibCfg?.length || 30) : null;
     const labels = arStructCfg && structSwings ? structureLabels(structSwings.pivots) : [];
+    // Dark Pool Decoder: its own swing size; "trend" keeps the legs in the 1-hour trend's direction (his rule)
+    let decoders: DecoderZone[] = [];
+    if (dpd) {
+      const piv =
+        dpdMult === structMult && structSwings
+          ? structSwings.pivots
+          : dpdMult === fibMult && fibSwings
+            ? fibSwings.pivots
+            : swings(bars, dpdMult).pivots;
+      const side =
+        dpd.side === 'trend' ? (prefer === 'bull' ? 'up' : prefer === 'bear' ? 'down' : 'both') : dpd.side;
+      decoders = decoderZones(bars, piv, {
+        levels: { near: dpd.near, mid: dpd.mid, far: dpd.far },
+        count: arDpdCfg?.length || 3,
+        side,
+      });
+      if (!dpd.showDone) decoders = decoders.filter((z) => z.endAt == null);
+    }
     return {
       boxes,
-      sessions: arSessCfg ? boxes : [],
+      // boxes on 1 h and above are one or two candles wide and repeat every day: clutter, so draw them below 1 h only
+      sessions: arSessCfg && tf.secs < 3600 ? boxes : [],
       avr,
       fib,
+      decoder: !!arFibCfg && arFibCfg.arDecoder === true,
+      decoders,
       prefer: prefer ?? 'neutral',
       ladder: arStructCfg ? ladder : [],
       swings: arStructCfg && structSwings ? structSwings.pivots.map((pivot, k) => ({ pivot, label: labels[k] ?? null })) : [],
@@ -1507,6 +1579,13 @@ export function TvChart({
           }
         : null,
       strat,
+      confirm: arStratCfg?.arStrat?.confirm ?? 'candles',
+      /** Gamma snapshots on file and the regime at the latest candle (null without one that covers it). */
+      gamma: arStratCfg
+        ? { snapshots: gammaSnaps?.length ?? 0, read: strat?.reads[strat.reads.length - 1]?.gamma ?? null }
+        : null,
+      /** The Strategy Tester's Compare: the same candles and levels, other settings. */
+      runStrat,
     };
   }, [
     arAny,
@@ -1517,12 +1596,14 @@ export function TvChart({
     arEnvCfg,
     arStratCfg,
     arStackCfg,
+    arDpdCfg,
     footprints,
     tf.intraday,
     tf.secs,
     bars,
     timeZone,
     arDaily,
+    arGamma,
     symbol,
     replayEnd,
   ]);
@@ -1947,7 +2028,7 @@ export function TvChart({
     const flip = gexRes?.all?.flip;
     gexPrimRef.current?.setFlip(
       gexShown && gexZonesOn && flip != null ? flip * (gexRes?.scale ?? 1) : null,
-      (gexCfg?.gexZoneOpacity ?? 50) / 100,
+      (gexCfg?.gexZoneOpacity ?? 100) / 100,
     );
   }, [gexShown, gexZonesOn, gexCfg?.gexZoneOpacity, gexRes, chartType, fp.on]);
 
@@ -2469,6 +2550,26 @@ export function TvChart({
 
   // AR model layers → primitive. `arFocus`: the trade hovered in the AR panel.
   const [arFocus, setArFocus] = useState<number | null>(null);
+  /** Centre the chart on candle `index` and re-fit prices to it (AR panel and Strategy Tester trade lists). */
+  const goToBar = (index: number) => {
+    const ts = chartRef.current?.timeScale();
+    if (!ts) return;
+    const r = ts.getVisibleLogicalRange();
+    const half = r ? (r.to - r.from) / 2 : 60;
+    ts.setVisibleLogicalRange({ from: index - half, to: index + half });
+    // re-fit prices to the trade's candles, like the bottom bar's "auto"
+    chartRef.current?.priceScale('right').applyOptions({ autoScale: true });
+    setAutoScale(true);
+  };
+  const stratInd = indicators.find((i) => i.type === 'arstrat') ?? null;
+  const lotSize = meta?.lotSize;
+  const tickSize = meta?.tickSize;
+  const testerContract = useMemo(() => (lotSize ? { lotSize, tickSize } : undefined), [lotSize, tickSize]);
+  const runStrat = arState?.runStrat;
+  const runVariant = useCallback(
+    (arStrat: Partial<ArStrategyCfg>) => (runStrat ? runStrat(arStrat) : null),
+    [runStrat],
+  );
   useEffect(() => {
     arPrimRef.current?.setState(
       arState
@@ -2476,6 +2577,8 @@ export function TvChart({
             sessions: arState.sessions,
             avr: arState.avr,
             fib: arState.fib,
+            decoder: arState.decoder,
+            decoders: arState.decoders,
             lastIndex: bars.length - 1,
             swings: arState.swings,
             trades: arState.strat?.trades ?? [],
@@ -3980,6 +4083,8 @@ export function TvChart({
   // ── paper trading ──────────────────────────────────────────────────────
   // Two accounts: the live one persists; the replay one is a sandbox that starts fresh with every replay.
   const [paperOpen, setPaperOpen] = useState(false);
+  const [testerOpen, setTesterOpen] = useState(false);
+  useEffect(() => setTesterOpen(load<boolean>('tv:testerOpen', false)), []);
   const [brokerOpen, setBrokerOpen] = useState(false);
   const [brokerSel, setBrokerSel] = useState<string | null>(null);
   const [tradeOpen, setTradeOpen] = useState(false);
@@ -4577,9 +4682,21 @@ export function TvChart({
                 </div>
               );
             })()}
-            {newsOn && news && news.symbol === symbol && !news.res.supported ? (
-              <div className="pointer-events-none absolute bottom-12 right-2 z-10 max-w-[calc(100%-16px)] md:right-20 md:max-w-xs rounded bg-[#1e222d]/90 px-3 py-1.5 text-[11px] text-[#b2b5be]">
-                News unavailable: {news.res.reason}
+            {newsOn && news && news.symbol === symbol && !news.res.supported && !newsNoticeHidden ? (
+              <div
+                className="absolute bottom-12 right-2 z-10 flex max-w-[calc(100%-16px)] items-start gap-2 rounded bg-[#1e222d]/90 py-1.5 pl-3 pr-1.5 text-[11px] text-[#b2b5be] md:right-20 md:max-w-xs"
+                data-tv-ui
+              >
+                <span>News unavailable: {news.res.reason}</span>
+                <button
+                  type="button"
+                  aria-label="Dismiss"
+                  title="Dismiss"
+                  onClick={dismissNewsNotice}
+                  className="shrink-0 rounded p-0.5 text-[#787b86] hover:bg-[#2a2e39] hover:text-white"
+                >
+                  <Icons.close size={12} />
+                </button>
               </div>
             ) : null}
             {replayActive || replayPick ? (
@@ -4722,6 +4839,36 @@ export function TvChart({
           {chrome(
             embed?.bottomSlot,
             <>
+              {testerOpen ? (
+                <StrategyTesterPanel
+                  symbol={symbol}
+                  timeZone={timeZone}
+                  decimals={decimals}
+                  currency={meta?.currency ?? ''}
+                  contract={testerContract}
+                  price={bars[bars.length - 1]?.close}
+                  times={wall as number[]}
+                  cfg={stratInd}
+                  hidden={!!stratInd && (!!stratInd.hidden || hiddenAll(stratInd.id))}
+                  result={arState?.strat ?? null}
+                  runVariant={runVariant}
+                  onCfg={(c) => setIndicators((list) => list.map((i) => (i.id === c.id ? c : i)))}
+                  onAdd={() =>
+                    setIndicators((list) =>
+                      list.some((i) => i.type === 'arstrat') ? list : [...list, makeIndicator('arstrat', list)],
+                    )
+                  }
+                  onShow={() =>
+                    setIndicators((list) => list.map((i) => (i.type === 'arstrat' ? { ...i, hidden: false } : i)))
+                  }
+                  onGoTo={goToBar}
+                  onFocusTrade={setArFocus}
+                  onClose={() => {
+                    setTesterOpen(false);
+                    save('tv:testerOpen', false);
+                  }}
+                />
+              ) : null}
               {paperOpen ? (
                 <PaperPanel
                   state={paper}
@@ -4754,6 +4901,12 @@ export function TvChart({
               <BottomBar
                 symbol={symbol}
                 paperOpen={paperOpen}
+                testerOpen={testerOpen}
+                onTester={() => {
+                  const next = !testerOpen;
+                  setTesterOpen(next);
+                  save('tv:testerOpen', next);
+                }}
                 onPaper={() => {
                   const next = !paperOpen;
                   setPaperOpen(next);
@@ -4797,16 +4950,7 @@ export function TvChart({
                 hoverIndex={hoverIdx != null && hoverIdx >= 0 && hoverIdx < bars.length ? hoverIdx : null}
                 times={wall as number[]}
                 onFocusTrade={setArFocus}
-                onGoTo={(index) => {
-                  const ts = chartRef.current?.timeScale();
-                  if (!ts) return;
-                  const r = ts.getVisibleLogicalRange();
-                  const half = r ? (r.to - r.from) / 2 : 60;
-                  ts.setVisibleLogicalRange({ from: index - half, to: index + half });
-                  // re-fit prices to the trade's candles, like the bottom bar's "auto"
-                  chartRef.current?.priceScale('right').applyOptions({ autoScale: true });
-                  setAutoScale(true);
-                }}
+                onGoTo={goToBar}
               />
             ) : null}
             <div className={compact ? 'contents' : 'flex min-h-0 shrink-0 flex-col'}>

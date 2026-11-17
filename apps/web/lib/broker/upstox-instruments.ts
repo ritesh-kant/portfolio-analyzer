@@ -12,6 +12,8 @@ interface MasterRow {
   name?: string;
   expiry?: number;
   lot_size?: number;
+  /** In paise: 10 = ₹0.10. */
+  tick_size?: number;
 }
 
 interface Master {
@@ -57,6 +59,8 @@ export interface FutureContract {
   key: string;
   expiry: number;
   lotSize: number;
+  /** Smallest price step in rupees. */
+  tickSize: number;
 }
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -76,6 +80,7 @@ export async function futureContracts(): Promise<FutureContract[]> {
       key: r.instrument_key,
       expiry: r.expiry,
       lotSize: r.lot_size ?? 0,
+      tickSize: (r.tick_size ?? 5) / 100,
     });
   }
   return out.sort((a, b) => a.expiry - b.expiry);

@@ -1,0 +1,176 @@
+{
+  "id": "20261112-163644_5m_decoder_vs_fib_5m_allday",
+  "created": "2026-11-12T16:36:44.321Z",
+  "symbol": "NQ=F",
+  "interval": "5m",
+  "window": {
+    "from": "2026-09-03 00:05",
+    "to": "2026-11-12 00:30",
+    "days": 59,
+    "candles": 13386,
+    "formingLast": false
+  },
+  "footprint": {
+    "candles": 5741,
+    "from": "2026-10-14 01:30",
+    "source": "estimated from 1m bars",
+    "rowStep": 5
+  },
+  "engine": "apps/web/lib/tv/ar-strategy.ts",
+  "costs": {
+    "instrument": "NQ",
+    "contracts": 1,
+    "commission": null,
+    "slipTicks": 1,
+    "roundTripPts": 0.725
+  },
+  "a": {
+    "settings": {
+      "swingMult": 2,
+      "valueRows": 30,
+      "envWindow": 24,
+      "windowStart": 0,
+      "windowEnd": 1439,
+      "flatAt": 1439,
+      "minRR": 1.5,
+      "entry": "pullback",
+      "entryWait": 3,
+      "confirmWithin": 6,
+      "stopBuffer": 0.1,
+      "requireOutsideValue": false,
+      "allowWarnings": true,
+      "requireStack": false,
+      "confirm": "candles",
+      "absorbVol": 1.5,
+      "flipShare": 0.1,
+      "zone": "fib"
+    },
+    "changed": {
+      "windowStart": 0,
+      "windowEnd": 1439,
+      "flatAt": 1439
+    },
+    "stats": {
+      "trades": 58,
+      "wins": 16,
+      "losses": 42,
+      "winRate": 0.27586206896551724,
+      "gross": -6352.540677698853,
+      "cost": 841,
+      "net": -7193.540677698853,
+      "avgNet": -124.02656340860091,
+      "medianNet": -457.16410654923675,
+      "avgR": -0.23420837338332484,
+      "medianR": -1.0217057921033637,
+      "profitFactor": 0.7240580976248706,
+      "avgWin": 1179.71875,
+      "avgLoss": -620.6914447071156,
+      "best": 2838,
+      "worst": -1831.7034250719298,
+      "maxDrawdown": 8728.293481113185,
+      "netWithoutTop3": -13695.040677698853,
+      "byOutcome": {
+        "stop": {
+          "n": 42,
+          "net": -26069.040677698853
+        },
+        "target": {
+          "n": 12,
+          "net": 15593.5
+        },
+        "time": {
+          "n": 4,
+          "net": 3282
+        }
+      },
+      "byDir": {
+        "long": {
+          "n": 31,
+          "net": -9647.570472540276,
+          "wins": 7
+        },
+        "short": {
+          "n": 27,
+          "net": 2454.0297948414227,
+          "wins": 9
+        }
+      }
+    },
+    "skips": 238
+  },
+  "b": {
+    "settings": {
+      "swingMult": 2,
+      "valueRows": 30,
+      "envWindow": 24,
+      "windowStart": 0,
+      "windowEnd": 1439,
+      "flatAt": 1439,
+      "minRR": 1.5,
+      "entry": "pullback",
+      "entryWait": 3,
+      "confirmWithin": 6,
+      "stopBuffer": 0.1,
+      "requireOutsideValue": false,
+      "allowWarnings": true,
+      "requireStack": false,
+      "confirm": "candles",
+      "absorbVol": 1.5,
+      "flipShare": 0.1,
+      "zone": "decoder"
+    },
+    "changed": {
+      "windowStart": 0,
+      "windowEnd": 1439,
+      "flatAt": 1439,
+      "zone": "decoder"
+    },
+    "stats": {
+      "trades": 59,
+      "wins": 11,
+      "losses": 48,
+      "winRate": 0.1864406779661017,
+      "gross": -12167.379134746661,
+      "cost": 855.5,
+      "net": -13022.879134746661,
+      "avgNet": -220.72676499570613,
+      "medianNet": -479.30475361517165,
+      "avgR": -0.3868579464152866,
+      "medianR": -1.0252035386619451,
+      "profitFactor": 0.5427501000536619,
+      "avgWin": 1405.2727272727273,
+      "avgLoss": -593.3516486405555,
+      "best": 2838,
+      "worst": -1831.7034250719298,
+      "maxDrawdown": 14434.17759829716,
+      "netWithoutTop3": -19264.37913474666,
+      "byOutcome": {
+        "stop": {
+          "n": 47,
+          "net": -28046.37913474666
+        },
+        "target": {
+          "n": 10,
+          "net": 15082.5
+        },
+        "time": {
+          "n": 2,
+          "net": -59
+        }
+      },
+      "byDir": {
+        "long": {
+          "n": 33,
+          "net": -13236.77692130515,
+          "wins": 4
+        },
+        "short": {
+          "n": 26,
+          "net": 213.89778655848932,
+          "wins": 7
+        }
+      }
+    },
+    "skips": 240
+  }
+}

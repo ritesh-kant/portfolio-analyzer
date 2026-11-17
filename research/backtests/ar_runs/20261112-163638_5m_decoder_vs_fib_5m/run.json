@@ -1,0 +1,153 @@
+{
+  "id": "20261112-163638_5m_decoder_vs_fib_5m",
+  "created": "2026-11-12T16:36:38.604Z",
+  "symbol": "NQ=F",
+  "interval": "5m",
+  "window": {
+    "from": "2026-09-03 00:05",
+    "to": "2026-11-12 00:30",
+    "days": 59,
+    "candles": 13386,
+    "formingLast": false
+  },
+  "footprint": {
+    "candles": 5741,
+    "from": "2026-10-14 01:30",
+    "source": "estimated from 1m bars",
+    "rowStep": 5
+  },
+  "engine": "apps/web/lib/tv/ar-strategy.ts",
+  "costs": {
+    "instrument": "NQ",
+    "contracts": 1,
+    "commission": null,
+    "slipTicks": 1,
+    "roundTripPts": 0.725
+  },
+  "a": {
+    "settings": {
+      "swingMult": 2,
+      "valueRows": 30,
+      "envWindow": 24,
+      "windowStart": 570,
+      "windowEnd": 660,
+      "flatAt": 960,
+      "minRR": 1.5,
+      "entry": "pullback",
+      "entryWait": 3,
+      "confirmWithin": 6,
+      "stopBuffer": 0.1,
+      "requireOutsideValue": false,
+      "allowWarnings": true,
+      "requireStack": false,
+      "confirm": "candles",
+      "absorbVol": 1.5,
+      "flipShare": 0.1,
+      "zone": "fib"
+    },
+    "changed": {},
+    "stats": {
+      "trades": 2,
+      "wins": 0,
+      "losses": 2,
+      "winRate": 0,
+      "gross": -1836.455123396663,
+      "cost": 29,
+      "net": -1865.455123396663,
+      "avgNet": -932.7275616983316,
+      "medianNet": -932.7275616983316,
+      "avgR": -1.016284549566043,
+      "medianR": -1.016284549566043,
+      "profitFactor": 0,
+      "avgWin": 0,
+      "avgLoss": -932.7275616983316,
+      "best": -772.9193428880099,
+      "worst": -1092.5357805086533,
+      "maxDrawdown": 1865.455123396663,
+      "netWithoutTop3": 0,
+      "byOutcome": {
+        "stop": {
+          "n": 2,
+          "net": -1865.455123396663
+        }
+      },
+      "byDir": {
+        "long": {
+          "n": 1,
+          "net": -1092.5357805086533,
+          "wins": 0
+        },
+        "short": {
+          "n": 1,
+          "net": -772.9193428880099,
+          "wins": 0
+        }
+      }
+    },
+    "skips": 301
+  },
+  "b": {
+    "settings": {
+      "swingMult": 2,
+      "valueRows": 30,
+      "envWindow": 24,
+      "windowStart": 570,
+      "windowEnd": 660,
+      "flatAt": 960,
+      "minRR": 1.5,
+      "entry": "pullback",
+      "entryWait": 3,
+      "confirmWithin": 6,
+      "stopBuffer": 0.1,
+      "requireOutsideValue": false,
+      "allowWarnings": true,
+      "requireStack": false,
+      "confirm": "candles",
+      "absorbVol": 1.5,
+      "flipShare": 0.1,
+      "zone": "decoder"
+    },
+    "changed": {
+      "zone": "decoder"
+    },
+    "stats": {
+      "trades": 2,
+      "wins": 0,
+      "losses": 2,
+      "winRate": 0,
+      "gross": -1615.7150550846563,
+      "cost": 29,
+      "net": -1644.7150550846563,
+      "avgNet": -822.3575275423282,
+      "medianNet": -822.3575275423282,
+      "avgR": -1.0202090689810315,
+      "medianR": -1.0202090689810315,
+      "profitFactor": 0,
+      "avgWin": 0,
+      "avgLoss": -822.3575275423282,
+      "best": -552.1792745760031,
+      "worst": -1092.5357805086533,
+      "maxDrawdown": 1644.7150550846563,
+      "netWithoutTop3": 0,
+      "byOutcome": {
+        "stop": {
+          "n": 2,
+          "net": -1644.7150550846563
+        }
+      },
+      "byDir": {
+        "long": {
+          "n": 1,
+          "net": -1092.5357805086533,
+          "wins": 0
+        },
+        "short": {
+          "n": 1,
+          "net": -552.1792745760031,
+          "wins": 0
+        }
+      }
+    },
+    "skips": 303
+  }
+}

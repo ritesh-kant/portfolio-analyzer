@@ -120,3 +120,11 @@ test('NSE clock and chip states', async () => {
   assert.equal(chipState({ fresh: false, running: false, clock: thu }), 'idle');
   assert.equal(chipState({ fresh: false, running: false, clock: sat }), 'closed');
 });
+
+test('NSE futures and NSE stocks can be recorded; other markets cannot', async () => {
+  const { isTickRecordable } = await import('./tick-recorder.ts');
+  for (const s of ['NIFTY1!.NFO', 'NIFTY26NOVFUT.NFO', 'NIFTY1!', 'TCS.NS', 'tcs.ns', 'M&M.NS']) {
+    assert.equal(isTickRecordable(s), true, s);
+  }
+  for (const s of ['NQ=F', 'AAPL', 'TCS.BO', '^NSEI', 'TCS.NSX', '']) assert.equal(isTickRecordable(s), false, s);
+});

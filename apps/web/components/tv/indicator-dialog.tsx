@@ -9,6 +9,8 @@ import {
   isArType,
   PALETTE,
   catalogOf,
+  dpdOf,
+  type DpdSettings,
   indicatorLabel,
   VOL_DOWN_DEFAULT,
   VOL_MA_DEFAULT,
@@ -196,10 +198,12 @@ export const NumberField = ({
   value,
   onChange,
   min = 1,
+  step,
 }: {
   label: string;
   value: number;
   min?: number;
+  step?: number;
   onChange: (n: number) => void;
 }) => (
   <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
@@ -207,6 +211,7 @@ export const NumberField = ({
     <input
       type="number"
       min={min}
+      step={step}
       value={value}
       onChange={(e) => {
         const n = Number(e.target.value);
@@ -461,8 +466,16 @@ function ArFields({
             min={8}
             onChange={(length) => onChange({ ...cfg, length: Math.min(200, length) })}
           />
+          <Check
+            label="Also draw the decoder box on this leg"
+            checked={cfg.arDecoder === true}
+            onChange={(on) => onChange({ ...cfg, arDecoder: on })}
+          />
+          {note('The Dark Pool Decoder indicator draws the box on every recent leg, with its own levels and history.')}
         </>
       );
+    case 'ardpd':
+      return <DpdFields cfg={cfg} onChange={onChange} />;
     case 'arstruct':
       return (
         <>
@@ -525,6 +538,51 @@ const fromHhmm = (s: string) => {
   return m ? Math.min(1439, Number(m[1]) * 60 + Number(m[2])) : null;
 };
 
+/** Dark Pool Decoder settings: swing size, boxes kept, the three levels and which legs. */
+function DpdFields({ cfg, onChange }: { cfg: IndicatorCfg; onChange: (c: IndicatorCfg) => void }) {
+  const v = dpdOf(cfg);
+  const set = (p: Partial<DpdSettings>) => onChange({ ...cfg, dpd: { ...cfg.dpd, ...p } });
+  const lvl = (n: number) => Math.min(1.5, Math.max(0, Math.round(n * 1000) / 1000));
+  const sel = 'w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]';
+  return (
+    <>
+      <div className="py-1.5 text-[12px] leading-snug text-[#787b86]">
+        A stand-in for his private tool. He drags it from one swing to the next like a Fib; this draws it on every
+        recent swing leg instead. The levels are measured back from the leg&apos;s end, like Fib levels: the near
+        edge, the &quot;DLP&quot; line where his shading changes, and the far edge. The defaults are what his drags
+        show at 1:27, 1:34 and 1:42 in the video; one drag at 1:42 drew 0.55 / 0.70 / 0.78 instead, for a reason the
+        video does not show. It uses no dark-pool data: futures have none, and neither does his box.
+      </div>
+      <NumberField
+        label="Swing size (× ATR 14)"
+        value={cfg.mult ?? 2}
+        min={0.5}
+        step={0.5}
+        onChange={(mult) => onChange({ ...cfg, mult: Math.min(10, mult) })}
+      />
+      <NumberField
+        label="Boxes kept (latest legs)"
+        value={cfg.length || 3}
+        min={1}
+        onChange={(length) => onChange({ ...cfg, length: Math.min(20, Math.round(length)) })}
+      />
+      <NumberField label="Near edge" value={v.near} min={0} step={0.01} onChange={(n) => set({ near: lvl(n) })} />
+      <NumberField label="DLP line" value={v.mid} min={0} step={0.01} onChange={(n) => set({ mid: lvl(n) })} />
+      <NumberField label="Far edge (a close past it breaks the box)" value={v.far} min={0} step={0.01} onChange={(n) => set({ far: lvl(n) })} />
+      <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+        Legs
+        <select value={v.side} onChange={(e) => set({ side: e.target.value as DpdSettings['side'] })} className={sel}>
+          <option value="both">Every leg</option>
+          <option value="trend">Only with the 1h trend (his rule)</option>
+          <option value="up">Up legs only (long boxes)</option>
+          <option value="down">Down legs only (short boxes)</option>
+        </select>
+      </label>
+      <Check label="Keep boxes that held or broke (faded)" checked={v.showDone} onChange={(on) => set({ showDone: on })} />
+    </>
+  );
+}
+
 /** The AR strategy's rules, editable, in plain words. */
 export function ArStrategyFields({
   cfg,
@@ -557,7 +615,7 @@ export function ArStrategyFields({
     <>
       <div className="mb-2 text-[12px] leading-snug text-[#787b86]">
         Each candle is checked against his four steps (environment, location, path, confirmation). Confirmation is
-        estimated from candles. Times are {market.clock} time
+        estimated from candles, or read from the footprint. Times are {market.clock} time
         {market.key === 'nse' ? ' (NSE: his New York window becomes the first 90 minutes after 09:15)' : ''}. Results
         are in points before costs.
       </div>
@@ -568,13 +626,80 @@ export function ArStrategyFields({
           onChange={(e) => set({ entry: e.target.value as ArStrategyCfg['entry'] })}
           className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
         >
-          <option value="pullback">Pull-back to mid-candle (his)</option>
+          <option value="pullback">Pull-back to mid-candle</option>
+          <option value="lvn">Pull-back to the candle&apos;s LVN (his)</option>
           <option value="close">At the confirmation close</option>
         </select>
       </label>
-      {v.entry === 'pullback' ? (
+      {v.entry !== 'close' ? (
         <NumberField label="Order waits (candles)" value={v.entryWait} min={1} onChange={(n) => set({ entryWait: Math.min(20, n) })} />
       ) : null}
+      <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+        Confirmation
+        <select
+          value={v.confirm}
+          onChange={(e) => set({ confirm: e.target.value as ArStrategyCfg['confirm'] })}
+          className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+        >
+          <option value="candles">Candles (close beyond the extreme candle)</option>
+          <option value="orderflow">Order flow: absorption, then delta flip</option>
+        </select>
+      </label>
+      {v.confirm === 'orderflow' ? (
+        <>
+          <NumberField
+            label="Absorption volume (× usual)"
+            value={v.absorbVol}
+            min={0}
+            onChange={(n) => set({ absorbVol: Math.min(10, n) })}
+          />
+          <NumberField
+            label="Delta flip (% of volume)"
+            value={Math.round(v.flipShare * 100)}
+            min={0}
+            onChange={(n) => set({ flipShare: Math.min(100, n) / 100 })}
+          />
+          <div className="pb-1 text-[11px] leading-snug text-[#787b86]">
+            Reads the footprint: real volume only where ticks were recorded (NSE futures and stocks, blue box); elsewhere it is
+            estimated from 1-minute bars, where the delta mostly repeats the candle&apos;s colour.
+          </div>
+        </>
+      ) : null}
+      <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+        Zone
+        <select
+          value={v.zone}
+          onChange={(e) => set({ zone: e.target.value as ArStrategyCfg['zone'] })}
+          className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+        >
+          <option value="fib">0.705–0.886 (his rule)</option>
+          <option value="decoder">Decoder box 0.62–0.81 (fitted)</option>
+        </select>
+      </label>
+      {v.zone === 'decoder' ? (
+        <div className="pb-1 text-[11px] leading-snug text-[#787b86]">
+          A stand-in for his private &quot;dark pool decoder&quot;: fitted to boxes measured off his screen, not his
+          formula. Two of his three filmed drags measure 0.61–0.62 / 0.75 / 0.81; one measures 0.55 / 0.70 / 0.78.
+          A close past 0.81 cancels it.
+        </div>
+      ) : null}
+      <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+        Gamma
+        <select
+          value={v.gamma}
+          onChange={(e) => set({ gamma: e.target.value as ArStrategyCfg['gamma'] })}
+          className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+        >
+          <option value="off">Label trades only</option>
+          <option value="targets">Positive gamma: take profit at the first level</option>
+        </select>
+      </label>
+      <div className="pb-1 text-[11px] leading-snug text-[#787b86]">
+        Uses recorded gamma snapshots (<code>pnpm bt:gex</code>, QQQ options scaled to NQ): each candle sees the newest
+        one read before it closed. Above the gamma flip is positive gamma, where he takes profit quickly; this moves the
+        target to the first flip or wall before the leg&apos;s end (our rule). Recording started 2026-11-14, so older
+        candles have no regime.
+      </div>
       {time('Trade window from', v.windowStart, 'windowStart')}
       {time('Trade window to', v.windowEnd, 'windowEnd')}
       {time('Flat by', v.flatAt, 'flatAt')}
@@ -685,7 +810,7 @@ export function IndicatorSettings({ cfg, onChange, onClose, timeZone }: Settings
               <NumberField
                 label="Background strength (%)"
                 min={0}
-                value={cfg.gexZoneOpacity ?? 50}
+                value={cfg.gexZoneOpacity ?? 100}
                 onChange={(n) => onChange({ ...cfg, gexZoneOpacity: Math.min(200, n) })}
               />
             ) : null}

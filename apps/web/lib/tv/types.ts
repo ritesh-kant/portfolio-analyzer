@@ -20,6 +20,9 @@ export interface SymbolMeta {
   prevClose: number | null;
   /** Last regular-market price, for the header when bars are stale. */
   price: number | null;
+  /** NSE futures: units in one lot, and the smallest price step in rupees (Upstox instrument master). */
+  lotSize?: number;
+  tickSize?: number;
 }
 
 export interface BarsResponse {

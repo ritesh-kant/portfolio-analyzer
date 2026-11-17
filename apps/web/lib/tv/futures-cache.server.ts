@@ -10,6 +10,9 @@ export const REPO_ROOT = path.resolve(process.cwd(), '../..');
 export const FUTURES_CACHE =
   process.env.FUTURES_CACHE_DIR ?? path.join(REPO_ROOT, 'research/backtests/.cache_yahoo_futures');
 export const RECORDER_SCRIPT = path.join(REPO_ROOT, 'research/backtests/yahoo_futures_history.py');
+/** Recorded gamma snapshots (`pnpm bt:gex`, research/backtests/gex_snapshot.mjs): one `<SYMBOL>.jsonl` each. */
+export const GAMMA_SNAPSHOTS =
+  process.env.GAMMA_SNAPSHOTS_DIR ?? path.join(REPO_ROOT, 'research/backtests/gamma_snapshots');
 
 export async function readManifest(dir: string): Promise<CacheManifest | null> {
   try {

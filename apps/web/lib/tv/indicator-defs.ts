@@ -24,7 +24,8 @@ export type IndicatorType =
   | 'arstruct'
   | 'arenv'
   | 'arstrat'
-  | 'arstack';
+  | 'arstack'
+  | 'ardpd';
 
 export interface IndicatorCfg {
   id: string;
@@ -64,7 +65,7 @@ export interface IndicatorCfg {
   gexProfile?: boolean;
   /** Gamma levels: tint the pane green above the gamma flip (HVL) and red below it (absent = on). */
   gexZones?: boolean;
-  /** Gamma levels: background strength, % of the default tint (absent = 50). */
+  /** Gamma levels: background strength, % of the default tint (absent = 100). */
   gexZoneOpacity?: number;
   /** Gamma levels: the read-out panel at the chart's top right (absent = on). */
   gexPanel?: boolean;
@@ -72,6 +73,10 @@ export interface IndicatorCfg {
   gexStyle?: GexStyle;
   /** Stacked imbalances: also draw zones price has already traded through (absent = off). */
   stackUsed?: boolean;
+  /** Range Fib Zone: also draw the decoder box on its leg (absent = off; the Dark Pool Decoder indicator draws it). */
+  arDecoder?: boolean;
+  /** Dark Pool Decoder: levels and which legs (absent = `DPD_DEFAULTS`). Boxes kept = `length`, swing size = `mult`. */
+  dpd?: Partial<DpdSettings>;
   /** AR strategy: overrides of `AR_STRATEGY_DEFAULTS`. */
   arStrat?: Partial<ArStrategyCfg>;
   /** Bollinger std-dev multiplier. */
@@ -82,6 +87,21 @@ export interface IndicatorCfg {
   /** Own-pane indicators: pane shrunk to its legend row. */
   collapsed?: boolean;
 }
+
+export interface DpdSettings {
+  /** Retracement of the leg, measured back from its end, for the near edge, the "DLP" line and the far edge. */
+  near: number;
+  mid: number;
+  far: number;
+  /** both: every leg. trend: only legs in the 1-hour trend's direction, as he uses it. up / down: longs / shorts only. */
+  side: 'both' | 'trend' | 'up' | 'down';
+  /** Keep boxes that are already decided (held / broken), faded. */
+  showDone: boolean;
+}
+
+/** The levels read off his screen (median of the drags he shows; research/specs/orderflow-course-ar-model.md §2a′). */
+export const DPD_DEFAULTS: DpdSettings = { near: 0.62, mid: 0.75, far: 0.81, side: 'both', showDone: true };
+export const dpdOf = (cfg: IndicatorCfg): DpdSettings => ({ ...DPD_DEFAULTS, ...cfg.dpd });
 
 export interface CatalogEntry {
   type: IndicatorType;
@@ -244,10 +264,20 @@ export const CATALOG: CatalogEntry[] = [
     defaults: { type: 'arstack', length: 3, mult: 3 },
     group: 'AR Model',
   },
+  {
+    type: 'ardpd',
+    name: 'Dark Pool Decoder (fitted)',
+    description:
+      'His decoder box on each swing leg: near edge, "DLP" line and far edge at 0.62 / 0.75 / 0.81 back from the swing, until price holds it or closes through',
+    where: 'overlay',
+    // length = boxes kept, mult = swing size in ATRs
+    defaults: { type: 'ardpd', length: 3, mult: 2 },
+    group: 'AR Model',
+  },
 ];
 
 /** The "AR Model" template: everything the course uses that can be drawn from candles alone. */
-export const AR_TEMPLATE: IndicatorType[] = ['arsess', 'avr', 'arfib', 'arstruct', 'arenv', 'arstack', 'arstrat'];
+export const AR_TEMPLATE: IndicatorType[] = ['arsess', 'avr', 'arfib', 'ardpd', 'arstruct', 'arenv', 'arstack', 'arstrat'];
 export const isArType = (t: IndicatorType) => AR_TEMPLATE.includes(t);
 
 export const catalogOf = (type: IndicatorType): CatalogEntry =>
@@ -336,6 +366,8 @@ export function indicatorLabel(i: IndicatorCfg): string {
       return 'AR Strategy';
     case 'arstack':
       return `Stacked Imbalances ${i.length || 3}×${Math.round((i.mult ?? 3) * 100)}%`;
+    case 'ardpd':
+      return `Dark Pool Decoder ${i.mult ?? 2}×ATR`;
   }
 }
 

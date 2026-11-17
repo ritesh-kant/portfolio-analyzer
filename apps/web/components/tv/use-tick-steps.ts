@@ -7,14 +7,12 @@ import {
   type PackedStep,
   type TickSeries,
 } from '../../lib/tv/tick-footprint';
-
-/** NSE futures chart symbols: NIFTY1!.NFO, NIFTY26NOVFUT.NFO, NIFTY1!. */
-export const isNseFuture = (symbol: string) => /\.NFO$/i.test(symbol) || /1!$/.test(symbol);
+import { isTickRecordable } from '../../lib/tv/tick-recorder';
 
 const EMPTY: TickSeries = volumeSteps([]);
 
 /**
- * Volume per feed update recorded by capture_ticks.py for an NSE future (see lib/tv/tick-footprint.ts), refreshed
+ * Volume per feed update recorded by capture_ticks.py for an NSE future or stock (see lib/tv/tick-footprint.ts), refreshed
  * every 5 s while `live`. Empty for every other symbol, or when nothing was recorded.
  */
 export function useTickSteps(symbol: string, enabled: boolean, live: boolean) {
@@ -23,7 +21,7 @@ export function useTickSteps(symbol: string, enabled: boolean, live: boolean) {
     series: EMPTY,
     days: [],
   });
-  const wanted = enabled && isNseFuture(symbol);
+  const wanted = enabled && isTickRecordable(symbol);
   useEffect(() => {
     if (!wanted) return;
     let dead = false;

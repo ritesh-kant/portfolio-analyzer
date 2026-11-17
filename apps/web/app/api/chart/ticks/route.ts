@@ -10,7 +10,7 @@ import { packSteps, volumeSteps, type PackedStep } from '../../../../lib/tv/tick
  * `apps/signal-engine/scripts/capture_ticks.py` writes (`data/ticks/<IST day>/<key>.jsonl`).
  *
  * `?view=steps` returns the volume between consecutive feed updates instead (lib/tv/tick-footprint.ts), which the
- * footprint uses for NSE futures.
+ * footprint uses for NSE futures and stocks.
  *
  * Local only: it reads the repo's disk, so it returns nothing on Vercel. Putting the tape in Mongo behind
  * portfolio-service is the production step. See research/big-trades-bubbles-plan.md.

@@ -8,7 +8,7 @@ import type {
   SeriesType,
   Time,
 } from 'lightweight-charts';
-import type { AvrDay, Pivot, RangeFib, SessionBox, StructureLabel } from '../../lib/tv/ar';
+import type { AvrDay, DecoderZone, Pivot, RangeFib, SessionBox, StructureLabel } from '../../lib/tv/ar';
 import type { ArSkip, ArTrade } from '../../lib/tv/ar-strategy';
 import type { StackZone } from '../../lib/tv/stacked-imbalance';
 import { logicalX } from './coords';
@@ -18,6 +18,10 @@ export interface ArDrawState {
   sessions: SessionBox[];
   avr: AvrDay[];
   fib: RangeFib | null;
+  /** Draw the fib's "dark pool decoder" stand-in box. */
+  decoder: boolean;
+  /** Dark Pool Decoder indicator: a box per recent swing leg, oldest first. */
+  decoders: DecoderZone[];
   /** Index of the last candle (zone lines run to it, then on to the right edge). */
   lastIndex: number;
   swings: { pivot: Pivot; label: StructureLabel | null }[];
@@ -36,6 +40,8 @@ const EMPTY: ArDrawState = {
   sessions: [],
   avr: [],
   fib: null,
+  decoder: false,
+  decoders: [],
   lastIndex: 0,
   swings: [],
   trades: [],
@@ -66,6 +72,14 @@ const AVR_STYLE: Record<string, { fill: string; line: string }> = {
 
 const ZONE_FILL = 'rgba(255, 152, 0, 0.18)';
 const ZONE_DIM = 'rgba(120, 123, 134, 0.12)';
+/**
+ * The decoder stand-in box in his colours (read off his 1080p frames): a solid dark magenta band on the near side,
+ * a bright magenta band on the far side, thin dark lines between. Faded once the idea is cancelled or used.
+ */
+const DECODER = {
+  live: { near: 'rgba(150, 40, 140, 0.6)', far: 'rgba(200, 30, 180, 0.65)', edge: 'rgba(70, 12, 66, 0.95)', text: '#ffd6f7' },
+  done: { near: 'rgba(150, 40, 140, 0.16)', far: 'rgba(200, 30, 180, 0.2)', edge: 'rgba(150, 40, 140, 0.35)', text: 'rgba(255, 214, 247, 0.45)' },
+};
 const FIB_LINE = 'rgba(255, 213, 79, 0.75)';
 const PREMIUM = 'rgba(242, 54, 69, 0.06)';
 const DISCOUNT = 'rgba(8, 153, 129, 0.06)';
@@ -73,6 +87,15 @@ const STACK_STYLE = {
   buy: { fill: 'rgba(38, 166, 154, 0.22)', used: 'rgba(38, 166, 154, 0.08)', edge: 'rgba(38, 166, 154, 0.85)', text: '#4db6ac' },
   sell: { fill: 'rgba(239, 83, 80, 0.22)', used: 'rgba(239, 83, 80, 0.08)', edge: 'rgba(239, 83, 80, 0.85)', text: '#ef9a9a' },
 };
+/** A placed label's pixel box. */
+interface LabelBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+const LABEL_H = 12;
+
 const LABEL_FONT = '10px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
 
 /**
@@ -84,6 +107,9 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
   private series: ISeriesApi<SeriesType, Time> | null = null;
   private requestUpdate: (() => void) | null = null;
   private state: ArDrawState = EMPTY;
+  /** Labels of the current front paint: queued by `label`, laid out by `flushLabels`. */
+  private queued: { text: string; x: number; y: number; color: string; above: boolean; prio: number }[] = [];
+  private placed: LabelBox[] = [];
 
   private back: IPrimitivePaneView = {
     zOrder: () => 'bottom',
@@ -166,13 +192,76 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
     ctx.setLineDash([]);
   }
 
-  private label(ctx: CanvasRenderingContext2D, text: string, x: number, price: number, color: string, above = true) {
+  /**
+   * Queue a label on a price line; `flushLabels` places them so they do not overlap each other or the swing
+   * labels. Higher `prio` is placed first and keeps its natural spot; a low-priority label (0) that finds no free
+   * spot is dropped rather than drawn on top of another.
+   */
+  private label(
+    text: string,
+    x: number,
+    price: number,
+    color: string,
+    above = true,
+    prio = 1,
+  ) {
+    const y = this.y(price);
+    if (y == null) return;
+    this.queued.push({ text, x: x + 3, y, color, above, prio });
+  }
+
+  /** Draw a label straight away (back pane; not part of the overlap layout). */
+  private labelNow(ctx: CanvasRenderingContext2D, text: string, x: number, price: number, color: string, above = true) {
     const y = this.y(price);
     if (y == null) return;
     ctx.font = LABEL_FONT;
     ctx.fillStyle = color;
     ctx.textBaseline = above ? 'bottom' : 'top';
     ctx.fillText(text, x + 3, above ? y - 1 : y + 1);
+  }
+
+  private free(b: LabelBox): boolean {
+    return !this.placed.some((p) => b.x0 < p.x1 && b.x1 > p.x0 && b.y0 < p.y1 && b.y1 > p.y0);
+  }
+
+  private flushLabels(ctx: CanvasRenderingContext2D, w: number) {
+    ctx.font = LABEL_FONT;
+    ctx.textAlign = 'start';
+    const queue = this.queued
+      .map((l, k) => ({ l, k }))
+      .sort((a, b) => b.l.prio - a.l.prio || a.k - b.k)
+      .map(({ l }) => l);
+    for (const l of queue) {
+      const tw = ctx.measureText(l.text).width;
+      // a label that starts near the right edge would be cut off by the price axis: pull it back into the pane
+      l.x = Math.max(0, Math.min(l.x, w - tw - 4));
+      const boxAt = (x: number, above: boolean): LabelBox =>
+        above
+          ? { x0: x - 1, y0: l.y - 1 - LABEL_H, x1: x + tw + 1, y1: l.y - 1 }
+          : { x0: x - 1, y0: l.y + 1, x1: x + tw + 1, y1: l.y + 1 + LABEL_H };
+      // stay on the label's own line: its usual side, then the other side, then slide along the line
+      let spot: { x: number; above: boolean } | null = null;
+      for (const dx of [0, tw + 12, -(tw + 12), 2 * (tw + 12), -2 * (tw + 12)]) {
+        const x = l.x + dx;
+        if (dx !== 0 && (x < 0 || x + tw > w - 2)) continue;
+        for (const above of [l.above, !l.above]) {
+          if (this.free(boxAt(x, above))) {
+            spot = { x, above };
+            break;
+          }
+        }
+        if (spot) break;
+      }
+      if (!spot) {
+        if (l.prio <= 0) continue;
+        spot = { x: l.x, above: l.above };
+      }
+      this.placed.push(boxAt(spot.x, spot.above));
+      ctx.fillStyle = l.color;
+      ctx.textBaseline = spot.above ? 'bottom' : 'top';
+      ctx.fillText(l.text, spot.x, spot.above ? l.y - 1 : l.y + 1);
+    }
+    this.queued = [];
   }
 
   private paintBack(ctx: CanvasRenderingContext2D, w: number) {
@@ -191,6 +280,16 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
         if (fill && l.hi > l.lo) this.band(ctx, x, l.lo, l.hi, fill);
       }
     }
+    for (const z of s.decoders) {
+      // his look: a darker band from the near edge to the DLP line, a brighter one on to the far edge
+      const open = z.endAt == null;
+      const x = this.span(z.to.index, z.endAt ?? s.lastIndex, w, open);
+      if (!x) continue;
+      const c = open ? DECODER.live : DECODER.done;
+      const d = z.box;
+      this.band(ctx, x, Math.min(d.near, d.mid), Math.max(d.near, d.mid), c.near);
+      this.band(ctx, x, Math.min(d.mid, d.far), Math.max(d.mid, d.far), c.far);
+    }
     const f = s.fib;
     if (f) {
       const x = this.span(f.from.index, s.lastIndex, w, true);
@@ -205,6 +304,13 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
         const live = f.status !== 'invalidated' && f.status !== 'extended';
         const zx = this.span(f.to.index, s.lastIndex, w, true);
         if (zx) this.band(ctx, zx, f.zoneBottom, f.zoneTop, live ? ZONE_FILL : ZONE_DIM);
+        if (zx && s.decoder) {
+          // his look: a darker band from the near edge to the middle level, a brighter one on to the far edge
+          const d = f.decoder;
+          const c = live ? DECODER.live : DECODER.done;
+          this.band(ctx, zx, Math.min(d.near, d.mid), Math.max(d.near, d.mid), c.near);
+          this.band(ctx, zx, Math.min(d.mid, d.far), Math.max(d.mid, d.far), c.far);
+        }
       }
     }
   }
@@ -224,7 +330,7 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
       this.hline(ctx, x, z.side === 'buy' ? z.hi : z.lo, st.edge);
       const lx = this.x(z.index);
       if (lx != null && lx > -40 && lx < w) {
-        this.label(ctx, `${z.side === 'buy' ? '▲' : '▼'} ${z.rows} stacked`, lx, z.side === 'buy' ? z.lo : z.hi, st.text, z.side !== 'buy');
+        this.labelNow(ctx, `${z.side === 'buy' ? '▲' : '▼'} ${z.rows} stacked`, lx, z.side === 'buy' ? z.lo : z.hi, st.text, z.side !== 'buy');
       }
     }
   }
@@ -268,6 +374,17 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
         ctx.textBaseline = long ? 'top' : 'bottom';
         ctx.fillText(`AR ${t.dir}`, ex, long ? base + 2 : base - 2);
       }
+      // order-flow trades: the absorption candle's extreme, in orange
+      if (t.flow) {
+        const ax = this.x(t.flow.absorbIndex);
+        const ay = this.y(t.flow.absorbPrice);
+        if (ax != null && ay != null && ax > -10 && ax < w + 10) {
+          ctx.fillStyle = '#ffa726';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = long ? 'top' : 'bottom';
+          ctx.fillText(t.flow.source === 'ticks' ? 'absorbed' : 'absorbed (est.)', ax, long ? ay + 4 : ay - 4);
+        }
+      }
       // exit: a dot coloured by the result, with R
       if (t.exitIndex != null && t.exit != null) {
         const xx = this.x(t.exitIndex);
@@ -300,13 +417,15 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
   private paintFront(ctx: CanvasRenderingContext2D, w: number) {
     const s = this.state;
     const fmt = (p: number) => p.toFixed(s.decimals);
+    this.queued = [];
+    this.placed = [];
     for (const box of s.sessions) {
       const x = this.span(box.from, box.to, w);
       if (!x) continue;
       const st = SESSION_STYLE[box.key];
       this.hline(ctx, x, box.high, st.edge);
       this.hline(ctx, x, box.low, st.edge);
-      this.label(ctx, box.label, x[0], box.high, st.text);
+      this.label(box.label, x[0], box.high, st.text, true, 0);
     }
     for (const day of s.avr) {
       const x = this.span(day.from, day.to, w);
@@ -316,8 +435,8 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
       this.hline(ctx, x, day.eq, 'rgba(209, 212, 220, 0.5)', [4, 3]);
       this.hline(ctx, x, day.q1, 'rgba(242, 54, 69, 0.35)', [2, 3]);
       this.hline(ctx, x, day.q3, 'rgba(242, 54, 69, 0.35)', [2, 3]);
-      this.label(ctx, 'Asia H', x[0], day.asia.high, '#fff176');
-      this.label(ctx, 'Asia L', x[0], day.asia.low, '#fff176', false);
+      this.label('Asia H', x[0], day.asia.high, '#fff176', true, 1);
+      this.label('Asia L', x[0], day.asia.low, '#fff176', false);
       for (const l of day.levels) {
         const st = AVR_STYLE[l.key]!;
         const mid = (l.lo + l.hi) / 2;
@@ -325,8 +444,19 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
           this.hline(ctx, x, l.hi, st.line);
           this.hline(ctx, x, l.lo, st.line);
         } else this.hline(ctx, x, mid, st.line, [5, 4]);
-        this.label(ctx, l.label, x[0], l.side === 'up' ? l.hi : l.lo, st.line, l.side === 'up');
+        this.label(l.label, x[0], l.side === 'up' ? l.hi : l.lo, st.line, l.side === 'up');
       }
+    }
+    for (const z of s.decoders) {
+      const open = z.endAt == null;
+      const x = this.span(z.to.index, z.endAt ?? s.lastIndex, w, open);
+      if (!x) continue;
+      const c = open ? DECODER.live : DECODER.done;
+      const d = z.box;
+      for (const price of [d.near, d.mid, d.far]) this.hline(ctx, x, price, c.edge);
+      // his label sits on the line where the shading changes; ours adds the box's state
+      const text = open ? (z.status === 'in box' ? 'DLP · in box' : 'DLP') : `DLP · ${z.status}`;
+      this.label(text, x[0] + (x[1] - x[0]) * (open ? 0.5 : 0.1), d.mid, c.text, z.dir === 'down', open ? 3 : 1);
     }
     const f = s.fib;
     if (f) {
@@ -339,27 +469,34 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
           const zone = level >= 0.705 && level <= 0.886;
           const color = level === 1.1 ? dim('rgba(242, 54, 69, 0.8)') : dim(zone ? '#ffb74d' : FIB_LINE);
           this.hline(ctx, x, price, color, zone || level === 1.1 ? [] : [4, 3]);
-          this.label(ctx, `${level} (${fmt(price)})`, Math.max(x[0], x[1] - 120), price, color, f.dir === 'down');
+          this.label(`${level} (${fmt(price)})`, Math.max(x[0], x[1] - 120), price, color, f.dir === 'down', 2);
         }
         // the leg itself, and its end as the target ("DOL": draw on liquidity)
         this.hline(ctx, legX, f.to.price, dim('rgba(41, 98, 255, 0.9)'));
         this.hline(ctx, legX, f.from.price, 'rgba(41, 98, 255, 0.45)', [2, 3]);
-        this.label(ctx, `DOL · target ${fmt(f.target)}`, Math.max(legX[0], x[1] - 150), f.to.price, dim('#82b1ff'), f.dir === 'up');
+        this.label(`DOL · target ${fmt(f.target)}`, Math.max(legX[0], x[1] - 150), f.to.price, dim('#82b1ff'), f.dir === 'up', 3);
         if (f.vah != null && f.val != null && f.poc != null) {
           this.hline(ctx, legX, f.vah, 'rgba(242, 54, 69, 0.45)', [6, 4]);
           this.hline(ctx, legX, f.val, 'rgba(8, 153, 129, 0.55)', [6, 4]);
           this.hline(ctx, legX, f.poc, 'rgba(209, 212, 220, 0.4)', [1, 3]);
-          this.label(ctx, 'VAH · premium above', legX[0], f.vah, 'rgba(242, 54, 69, 0.8)');
-          this.label(ctx, 'VAL · discount below', legX[0], f.val, 'rgba(8, 153, 129, 0.9)', false);
+          this.label('VAH · premium above', legX[0], f.vah, 'rgba(242, 54, 69, 0.8)', true, 2);
+          this.label('VAL · discount below', legX[0], f.val, 'rgba(8, 153, 129, 0.9)', false, 2);
+        }
+        if (s.decoder) {
+          // his look: no level labels, thin dark lines at the three levels, a name in the bright band
+          const d = f.decoder;
+          const c = live ? DECODER.live : DECODER.done;
+          for (const price of [d.near, d.mid, d.far]) this.hline(ctx, x, price, c.edge);
+          this.label('DECODER (fitted)', x[0] + (x[1] - x[0]) * 0.25, d.mid, c.text, f.dir === 'down', 3);
         }
         const zoneEdge = f.dir === 'up' ? f.zoneTop : f.zoneBottom;
         this.label(
-          ctx,
           `${f.dir === 'up' ? 'Discount' : 'Premium'} zone · ${f.status}`,
           x[0],
           zoneEdge,
           live ? '#ffb74d' : '#787b86',
           f.dir === 'down',
+          3,
         );
       }
     }
@@ -376,7 +513,11 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
       ctx.fillStyle = label ? (up ? '#26a69a' : '#ef5350') : '#9598a1';
       ctx.textBaseline = high ? 'bottom' : 'top';
       ctx.fillText(text, px, high ? py - 4 : py + 4);
+      // swing labels sit on their candle: reserve the spot so the line labels move out of the way
+      const tw = ctx.measureText(text).width;
+      this.placed.push({ x0: px - tw / 2 - 2, x1: px + tw / 2 + 2, y0: high ? py - 4 - LABEL_H : py + 4, y1: high ? py - 4 : py + 4 + LABEL_H });
     }
     ctx.textAlign = 'start';
+    this.flushLabels(ctx, w);
   }
 }
