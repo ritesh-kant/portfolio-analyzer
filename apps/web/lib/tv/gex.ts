@@ -373,34 +373,40 @@ export interface GexLineDef {
   title: string;
   color: string;
   style: GexLineStyle;
+  /** Line width in px (absent = 1). The main levels are drawn heavier. */
+  width?: number;
   on: boolean;
   /** The price of this level in a response (null = not available). */
   price: (all: GexLevels, nearest: GexLevels | undefined) => number | null | undefined;
 }
 
-const CR = '#f4511e';
-const PS = '#43a047';
-const HVL = '#448aff';
+// Calls green, puts red, HVL cyan: the Tanuki/MenthorQ chart look.
+export const CR = '#22c55e';
+export const PS = '#f23645';
+export const HVL = '#22d3ee';
 const RANGE = '#ff9800';
-const GEX_N = '#26c6da';
+// Violet, so the GEX 1–10 lines can't be mistaken for the cyan HVL.
+const GEX_N = '#a78bfa';
 
 /** Every level the indicator can draw, in MenthorQ's order. Defaults match its "Gamma Levels" study. */
 export const GEX_LINES: GexLineDef[] = [
   {
     key: 'cr',
     name: 'Call Resistance',
-    title: 'CR',
+    title: 'C1',
     color: CR,
     style: 'solid',
+    width: 2,
     on: true,
     price: (a) => a.callWalls[0],
   },
   {
     key: 'ps',
     name: 'Put Support',
-    title: 'PS',
+    title: 'P1',
     color: PS,
     style: 'solid',
+    width: 2,
     on: true,
     price: (a) => a.putWalls[0],
   },
@@ -446,6 +452,7 @@ export const GEX_LINES: GexLineDef[] = [
     title: 'HVL',
     color: HVL,
     style: 'solid',
+    width: 2,
     on: true,
     price: (a) => a.flip,
   },

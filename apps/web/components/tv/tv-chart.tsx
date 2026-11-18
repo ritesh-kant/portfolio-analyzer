@@ -15,6 +15,7 @@ import {
   type ITimeScaleApi,
   LineSeries,
   LineStyle,
+  type LineWidth,
   PriceScaleMode,
   type SeriesType,
   type Time,
@@ -96,6 +97,19 @@ export interface TvEmbed {
 }
 
 const paneKey = (key: string, pane: number) => (pane > 0 ? `${key}:p${pane}` : key);
+/** True when a live merge changed nothing (same length, same last bar), so the old array can be kept and nothing rebuilds. */
+function sameTail(cur: Bar[], merged: Bar[]): boolean {
+  const a = merged[merged.length - 1];
+  const b = cur[cur.length - 1];
+  return (
+    merged.length === cur.length &&
+    a?.time === b?.time &&
+    a?.close === b?.close &&
+    a?.high === b?.high &&
+    a?.low === b?.low &&
+    a?.volume === b?.volume
+  );
+}
 /** Saved chart window. Pinned = candle times at both edges; live = width and right padding in bars, so the chart keeps following the newest candle. */
 type SavedView = { from: number; to: number } | { live: true; span: number; pad: number };
 import {
@@ -149,6 +163,7 @@ import { BigTradesPrimitive } from './big-trades-primitive';
 import { BigTradesControl, type BigTradesUi } from './big-trades-control';
 import {
   aggregate as aggregateTrades,
+  estimateFromBars,
   BIG_TRADES_DEFAULTS,
   type Trade as TapeTrade,
 } from '../../lib/tv/bigtrades';
@@ -1293,7 +1308,11 @@ export function TvChart({
   const pocFine = pocOn && pocFits;
   const fineOn = fpData || svpOn || cvdOn || pocFine;
   useEffect(() => {
-    if (!ready || (!fpData && !svpOn && !cvdOn && !pocFine && !replayWanted) || tf.source === '1m')
+    if (
+      !ready ||
+      (!fpData && !svpOn && !cvdOn && !pocFine && !replayWanted && !btUi.on) ||
+      tf.source === '1m'
+    )
       return;
     const ctl = new AbortController();
     fetchBars(symbol, '1m', '7d', ctl.signal, wantPrepost)
@@ -1307,6 +1326,7 @@ export function TvChart({
     cvdOn,
     pocFine,
     replayWanted,
+    btUi.on,
     symbol,
     tf.source,
     wantPrepost,
@@ -1421,23 +1441,21 @@ export function TvChart({
           setRaw((cur) => {
             if (!cur.key.startsWith(`${symbol}|`)) return cur;
             const merged = mergeBars(cur.bars, res.bars);
-            const a = merged[merged.length - 1];
-            const b = cur.bars[cur.bars.length - 1];
             // Nothing new: keep the same array so no indicator or series is rebuilt.
-            const same =
-              merged.length === cur.bars.length &&
-              a?.time === b?.time &&
-              a?.close === b?.close &&
-              a?.high === b?.high &&
-              a?.low === b?.low &&
-              a?.volume === b?.volume;
-            return same ? cur : { key: cur.key, bars: merged };
+            return sameTail(cur.bars, merged) ? cur : { key: cur.key, bars: merged };
           });
           // The 1-minute bars under the volume profiles / footprint go stale otherwise: new volume would not reach them.
-          if (tf.intraday && tf.source !== '1m' && fineOn) {
+          if (tf.intraday && tf.source !== '1m' && (fineOn || deltaActive)) {
             const fineRes = await fetchBars(symbol, '1m', '1d', undefined, wantPrepost);
             if (stopped) return;
             setSubRaw((cur) => (cur.length ? mergeBars(cur, fineRes.bars) : cur));
+            // With CVD, the delta panel or stacked imbalances on, the footprint reads the ~4-week 1-minute bars
+            // instead (see subBars); they were fetched once, so new candles had no footprint until a reload.
+            setDeltaSub((cur) => {
+              if (cur.symbol !== symbol || !cur.bars.length) return cur;
+              const merged = mergeBars(cur.bars, fineRes.bars);
+              return sameTail(cur.bars, merged) ? cur : { ...cur, bars: merged };
+            });
           }
         } catch {
           // transient — next tick retries
@@ -1451,7 +1469,7 @@ export function TvChart({
       stopped = true;
       clearInterval(timer);
     };
-  }, [ready, replayEnd, symbol, tf.source, tf.intraday, wantPrepost, fetchBars, fineOn]);
+  }, [ready, replayEnd, symbol, tf.source, tf.intraday, wantPrepost, fetchBars, fineOn, deltaActive]);
 
   // ── Auction Resolution (AR) model ─────────────────────────────────────
   // Sessions, Asia-range levels, range fib zone, structure and environment (lib/tv/ar.ts). Intraday charts only.
@@ -1962,7 +1980,10 @@ export function TvChart({
     }
     if (!main || !gexShown || !gexRes?.all) return;
     // Same price for two levels → one line, both labels (e.g. "CR 0DTE | GW 0DTE").
-    const byPrice = new Map<number, { titles: string[]; color: string; style: LineStyle }>();
+    const byPrice = new Map<
+      number,
+      { titles: string[]; color: string; style: LineStyle; width: number }
+    >();
     // Futures charts: strikes are cash prices, so move them up by the futures premium.
     const scale = gexRes.scale ?? 1;
     const add = (
@@ -1970,12 +1991,15 @@ export function TvChart({
       title: string,
       color: string,
       style: LineStyle,
+      width: number,
     ) => {
       if (price == null || !Number.isFinite(price)) return;
       const k = Math.round(price * scale * 100) / 100;
       const hit = byPrice.get(k);
-      if (hit) hit.titles.push(title);
-      else byPrice.set(k, { titles: [title], color, style });
+      if (hit) {
+        hit.titles.push(title);
+        hit.width = Math.max(hit.width, width);
+      } else byPrice.set(k, { titles: [title], color, style, width });
     };
     const { all, nearest } = gexRes;
     const lineStyle = {
@@ -1985,13 +2009,19 @@ export function TvChart({
     };
     for (const def of GEX_LINES) {
       if (!gexLineOn(def, gexStyle)) continue;
-      add(def.price(all, nearest), def.title, gexLineColor(def, gexStyle), lineStyle[def.style]);
+      add(
+        def.price(all, nearest),
+        def.title,
+        gexLineColor(def, gexStyle),
+        lineStyle[def.style],
+        def.width ?? 1,
+      );
     }
     const lines = [...byPrice].map(([price, l]) =>
       main.series.createPriceLine({
         price,
         color: l.color,
-        lineWidth: 1,
+        lineWidth: l.width as LineWidth,
         lineStyle: l.style,
         axisLabelVisible: true,
         title: l.titles.join(' | '),
@@ -2680,14 +2710,18 @@ export function TvChart({
       if (id) window.clearInterval(id);
     };
   }, [btUi.on, symbol, replayEnd]);
+  // No recorded tape (NQ and other CME futures have no tick feed): estimate from 1-minute volume spikes instead.
+  const btEstimated = btUi.on && !btTape.trades.length;
   const btBubbles = useMemo(() => {
     if (!btUi.on) return [];
     const upTo = replayEnd == null ? Infinity : replayEnd * 1000;
+    if (btEstimated)
+      return estimateFromBars(subBars, btUi.spikeX).filter((b) => b.t + 60_000 <= upTo);
     return aggregateTrades(
       btTape.trades.filter((t) => t.t < upTo),
       btUi,
     );
-  }, [btUi, btTape, replayEnd]);
+  }, [btUi, btTape, replayEnd, btEstimated, subBars]);
   useEffect(() => {
     btPrimRef.current?.setState(
       btBubbles,
@@ -4224,6 +4258,8 @@ export function TvChart({
                 }
                 loaded={btTape.trades.length}
                 shown={btBubbles.length}
+                estimated={btEstimated}
+                minuteBars={subBars.length}
                 coverage={btTape.coverage}
                 days={btTape.days}
               />

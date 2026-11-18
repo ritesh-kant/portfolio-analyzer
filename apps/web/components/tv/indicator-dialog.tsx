@@ -824,11 +824,11 @@ export function IndicatorSettings({ cfg, onChange, onClose, timeZone }: Settings
               <summary className="cursor-pointer text-[13px] text-[#d1d4dc]">What do these lines mean?</summary>
               <p className="mt-2">
                 GEX estimates how much option writers must buy or sell to stay hedged as price moves, from
-                the live option chain. <b className="text-[#f4511e]">Call Resistance</b> is the strike with
-                the most call gamma above price; <b className="text-[#43a047]">Put Support</b> the most put
-                gamma below. <b className="text-[#448aff]">HVL</b> is the gamma flip: above it hedging tends
-                to damp moves, below it to amplify them. <b className="text-[#f4511e]">Gamma Wall</b> is the
-                single largest strike. <b className="text-[#26c6da]">GEX 1–10</b> are the next-largest strikes
+                the live option chain. <b className="text-[#22c55e]">Call Resistance</b> is the strike with
+                the most call gamma above price; <b className="text-[#f23645]">Put Support</b> the most put
+                gamma below. <b className="text-[#22d3ee]">HVL</b> is the gamma flip: above it hedging tends
+                to damp moves, below it to amplify them. <b className="text-[#22c55e]">Gamma Wall</b> is the
+                single largest strike. <b className="text-[#a78bfa]">GEX 1–10</b> are the next-largest strikes
                 after Call Resistance and Put Support. 0DTE levels use the nearest expiry only; 1D Min/Max is
                 the one-day range implied by at-the-money volatility. The bars in the column right of the
                 prices are net GEX at each strike per 1% move (₹ crore for NSE, $ for US): green damps

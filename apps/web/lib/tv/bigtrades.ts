@@ -50,9 +50,11 @@ export interface BigTradesCfg {
   minQty: number;
   /** Merge trades at the same price and side that occur within this many ms of the group's first. 0 = off. */
   aggMs: number;
+  /** Estimate mode (no recorded tape): mark a 1-minute bar whose volume is at least this many times the median. */
+  spikeX: number;
 }
 
-export const BIG_TRADES_DEFAULTS: BigTradesCfg = { minQty: 500, aggMs: 1000 };
+export const BIG_TRADES_DEFAULTS: BigTradesCfg = { minQty: 500, aggMs: 1000, spikeX: 3 };
 
 /**
  * Aggressor of each trade. Buy when it printed at or above the best ask, sell at or below the best
@@ -126,4 +128,58 @@ export function parseTicks(text: string): RawTick[] {
     }
   }
   return out;
+}
+
+/** A 1-minute candle (time in unix s). */
+export interface MinuteBar {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}
+
+/** Bars of history the median volume is taken over, and the fewest it needs before it marks anything. */
+export const ESTIMATE_LOOKBACK = 60;
+const ESTIMATE_MIN_HISTORY = 10;
+
+/**
+ * ⚠ ESTIMATE, not trades: used when no tape was recorded (NQ and other CME futures have no tick feed here).
+ * One bubble per 1-minute bar whose volume is at least `spikeX` × the median volume of the previous
+ * `ESTIMATE_LOOKBACK` bars. Its size is the whole minute's volume, which may be one large order or many small
+ * ones; bars cannot tell them apart. Side: an up candle is a buy, a down candle a sell, a flat one follows the
+ * close against the previous close (unchanged: no bubble). Price: the bar's typical price (high + low + close) / 3.
+ *
+ * TODO(ibkr): once a real IBKR account is connected, record CME trades with IBKR tick-by-tick (`AllLast`, plus
+ * `reqHistoricalTicks` to backfill) into the same data/ticks/ JSONL and drop this estimate for those symbols.
+ */
+export function estimateFromBars(bars: MinuteBar[], spikeX: number): Bubble[] {
+  const out: Bubble[] = [];
+  const window: number[] = [];
+  let prevClose: number | null = null;
+  for (const b of bars) {
+    const v = b.volume ?? 0;
+    if (v > 0 && window.length >= ESTIMATE_MIN_HISTORY) {
+      const med = median(window);
+      if (med > 0 && v >= spikeX * med) {
+        const ref = b.close !== b.open ? b.open : prevClose;
+        const side: Side | null =
+          ref == null || b.close === ref ? null : b.close > ref ? 'buy' : 'sell';
+        if (side) out.push({ t: b.time * 1000, p: (b.high + b.low + b.close) / 3, q: v, side, n: 1 });
+      }
+    }
+    if (v > 0) {
+      window.push(v);
+      if (window.length > ESTIMATE_LOOKBACK) window.shift();
+    }
+    prevClose = b.close;
+  }
+  return out;
+}
+
+function median(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }

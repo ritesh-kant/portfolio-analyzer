@@ -82,16 +82,25 @@ export class BigTradesPrimitive implements ISeriesPrimitive<Time> {
     const ts = this.chart.timeScale();
     const last = this.barTimes[this.barTimes.length - 1]! + this.barSecs;
     const first = this.barTimes[0]!;
-    let max = 0;
-    for (const b of this.bubbles) max = Math.max(max, b.q);
-    if (!(max > 0)) return;
-    // largest first: they keep their spot, smaller ones are nudged sideways off them
-    const drawn = [...this.bubbles].sort((a, b) => b.q - a.q).slice(0, MAX_DRAWN);
-    const placed: Placed[] = [];
-    for (const b of drawn) {
+    // only bubbles on the visible candles compete for the MAX_DRAWN slots (and set the size scale); capping the
+    // whole history first let weeks-old large bubbles crowd out every one on screen
+    const range = ts.getVisibleLogicalRange();
+    const lo = range ? Math.floor(range.from) - 1 : -Infinity;
+    const hi = range ? Math.ceil(range.to) + 1 : Infinity;
+    const visible: { b: Bubble; i: number }[] = [];
+    for (const b of this.bubbles) {
       const sec = b.t / 1000;
       if (sec < first || sec >= last) continue;
       const i = barIndexAt(this.barTimes, sec);
+      if (i >= lo && i <= hi) visible.push({ b, i });
+    }
+    let max = 0;
+    for (const { b } of visible) max = Math.max(max, b.q);
+    if (!(max > 0)) return;
+    // largest first: they keep their spot, smaller ones are nudged sideways off them
+    const drawn = visible.sort((a, b) => b.b.q - a.b.q).slice(0, MAX_DRAWN);
+    const placed: Placed[] = [];
+    for (const { b, i } of drawn) {
       const x0 = ts.logicalToCoordinate(i as Logical);
       const y = this.series.priceToCoordinate(b.p);
       if (x0 == null || y == null || x0 < -R_MAX || x0 > width + R_MAX) continue;
@@ -111,10 +120,9 @@ export class BigTradesPrimitive implements ISeriesPrimitive<Time> {
       }
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      // opaque: footprint cell numbers under the bubble must not bleed through its label
-      ctx.fillStyle = '#131722';
-      ctx.fill();
-      ctx.fillStyle = `rgba(${p.rgb}, 0.8)`;
+      // see-through, so the footprint cells and candles under the bubble stay readable; the label keeps its dark
+      // outline so it still reads on top of them
+      ctx.fillStyle = `rgba(${p.rgb}, 0.25)`;
       ctx.fill();
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = `rgb(${p.rgb})`;

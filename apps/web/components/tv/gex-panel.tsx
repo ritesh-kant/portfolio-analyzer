@@ -1,13 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { type GexResponse, fmtGex } from '../../lib/tv/gex';
+import { CR as CALL, type GexResponse, HVL, PS as PUT, fmtGex } from '../../lib/tv/gex';
 
 const UP = '#089981';
 const DOWN = '#f23645';
-const CALL = '#f4511e';
-const PUT = '#43a047';
-const HVL = '#448aff';
 const RANGE = '#ff9800';
 
 /** 1234567 → "1.23M". */
@@ -84,7 +81,7 @@ export function GexPanel({
   const rows: Row[] = [];
   all.callWalls.forEach((p, i) =>
     rows.push({
-      label: i === 0 ? 'C1 · CR' : `C${i + 1}`,
+      label: i === 0 ? 'C1 · call res.' : `C${i + 1}`,
       price: p * scale,
       color: CALL,
       strike: p,
@@ -92,7 +89,7 @@ export function GexPanel({
   );
   all.putWalls.forEach((p, i) =>
     rows.push({
-      label: i === 0 ? 'P1 · PS' : `P${i + 1}`,
+      label: i === 0 ? 'P1 · put sup.' : `P${i + 1}`,
       price: p * scale,
       color: PUT,
       strike: p,

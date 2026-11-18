@@ -16,52 +16,98 @@ interface Props {
   /** Share of volume the sampled ticks account for (0–1), or null. */
   coverage: number | null;
   days: string[];
+  /** No recorded tape: the bubbles are 1-minute volume spikes, not trades. */
+  estimated: boolean;
+  /** 1-minute bars the estimate reads. */
+  minuteBars: number;
 }
 
 const field =
   'w-16 rounded border border-[#2a2e39] bg-[#1e222d] px-1.5 py-0.5 text-right text-[12px] text-[#d1d4dc] outline-none focus:border-[#2962ff]';
 
 /** Small floating control: switch the Big Trades bubbles on, set the size filter and the aggregate window. */
-export function BigTradesControl({ ui, onChange, loaded, shown, coverage, days }: Props) {
+export function BigTradesControl({
+  ui,
+  onChange,
+  loaded,
+  shown,
+  coverage,
+  days,
+  estimated,
+  minuteBars,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
   const box = useRef<HTMLDivElement>(null);
   return (
     <div ref={box} className="flex items-center gap-1 text-[12px]" data-tv-ui>
       {open ? (
-        <div style={{ left: pos.left, top: pos.top }} className="fixed z-50 w-64 rounded border border-[#2a2e39] bg-[#1e222d] p-3 text-[11px] text-[#b2b5be] shadow-lg">
+        <div
+          style={{ left: pos.left, top: pos.top }}
+          className="fixed z-50 w-64 rounded border border-[#2a2e39] bg-[#1e222d] p-3 text-[11px] text-[#b2b5be] shadow-lg"
+        >
           <div className="mb-2 text-[12px] font-medium text-[#d1d4dc]">Big Trades</div>
-          <label className="mb-2 flex items-center justify-between gap-2">
-            <span>Min trade size</span>
-            <input
-              type="number"
-              min={1}
-              className={field}
-              value={ui.minQty}
-              onChange={(e) => onChange({ minQty: Math.max(1, Number(e.target.value) || 1) })}
-            />
-          </label>
-          <label className="mb-2 flex items-center justify-between gap-2">
-            <span>Aggregate period (ms)</span>
-            <input
-              type="number"
-              min={0}
-              step={100}
-              className={field}
-              value={ui.aggMs}
-              onChange={(e) => onChange({ aggMs: Math.max(0, Number(e.target.value) || 0) })}
-            />
-          </label>
-          <p className="leading-snug text-[#787b86]">
-            {loaded
-              ? `${shown} of ${loaded} trades shown · ${days.join(', ')}`
-              : 'No captured trades for this symbol. Run scripts/capture_ticks.py during market hours.'}
-            {coverage != null ? ` · sampled: ~${Math.round(coverage * 100)}% of volume seen` : ''}
-          </p>
-          <p className="mt-1 leading-snug text-[#787b86]">
-            The feed is a ~1 s snapshot of the last trade, so some trades are missing. Side comes from the best
-            bid/ask, else the tick rule.
-          </p>
+          {estimated ? (
+            <>
+              <label className="mb-2 flex items-center justify-between gap-2">
+                <span>Volume spike (× median)</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={0.5}
+                  className={field}
+                  value={ui.spikeX}
+                  onChange={(e) => onChange({ spikeX: Math.max(1, Number(e.target.value) || 1) })}
+                />
+              </label>
+              <p className="leading-snug text-[#787b86]">
+                <span className="font-medium text-[#f0b90b]">Estimated</span> · no recorded trades
+                for this symbol, so each bubble is a 1-minute bar whose volume is at least{' '}
+                {ui.spikeX}× the median of the previous 60 minutes. {shown} marked from {minuteBars}{' '}
+                minute bars.
+              </p>
+              <p className="mt-1 leading-snug text-[#787b86]">
+                The number is the whole minute&apos;s volume: one large order or many small ones
+                look the same. Green = up candle, red = down candle.
+              </p>
+            </>
+          ) : (
+            <>
+              <label className="mb-2 flex items-center justify-between gap-2">
+                <span>Min trade size</span>
+                <input
+                  type="number"
+                  min={1}
+                  className={field}
+                  value={ui.minQty}
+                  onChange={(e) => onChange({ minQty: Math.max(1, Number(e.target.value) || 1) })}
+                />
+              </label>
+              <label className="mb-2 flex items-center justify-between gap-2">
+                <span>Aggregate period (ms)</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={100}
+                  className={field}
+                  value={ui.aggMs}
+                  onChange={(e) => onChange({ aggMs: Math.max(0, Number(e.target.value) || 0) })}
+                />
+              </label>
+              <p className="leading-snug text-[#787b86]">
+                {loaded
+                  ? `${shown} of ${loaded} trades shown · ${days.join(', ')}`
+                  : 'No captured trades for this symbol. Run scripts/capture_ticks.py during market hours.'}
+                {coverage != null
+                  ? ` · sampled: ~${Math.round(coverage * 100)}% of volume seen`
+                  : ''}
+              </p>
+              <p className="mt-1 leading-snug text-[#787b86]">
+                The feed is a ~1 s snapshot of the last trade, so some trades are missing. Side
+                comes from the best bid/ask, else the tick rule.
+              </p>
+            </>
+          )}
         </div>
       ) : null}
       <>
@@ -71,7 +117,7 @@ export function BigTradesControl({ ui, onChange, loaded, shown, coverage, days }
           className={`rounded px-2 py-1 ${ui.on ? 'bg-[#2962ff]/30 text-white' : 'text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white'}`}
           title="Big Trades bubbles: large trades, green = buyer was the aggressor, red = seller"
         >
-          Big Trades
+          Big Trades{ui.on && estimated ? ' (est.)' : ''}
         </button>
         {ui.on ? (
           <button
