@@ -1,3 +1,4 @@
+import { estimateFromBars } from './bigtrades.ts';
 import type { Bar, FootprintCandle, FootprintLevel } from './types';
 
 /**
@@ -102,14 +103,54 @@ function spread(bar: Bar, step: number, into: Map<number, FootprintLevel>) {
 }
 
 /**
+ * Yahoo reports the minute still forming with volume 0, and its 1-minute bars lag the candle's own volume
+ * (a 5-minute candle 2 minutes in: 11.5K on the candle, 6.3K across its minutes). Without this the newest
+ * candle has no footprint for its first minute and never shows its latest prices. The volume the minutes
+ * have not reported yet goes on the forming minute's range, widened to any part of the candle the reported
+ * minutes never reached (the 5-minute candle runs ahead of the 1-minute bars), or the whole candle before
+ * any minute exists.
+ */
+function unreported(candle: Bar, subs: Bar[]): Bar | null {
+  const reported = subs.filter((b) => b.volume > 0);
+  const missing = candle.volume - reported.reduce((sum, b) => sum + b.volume, 0);
+  if (!(missing > 0)) return null;
+  if (!reported.length) return { ...candle, volume: missing };
+  const forming = [...subs].reverse().find((b) => b.volume <= 0);
+  const open = forming?.open ?? reported[reported.length - 1]!.close;
+  const close = forming?.close ?? candle.close;
+  const reachedHigh = Math.max(...reported.map((b) => b.high));
+  const reachedLow = Math.min(...reported.map((b) => b.low));
+  return {
+    time: candle.time,
+    open,
+    close,
+    high: Math.max(
+      open,
+      close,
+      forming?.high ?? close,
+      candle.high > reachedHigh ? candle.high : -Infinity,
+    ),
+    low: Math.min(
+      open,
+      close,
+      forming?.low ?? close,
+      candle.low < reachedLow ? candle.low : Infinity,
+    ),
+    volume: missing,
+  };
+}
+
+/**
  * One FootprintCandle per chart candle (null where no sub-bars cover it).
  * `chartBars` need `time`; `subBars` are 1-minute bars; `candleSecs` is the chart timeframe.
+ * `fillLast`: the newest candle also gets the volume its 1-minute bars have not reported yet (live charts).
  */
 export function buildFootprints(
   chartBars: Bar[],
   subBars: Bar[],
   candleSecs: number,
   step: number,
+  fillLast = false,
 ): (FootprintCandle | null)[] {
   const result: (FootprintCandle | null)[] = new Array(chartBars.length).fill(null);
   if (!subBars.length || !chartBars.length) return result;
@@ -127,6 +168,10 @@ export function buildFootprints(
       spread(subBars[e]!, step, rows);
       e += 1;
     }
+    if (fillLast && i === chartBars.length - 1) {
+      const extra = unreported(chartBars[i]!, subBars.slice(s, e));
+      if (extra) spread(extra, step, rows);
+    }
     if (!rows.size) continue;
     const levels = [...rows.entries()].sort(([a], [b]) => a - b).map(([, level]) => level);
     let poc = 0;
@@ -140,4 +185,55 @@ export function buildFootprints(
     result[i] = { poc, levels, delta, total, step };
   }
   return result;
+}
+
+/** A minute whose volume spiked inside a chart candle: the price span it traded through, its volume and side. */
+export interface FootprintSweep {
+  low: number;
+  high: number;
+  volume: number;
+  side: 'buy' | 'sell';
+}
+
+/**
+ * ⚠ ESTIMATE. Order-flow platforms mark a large aggressive order that swept several price levels: the levels it
+ * traded through, coloured by side, with its size in a bubble. That needs the trade tape, which NQ has no source for
+ * here (Yahoo 1-minute bars). The stand-in is the Big Trades estimate (lib/tv/bigtrades.ts): a 1-minute bar with at
+ * least `spikeX` × the median volume of the previous hour, sided by its candle. Its span is that minute's low–high and
+ * its size the whole minute's volume, which may be one order or many. Only the candle's biggest such minute is kept.
+ * On NQ 5m, 4× marks ~8% of candles. 0 = off.
+ */
+export function footprintSweeps(
+  chartTimes: number[],
+  candleSecs: number,
+  subBars: Bar[],
+  spikeX: number,
+): FootprintSweep[][] {
+  const out = chartTimes.map(() => [] as FootprintSweep[]);
+  if (!(spikeX > 0) || !chartTimes.length) return out;
+  const byTime = new Map(subBars.map((b) => [b.time, b]));
+  let i = 0;
+  for (const spike of estimateFromBars(subBars, spikeX)) {
+    const t = spike.t / 1000;
+    const bar = byTime.get(t);
+    if (!bar) continue;
+    while (i + 1 < chartTimes.length && chartTimes[i + 1]! <= t) i += 1;
+    const start = chartTimes[i]!;
+    const end =
+      i + 1 < chartTimes.length
+        ? Math.min(chartTimes[i + 1]!, start + candleSecs)
+        : start + candleSecs;
+    if (t < start || t >= end) continue;
+    // One per candle, its biggest minute: at the US open every minute beats the quiet hour before it, and five
+    // overlapping blocks would paint the whole candle.
+    const sweep: FootprintSweep = {
+      low: bar.low,
+      high: bar.high,
+      volume: spike.q,
+      side: spike.side === 'sell' ? 'sell' : 'buy',
+    };
+    const cur = out[i]![0];
+    if (!cur || sweep.volume > cur.volume) out[i] = [sweep];
+  }
+  return out;
 }

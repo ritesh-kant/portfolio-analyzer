@@ -12,6 +12,7 @@ import {
   type Time,
   customSeriesDefaultOptions,
 } from 'lightweight-charts';
+import type { FootprintSweep } from '../../lib/tv/footprint';
 import type { FootprintCandle } from '../../lib/tv/types';
 import { diagonalImbalances, stackedOnly as stackedRows } from '../../lib/tv/stacked-imbalance';
 
@@ -20,6 +21,25 @@ const UP = '#089981';
 const DOWN = '#f23645';
 const POC_FILL = '#d1d4dc';
 const VA_LINE = 'rgba(255, 255, 255, 0.85)';
+/** POC row outline in the profile style. */
+const POC_LINE = '#e2c044';
+/** Big-order sweep bars and bubbles: yellow for buying, red for selling (the order-flow platforms' colours). */
+const SWEEP_COLOR: Record<FootprintSweep['side'], string> = {
+  buy: '245,217,10',
+  sell: '242,54,69',
+};
+/** Height of one row of the Delta / Volume strip at the bottom of the pane, css px. */
+export const STRIP_ROW = 20;
+/** Same magenta as the Delta Divergence badges. */
+const DIVERGENCE = '#e879f9';
+
+interface StripCol {
+  left: number;
+  w: number;
+  fp: FootprintCandle;
+  up: boolean;
+  down: boolean;
+}
 
 export interface FootprintData extends CustomData<Time> {
   open: number;
@@ -27,6 +47,8 @@ export interface FootprintData extends CustomData<Time> {
   low: number;
   close: number;
   fp: FootprintCandle | null;
+  /** Estimated big-order sweeps in this candle (profile style), from lib/tv/footprint.ts footprintSweeps. */
+  sweeps?: FootprintSweep[];
 }
 
 export interface FootprintSettings {
@@ -39,7 +61,15 @@ export interface FootprintSettings {
   highlight: boolean;
   /** 0 = off; N >= 2 = only mark imbalances that stack N or more rows in a row on the same side. */
   stackedLevels: number;
+  /** profile: one column of `bid x ask` over a per-candle volume profile, body as an outline (order-flow platforms);
+   *  split: bid cells left of the candle, ask cells right (TradingView). */
+  style: FootprintStyle;
+  /** Estimated big-order sweeps (profile style): 1-minute volume at least this many times the last hour's median;
+   *  0 = off. The sweeps themselves come with the data (FootprintData.sweeps). */
+  sweepX: number;
 }
+
+export type FootprintStyle = 'profile' | 'split';
 
 export const DEFAULT_FOOTPRINT_SETTINGS: FootprintSettings = {
   imbalance: 3,
@@ -47,6 +77,8 @@ export const DEFAULT_FOOTPRINT_SETTINGS: FootprintSettings = {
   valueAreaPct: 70,
   highlight: true,
   stackedLevels: 0,
+  style: 'profile',
+  sweepX: 4,
 };
 
 type Target = Parameters<ICustomSeriesPaneRenderer['draw']>[0];
@@ -59,6 +91,10 @@ const fmtVol = (v: number) =>
       : v >= 1e3
         ? `${(v / 1e3).toFixed(1)}K`
         : `${Math.round(v)}`;
+
+/** Narrow columns: whole thousands / millions ("1K", "12K", "2M"), as order-flow platforms print them. */
+const fmtCompact = (v: number) =>
+  v >= 1e6 ? `${Math.round(v / 1e6)}M` : v >= 1e3 ? `${Math.round(v / 1e3)}K` : `${Math.round(v)}`;
 
 interface Rows {
   levels: FootprintCandle['levels'];
@@ -83,6 +119,15 @@ function coarsen(fp: FootprintCandle, k: number): Rows {
     if (l.ask + l.bid > levels[poc]!.ask + levels[poc]!.bid) poc = i;
   });
   return { levels, step: fp.step * k, poc };
+}
+
+/** The rows as drawn: base rows merged until each is ~12px tall on screen. */
+function displayRows(fp: FootprintCandle, priceToY: PriceToCoordinateConverter): Rows {
+  const base = fp.levels[0]!;
+  const by0 = priceToY(base.price + fp.step);
+  const by1 = priceToY(base.price);
+  const baseH = by0 != null && by1 != null ? Math.abs(by1 - by0) : 0;
+  return coarsen(fp, baseH > 0 ? Math.max(1, Math.ceil(12 / baseH)) : 1);
 }
 
 /**
@@ -118,6 +163,8 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
   data: PaneRendererCustomData<Time, FootprintData> | null = null;
   settings: FootprintSettings = DEFAULT_FOOTPRINT_SETTINGS;
   chart: IChartApi | null = null;
+  /** The largest sweep on screen this frame (bubble size). */
+  private biggestSweep = 0;
 
   draw(target: Target, priceToY: PriceToCoordinateConverter) {
     target.useBitmapCoordinateSpace((scope) => {
@@ -128,6 +175,14 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
       const vr = scope.verticalPixelRatio;
       const spacing = data.barSpacing; // media px
       const { from, to } = data.visibleRange;
+      const cols: StripCol[] = [];
+      // Bubbles are sized against the biggest cluster on screen.
+      this.biggestSweep = 0;
+      for (let i = Math.max(0, from); i <= Math.min(data.bars.length - 1, to); i += 1) {
+        for (const sw of data.bars[i]!.originalData.sweeps ?? []) {
+          this.biggestSweep = Math.max(this.biggestSweep, sw.volume);
+        }
+      }
       for (let i = Math.max(0, from); i <= Math.min(data.bars.length - 1, to); i += 1) {
         const bar = data.bars[i]!;
         const d = bar.originalData;
@@ -141,9 +196,288 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
           this.plainCandle(ctx, d, x, spacing * hr, color, priceToY, vr);
           continue;
         }
-        this.footprintCandle(ctx, d, d.fp, x, spacing * hr, color, priceToY, hr, vr, spacing);
+        const col =
+          this.settings.style === 'split'
+            ? this.footprintCandle(ctx, d, d.fp, x, spacing * hr, color, priceToY, hr, vr, spacing)
+            : this.profileCandle(ctx, d, d.fp, x, spacing * hr, color, priceToY, hr, vr);
+        cols.push({ ...col, fp: d.fp, up: d.close > d.open, down: d.close < d.open });
+      }
+      if (this.settings.showDelta && cols.length) {
+        this.summaryStrip(ctx, cols, scope.bitmapSize.width, scope.bitmapSize.height, hr, vr);
       }
     });
+  }
+
+  /**
+   * The order-flow platforms' look: one column per candle with `bid x ask` on each row, a blue bar behind each row
+   * as long as its volume (the candle's own volume profile), the body as an outline from the open row to the close
+   * row, the wick as a thin line down the middle, and the POC row boxed in yellow. Imbalances print bold, tinted
+   * by side.
+   */
+  private profileCandle(
+    ctx: CanvasRenderingContext2D,
+    d: FootprintData,
+    fp: FootprintCandle,
+    x: number,
+    spacingPx: number,
+    color: string,
+    priceToY: PriceToCoordinateConverter,
+    hr: number,
+    vr: number,
+  ) {
+    const w = Math.max(6, Math.floor(spacingPx * 0.94));
+    const left = Math.round(x - w / 2);
+    const mid = Math.round(x);
+
+    const rows = displayRows(fp, priceToY);
+    const levels = rows.levels;
+    const step = rows.step;
+    const rowTop = (price: number) => priceToY(price + step);
+    const rowBottom = (price: number) => priceToY(price);
+    const sy0 = rowTop(levels[0]!.price);
+    const sy1 = rowBottom(levels[0]!.price);
+    const rowH = sy0 != null && sy1 != null ? Math.abs(sy1 - sy0) : 0; // media px
+    const maxRow = Math.max(...levels.map((l) => l.bid + l.ask), 1);
+
+    const flags = diagonalImbalances(levels, this.settings.imbalance, step);
+    const stackedOnly = (f: boolean[]) => stackedRows(f, this.settings.stackedLevels);
+    const askMarks = this.settings.highlight ? stackedOnly(flags.ask) : flags.ask.map(() => false);
+    const bidMarks = this.settings.highlight ? stackedOnly(flags.bid) : flags.bid.map(() => false);
+
+    // Text on each row whose "bid x ask" fits the column (measured bold, the widest it can print).
+    const fontPx = Math.min(12, Math.max(8, Math.floor(rowH - 2)));
+    ctx.font = `700 ${fontPx * vr}px ${FONT}`;
+    const gap = 3 * hr;
+    const xW = ctx.measureText('x').width;
+    const half = (w - xW) / 2 - gap - 2 * hr; // room for one side's number
+    // Each row's numbers at the largest font (down to 7px) that fits the column; if the full form ("1.4K") is too
+    // wide even then, whole thousands ("1K") as the order-flow platforms print them in narrow columns.
+    const fitText = (l: { bid: number; ask: number }): { px: number; bid: string; ask: string } | null => {
+      if (rowH < 9) return null;
+      for (const fmt of [fmtVol, fmtCompact]) {
+        const bid = fmt(l.bid);
+        const ask = fmt(l.ask);
+        const widest = Math.max(ctx.measureText(bid).width, ctx.measureText(ask).width);
+        const px = Math.min(fontPx, Math.floor((fontPx * half) / Math.max(widest, 1)));
+        if (px >= 7) return { px, bid, ask };
+      }
+      return null;
+    };
+    const rowText = levels.map(fitText);
+    const showText = rowText.some(Boolean);
+
+    // 1. Volume profile: a bar from the left edge, as long as the row's volume against the candle's busiest row.
+    const box = (price: number) => {
+      const yt = rowTop(price);
+      const yb = rowBottom(price);
+      if (yt == null || yb == null) return null;
+      const top = Math.round(yt * vr);
+      return { top, h: Math.max(1, Math.round((yb - yt) * vr) - (rowH > 4 ? 1 : 0)) };
+    };
+    // Estimated big-order sweeps: the profile bars of the rows a spike minute traded through take its colour (yellow
+    // buy, red sell), each still as long as its row's volume, so the run reads as a coloured slice of the profile with
+    // its shape (the volume at each level); the minute's volume goes in a bubble (step 7).
+    const sweeps = this.settings.sweepX > 0 ? (d.sweeps ?? []) : [];
+    const inSweep = levels.map(
+      (l) => [...sweeps].reverse().find((sw) => l.price <= sw.high + 1e-9 && l.price + step > sw.low + 1e-9) ?? null,
+    );
+    const barW = levels.map((level) => Math.max(1, Math.round(((level.bid + level.ask) / maxRow) * w)));
+    levels.forEach((level, idx) => {
+      const b = box(level.price);
+      if (!b) return;
+      const share = (level.bid + level.ask) / maxRow;
+      const sw = inSweep[idx];
+      ctx.fillStyle = sw
+        ? `rgba(${SWEEP_COLOR[sw.side]},0.92)`
+        : `rgba(41,98,255,${(0.16 + 0.5 * share).toFixed(3)})`;
+      ctx.fillRect(left, b.top, barW[idx]!, b.h);
+    });
+
+    // 2. Wick down the middle.
+    const yh = priceToY(d.high);
+    const yl = priceToY(d.low);
+    if (yh != null && yl != null) {
+      ctx.fillStyle = color;
+      const wick = Math.max(1, Math.round(hr));
+      ctx.fillRect(mid - Math.floor(wick / 2), Math.round(yh * vr), wick, Math.max(1, Math.round((yl - yh) * vr)));
+    }
+
+    // 3. Body: an outline from the open's row to the close's row, the full column wide.
+    const rowOf = (price: number) => Math.floor(price / step + 1e-9) * step;
+    const bodyTop = rowTop(rowOf(Math.max(d.open, d.close)));
+    const bodyBottom = rowBottom(rowOf(Math.min(d.open, d.close)));
+    if (bodyTop != null && bodyBottom != null) {
+      const line = Math.max(1, Math.round(1.5 * hr));
+      ctx.strokeStyle = color;
+      ctx.lineWidth = line;
+      const t = Math.round(bodyTop * vr) + line / 2;
+      const b = Math.round(bodyBottom * vr) - line / 2;
+      ctx.strokeRect(left + line / 2, t, w - line, Math.max(line, b - t));
+    }
+
+    // 4. POC row: boxed in yellow.
+    const poc = levels[rows.poc];
+    const pb = poc ? box(poc.price) : null;
+    if (pb) {
+      const line = Math.max(1, Math.round(hr));
+      ctx.strokeStyle = POC_LINE;
+      ctx.lineWidth = line;
+      ctx.strokeRect(left + 1.5 * line, pb.top + line / 2, w - 3 * line, Math.max(line, pb.h - line));
+    }
+
+    // 5. Value area: dotted lines at its top and bottom row edges.
+    const va = valueArea(rows, Math.min(100, Math.max(1, this.settings.valueAreaPct)) / 100);
+    if (va) {
+      ctx.save();
+      ctx.strokeStyle = VA_LINE;
+      ctx.lineWidth = Math.max(1, Math.round(hr));
+      ctx.setLineDash([3 * hr, 3 * hr]);
+      for (const y of [rowTop(levels[va.hi]!.price), rowBottom(levels[va.lo]!.price)]) {
+        if (y == null) continue;
+        const py = Math.round(y * vr) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(left, py);
+        ctx.lineTo(left + w, py);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // 6. "bid x ask" on each row. On a sweep row the text is drawn twice: in the usual colours, then again clipped
+    // to the coloured bar in plain dark (on yellow) or white (on red), so every glyph stays readable whether it sits
+    // on the bar or past its end.
+    if (showText) {
+      ctx.textBaseline = 'middle';
+      const paint = (idx: number, cy: number, onSweep: FootprintSweep['side'] | null) => {
+        const txt = rowText[idx]!;
+        const px = txt.px;
+        const bidImb = bidMarks[idx]!;
+        const askImb = askMarks[idx]!;
+        const ink = onSweep === 'buy' ? '#131722' : '#ffffff';
+        ctx.textAlign = 'right';
+        ctx.font = `${bidImb ? '700 ' : ''}${px * vr}px ${FONT}`;
+        ctx.fillStyle = onSweep ? ink : bidImb ? '#ff8a96' : '#d1d4dc';
+        ctx.fillText(txt.bid, mid - xW / 2 - gap, cy);
+        ctx.textAlign = 'center';
+        ctx.font = `${px * vr}px ${FONT}`;
+        ctx.fillStyle = onSweep === 'buy' ? '#3a3e4a' : onSweep ? '#f2f2f2' : '#787b86';
+        ctx.fillText('x', mid, cy);
+        ctx.textAlign = 'left';
+        ctx.font = `${askImb ? '700 ' : ''}${px * vr}px ${FONT}`;
+        ctx.fillStyle = onSweep ? ink : askImb ? '#5eead4' : '#d1d4dc';
+        ctx.fillText(txt.ask, mid + xW / 2 + gap, cy);
+      };
+      levels.forEach((level, idx) => {
+        const b = box(level.price);
+        if (!b || !rowText[idx]) return;
+        const cy = b.top + b.h / 2;
+        paint(idx, cy, null);
+        const sw = inSweep[idx];
+        if (!sw) return;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(left, b.top, barW[idx]!, b.h);
+        ctx.clip();
+        paint(idx, cy, sw.side);
+        ctx.restore();
+      });
+    }
+
+    // 7. Sweep bubbles: the minute's volume in a see-through circle at the middle of its span, sized against the
+    // biggest on screen.
+    for (const sw of sweeps) {
+      const yt = priceToY(sw.high);
+      const yb = priceToY(sw.low);
+      if (yt == null || yb == null || !(this.biggestSweep > 0)) continue;
+      const cy = ((yt + yb) / 2) * vr;
+      const r = (9 + 13 * Math.sqrt(Math.min(1, sw.volume / this.biggestSweep))) * Math.min(hr, vr);
+      ctx.beginPath();
+      ctx.arc(mid, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${SWEEP_COLOR[sw.side]},0.45)`;
+      ctx.fill();
+      ctx.font = `700 ${Math.max(9, Math.min(15, (r / Math.min(hr, vr)) * 0.75)) * vr}px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(fmtVol(sw.volume), mid, cy);
+    }
+    return { left, w };
+  }
+
+  /**
+   * Delta and Volume for every candle in a strip along the bottom of the pane, one cell under each candle, with
+   * the row names pinned on the left (the order-flow platforms' summary table). Delta cells are tinted by
+   * size against the biggest delta on screen; a blue top edge marks a candle built from recorded ticks, and a
+   * magenta outline (plus a notch above) a candle whose delta disagrees with its colour.
+   */
+  private summaryStrip(
+    ctx: CanvasRenderingContext2D,
+    cols: StripCol[],
+    width: number,
+    height: number,
+    hr: number,
+    vr: number,
+  ) {
+    const rowH = Math.round(STRIP_ROW * vr);
+    const top = height - 2 * rowH;
+    const gap = Math.max(1, Math.round(hr));
+    const maxDelta = Math.max(...cols.map((c) => Math.abs(c.fp.delta)), 1);
+    ctx.fillStyle = 'rgba(19,23,34,0.92)';
+    ctx.fillRect(0, top - gap, width, 2 * rowH + gap);
+    ctx.font = `${10 * vr}px ${FONT}`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    for (const { left, w, fp, up, down } of cols) {
+      const x = left + gap;
+      const cw = Math.max(1, w - gap);
+      const strength = Math.abs(fp.delta) / maxDelta;
+      ctx.fillStyle =
+        fp.delta >= 0
+          ? `rgba(8,153,129,${0.25 + 0.6 * strength})`
+          : `rgba(242,54,69,${0.25 + 0.6 * strength})`;
+      ctx.fillRect(x, top, cw, rowH - gap);
+      ctx.fillStyle = '#1e222d';
+      ctx.fillRect(x, top + rowH, cw, rowH - gap);
+      // Delta divergence: a green candle sellers out-traded (delta < 0) or a red one buyers did (delta > 0).
+      if ((up && fp.delta < 0) || (down && fp.delta > 0)) {
+        const line = Math.max(2, Math.round(1.5 * hr));
+        ctx.strokeStyle = DIVERGENCE;
+        ctx.lineWidth = line;
+        ctx.strokeRect(x + line / 2, top + line / 2, cw - line, rowH - gap - line);
+        // a small notch above the cell, so it can be spotted when the cell is too narrow for text
+        ctx.fillStyle = DIVERGENCE;
+        ctx.beginPath();
+        ctx.moveTo(x + cw / 2 - 4 * hr, top - gap);
+        ctx.lineTo(x + cw / 2 + 4 * hr, top - gap);
+        ctx.lineTo(x + cw / 2, top - gap - 5 * vr);
+        ctx.closePath();
+        ctx.fill();
+      }
+      if (fp.source === 'ticks') {
+        ctx.fillStyle = '#2962ff';
+        ctx.fillRect(x, top, cw, Math.max(1, Math.round(2 * vr)));
+      }
+      const deltaText = `${fp.delta >= 0 ? '' : '−'}${fmtVol(Math.abs(fp.delta))}`;
+      const volText = fmtVol(fp.total);
+      const cx = x + cw / 2;
+      if (ctx.measureText(deltaText).width + 2 * hr <= cw) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(deltaText, cx, top + (rowH - gap) / 2);
+      }
+      if (ctx.measureText(volText).width + 2 * hr <= cw) {
+        ctx.fillStyle = '#d1d4dc';
+        ctx.fillText(volText, cx, top + rowH + (rowH - gap) / 2);
+      }
+    }
+    // Row names over the left edge, on a solid background so the cells scrolling under them don't show through.
+    const labelW = Math.round(52 * hr);
+    ctx.fillStyle = '#131722';
+    ctx.fillRect(0, top - gap, labelW, 2 * rowH + gap);
+    ctx.fillStyle = '#b2b5be';
+    ctx.textAlign = 'left';
+    ctx.font = `${11 * vr}px ${FONT}`;
+    ctx.fillText('Delta', 6 * hr, top + (rowH - gap) / 2);
+    ctx.fillText('Volume', 6 * hr, top + rowH + (rowH - gap) / 2);
   }
 
   private plainCandle(
@@ -309,69 +643,7 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
       ctx.strokeStyle = '#131722';
       ctx.strokeRect(mid - half + 0.5, bodyTop + 0.5, bodyW - 1, Math.max(1, bodyH - 1));
     }
-
-    // Bid / ask totals and the Delta / Total box under the candle.
-    if (this.settings.showDelta && spacing >= 30 && yl != null) {
-      // Rows span [price, price + step], so the bottom row reaches below the candle's low: start under it.
-      const bottomEdge = priceToY(levels[0]!.price);
-      const baseY = Math.round(Math.max(yl, bottomEdge ?? yl) * vr) + 4 * vr;
-      const deltaText = `${fp.delta >= 0 ? '+' : '−'}${fmtVol(Math.abs(fp.delta))}`;
-      const deltaColor = fp.delta >= 0 ? '#5eead4' : '#ff8a96';
-      ctx.textBaseline = 'top';
-      if (w < 64 * hr) {
-        // Narrow candle: two plain lines.
-        ctx.textAlign = 'center';
-        ctx.font = `700 ${11 * vr}px ${FONT}`;
-        ctx.fillStyle = deltaColor;
-        ctx.fillText(`${fp.source === 'ticks' ? '•' : ''}Δ ${deltaText}`, mid, baseY);
-        ctx.font = `${11 * vr}px ${FONT}`;
-        ctx.fillStyle = '#b2b5be';
-        ctx.fillText(fmtVol(fp.total), mid, baseY + 13 * vr);
-        return;
-      }
-      let bidSum = 0;
-      let askSum = 0;
-      for (const l of fp.levels) {
-        bidSum += l.bid;
-        askSum += l.ask;
-      }
-      ctx.font = `${10.5 * vr}px ${FONT}`;
-      ctx.textAlign = 'right';
-      ctx.fillStyle = DOWN;
-      ctx.fillText(fmtVol(bidSum), mid - half - 4 * hr, baseY);
-      ctx.textAlign = 'left';
-      ctx.fillStyle = UP;
-      ctx.fillText(fmtVol(askSum), rightX + 4 * hr, baseY);
-
-      const boxY = baseY + 15 * vr;
-      const boxH = 36 * vr;
-      const pad = 7 * hr;
-      ctx.beginPath();
-      const r = 4 * Math.min(hr, vr);
-      ctx.moveTo(left + r, boxY);
-      ctx.arcTo(left + w, boxY, left + w, boxY + boxH, r);
-      ctx.arcTo(left + w, boxY + boxH, left, boxY + boxH, r);
-      ctx.arcTo(left, boxY + boxH, left, boxY, r);
-      ctx.arcTo(left, boxY, left + w, boxY, r);
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(19,23,34,0.94)';
-      ctx.fill();
-      ctx.lineWidth = Math.max(1, hr);
-      // Blue outline: built from recorded ticks, not estimated from 1-minute bars.
-      ctx.strokeStyle = fp.source === 'ticks' ? '#2962ff' : '#2a2e39';
-      ctx.stroke();
-      ctx.font = `${11 * vr}px ${FONT}`;
-      ctx.fillStyle = '#d1d4dc';
-      ctx.textAlign = 'left';
-      ctx.fillText('Delta', left + pad, boxY + 5 * vr);
-      ctx.fillText('Total', left + pad, boxY + 20 * vr);
-      ctx.font = `700 ${12 * vr}px ${FONT}`;
-      ctx.textAlign = 'right';
-      ctx.fillStyle = deltaColor;
-      ctx.fillText(deltaText, left + w - pad, boxY + 4.5 * vr);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(fmtVol(fp.total), left + w - pad, boxY + 19.5 * vr);
-    }
+    return { left, w };
   }
 }
 

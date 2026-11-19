@@ -39,12 +39,13 @@ import {
   withAlpha,
 } from '../../lib/tv/drawings';
 import { dragPositionHandle, isPosition, positionPts } from '../../lib/tv/position';
-import { autoStep, buildFootprints, stepLadder } from '../../lib/tv/footprint';
+import { autoStep, buildFootprints, footprintSweeps, stepLadder } from '../../lib/tv/footprint';
 import { buildTickFootprints, mergeFootprints, type TickFootprint } from '../../lib/tv/tick-footprint';
 import {
   CATALOG,
   DEFAULT_INDICATORS,
   type IndicatorCfg,
+  AVP_ROWS,
   AVP_VP,
   SVP_DEFAULTS,
   VOL_DOWN_DEFAULT,
@@ -246,7 +247,7 @@ import { completedCount, formingCandle, nextReplayEnd, startReplayEnd } from '..
 import { groupByBar } from '../../lib/tv/news-markers';
 import type { NewsItem, NewsResponse } from '../../lib/tv/news-types';
 import { GEX_LINES, type GexResponse, fmtGex, gexLineColor, gexLineOn } from '../../lib/tv/gex';
-import { FootprintView, type FootprintData } from './footprint-series';
+import { FootprintView, STRIP_ROW, type FootprintData } from './footprint-series';
 import { useTickSteps } from './use-tick-steps';
 import { Icons } from './icons';
 import { IndicatorPicker, IndicatorSettings } from './indicator-dialog';
@@ -290,6 +291,8 @@ const DEFAULT_SETTINGS: Settings = {
     valueAreaPct: 70,
     highlight: true,
     stackedLevels: 0,
+    style: 'profile',
+    sweepX: 4,
   },
   news: true,
   sessions: true,
@@ -921,9 +924,25 @@ export function TvChart({
   const footprints = useMemo(
     () =>
       fpData
-        ? mergeFootprints(buildFootprints(bars, subBars, tf.secs, effectiveStep), tickFootprints)
+        ? mergeFootprints(
+            buildFootprints(bars, subBars, tf.secs, effectiveStep, replayEnd == null),
+            tickFootprints,
+          )
         : [],
-    [fpData, bars, subBars, tf.secs, effectiveStep, tickFootprints],
+    [fpData, bars, subBars, tf.secs, effectiveStep, tickFootprints, replayEnd],
+  );
+  // Estimated big-order sweeps: 1-minute volume spikes, marked in the footprint (lib/tv/footprint.ts).
+  const fpSweeps = useMemo(
+    () =>
+      fp.on && fp.style !== 'split' && fp.sweepX > 0 && tf.secs > 60
+        ? footprintSweeps(
+            bars.map((b) => b.time),
+            tf.secs,
+            replayEnd == null ? subBars : subBars.filter((b) => b.time < replayEnd),
+            fp.sweepX,
+          )
+        : [],
+    [fp.on, fp.style, fp.sweepX, bars, subBars, tf.secs, replayEnd],
   );
   const tickFpStats = useMemo(() => {
     let n = 0;
@@ -2201,6 +2220,8 @@ export function TvChart({
       valueAreaPct: fp.valueAreaPct,
       highlight: fp.highlight,
       stackedLevels: fp.stackedLevels,
+      style: fp.style,
+      sweepX: fp.sweepX,
     });
     series.applyOptions({
       priceFormat: { type: 'price', precision: decimals, minMove: 1 / 10 ** decimals },
@@ -2216,6 +2237,7 @@ export function TvChart({
       low: b.low,
       close: b.close,
       fp: footprints[i] ?? null,
+      sweeps: fpSweeps[i],
     }));
     series.setData(data);
   }, [
@@ -2225,6 +2247,9 @@ export function TvChart({
     fp.valueAreaPct,
     fp.highlight,
     fp.stackedLevels,
+    fp.style,
+    fp.sweepX,
+    fpSweeps,
     bars,
     wall,
     footprints,
@@ -2646,7 +2671,9 @@ export function TvChart({
   useEffect(() => {
     deltaPrimRef.current?.setState(
       deltaMarks && !hiddenAll('delta-div') ? divergences.map(deltaMark) : [],
-      fp.on && fp.showDelta,
+      // the footprint's Delta / Volume sit in a strip at the bottom now, not under each candle; badges stay above it
+      false,
+      fp.on && fp.showDelta ? 2 * STRIP_ROW : 0,
     );
   }, [
     divergences,
@@ -3036,9 +3063,23 @@ export function TvChart({
       const chart = chartRef.current;
       const series = seriesFor(key);
       if (!chart || !series) return null;
-      const index = series.getPane().paneIndex();
-      const el = chart.panes()[index]?.getHTMLElement();
-      const size = chart.paneSize(index);
+      // A series whose pane was just removed (indicator toggled off, symbol switch) still sits in
+      // subPrimsRef for a moment; its pane index then points past chart.panes() and paneSize() asserts.
+      let index: number;
+      try {
+        index = series.getPane().paneIndex();
+      } catch {
+        return null;
+      }
+      const pane = chart.panes()[index];
+      if (!pane) return null;
+      const el = pane.getHTMLElement();
+      let size: { width: number; height: number };
+      try {
+        size = chart.paneSize(index);
+      } catch {
+        return null;
+      }
       const top = el ? el.getBoundingClientRect().top - wrap.getBoundingClientRect().top : 0;
       return { key, top, w: size.width, h: size.height };
     };
@@ -3251,12 +3292,18 @@ export function TvChart({
         setSelectedId(null);
         return;
       }
+      if (hit.drawingId.startsWith('avp:') && hit.handle === 'body') {
+        // An anchored profile's box covers most of the pane: a click in it selects the profile but
+        // still reaches the chart, so dragging there pans the candles.
+        setSelectedId(hit.drawingId);
+        return;
+      }
       e.stopImmediatePropagation();
       e.preventDefault();
       setSelectedId(hit.drawingId);
       if (hit.drawingId.startsWith('avp:')) {
-        // An anchored profile indicator: its left line moves the anchor; the body only selects.
-        if (hit.handle !== 'body' && !L.lockAll)
+        // An anchored profile indicator: its left line moves the anchor.
+        if (!L.lockAll)
           drag = { mode: 'handle', id: hit.drawingId, pane: here.key, handle: 0, moved: false };
         return;
       }
@@ -4335,7 +4382,11 @@ export function TvChart({
             ref={wrapRef}
             className={`relative min-h-0 flex-1 ${tool !== 'cursor' || replayPick ? 'tv-tool' : ''}`}
           >
-            <div ref={containerRef} className="absolute inset-0" />
+            <div
+              ref={containerRef}
+              // the TradingView attribution logo sits bottom-left: lift it above the footprint's Delta / Volume strip
+              className={`absolute inset-0 ${fp.on && fp.showDelta ? '[&_#tv-attr-logo]:!bottom-[52px]' : ''}`}
+            />
             {textEdit ? (
               <input
                 data-tv-ui
@@ -4546,7 +4597,8 @@ export function TvChart({
             ) : null}
             {fp.on && bars.length && (footprintCoverage < 1 || tickFpStats.n > 0) && !fpNoteClosed ? (
               <div
-                className="absolute bottom-3 left-3 z-10 flex max-w-sm items-start gap-2 rounded bg-[#1e222d]/90 py-1.5 pl-3 pr-1.5 text-[11px] text-[#b2b5be]"
+                // above the footprint's Delta / Volume strip when it is on
+                className={`absolute ${fp.showDelta ? 'bottom-[72px]' : 'bottom-3'} left-3 z-10 flex max-w-sm items-start gap-2 rounded bg-[#1e222d]/90 py-1.5 pl-3 pr-1.5 text-[11px] text-[#b2b5be]`}
                 data-tv-ui
               >
                 <span>
@@ -5361,6 +5413,7 @@ export function TvChart({
           vp={avpOf(indicators.find((i) => i.id === settingsId)!)}
           rows={indicators.find((i) => i.id === settingsId)!.length}
           defaults={AVP_VP}
+          defaultRows={AVP_ROWS}
           widthLabel="Width (% of pane)"
           onChange={({ vp, rows }) =>
             setIndicators((list) =>

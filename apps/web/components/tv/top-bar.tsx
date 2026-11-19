@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { TIMEFRAMES } from '../../lib/tv/timeframes';
+import type { FootprintStyle } from './footprint-series';
 import { Icons } from './icons';
 
 export type ChartType = 'candles' | 'hollow' | 'bars' | 'line' | 'area' | 'ha';
@@ -33,6 +34,8 @@ export interface FootprintUi {
   valueAreaPct: number;
   highlight: boolean;
   stackedLevels: number;
+  style: FootprintStyle;
+  sweepX: number;
 }
 
 const FAVORITES = ['1m', '5m', '15m', '1h', '1D'];
@@ -300,6 +303,36 @@ export function TopBar(p: Props) {
                 </span>
               </div>
               <label className="flex items-center justify-between">
+                Style
+                <select
+                  value={p.footprint.style}
+                  onChange={(e) => p.onFootprint({ style: e.target.value as FootprintStyle })}
+                  className="rounded border border-[#363a45] bg-[#131722] px-2 py-0.5"
+                >
+                  <option value="profile">Bid x Ask + profile</option>
+                  <option value="split">Split (TradingView)</option>
+                </select>
+              </label>
+              <label
+                className="flex items-center justify-between"
+                title="Estimate: a 1-minute bar with at least this many times the last hour's median volume. Its price range is coloured yellow (up minute) or red (down minute), with its volume in a bubble. It may be one large order or many small ones: there is no trade tape here."
+              >
+                Big orders (est.)
+                <select
+                  value={p.footprint.sweepX}
+                  disabled={p.footprint.style === 'split'}
+                  onChange={(e) => p.onFootprint({ sweepX: Number(e.target.value) })}
+                  className="rounded border border-[#363a45] bg-[#131722] px-2 py-0.5 disabled:opacity-40"
+                >
+                  <option value={0}>Off</option>
+                  {[3, 4, 5, 6].map((n) => (
+                    <option key={n} value={n}>
+                      {n}× minute volume
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center justify-between">
                 Auto row size
                 <input
                   type="checkbox"
@@ -365,7 +398,7 @@ export function TopBar(p: Props) {
                 </span>
               </label>
               <label className="flex items-center justify-between">
-                Delta &amp; volume
+                Delta &amp; volume strip (bottom)
                 <input
                   type="checkbox"
                   checked={p.footprint.showDelta}
@@ -376,6 +409,16 @@ export function TopBar(p: Props) {
                 Estimated from 1-minute bars: this data source has no tick or bid/ask feed, so each
                 minute&apos;s volume is spread over the rows it traded through. Needs the last ~7
                 sessions.
+              </p>
+              <p className="text-[11px] leading-snug text-[#787b86]">
+                <span className="text-[#e879f9]">Magenta</span> Delta cell: the candle and its delta
+                disagree (green candle, negative delta, or red candle, positive delta).
+              </p>
+              <p className="text-[11px] leading-snug text-[#787b86]">
+                Big orders (Bid x Ask style, estimated): a minute that traded far more than the last hour&apos;s
+                usual, its price range in <span className="text-[#f5d90a]">yellow</span> when it went up or{' '}
+                <span className="text-[#f23645]">red</span> when it went down, the bubble its volume. Real
+                large-order sweeps need a trade tape this data source does not have.
               </p>
             </div>
           )}

@@ -11,6 +11,8 @@ interface Props {
   rows: number;
   /** What Reset restores. */
   defaults?: VpSettings;
+  /** Rows that Reset restores. */
+  defaultRows?: number;
   /** Label of the width input. */
   widthLabel?: string;
   onChange: (next: { vp: VpSettings; rows: number }) => void;
@@ -79,6 +81,7 @@ export function VpSettingsDialog({
   vp,
   rows,
   defaults = VP_DEFAULTS,
+  defaultRows = DEFAULT_ROWS,
   widthLabel = 'Width (% of box)',
   onChange,
   onClose,
@@ -209,7 +212,7 @@ export function VpSettingsDialog({
         <div className="mt-3 flex justify-between border-t border-[#363a45] pt-3 text-[13px]">
           <button
             type="button"
-            onClick={() => onChange({ vp: { ...defaults }, rows: DEFAULT_ROWS })}
+            onClick={() => onChange({ vp: { ...defaults }, rows: defaultRows })}
             className="rounded px-3 py-1.5 text-[#b2b5be] hover:bg-[#2a2e39]"
           >
             Reset

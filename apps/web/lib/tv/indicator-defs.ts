@@ -3,6 +3,9 @@ import { AVP_DEFAULTS, VP_DEFAULTS, type VpSettings } from './drawings';
 import type { GexConvention, GexStyle } from './gex';
 import { DEFAULT_ROWS } from './volume-profile';
 
+/** Anchored volume profile: default number of price rows (finer than the session/fixed-range profiles). */
+export const AVP_ROWS = 400;
+
 export type IndicatorType =
   | 'volume'
   | 'rvol'
@@ -190,7 +193,7 @@ export const CATALOG: CatalogEntry[] = [
     name: 'Anchored Volume Profile',
     description: 'Volume by price from an anchor candle to the latest bar, with POC and value area',
     where: 'overlay',
-    defaults: { type: 'avp', length: DEFAULT_ROWS },
+    defaults: { type: 'avp', length: AVP_ROWS },
   },
   {
     type: 'cvd',

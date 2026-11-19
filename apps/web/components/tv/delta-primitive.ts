@@ -49,6 +49,9 @@ export class DeltaPrimitive implements ISeriesPrimitive<Time> {
   private requestUpdate: (() => void) | null = null;
   private marks: DeltaMark[] = [];
   private footprintLabels = false;
+  /** Pixels at the bottom of the pane kept clear (the footprint's Delta / Volume strip). */
+  private bottomReserve = 0;
+  private paneHeight = 0;
   private focused: DeltaMark | null = null;
   private focusStart = 0;
   private raf = 0;
@@ -80,10 +83,12 @@ export class DeltaPrimitive implements ISeriesPrimitive<Time> {
     return [this.view];
   }
 
-  /** `footprintLabels`: the footprint is showing its Δ/volume text under each candle. */
-  setState(marks: DeltaMark[], footprintLabels = false) {
+  /** `footprintLabels`: the footprint is showing its Δ/volume text under each candle. `bottomReserve`: pixels at
+   *  the bottom of the pane a badge must stay above (the footprint's Delta / Volume strip). */
+  setState(marks: DeltaMark[], footprintLabels = false, bottomReserve = 0) {
     this.marks = marks;
     this.footprintLabels = footprintLabels;
+    this.bottomReserve = bottomReserve;
     this.requestUpdate?.();
   }
 
@@ -156,12 +161,12 @@ export class DeltaPrimitive implements ISeriesPrimitive<Time> {
       : spacing >= FOOTPRINT_BOX_SPACING
         ? FOOTPRINT_LABELS_BOX
         : FOOTPRINT_LABELS_LINES;
-    return {
-      cx,
-      x0,
-      x1,
-      cy: m.kind === 'buyers' ? py - GAP - RADIUS : py + GAP + RADIUS + clear,
-    };
+    let cy = m.kind === 'buyers' ? py - GAP - RADIUS : py + GAP + RADIUS + clear;
+    // never on top of the bottom strip: a badge under a low near the bottom would hide that candle's Delta cell
+    if (this.bottomReserve > 0 && this.paneHeight > 0) {
+      cy = Math.min(cy, this.paneHeight - this.bottomReserve - GAP - RADIUS);
+    }
+    return { cx, x0, x1, cy };
   }
 
   /** The broken level, as a dashed line from the signal candle to the confirming one, ending in an arrow. */
@@ -217,6 +222,7 @@ export class DeltaPrimitive implements ISeriesPrimitive<Time> {
   }
 
   private paint(ctx: CanvasRenderingContext2D, height: number) {
+    this.paneHeight = height;
     if (!this.chart || !this.series) return;
     const f = this.focused;
     for (const m of this.marks) {

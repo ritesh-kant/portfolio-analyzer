@@ -292,6 +292,9 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
     const order = [...own].reverse();
     const sel = own.find((d) => d.id === this.state.selectedId);
     if (sel) order.unshift(sel);
+    // A volume profile's body is its whole box, which can cover most of the pane: it only wins when
+    // nothing else (a fib, a line, ...) is under the cursor.
+    let profileBody: Hit | null = null;
     for (const d of order) {
       const g = this.geometry(d, w, h);
       if (!g) continue;
@@ -308,9 +311,12 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time> {
         const nearest = d.kind === 'avprofile' || dx[0]! <= dx[1]! ? 0 : 1;
         if (dx[nearest]! <= tol) return { drawingId: d.id, handle: nearest };
       }
-      if (this.bodyHit(d, g, p, tol)) return { drawingId: d.id, handle: 'body' };
+      if (this.bodyHit(d, g, p, tol)) {
+        if (d.kind !== 'vprofile' && d.kind !== 'avprofile') return { drawingId: d.id, handle: 'body' };
+        profileBody ??= { drawingId: d.id, handle: 'body' };
+      }
     }
-    return null;
+    return profileBody;
   }
 
   private handlePoints(d: Drawing, g: Geometry): (Px | null)[] {

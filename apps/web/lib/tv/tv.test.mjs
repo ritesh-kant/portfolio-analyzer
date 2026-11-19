@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { aggregateBars, heikinAshi, mergeBars, sessionDay, wallClock } from './timeframes.ts';
 import { atr, ema, macd, relativeVolume, rsi, sma, vwap } from './indicators.ts';
-import { autoStep, buildFootprints, niceStep, stepLadder } from './footprint.ts';
+import { autoStep, buildFootprints, footprintSweeps, niceStep, stepLadder } from './footprint.ts';
 import { makeTimeAxis } from './drawings.ts';
 import { dragPositionHandle, editPositionLevels, positionEnd, positionPts, positionSpan, positionStats } from './position.ts';
 import { aliasHits } from './aliases.ts';
@@ -139,6 +139,51 @@ test("footprint conserves each candle's volume and sums delta correctly", () => 
     fp.levels[fp.poc].ask + fp.levels[fp.poc].bid >=
       Math.max(...fp.levels.map((l) => l.ask + l.bid)) - 1e-9,
   );
+});
+
+test('footprint: the newest candle gets the volume its minutes have not reported yet', () => {
+  const chart = [
+    { time: open, open: 100, high: 100.4, low: 99.9, close: 100.2, volume: 900 },
+    { time: open + 300, open: 100.2, high: 101, low: 100.1, close: 100.9, volume: 5000 },
+  ];
+  const subs = [
+    minute(0, 100, 100.4, 99.9, 100.2, 900),
+    minute(5, 100.2, 100.5, 100.1, 100.4, 2000),
+    minute(6, 100.4, 101, 100.4, 100.9, 0), // still forming: Yahoo reports volume 0
+  ];
+  const [a, b] = buildFootprints(chart, subs, 300, 0.1, true);
+  assert.ok(Math.abs(a.total - 900) < 1e-6); // older candles untouched
+  assert.ok(Math.abs(b.total - 5000) < 1e-6); // 2000 reported + 3000 on the forming minute
+  assert.ok(b.levels.some((l) => l.price >= 100.9 - 1e-9)); // the forming minute's prices have rows
+  // off by default (replay, divergences), and no minutes yet → the candle's own range
+  assert.ok(Math.abs(buildFootprints(chart, subs, 300, 0.1)[1].total - 2000) < 1e-6);
+  const [, first] = buildFootprints(chart, subs.slice(0, 1), 300, 0.1, true);
+  assert.ok(Math.abs(first.total - 5000) < 1e-6);
+  // the candle reaches prices its minutes have not: those rows get the unreported volume too
+  const [, wide] = buildFootprints([chart[0], { ...chart[1], low: 99.5 }], subs, 300, 0.1, true);
+  assert.ok(wide.levels[0].price <= 99.5 + 1e-9);
+  assert.ok(Math.abs(wide.total - 5000) < 1e-6);
+  // the minutes already report more than the candle: nothing added
+  const [, ahead] = buildFootprints([chart[0], { ...chart[1], volume: 1500 }], subs, 300, 0.1, true);
+  assert.ok(Math.abs(ahead.total - 2000) < 1e-6);
+});
+
+test('footprint sweeps: a 1-minute volume spike, placed in its candle with its range and side', () => {
+  // 12 quiet minutes (volume 100), then a 600-volume up minute and a 500-volume down minute, in 5-minute candles
+  const quiet = Array.from({ length: 12 }, (_, i) => minute(i, 100, 100.5, 99.5, 100.2, 100));
+  const subs = [...quiet, minute(12, 100, 103, 99.8, 102.5, 600), minute(16, 102.5, 102.6, 101, 101.2, 500)];
+  const times = [0, 1, 2, 3].map((k) => open + k * 300);
+  const sw = footprintSweeps(times, 300, subs, 4);
+  assert.deepEqual(sw.map((s) => s.length), [0, 0, 1, 1]);
+  assert.deepEqual(sw[2][0], { low: 99.8, high: 103, volume: 600, side: 'buy' }); // 12th minute → third candle
+  assert.equal(sw[3][0].side, 'sell');
+  assert.deepEqual(footprintSweeps(times, 300, subs, 7).map((s) => s.length), [0, 0, 0, 0]); // 600 < 7 × 100
+  assert.deepEqual(footprintSweeps(times, 300, subs, 0).map((s) => s.length), [0, 0, 0, 0]); // off
+  // two spikes in one candle: only the bigger is kept
+  const two = [...quiet, minute(12, 100, 103, 99.8, 102.5, 600), minute(13, 102.5, 104, 102, 103.8, 900)];
+  const one = footprintSweeps(times, 300, two, 4)[2];
+  assert.equal(one.length, 1);
+  assert.equal(one[0].volume, 900);
 });
 
 test('footprint candles with no sub-bars are null', () => {
