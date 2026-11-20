@@ -1685,7 +1685,8 @@ export function TvChart({
     if (replayEnd != null)
       return <span className="text-[#787b86]">live snapshot only, hidden in replay</span>;
     const all = gexRes.all!;
-    const at = new Date((gexRes.asOf ?? 0) * 1000).toLocaleTimeString('en-IN', {
+    const at = new Date((gexRes.asOf ?? 0) * 1000).toLocaleString('en-IN', {
+      ...(gexRes.stale ? { weekday: 'short' as const } : {}),
       hour: '2-digit',
       minute: '2-digit',
       timeZone: 'Asia/Kolkata',
@@ -1703,8 +1704,14 @@ export function TvChart({
             : gexRes.scale && gexRes.futurePrice && gexRes.spot
               ? ` · strikes moved ${gexRes.futurePrice - gexRes.spot >= 0 ? '+' : ''}${(gexRes.futurePrice - gexRes.spot).toFixed(1)} to futures`
               : ''}{' '}
-          · snapshot {at} IST{gexRes.source === 'yahoo' ? ' (Yahoo, ~15 min delayed)' : ''}
+          · snapshot {at} IST{gexRes.source === 'yahoo' && !gexRes.stale ? ' (Yahoo, ~15 min delayed)' : ''}
         </span>
+        {gexRes.stale ? (
+          <span className="text-[#ff9800]" title={gexRes.stale}>
+            {' '}
+            · last full snapshot (no open interest before the US open)
+          </span>
+        ) : null}
       </span>
     );
   };

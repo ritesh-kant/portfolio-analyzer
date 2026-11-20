@@ -59,8 +59,13 @@ export interface GexLevels {
   flip: number | null;
   /** C1, C2, … strongest call-gamma strikes at/above spot. */
   callWalls: number[];
-  /** P1, P2, … strongest put-gamma strikes at/below spot. */
+  /** P1, P2, … strongest put-gamma strikes at/below spot (used by the gamma recorder and AR strategy). */
   putWalls: number[];
+  /**
+   * What the chart draws as P1…P7: the strongest put-gamma strikes on EITHER side of spot (Tanuki style; a put
+   * wall above price acts as resistance). Absent in responses from before it existed: use `chartPutWalls`.
+   */
+  putWallsAll?: number[];
   /** One-day range from the nearest expiry's ATM IV: [1D min, 1D max]. */
   range: [number, number] | null;
   /** Strike with the largest |net| GEX, either side of spot (MenthorQ's "Gamma Wall"). */
@@ -298,6 +303,7 @@ export function computeLevels(
   convention: GexConvention = 'dealer_long_calls',
   nWalls = 3,
   nGex = 10,
+  nPutWallsAll = 7,
 ): GexLevels {
   const live = rows.filter((r) => r.oi > 0 && r.iv > 0 && r.expiry > now);
   const strikes = strikeGex(live, spot, now, convention);
@@ -311,6 +317,11 @@ export function computeLevels(
     .filter((s) => s.strike <= spot && s.put !== 0)
     .sort((a, b) => Math.abs(b.put) - Math.abs(a.put))
     .slice(0, nWalls)
+    .map((s) => s.strike);
+  const putWallsAll = strikes
+    .filter((s) => s.put !== 0)
+    .sort((a, b) => Math.abs(b.put) - Math.abs(a.put))
+    .slice(0, nPutWallsAll)
     .map((s) => s.strike);
   const byNet = strikes
     .filter((s) => s.net !== 0)
@@ -327,6 +338,7 @@ export function computeLevels(
     flip: convention === 'dealer_long_calls' ? gammaFlip(live, spot, now, convention) : null,
     callWalls,
     putWalls,
+    putWallsAll,
     range: expectedMove(spot, atmIv(live, spot, now)),
     activity: chainActivity(rows, spot, now),
     strikes,
@@ -348,6 +360,8 @@ export interface GexResponse {
   symbol?: string;
   /** Snapshot time, unix seconds. */
   asOf?: number;
+  /** Set when these are an older snapshot served because the live chain is unusable; says why. */
+  stale?: string;
   spot?: number;
   /** Futures charts only: the future's last price, and futures ÷ spot to move strike levels onto it. */
   futurePrice?: number;
@@ -388,6 +402,10 @@ const RANGE = '#ff9800';
 // Violet, so the GEX 1–10 lines can't be mistaken for the cyan HVL.
 const GEX_N = '#a78bfa';
 
+/** The put walls the chart draws: both sides of price when the response has them, else the old below-price ones. */
+export const chartPutWalls = (lv: GexLevels | undefined): number[] =>
+  lv ? (lv.putWallsAll ?? lv.putWalls) : [];
+
 /** Every level the indicator can draw, in MenthorQ's order. Defaults match its "Gamma Levels" study. */
 export const GEX_LINES: GexLineDef[] = [
   {
@@ -402,13 +420,13 @@ export const GEX_LINES: GexLineDef[] = [
   },
   {
     key: 'ps',
-    name: 'Put Support',
+    name: 'Put Wall 1 (Put Support)',
     title: 'P1',
     color: PS,
     style: 'solid',
     width: 2,
     on: true,
-    price: (a) => a.putWalls[0],
+    price: (a) => chartPutWalls(a)[0],
   },
   {
     key: 'c2',
@@ -435,7 +453,7 @@ export const GEX_LINES: GexLineDef[] = [
     color: PS,
     style: 'solid',
     on: true,
-    price: (a) => a.putWalls[1],
+    price: (a) => chartPutWalls(a)[1],
   },
   {
     key: 'p3',
@@ -444,8 +462,19 @@ export const GEX_LINES: GexLineDef[] = [
     color: PS,
     style: 'solid',
     on: true,
-    price: (a) => a.putWalls[2],
+    price: (a) => chartPutWalls(a)[2],
   },
+  ...[4, 5, 6, 7].map(
+    (n): GexLineDef => ({
+      key: `p${n}`,
+      name: `Put Wall ${n}`,
+      title: `P${n}`,
+      color: PS,
+      style: 'solid',
+      on: true,
+      price: (a) => chartPutWalls(a)[n - 1],
+    }),
+  ),
   {
     key: 'hvl',
     name: 'HVL',
@@ -490,7 +519,7 @@ export const GEX_LINES: GexLineDef[] = [
     color: PS,
     style: 'dashed',
     on: true,
-    price: (_, n) => n?.putWalls[0],
+    price: (_, n) => chartPutWalls(n)[0],
   },
   {
     key: 'hvl0',
@@ -625,6 +654,15 @@ export function paritySpot(
  * Yahoo contracts → rows. Open interest is in contracts, so × 100 to units. IV is solved from the bid/ask
  * mid (Yahoo's own IV is unreliable on thin strikes), else from the last trade, else Yahoo's figure.
  */
+/**
+ * Before the US open Yahoo blanks open interest on nearly every contract (a 2026-11-20 pre-market QQQ chain: 2 of
+ * 631 contracts had any), so walls would come from a handful of leftover far-away strikes. True when fewer than
+ * 1 in 5 listed contracts carry open interest.
+ */
+export function thinOpenInterest(listed: number, withOi: number): boolean {
+  return listed > 0 && withOi < listed * 0.2;
+}
+
 export function usRows(
   calls: YahooContract[],
   puts: YahooContract[],

@@ -1,6 +1,9 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { NextResponse } from 'next/server';
 import { computeLevels, type GexConvention, type GexResponse, type OptionRow } from '../../../../lib/tv/gex';
-import { noGex as none, usLevels } from '../../../../lib/tv/gex-us';
+import { NO_OPEN_INTEREST, noGex as none, usLevels } from '../../../../lib/tv/gex-us';
 import { futureBySymbol, instrumentKey } from '../../../../lib/broker/upstox-instruments';
 
 /**
@@ -72,6 +75,29 @@ const CONVENTIONS: GexConvention[] = ['dealer_long_calls', 'dealer_short_all'];
 
 const cache = new Map<string, { at: number; body: GexResponse }>();
 
+/**
+ * The last full US snapshot per symbol, on disk so it survives a restart: served (marked `stale`) while Yahoo
+ * has blanked open interest before the US open, instead of levels built from a few leftover strikes.
+ */
+const LAST_GOOD_MAX_AGE_S = 4 * 86_400;
+const lastGoodPath = (key: string) => join(tmpdir(), `gex-last-${key.replace(/[^A-Za-z0-9|_-]/g, '_').replace(/\|/g, '-')}.json`);
+async function saveLastGood(key: string, body: GexResponse) {
+  try {
+    await writeFile(lastGoodPath(key), JSON.stringify(body));
+  } catch {
+    /* read-only disk: no fallback, nothing else lost */
+  }
+}
+async function loadLastGood(key: string): Promise<GexResponse | null> {
+  try {
+    const body = JSON.parse(await readFile(lastGoodPath(key), 'utf8')) as GexResponse;
+    const age = Date.now() / 1000 - (body.asOf ?? 0);
+    return body.supported && age < LAST_GOOD_MAX_AGE_S ? body : null;
+  } catch {
+    return null;
+  }
+}
+
 
 interface ChainItem {
   strike_price: number;
@@ -128,7 +154,12 @@ export async function GET(req: Request) {
 
   if (!isNseSymbol(symbol)) {
     try {
-      const body = await usLevels(symbol, days, convention);
+      let body = await usLevels(symbol, days, convention);
+      if (body.supported) await saveLastGood(cacheKey, body);
+      else if (body.reason === NO_OPEN_INTEREST) {
+        const old = await loadLastGood(cacheKey);
+        if (old) body = { ...old, stale: NO_OPEN_INTEREST };
+      }
       if (body.supported) cache.set(cacheKey, { at: Date.now(), body });
       return NextResponse.json(body);
     } catch (err) {

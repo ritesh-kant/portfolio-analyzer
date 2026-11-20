@@ -1,7 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { CR as CALL, type GexResponse, HVL, PS as PUT, fmtGex } from '../../lib/tv/gex';
+import {
+  CR as CALL,
+  type GexResponse,
+  HVL,
+  PS as PUT,
+  chartPutWalls,
+  fmtGex,
+} from '../../lib/tv/gex';
 
 const UP = '#089981';
 const DOWN = '#f23645';
@@ -87,9 +94,9 @@ export function GexPanel({
       strike: p,
     }),
   );
-  all.putWalls.forEach((p, i) =>
+  chartPutWalls(all).forEach((p, i) =>
     rows.push({
-      label: i === 0 ? 'P1 · put sup.' : `P${i + 1}`,
+      label: `P${i + 1}`,
       price: p * scale,
       color: PUT,
       strike: p,

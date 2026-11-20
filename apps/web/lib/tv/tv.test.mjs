@@ -14,7 +14,7 @@ import { cotItems, metalRoot, parseBlsCalendar, parseFedRss, zonedInstant } from
 import { groupByBar } from './news-markers.ts';
 import { barContaining, deltaDepthDays, findDeltaDivergences, inDeltaView, DELTA_VIEW_DEFAULTS } from './delta-divergence.ts';
 import { FVG_DEFAULTS, findFvgs } from './fvg.ts';
-import { bsDelta, bsPrice, chainActivity, computeLevels, fmtGex, impliedVol, paritySpot, usExpiryInstant, usRows } from './gex.ts';
+import { bsDelta, bsPrice, chainActivity, chartPutWalls, computeLevels, thinOpenInterest, fmtGex, impliedVol, paritySpot, usExpiryInstant, usRows } from './gex.ts';
 import { backfillOpeningVolume, dropSpikeWicks, foldTrailingTick, intervalSecs } from './clean-bars.ts';
 
 const IST = 'Asia/Kolkata';
@@ -1249,6 +1249,8 @@ test('gex levels match the Python implementation', () => {
   assert.ok(Math.abs(lv.flip - 23987.448925655222) < 1e-6);
   assert.deepEqual(lv.callWalls, [24200, 24500, 24600]);
   assert.deepEqual(lv.putWalls, [23800, 23500, 24000]);
+  // No put strike above spot in this chain, so the chart's walls start the same.
+  assert.deepEqual(lv.putWallsAll.slice(0, 3), [23800, 23500, 24000]);
   assert.equal(lv.gammaWall, 24200);
   assert.deepEqual(lv.gexLevels, [24500, 23500, 24600, 24000, 23400]);
   assert.ok(Math.abs(lv.range[0] - 23845.47397454288) < 1e-6);
@@ -1375,4 +1377,28 @@ test('gex: usRows keeps volume-only and IV-less contracts for the ratios, out of
     ],
   );
   assert.equal(computeLevels(rows, 100, now).netGex, 0);
+});
+
+test('gex: chart put walls come from both sides of price, up to 7', () => {
+  const now = 1793766600;
+  const e1 = 1794304800;
+  const row = (strike, oi) => ({ expiry: e1, strike, kind: 'PE', oi, iv: 0.15 });
+  // A big put strike ABOVE spot (24200) must appear in putWallsAll but not in the below-spot putWalls.
+  const strikes = [23600, 23700, 23800, 23900, 24000, 24100, 24200, 24300, 24400];
+  const rows = strikes.map((k) => row(k, k === 24200 ? 9e6 : 1e6));
+  const lv = computeLevels(rows, 24050, now);
+  assert.ok(lv.putWallsAll.includes(24200));
+  assert.ok(!lv.putWalls.includes(24200));
+  assert.equal(lv.putWallsAll.length, 7);
+  assert.equal(lv.putWalls.length, 3);
+  assert.ok(lv.putWalls.every((k) => k <= 24050));
+  // An old response without the field falls back to the below-spot walls.
+  assert.deepEqual(chartPutWalls({ ...lv, putWallsAll: undefined }), lv.putWalls);
+});
+
+test('gex: a pre-market chain with blanked open interest is refused', () => {
+  // 2026-11-20 pre-market QQQ: 2 of 631 contracts had open interest.
+  assert.equal(thinOpenInterest(631, 2), true);
+  assert.equal(thinOpenInterest(631, 500), false);
+  assert.equal(thinOpenInterest(0, 0), false);
 });

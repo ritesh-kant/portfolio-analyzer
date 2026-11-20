@@ -825,8 +825,9 @@ export function IndicatorSettings({ cfg, onChange, onClose, timeZone }: Settings
               <p className="mt-2">
                 GEX estimates how much option writers must buy or sell to stay hedged as price moves, from
                 the live option chain. <b className="text-[#22c55e]">Call Resistance</b> is the strike with
-                the most call gamma above price; <b className="text-[#f23645]">Put Support</b> the most put
-                gamma below. <b className="text-[#22d3ee]">HVL</b> is the gamma flip: above it hedging tends
+                the most call gamma above price; <b className="text-[#f23645]">P1–P7</b> are the
+                strikes with the most put gamma on either side of price: below it they tend to act as
+                support, above it as resistance. <b className="text-[#22d3ee]">HVL</b> is the gamma flip: above it hedging tends
                 to damp moves, below it to amplify them. <b className="text-[#22c55e]">Gamma Wall</b> is the
                 single largest strike. <b className="text-[#a78bfa]">GEX 1–10</b> are the next-largest strikes
                 after Call Resistance and Put Support. 0DTE levels use the nearest expiry only; 1D Min/Max is

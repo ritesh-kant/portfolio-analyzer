@@ -4,6 +4,7 @@ import {
   type GexConvention,
   type GexResponse,
   paritySpot,
+  thinOpenInterest,
   usExpiryInstant,
   usRows,
 } from './gex.ts';
@@ -37,6 +38,10 @@ export const US_PROXY: Record<string, string> = {
 const MAX_US_EXPIRIES = 20;
 
 export const noGex = (reason: string): GexResponse => ({ supported: false, reason });
+
+/** `usLevels`' reason when the chain has no open interest yet (pre-market); the route then serves the last good one. */
+export const NO_OPEN_INTEREST =
+  'Yahoo shows no open interest before the US open, so no levels until 9:30 ET';
 
 /** Last price of a chart symbol (the chart endpoint needs no session). */
 async function yahooPrice(symbol: string): Promise<number | undefined> {
@@ -76,11 +81,19 @@ export async function usLevels(symbol: string, days: number, convention: GexConv
   if (!dates.length) return noGex('no live expiries in the window');
 
   const tally = { mid: 0, last: 0, yahoo: 0 };
+  let listed = 0;
+  let withOi = 0;
   const chunks = await mapPool(dates, 4, async (d) => {
     const chain = first.options[0]?.expirationDate === d ? first : await optionChain(chainSymbol, d);
     const leg = chain?.options[0];
-    return leg ? usRows(leg.calls, leg.puts, usExpiryInstant(d), spot, now, tally) : [];
+    if (!leg) return [];
+    for (const c of [...leg.calls, ...leg.puts]) {
+      listed += 1;
+      if ((c.openInterest ?? 0) > 0) withOi += 1;
+    }
+    return usRows(leg.calls, leg.puts, usExpiryInstant(d), spot, now, tally);
   });
+  if (thinOpenInterest(listed, withOi)) return noGex(NO_OPEN_INTEREST);
   const rows = chunks.flat();
   if (!rows.length) return noGex('empty option chain');
 
