@@ -2083,6 +2083,18 @@ export function TvChart({
     );
   }, [gexShown, gexProfileOn, gexRes, chartType, fp.on]);
 
+  // TanukiTrade label chips at the left edge, with a band where two or more stack (confluence).
+  const gexChipsOn = gexCfg?.gexChips !== false;
+  useEffect(() => {
+    const tags = gexRes?.all?.tags;
+    const scale = gexRes?.scale ?? 1;
+    gexPrimRef.current?.setTags(
+      gexShown && gexChipsOn && tags
+        ? tags.map((t) => ({ price: t.strike * scale, labels: t.labels }))
+        : [],
+    );
+  }, [gexShown, gexChipsOn, gexRes, chartType, fp.on]);
+
   // Regime background: above the gamma flip dealers damp moves (green), below it they chase them (red).
   const gexZonesOn = gexCfg?.gexZones !== false;
   useEffect(() => {

@@ -815,6 +815,11 @@ export function IndicatorSettings({ cfg, onChange, onClose, timeZone }: Settings
               />
             ) : null}
             <Check
+              label="Label chips and confluence bands (TanukiTrade style, at the left edge)"
+              checked={cfg.gexChips !== false}
+              onChange={(gexChips) => onChange({ ...cfg, gexChips })}
+            />
+            <Check
               label="Info panel (regime, net delta, level distances, put/call ratios)"
               checked={cfg.gexPanel !== false}
               onChange={(gexPanel) => onChange({ ...cfg, gexPanel })}

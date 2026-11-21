@@ -70,6 +70,8 @@ export interface IndicatorCfg {
   gexZones?: boolean;
   /** Gamma levels: background strength, % of the default tint (absent = 100). */
   gexZoneOpacity?: number;
+  /** Gamma levels: TanukiTrade label chips and confluence bands at the left edge (absent = on). */
+  gexChips?: boolean;
   /** Gamma levels: the read-out panel at the chart's top right (absent = on). */
   gexPanel?: boolean;
   /** Gamma levels: per-level show / colour overrides, by `GEX_LINES` key. */
