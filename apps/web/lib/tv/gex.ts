@@ -51,21 +51,34 @@ export interface StrikeGex {
   net: number;
 }
 
+/** The labels on one strike; `labels.length` is its confluence count. */
+export interface StrikeTags {
+  strike: number;
+  labels: string[];
+}
+
 export interface GexLevels {
   spot: number;
   /** ₹ per 1% move summed over every row. */
   netGex: number;
-  /** Gamma flip ("HVL"); null when the total never changes sign within ±8%. */
+  /** Gamma flip ("HVL"); null when the total never changes sign within ±20%. */
   flip: number | null;
   /** C1, C2, … strongest call-gamma strikes at/above spot. */
   callWalls: number[];
   /** P1, P2, … strongest put-gamma strikes at/below spot (used by the gamma recorder and AR strategy). */
   putWalls: number[];
   /**
-   * What the chart draws as P1…P7: the strongest put-gamma strikes on EITHER side of spot (Tanuki style; a put
-   * wall above price acts as resistance). Absent in responses from before it existed: use `chartPutWalls`.
+   * What the chart draws as C1…C7 / P1…P7, by TanukiTrade's rule: call walls are the strikes with the largest
+   * POSITIVE net GEX above the HVL, put walls the largest NEGATIVE net GEX below it (spot when there is no HVL),
+   * ranked by size, not distance. So a put wall can sit above price while price is below the HVL. Absent in
+   * responses from before it existed: use `chartWalls`.
    */
-  putWallsAll?: number[];
+  walls?: { calls: number[]; puts: number[] };
+  /**
+   * TanukiTrade's level labels by strike (walls, HVL, Ab1–3, COI/POI/nCOI/nPOI/AbOI, D+/D−, CV/PV/nCV/nPV).
+   * Several labels on one strike = "confluence": 2 moderate, 3 strong, 4+ exceptional.
+   */
+  tags?: StrikeTags[];
   /** One-day range from the nearest expiry's ATM IV: [1D min, 1D max]. */
   range: [number, number] | null;
   /** Strike with the largest |net| GEX, either side of spot (MenthorQ's "Gamma Wall"). */
@@ -245,14 +258,19 @@ export function strikeGex(
   return [...by.values()].sort((a, b) => a.strike - b.strike);
 }
 
-/** Spot where total GEX changes sign, nearest the current spot (sweep ±`span`, interpolate the bracket). */
+/**
+ * Spot where total GEX changes sign, nearest the current spot (sweep ±`span`, interpolate the bracket).
+ * ±20% on a 0.1% grid: after a big move the flip can sit well over 8% away (QQQ on 2026-11-20 closed 608 with
+ * the flip near 661), and the old ±8% sweep then drew no HVL at all. The grid points are the same as the old
+ * ±8% / 161-step sweep's, so a flip it found is unchanged.
+ */
 export function gammaFlip(
   rows: OptionRow[],
   spot: number,
   now: number,
   convention: GexConvention,
-  span = 0.08,
-  steps = 161,
+  span = 0.2,
+  steps = 401,
 ): number | null {
   const lo = spot * (1 - span);
   const hi = spot * (1 + span);
@@ -296,6 +314,124 @@ export function expectedMove(spot: number, iv: number | null, days = 1): [number
   return [spot - move, spot + move];
 }
 
+/** Most walls on each side, as TanukiTrade's v3 chart draws. */
+export const N_TANUKI_WALLS = 7;
+
+/** Index of the largest value (ties: the first); -1 when none is above `floor`. */
+function argMax<T>(items: T[], value: (t: T) => number, floor = 0): number {
+  let best = -1;
+  let bestV = floor;
+  items.forEach((t, i) => {
+    const v = value(t);
+    if (v > bestV) {
+      best = i;
+      bestV = v;
+    }
+  });
+  return best;
+}
+
+interface StrikeStats {
+  strike: number;
+  callOi: number;
+  putOi: number;
+  callVol: number;
+  putVol: number;
+  /** Call OI × call delta − put OI × |put delta| (TanukiTrade's net DEX, before scaling). */
+  dex: number;
+}
+
+/**
+ * TanukiTrade's labels by strike. `strikes` carries the per-strike gamma; `rows` the open interest, volume and
+ * (for delta) IV. Definitions from its docs and "4 Layers of Market Structure with GEX" cheat sheet:
+ *  - C1…C7 / P1…P7: largest positive net GEX above the HVL / largest negative net GEX below it.
+ *  - HVL: counted on the strike nearest it, when it sits within half the gap to the next strike.
+ *  - Ab1–Ab3: largest call-gamma plus put-gamma magnitude (not |net|).
+ *  - COI / POI: highest call / put open interest; nCOI / nPOI: largest call−put / put−call OI; AbOI: call+put OI.
+ *  - D+ / D−: highest positive / most negative net DEX.
+ *  - CV / PV / nCV / nPV: the same as the OI labels on session volume.
+ * cT/pT (transition edges) are not built: TanukiTrade leaves them out of confluence counts.
+ */
+export function strikeTags(
+  rows: OptionRow[],
+  strikes: StrikeGex[],
+  spot: number,
+  now: number,
+  walls: { calls: number[]; puts: number[] },
+  flip: number | null,
+): StrikeTags[] {
+  const by = new Map<number, string[]>();
+  const tag = (strike: number | undefined, label: string) => {
+    if (strike == null) return;
+    const list = by.get(strike);
+    if (list) list.push(label);
+    else by.set(strike, [label]);
+  };
+  walls.calls.forEach((k, i) => tag(k, `C${i + 1}`));
+  walls.puts.forEach((k, i) => tag(k, `P${i + 1}`));
+  if (flip != null && strikes.length) {
+    const ks = strikes.map((s) => s.strike);
+    let i = 0;
+    for (let j = 1; j < ks.length; j += 1) if (Math.abs(ks[j]! - flip) < Math.abs(ks[i]! - flip)) i = j;
+    const gaps = [ks[i]! - (ks[i - 1] ?? -Infinity), (ks[i + 1] ?? Infinity) - ks[i]!];
+    if (Math.abs(ks[i]! - flip) <= Math.min(...gaps) / 2) tag(ks[i], 'HVL');
+  }
+  [...strikes]
+    .filter((s) => Math.abs(s.call) + Math.abs(s.put) > 0)
+    .sort((a, b) => Math.abs(b.call) + Math.abs(b.put) - (Math.abs(a.call) + Math.abs(a.put)))
+    .slice(0, 3)
+    .forEach((s, i) => tag(s.strike, `Ab${i + 1}`));
+
+  const stats = new Map<number, StrikeStats>();
+  for (const r of rows) {
+    if (r.expiry <= now) continue;
+    let st = stats.get(r.strike);
+    if (!st) {
+      st = { strike: r.strike, callOi: 0, putOi: 0, callVol: 0, putVol: 0, dex: 0 };
+      stats.set(r.strike, st);
+    }
+    const call = r.kind === 'CE';
+    if (call) {
+      st.callOi += r.oi;
+      st.callVol += r.volume ?? 0;
+    } else {
+      st.putOi += r.oi;
+      st.putVol += r.volume ?? 0;
+    }
+    if (r.oi > 0 && r.iv > 0) {
+      // A put's delta is negative, so this is call OI × Δ − put OI × |Δ|.
+      st.dex += r.oi * bsDelta(spot, r.strike, yearFraction(now, r.expiry), r.iv, r.kind, r.r ?? RISK_FREE);
+    }
+  }
+  const list = [...stats.values()].sort((a, b) => a.strike - b.strike);
+  const pick = (label: string, value: (s: StrikeStats) => number) => {
+    const i = argMax(list, value);
+    if (i >= 0) tag(list[i]!.strike, label);
+  };
+  pick('COI', (s) => s.callOi);
+  pick('POI', (s) => s.putOi);
+  pick('nCOI', (s) => s.callOi - s.putOi);
+  pick('nPOI', (s) => s.putOi - s.callOi);
+  pick('AbOI', (s) => s.callOi + s.putOi);
+  pick('D+', (s) => s.dex);
+  pick('D−', (s) => -s.dex);
+  pick('CV', (s) => s.callVol);
+  pick('PV', (s) => s.putVol);
+  pick('nCV', (s) => s.callVol - s.putVol);
+  pick('nPV', (s) => s.putVol - s.callVol);
+  return [...by]
+    .map(([strike, labels]) => ({ strike, labels }))
+    .sort((a, b) => a.strike - b.strike);
+}
+
+/** TanukiTrade's words for a confluence count. */
+export function confluenceWord(n: number): string | null {
+  if (n >= 4) return 'Exceptional';
+  if (n === 3) return 'Strong';
+  if (n === 2) return 'Moderate';
+  return null;
+}
+
 export function computeLevels(
   rows: OptionRow[],
   spot: number,
@@ -303,11 +439,11 @@ export function computeLevels(
   convention: GexConvention = 'dealer_long_calls',
   nWalls = 3,
   nGex = 10,
-  nPutWallsAll = 7,
 ): GexLevels {
   const live = rows.filter((r) => r.oi > 0 && r.iv > 0 && r.expiry > now);
   const strikes = strikeGex(live, spot, now, convention);
-  // Walls on their own side of price (Tanuki style): resistance above, support below.
+  // The original walls (call gamma above spot, put gamma below), kept for the gamma recorder, the AR strategy
+  // and the Python parity test.
   const callWalls = strikes
     .filter((s) => s.strike >= spot && s.call !== 0)
     .sort((a, b) => Math.abs(b.call) - Math.abs(a.call))
@@ -318,11 +454,21 @@ export function computeLevels(
     .sort((a, b) => Math.abs(b.put) - Math.abs(a.put))
     .slice(0, nWalls)
     .map((s) => s.strike);
-  const putWallsAll = strikes
-    .filter((s) => s.put !== 0)
-    .sort((a, b) => Math.abs(b.put) - Math.abs(a.put))
-    .slice(0, nPutWallsAll)
-    .map((s) => s.strike);
+  const flip = convention === 'dealer_long_calls' ? gammaFlip(live, spot, now, convention) : null;
+  // The chart's walls, by TanukiTrade's rule: net GEX on its own side of the HVL.
+  const pivot = flip ?? spot;
+  const walls = {
+    calls: strikes
+      .filter((s) => s.strike > pivot && s.net > 0)
+      .sort((a, b) => b.net - a.net)
+      .slice(0, N_TANUKI_WALLS)
+      .map((s) => s.strike),
+    puts: strikes
+      .filter((s) => s.strike < pivot && s.net < 0)
+      .sort((a, b) => a.net - b.net)
+      .slice(0, N_TANUKI_WALLS)
+      .map((s) => s.strike),
+  };
   const byNet = strikes
     .filter((s) => s.net !== 0)
     .sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
@@ -335,10 +481,11 @@ export function computeLevels(
       .filter((s) => !crPs.has(s.strike))
       .slice(0, nGex)
       .map((s) => s.strike),
-    flip: convention === 'dealer_long_calls' ? gammaFlip(live, spot, now, convention) : null,
+    flip,
     callWalls,
     putWalls,
-    putWallsAll,
+    walls,
+    tags: strikeTags(rows, strikes, spot, now, walls, flip),
     range: expectedMove(spot, atmIv(live, spot, now)),
     activity: chainActivity(rows, spot, now),
     strikes,
@@ -394,87 +541,66 @@ export interface GexLineDef {
   price: (all: GexLevels, nearest: GexLevels | undefined) => number | null | undefined;
 }
 
-// Calls green, puts red, HVL cyan: the Tanuki/MenthorQ chart look.
+// Calls green, puts red, HVL cyan; the secondary labels in TanukiTrade's layer colours.
 export const CR = '#22c55e';
 export const PS = '#f23645';
 export const HVL = '#22d3ee';
 const RANGE = '#ff9800';
-// Violet, so the GEX 1–10 lines can't be mistaken for the cyan HVL.
-const GEX_N = '#a78bfa';
+const AB = '#a78bfa';
+const OI = '#eab308';
+const DEX = '#e5e7eb';
+const FLOW = '#2dd4bf';
+// Slate, so the MenthorQ GEX 1–10 lines don't clash with the cyan HVL or the lavender Ab levels.
+const GEX_N = '#64748b';
 
-/** The put walls the chart draws: both sides of price when the response has them, else the old below-price ones. */
-export const chartPutWalls = (lv: GexLevels | undefined): number[] =>
-  lv ? (lv.putWallsAll ?? lv.putWalls) : [];
+/** The walls the chart draws: TanukiTrade's when the response has them, else the older call/put-gamma ones. */
+export function chartWalls(lv: GexLevels | undefined): { calls: number[]; puts: number[] } {
+  if (!lv) return { calls: [], puts: [] };
+  const legacy = (lv as GexLevels & { putWallsAll?: number[] }).putWallsAll;
+  return lv.walls ?? { calls: lv.callWalls, puts: legacy ?? lv.putWalls };
+}
 
-/** Every level the indicator can draw, in MenthorQ's order. Defaults match its "Gamma Levels" study. */
+/** The strike carrying a label (Ab1, COI, D+, …), if any. */
+export const tagStrike = (lv: GexLevels | undefined, label: string): number | undefined =>
+  lv?.tags?.find((t) => t.labels.includes(label))?.strike;
+
+/** Confluence count at a strike (0 when it carries no label). */
+export const tagCount = (lv: GexLevels | undefined, strike: number): number =>
+  lv?.tags?.find((t) => t.strike === strike)?.labels.length ?? 0;
+
+const wall = (side: 'C' | 'P', n: number): GexLineDef => ({
+  key: n === 1 ? (side === 'C' ? 'cr' : 'ps') : `${side.toLowerCase()}${n}`,
+  name: `${side === 'C' ? 'Call' : 'Put'} Wall ${n}${n === 1 ? (side === 'C' ? ' (Call Resistance)' : ' (Put Support)') : ''}`,
+  title: `${side}${n}`,
+  color: side === 'C' ? CR : PS,
+  style: 'solid',
+  ...(n === 1 ? { width: 2 } : {}),
+  on: true,
+  price: (a) => chartWalls(a)[side === 'C' ? 'calls' : 'puts'][n - 1],
+});
+
+const secondary = (
+  label: string,
+  name: string,
+  color: string,
+  style: GexLineStyle,
+  on: boolean,
+): GexLineDef => ({
+  key: `t_${label}`,
+  name,
+  title: label,
+  color,
+  style,
+  on,
+  price: (a) => tagStrike(a, label),
+});
+
+/** Every level the indicator can draw. Walls and secondary labels follow TanukiTrade; 0DTE and GEX 1–10 MenthorQ. */
 export const GEX_LINES: GexLineDef[] = [
-  {
-    key: 'cr',
-    name: 'Call Resistance',
-    title: 'C1',
-    color: CR,
-    style: 'solid',
-    width: 2,
-    on: true,
-    price: (a) => a.callWalls[0],
-  },
-  {
-    key: 'ps',
-    name: 'Put Wall 1 (Put Support)',
-    title: 'P1',
-    color: PS,
-    style: 'solid',
-    width: 2,
-    on: true,
-    price: (a) => chartPutWalls(a)[0],
-  },
-  {
-    key: 'c2',
-    name: 'Call Wall 2',
-    title: 'C2',
-    color: CR,
-    style: 'solid',
-    on: true,
-    price: (a) => a.callWalls[1],
-  },
-  {
-    key: 'c3',
-    name: 'Call Wall 3',
-    title: 'C3',
-    color: CR,
-    style: 'solid',
-    on: true,
-    price: (a) => a.callWalls[2],
-  },
-  {
-    key: 'p2',
-    name: 'Put Wall 2',
-    title: 'P2',
-    color: PS,
-    style: 'solid',
-    on: true,
-    price: (a) => chartPutWalls(a)[1],
-  },
-  {
-    key: 'p3',
-    name: 'Put Wall 3',
-    title: 'P3',
-    color: PS,
-    style: 'solid',
-    on: true,
-    price: (a) => chartPutWalls(a)[2],
-  },
-  ...[4, 5, 6, 7].map(
-    (n): GexLineDef => ({
-      key: `p${n}`,
-      name: `Put Wall ${n}`,
-      title: `P${n}`,
-      color: PS,
-      style: 'solid',
-      on: true,
-      price: (a) => chartPutWalls(a)[n - 1],
-    }),
-  ),
+  wall('C', 1),
+  wall('P', 1),
+  ...[2, 3, 4, 5, 6, 7].map((n) => wall('C', n)),
+  ...[2, 3, 4, 5, 6, 7].map((n) => wall('P', n)),
   {
     key: 'hvl',
     name: 'HVL',
@@ -485,6 +611,20 @@ export const GEX_LINES: GexLineDef[] = [
     on: true,
     price: (a) => a.flip,
   },
+  secondary('Ab1', 'Absolute GEX 1 (highest call + put gamma)', AB, 'solid', true),
+  secondary('Ab2', 'Absolute GEX 2', AB, 'solid', true),
+  secondary('Ab3', 'Absolute GEX 3', AB, 'solid', true),
+  secondary('COI', 'Call OI peak', OI, 'dashed', true),
+  secondary('POI', 'Put OI peak', OI, 'dashed', true),
+  secondary('AbOI', 'Total OI peak (call + put)', OI, 'dashed', true),
+  secondary('nCOI', 'Net call OI (call OI most above put OI)', OI, 'dashed', false),
+  secondary('nPOI', 'Net put OI (put OI most above call OI)', OI, 'dashed', false),
+  secondary('D+', 'Highest positive net DEX', DEX, 'dashed', true),
+  secondary('D−', 'Highest negative net DEX', DEX, 'dashed', true),
+  secondary('CV', 'Call volume peak', FLOW, 'dotted', true),
+  secondary('PV', 'Put volume peak', FLOW, 'dotted', true),
+  secondary('nCV', 'Net call volume', FLOW, 'dotted', false),
+  secondary('nPV', 'Net put volume', FLOW, 'dotted', false),
   {
     key: 'min1d',
     name: '1D Min',
@@ -510,7 +650,7 @@ export const GEX_LINES: GexLineDef[] = [
     color: CR,
     style: 'dashed',
     on: true,
-    price: (_, n) => n?.callWalls[0],
+    price: (_, n) => chartWalls(n).calls[0],
   },
   {
     key: 'ps0',
@@ -519,7 +659,7 @@ export const GEX_LINES: GexLineDef[] = [
     color: PS,
     style: 'dashed',
     on: true,
-    price: (_, n) => chartPutWalls(n)[0],
+    price: (_, n) => chartWalls(n).puts[0],
   },
   {
     key: 'hvl0',
@@ -543,11 +683,11 @@ export const GEX_LINES: GexLineDef[] = [
     { length: 10 },
     (_, i): GexLineDef => ({
       key: `gex${i + 1}`,
-      name: `GEX ${i + 1}`,
+      name: `GEX ${i + 1} (MenthorQ)`,
       title: `G${i + 1}`,
       color: GEX_N,
       style: 'solid',
-      on: i < 3,
+      on: false,
       price: (a) => a.gexLevels?.[i],
     }),
   ),

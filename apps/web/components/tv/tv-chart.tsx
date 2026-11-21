@@ -2043,16 +2043,21 @@ export function TvChart({
         def.width ?? 1,
       );
     }
-    const lines = [...byPrice].map(([price, l]) =>
-      main.series.createPriceLine({
+    // TanukiTrade confluence: how many labels share the strike (hidden ones included), shown as "5×".
+    const stack = new Map(
+      (all.tags ?? []).map((t) => [Math.round(t.strike * scale * 100) / 100, t.labels.length]),
+    );
+    const lines = [...byPrice].map(([price, l]) => {
+      const n = stack.get(price) ?? 0;
+      return main.series.createPriceLine({
         price,
         color: l.color,
         lineWidth: l.width as LineWidth,
         lineStyle: l.style,
         axisLabelVisible: true,
-        title: l.titles.join(' | '),
-      }),
-    );
+        title: `${l.titles.join(' | ')}${n >= 2 ? `  ${n}×` : ''}`,
+      });
+    });
     gexLinesRef.current = { series: main.series, lines };
   }, [gexShown, gexRes, gexStyle, chartType, fp.on]);
 

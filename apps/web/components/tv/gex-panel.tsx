@@ -6,7 +6,8 @@ import {
   type GexResponse,
   HVL,
   PS as PUT,
-  chartPutWalls,
+  chartWalls,
+  confluenceWord,
   fmtGex,
 } from '../../lib/tv/gex';
 
@@ -86,7 +87,8 @@ export function GexPanel({
   const gexUp = all.netGex >= 0;
 
   const rows: Row[] = [];
-  all.callWalls.forEach((p, i) =>
+  const walls = chartWalls(all);
+  walls.calls.forEach((p, i) =>
     rows.push({
       label: i === 0 ? 'C1 · call res.' : `C${i + 1}`,
       price: p * scale,
@@ -94,9 +96,9 @@ export function GexPanel({
       strike: p,
     }),
   );
-  chartPutWalls(all).forEach((p, i) =>
+  walls.puts.forEach((p, i) =>
     rows.push({
-      label: `P${i + 1}`,
+      label: i === 0 ? 'P1 · put sup.' : `P${i + 1}`,
       price: p * scale,
       color: PUT,
       strike: p,
@@ -118,6 +120,12 @@ export function GexPanel({
   });
   const digits = px >= 1000 ? 1 : 2;
   const act = all.activity;
+  // Strikes where two or more TanukiTrade labels land: the biggest stacks first, then the nearest.
+  const stacks = (all.tags ?? [])
+    .filter((t) => t.labels.length >= 2)
+    .map((t) => ({ ...t, price: t.strike * scale }))
+    .sort((a, b) => b.labels.length - a.labels.length || Math.abs(a.price - px) - Math.abs(b.price - px))
+    .slice(0, 6);
 
   if (!open) {
     return (
@@ -228,6 +236,44 @@ export function GexPanel({
             })}
           </tbody>
         </table>
+
+        {stacks.length ? (
+          <div className="mt-2 border-t border-[#2a2e39] pt-1.5">
+            <div
+              className="mb-1 text-[9px] uppercase tracking-wide text-[#787b86]"
+              title="Several TanukiTrade labels on one strike (walls, HVL, absolute gamma, open interest, delta, volume). 2 = moderate, 3 = strong, 4+ = exceptional. Descriptive only: a place price may react, not a signal."
+            >
+              Confluence
+            </div>
+            {stacks.map((t) => {
+              const pct = ((t.price - px) / px) * 100;
+              const n = t.labels.length;
+              return (
+                <div key={t.strike} className="mb-1 tabular-nums">
+                  <div className="flex items-center justify-between">
+                    <span>
+                      <span
+                        className="mr-1.5 rounded px-1 text-[10px] font-semibold"
+                        style={{
+                          background: n >= 4 ? '#5c1d24' : n === 3 ? '#4a3416' : '#262c47',
+                          color: n >= 4 ? '#ff6b6b' : n === 3 ? '#ffb454' : '#8f9bff',
+                        }}
+                      >
+                        {n}×
+                      </span>
+                      <span className="text-[#d1d4dc]">{t.strike}</span>
+                      <span className="ml-1.5 text-[#787b86]">{confluenceWord(n)?.toLowerCase()}</span>
+                    </span>
+                    <span style={{ color: pct >= 0 ? UP : DOWN }}>
+                      {`${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-[#9598a1]">{t.labels.join(' · ')}</div>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
 
         {act && act.callOi + act.putOi > 0 ? (
           <div className="mt-2 space-y-1 border-t border-[#2a2e39] pt-1.5">

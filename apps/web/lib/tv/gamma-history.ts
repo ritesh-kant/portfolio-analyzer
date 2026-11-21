@@ -14,7 +14,7 @@ import type { GexLevels, GexResponse } from './gex.ts';
  */
 
 export interface GammaSet {
-  /** Gamma flip, in the proxy's prices; null when the total never changes sign within ±8 %. */
+  /** Gamma flip, in the proxy's prices; null when the total never changes sign within ±20 % (±8 % before 2026-11-21). */
   flip: number | null;
   callWalls: number[];
   putWalls: number[];

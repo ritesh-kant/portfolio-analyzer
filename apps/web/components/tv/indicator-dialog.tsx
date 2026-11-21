@@ -824,16 +824,21 @@ export function IndicatorSettings({ cfg, onChange, onClose, timeZone }: Settings
               <summary className="cursor-pointer text-[13px] text-[#d1d4dc]">What do these lines mean?</summary>
               <p className="mt-2">
                 GEX estimates how much option writers must buy or sell to stay hedged as price moves, from
-                the live option chain. <b className="text-[#22c55e]">Call Resistance</b> is the strike with
-                the most call gamma above price; <b className="text-[#f23645]">P1–P7</b> are the
-                strikes with the most put gamma on either side of price: below it they tend to act as
-                support, above it as resistance. <b className="text-[#22d3ee]">HVL</b> is the gamma flip: above it hedging tends
-                to damp moves, below it to amplify them. <b className="text-[#22c55e]">Gamma Wall</b> is the
-                single largest strike. <b className="text-[#a78bfa]">GEX 1–10</b> are the next-largest strikes
-                after Call Resistance and Put Support. 0DTE levels use the nearest expiry only; 1D Min/Max is
-                the one-day range implied by at-the-money volatility. The bars in the column right of the
-                prices are net GEX at each strike per 1% move (₹ crore for NSE, $ for US): green damps
-                moves, red amplifies them.
+                the live option chain. <b className="text-[#22d3ee]">HVL</b> is the gamma flip: above it
+                hedging tends to damp moves, below it to amplify them. Walls follow TanukiTrade:{' '}
+                <b className="text-[#22c55e]">C1–C7</b> are the strikes with the largest positive net GEX above
+                the HVL, <b className="text-[#f23645]">P1–P7</b> the largest negative net GEX below it, ranked
+                by size, not distance (so a put wall can sit above price while price is under the HVL).{' '}
+                <b className="text-[#a78bfa]">Ab1–3</b> have the most call plus put gamma;{' '}
+                <b className="text-[#eab308]">COI / POI / AbOI</b> the most call / put / total open interest
+                (nCOI / nPOI: where one side most exceeds the other); <b className="text-[#e5e7eb]">D+ / D−</b>{' '}
+                the largest positive / negative net delta exposure; <b className="text-[#2dd4bf]">CV / PV</b>{' '}
+                the most call / put volume today (nCV / nPV: net). When several labels land on one strike the
+                line shows a count such as <b>4×</b> (2 moderate, 3 strong, 4+ exceptional confluence): a place
+                price may react, not a signal. 0DTE levels, Gamma Wall and GEX 1–10 (off by default) are
+                MenthorQ&rsquo;s and use the nearest expiry or |net| GEX; 1D Min/Max is the one-day range implied
+                by at-the-money volatility. The bars right of the prices are net GEX per strike per 1% move (₹
+                crore for NSE, $ for US): green damps moves, red amplifies them.
               </p>
               <p className="mt-2">
                 NSE chains come from Upstox; US chains from Yahoo (~15 minutes delayed, implied volatility
