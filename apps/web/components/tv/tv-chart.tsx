@@ -3537,6 +3537,33 @@ export function TvChart({
         zoomIn();
         return;
       }
+      // Arrow keys nudge the selected drawing: left/right by one bar, up/down by one pixel of its
+      // pane's price scale (Shift = 10x). Shift+Right / Shift+Down stay with replay while it runs.
+      const nudge = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[
+        e.key
+      ] as [number, number] | undefined;
+      if (nudge && !e.ctrlKey && !e.metaKey && !e.altKey && latest.current.selectedId) {
+        const d = latest.current.drawings.find((v) => v.id === latest.current.selectedId);
+        const series = d ? seriesFor(d.pane ?? null) : undefined;
+        if (d && !d.locked && series) {
+          e.preventDefault();
+          const k = e.shiftKey ? 10 : 1;
+          const y0 = series.priceToCoordinate(d.pts[0]?.p ?? 0) ?? 100;
+          const p0 = series.coordinateToPrice(y0);
+          const p1 = series.coordinateToPrice(y0 - 1);
+          const dp = p0 != null && p1 != null ? (p1 - p0) * nudge[1] * k : 0;
+          const dl = nudge[0] * k;
+          const moved: Drawing = {
+            ...d,
+            pts: d.pts.map((pt) => ({
+              t: dl ? axis.toTime(axis.toLogical(pt.t) + dl) : pt.t,
+              p: pt.p + dp,
+            })),
+          };
+          setDrawings(latest.current.drawings.map((v) => (v.id === d.id ? moved : v)));
+          return;
+        }
+      }
       if (e.key === 'Escape') {
         setNewsPinned(null);
         cancelDraft();

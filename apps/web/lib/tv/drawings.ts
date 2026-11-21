@@ -211,7 +211,7 @@ export function defaultFib(): FibSettings {
     trend: { on: true, color: '#787b86', width: 1, style: 'dashed' },
     lines: { width: 1, style: 'solid' },
     background: { on: true, opacity: 0.09 },
-    labels: { show: true, price: true, percent: false, side: 'left' },
+    labels: { show: true, price: true, percent: false, side: 'right' },
     extendLeft: false,
     extendRight: false,
     reverse: false,
