@@ -1691,25 +1691,45 @@ export function TvChart({
       minute: '2-digit',
       timeZone: 'Asia/Kolkata',
     });
+    const shift =
+      !gexRes.proxy && gexRes.scale && gexRes.futurePrice && gexRes.spot
+        ? gexRes.futurePrice - gexRes.spot
+        : null;
+    const shiftTxt = shift != null ? `${shift >= 0 ? '+' : ''}${shift.toFixed(1)}` : '';
     return (
       <span
-        className="tabular-nums"
+        className="whitespace-nowrap tabular-nums"
         style={{ color: all.netGex >= 0 ? UP : DOWN }}
         title="Net GEX: money of hedging per 1% move (₹ crore for NSE, $ for US). Positive = dealer hedging damps moves; negative = it amplifies them. An estimate built on an assumed dealer position."
       >
-        net GEX {fmtGex(all.netGex, gexRes.currency)}
-        <span className="text-[#787b86]">
+        {fmtGex(all.netGex, gexRes.currency)}
+        {/* Kept to one short line so it never wraps over the chart: the long form of each part is its tooltip. */}
+        <span
+          className="text-[#787b86]"
+          title={
+            (gexRes.proxy
+              ? `Built from ${gexRes.proxy} options${gexRes.scale ? `, strikes scaled ×${gexRes.scale.toFixed(gexRes.scale > 2 ? 2 : 4)} to this contract` : ''}. `
+              : shift != null
+                ? `Strikes moved ${shiftTxt} to the futures price. `
+                : '') +
+            `Snapshot ${at} IST${gexRes.source === 'yahoo' && !gexRes.stale ? ' (Yahoo, ~15 min delayed)' : ''}.`
+          }
+        >
           {gexRes.proxy
-            ? ` · from ${gexRes.proxy} options${gexRes.scale ? ` ×${gexRes.scale.toFixed(gexRes.scale > 2 ? 2 : 4)}` : ''}`
-            : gexRes.scale && gexRes.futurePrice && gexRes.spot
-              ? ` · strikes moved ${gexRes.futurePrice - gexRes.spot >= 0 ? '+' : ''}${(gexRes.futurePrice - gexRes.spot).toFixed(1)} to futures`
+            ? ` · ${gexRes.proxy}${gexRes.scale ? ` ×${gexRes.scale.toFixed(gexRes.scale > 2 ? 2 : 4)}` : ''}`
+            : shift != null
+              ? ` · ${shiftTxt} fut`
               : ''}{' '}
-          · snapshot {at} IST{gexRes.source === 'yahoo' && !gexRes.stale ? ' (Yahoo, ~15 min delayed)' : ''}
+          · {at}
+          {gexRes.source === 'yahoo' && !gexRes.stale ? ' ~15m late' : ''}
         </span>
         {gexRes.stale ? (
-          <span className="text-[#ff9800]" title={gexRes.stale}>
+          <span
+            className="text-[#ff9800]"
+            title={`Showing the last full snapshot. ${gexRes.stale}`}
+          >
             {' '}
-            · last full snapshot (no open interest before the US open)
+            · stale
           </span>
         ) : null}
       </span>

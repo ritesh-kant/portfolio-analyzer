@@ -22,7 +22,7 @@ const DOWN = '#f23645';
 const POC_FILL = '#d1d4dc';
 const VA_LINE = 'rgba(255, 255, 255, 0.85)';
 /** POC row outline in the profile style. */
-const POC_LINE = '#e2c044';
+const POC_LINE = '#ffe600';
 /** Big-order sweep bars and bubbles: yellow for buying, red for selling (the order-flow platforms' colours). */
 const SWEEP_COLOR: Record<FootprintSweep['side'], string> = {
   buy: '245,217,10',
@@ -293,19 +293,31 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
       ctx.fillRect(left, b.top, barW[idx]!, b.h);
     });
 
-    // 2. Wick down the middle.
+    // 2. Wick: only outside the body (high down to the body's top, body's bottom down to the low); inside the body
+    // the volume numbers stay unobstructed.
+    const rowOf = (price: number) => Math.floor(price / step + 1e-9) * step;
+    const bodyTop = rowTop(rowOf(Math.max(d.open, d.close)));
+    const bodyBottom = rowBottom(rowOf(Math.min(d.open, d.close)));
     const yh = priceToY(d.high);
     const yl = priceToY(d.low);
     if (yh != null && yl != null) {
       ctx.fillStyle = color;
-      const wick = Math.max(1, Math.round(hr));
-      ctx.fillRect(mid - Math.floor(wick / 2), Math.round(yh * vr), wick, Math.max(1, Math.round((yl - yh) * vr)));
+      const wick = Math.max(2, Math.round(2 * hr));
+      const wx = mid - Math.floor(wick / 2);
+      const segment = (from: number, to: number) => {
+        const y0 = Math.round(from * vr);
+        const y1 = Math.round(to * vr);
+        if (y1 > y0) ctx.fillRect(wx, y0, wick, y1 - y0);
+      };
+      if (bodyTop != null && bodyBottom != null) {
+        segment(yh, bodyTop);
+        segment(bodyBottom, yl);
+      } else {
+        segment(yh, yl);
+      }
     }
 
     // 3. Body: an outline from the open's row to the close's row, the full column wide.
-    const rowOf = (price: number) => Math.floor(price / step + 1e-9) * step;
-    const bodyTop = rowTop(rowOf(Math.max(d.open, d.close)));
-    const bodyBottom = rowBottom(rowOf(Math.min(d.open, d.close)));
     if (bodyTop != null && bodyBottom != null) {
       const line = Math.max(1, Math.round(1.5 * hr));
       ctx.strokeStyle = color;
@@ -319,7 +331,7 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
     const poc = levels[rows.poc];
     const pb = poc ? box(poc.price) : null;
     if (pb) {
-      const line = Math.max(1, Math.round(hr));
+      const line = Math.max(2, Math.round(2 * hr));
       ctx.strokeStyle = POC_LINE;
       ctx.lineWidth = line;
       ctx.strokeRect(left + 1.5 * line, pb.top + line / 2, w - 3 * line, Math.max(line, pb.h - line));
