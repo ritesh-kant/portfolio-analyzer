@@ -319,7 +319,7 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
 
     // 3. Body: an outline from the open's row to the close's row, the full column wide.
     if (bodyTop != null && bodyBottom != null) {
-      const line = Math.max(1, Math.round(1.5 * hr));
+      const line = Math.max(2, Math.round(2.5 * hr));
       ctx.strokeStyle = color;
       ctx.lineWidth = line;
       const t = Math.round(bodyTop * vr) + line / 2;

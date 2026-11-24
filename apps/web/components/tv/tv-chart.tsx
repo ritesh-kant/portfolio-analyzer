@@ -79,6 +79,7 @@ import {
 } from '../../lib/tv/cvd';
 import { SYNC_KEY } from '../../lib/tv/layout';
 import { load, save } from '../../lib/tv/storage';
+import { resolveDisplayTz, setDisplayTz, useDisplayTzSetting } from '../../lib/tv/display-tz';
 
 const VIEW_KEY = 'tv:view';
 const REPLAY_KEY = 'tv:replay';
@@ -747,6 +748,9 @@ export function TvChart({
 
   const tf = timeframeById(tfId);
   const timeZone = meta?.timezone ?? 'UTC';
+  const displayTzSetting = useDisplayTzSetting();
+  // Axis / crosshair / clock zone. Daily and longer candles keep the exchange's dates, as TradingView does.
+  const displayTz = tf.intraday ? resolveDisplayTz(displayTzSetting, timeZone) : timeZone;
   intradayRef.current = tf.intraday;
 
   // ── derived data ──────────────────────────────────────────────────────
@@ -805,9 +809,15 @@ export function TvChart({
   replayPickRef.current = replayPick;
   const replayAtEnd =
     replayEnd != null && nextReplayEnd(fullTimes, tf.secs, fineTimes, replayEnd) == null;
+  // Chart x values: each candle's clock time in the display zone, passed as if UTC (lightweight-charts draws UTC).
   const wall = useMemo(
-    () => bars.map((b) => wallClock(b.time, timeZone) as UTCTimestamp),
-    [bars, timeZone],
+    () => bars.map((b) => wallClock(b.time, displayTz) as UTCTimestamp),
+    [bars, displayTz],
+  );
+  // The same candles on the exchange's clock, for anything that reasons about the trading session.
+  const exWall = useMemo(
+    () => (displayTz === timeZone ? wall : bars.map((b) => wallClock(b.time, timeZone) as UTCTimestamp)),
+    [bars, wall, displayTz, timeZone],
   );
   const decimals = pricePrecision(bars[bars.length - 1]?.close ?? meta?.price ?? 0);
   // 1-minute candles for volume profiles (never past the replay cut-off); none when the chart already is 1-minute.
@@ -2637,7 +2647,7 @@ export function TvChart({
       return;
     }
     const def = sessionInfo ? sessionFor(sessionInfo) : null;
-    const shade = def ? runs(extendedMask(wall as number[], def)) : [];
+    const shade = def ? runs(extendedMask(exWall as number[], def)) : [];
     prim.setState(
       shade,
       sessionBreaks(
@@ -2645,7 +2655,7 @@ export function TvChart({
         tf.secs,
       ),
     );
-  }, [sessionsOn, tf.intraday, tf.secs, bars, wall, sessionInfo, chartType, fp.on]);
+  }, [sessionsOn, tf.intraday, tf.secs, bars, exWall, sessionInfo, chartType, fp.on]);
 
   // AR model layers → primitive. `arFocus`: the trade hovered in the AR panel.
   const [arFocus, setArFocus] = useState<number | null>(null);
@@ -3741,7 +3751,7 @@ export function TvChart({
     if (id === 'YTD') {
       const year = new Date(wallClock(last.time, timeZone) * 1000).getUTCFullYear();
       fromTime = Date.UTC(year, 0, 1) / 1000;
-      const idx = wall.findIndex((t) => t >= fromTime);
+      const idx = exWall.findIndex((t) => t >= fromTime);
       chart.timeScale().setVisibleLogicalRange({ from: Math.max(-2, idx - 1), to: n + 5 });
       return;
     }
@@ -5075,7 +5085,10 @@ export function TvChart({
                 lastBarEnd={bars.length ? bars[bars.length - 1]!.time + tf.secs : null}
                 updatedAt={updatedAt}
                 live={replayEnd == null}
-                timeZone={timeZone}
+                timeZone={displayTz}
+                exchangeTz={timeZone}
+                tzSetting={displayTzSetting}
+                onTz={setDisplayTz}
                 percent={percent}
                 log={log}
                 auto={autoScale}

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { DISPLAY_TZ_CHOICES, type DisplayTzSetting, localTz } from '../../lib/tv/display-tz';
 import { HistoryChip } from './history-chip';
 import { TicksChip } from './ticks-chip';
 
@@ -15,7 +16,12 @@ interface Props {
   testerOpen: boolean;
   onTester: () => void;
   onRange: (r: RangeId) => void;
+  /** Zone the axis and clock are drawn in. */
   timeZone: string;
+  /** The symbol's exchange zone (for the menu's "Exchange" row). */
+  exchangeTz: string;
+  tzSetting: DisplayTzSetting;
+  onTz: (v: DisplayTzSetting) => void;
   /** Unix seconds when the latest candle closes. */
   lastBarEnd: number | null;
   /** ms epoch of the last successful data pull. */
@@ -95,9 +101,7 @@ export function BottomBar(p: Props) {
       {p.live && p.updatedAt ? (
         <Freshness lastBarEnd={p.lastBarEnd} updatedAt={p.updatedAt} />
       ) : null}
-      <span className="mx-3 hidden shrink-0 whitespace-nowrap text-[12px] tabular-nums text-[#b2b5be] sm:inline">
-        {now} {offsetLabel(p.timeZone)}
-      </span>
+      <TzMenu now={now} {...p} />
       <button type="button" className={b(p.percent)} onClick={p.onPercent} title="Percentage scale">
         %
       </button>
@@ -139,6 +143,53 @@ function Freshness({ lastBarEnd, updatedAt }: { lastBarEnd: number | null; updat
     >
       <span className={stale ? 'text-[#ffb74d]' : 'text-[#089981]'}>●</span> pulled {ago(pulled)}{' '}
       ago · newest candle closed {ago(Math.max(0, barAge))} ago
+    </span>
+  );
+}
+
+/** TradingView's bottom-right clock: shows the chart's time zone, click to change it (shared by every pane). */
+function TzMenu(p: { now: string; timeZone: string; exchangeTz: string; tzSetting: DisplayTzSetting; onTz: (v: DisplayTzSetting) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [open]);
+  const zoneOf = (id: DisplayTzSetting) => (id === 'exchange' ? p.exchangeTz : id === 'local' ? localTz() : id);
+  return (
+    <span ref={ref} className="relative mx-2 hidden shrink-0 sm:inline">
+      <button
+        type="button"
+        className="rounded px-2 py-1 whitespace-nowrap text-[12px] tabular-nums text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white"
+        onClick={() => setOpen((v) => !v)}
+        title="Time zone of the time axis and crosshair (session calculations always use the exchange's zone)"
+      >
+        {p.now} {offsetLabel(p.timeZone)}
+      </button>
+      {open ? (
+        <div className="fixed bottom-10 right-2 z-50 w-60 rounded border border-[#363a45] bg-[#1e222d] py-1 shadow-lg">
+          {DISPLAY_TZ_CHOICES.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-[12px] hover:bg-[#2a2e39] ${
+                p.tzSetting === c.id ? 'text-[#2962ff]' : 'text-[#d1d4dc]'
+              }`}
+              onClick={() => {
+                p.onTz(c.id);
+                setOpen(false);
+              }}
+            >
+              <span>{c.label}</span>
+              <span className="text-[#787b86]">{offsetLabel(zoneOf(c.id))}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </span>
   );
 }
