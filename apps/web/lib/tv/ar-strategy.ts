@@ -8,7 +8,8 @@ import {
   type Pivot,
   arMarket,
   environment,
-  structureBias,
+  sessionAnchoredFrom,
+  structureTrend,
   swings,
 } from './ar.ts';
 import { type FlowSide, absorption, deltaFlip, lvnPrice } from './ar-orderflow.ts';
@@ -26,9 +27,10 @@ import { buildProfile } from './volume-profile.ts';
  * Walks the candles in order and never reads a candle after the one it is deciding on, so the chart, a replay and
  * the backtest all see the same trades. Where the course is discretionary the rule here is OURS and says so:
  *
- *   1 Environment  trend = structure on 1-hour candles (or the chart's own when it is 1h+); expansion / rotation /
+ *   1 Environment  trend = break of structure on 1-hour candles (`structureTrend`; the chart's own when it is 1h+); expansion / rotation /
  *                  compression from `environment()`. Compression fails; rotation or a flat trend only warns.
- *   2 Location     the latest swing leg in the trend's direction; price must reach its 0.705–0.886 zone. A close
+ *   2 Location     the latest swing leg in the trend's direction (on NSE it starts inside today's session:
+ *                  `sessionLegs`); price must reach its 0.705–0.886 zone. A close
  *                  past 0.886 cancels it, price beyond the leg's end before any retracement retires it. A zone
  *                  inside the leg's value area warns (fails when `requireOutsideValue`). `zone: 'decoder'` uses the
  *                  "dark pool decoder" stand-in instead (0.62–0.81, fitted to his screen; `DECODER_LEVELS`).
@@ -36,7 +38,7 @@ import { buildProfile } from './volume-profile.ts';
  *                  tends to tire there), price already past Max in the trade's direction fails.
  *   4 Confirmation ESTIMATED from candles (no bid/ask data): after the touch, a candle that closes in the trade's
  *                  direction AND beyond the extreme candle's other end (aggression failed, pressure flipped), inside
- *                  his window (New York 09:30–11:00; NSE's own first 90 minutes, see `arMarket`). Entry: a pull-back to the middle of that candle within a few candles (his
+ *                  the window (New York 09:30–16:00; NSE 09:15–15:15: the whole session up to the flat time, see `arMarket`). Entry: a pull-back to the middle of that candle within a few candles (his
  *                  "entry candle pulls back into the confirmation candle"), or its close.
  *                  `confirm: 'orderflow'` (phase 4) uses the footprint instead: absorption on the candle holding the
  *                  extreme, then a delta flip (lib/tv/ar-orderflow.ts), and `entry: 'lvn'` rests the order at the
@@ -101,6 +103,11 @@ export interface ArStrategyCfg {
    * profit at the first gamma level before the leg's end when gamma is positive.
    */
   gamma: 'off' | 'targets';
+  /**
+   * Legs may not cross an overnight gap: a leg starts at the extreme of its end swing's own session
+   * (`sessionAnchoredFrom`). OUR adaptation, on by default where the market closes overnight (NSE).
+   */
+  sessionLegs: boolean;
 }
 
 /** His defaults (US: New York clock). For a chart, use `arStrategyDefaults(timeZone)`. */
@@ -109,7 +116,7 @@ export const AR_STRATEGY_DEFAULTS: ArStrategyCfg = {
   valueRows: 30,
   envWindow: 24,
   windowStart: 9 * 60 + 30,
-  windowEnd: 11 * 60,
+  windowEnd: 16 * 60,
   flatAt: 16 * 60,
   minRR: 1.5,
   entry: 'pullback',
@@ -124,18 +131,23 @@ export const AR_STRATEGY_DEFAULTS: ArStrategyCfg = {
   flipShare: 0.1,
   zone: 'fib',
   gamma: 'off',
+  sessionLegs: false,
 };
 
 /** The defaults for a chart's market: the trade window and flat time follow `arMarket`. */
 export function arStrategyDefaults(timeZone: string): ArStrategyCfg {
   const m = arMarket(timeZone);
-  return { ...AR_STRATEGY_DEFAULTS, windowStart: m.window.start, windowEnd: m.window.end, flatAt: m.flatAt };
+  return { ...AR_STRATEGY_DEFAULTS, windowStart: m.window.start, windowEnd: m.window.end, flatAt: m.flatAt, sessionLegs: !m.hasAsia };
 }
 
 export type CheckState = 'pass' | 'warn' | 'fail' | 'wait';
 export interface Check {
   state: CheckState;
+  /** The whole read in one line (logs, tooltips, tests). */
   text: string;
+  /** Optional split of `text` for the panel: one marked line per part, then an unmarked detail line. */
+  lines?: { state: CheckState; text: string }[];
+  detail?: string;
 }
 export type StepKey = 'environment' | 'location' | 'path' | 'confirmation';
 export const STEPS: { key: StepKey; label: string }[] = [
@@ -250,6 +262,8 @@ interface Leg {
   /** Order flow: the last check lacked a footprint. */
   flowNoData: boolean;
   dead: 'invalidated' | 'extended' | 'used' | 'expired' | null;
+  /** Candle at which it died. */
+  deadAt: number | null;
 }
 
 const minuteOf = (t: number, tz: string) => Math.floor((((wallClock(t, tz) % 86400) + 86400) % 86400) / 60);
@@ -257,6 +271,20 @@ const fmtTime = (t: number, tz: string) => {
   const m = minuteOf(t, tz);
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 };
+/** "11-25 09:15" on the market's clock. */
+const fmtWhen = (t: number, tz: string) => new Date(wallClock(t, tz) * 1000).toISOString().slice(5, 16).replace('T', ' ');
+
+/** What the checklist needs to name a leg in words. */
+interface LegCtx {
+  bars: Bar[];
+  tz: string;
+  /** Index of the first candle of candle i's session (a gap over an hour starts one). */
+  sessionStart: number;
+}
+
+/** "swing 25730.00 (11-25 09:15) → 26114.10 (11-25 11:45)" */
+const legName = (leg: Leg, c: LegCtx) =>
+  `swing ${leg.from.price.toFixed(2)} (${fmtWhen(c.bars[leg.from.index]!.time, c.tz)}) → ${leg.to.price.toFixed(2)} (${fmtWhen(c.bars[leg.to.index]!.time, c.tz)})`;
 
 function makeLeg(bars: Bar[], from: Pivot, to: Pivot, rows: number, zone: ArStrategyCfg['zone']): Leg {
   const span = to.price - from.price;
@@ -286,6 +314,7 @@ function makeLeg(bars: Bar[], from: Pivot, to: Pivot, rows: number, zone: ArStra
     extremeIndex: null,
     flowNoData: false,
     dead: null,
+    deadAt: null,
   };
 }
 
@@ -299,20 +328,13 @@ function biasAsOf(bars: Bar[], chartSecs: number, timeZone: string, mult: number
     tfBars = aggregateBars(bars, 3600, timeZone);
     tfSecs = 3600;
   }
-  const pivots = swings(tfBars, mult).pivots;
-  // when each pivot becomes known, in unix seconds: the close of the candle that confirmed it
-  const known = pivots.map((p) => tfBars[p.confirmedAt]!.time + tfSecs);
-  let k = 0;
-  let bias: Bias = 'neutral';
+  const trend = structureTrend(tfBars, swings(tfBars, mult).pivots);
+  // each 1h value is known at that 1h candle's close
+  let k = -1;
   for (let i = 0; i < bars.length; i++) {
     const close = bars[i]!.time + chartSecs;
-    let moved = false;
-    while (k < pivots.length && known[k]! <= close) {
-      k++;
-      moved = true;
-    }
-    if (moved) bias = structureBias(pivots.slice(0, k));
-    out[i] = bias;
+    while (k + 1 < tfBars.length && tfBars[k + 1]!.time + tfSecs <= close) k++;
+    out[i] = k >= 0 ? trend[k]! : 'neutral';
   }
   return out;
 }
@@ -402,8 +424,10 @@ export function runArStrategy(
           ? 'no stacked-imbalance zone at the fill'
           : 'no footprint data to check for stacked imbalances';
 
+  let sessionStart = 0;
   for (let i = 0; i < bars.length; i++) {
     const b = bars[i]!;
+    if (i > 0 && b.time - bars[i - 1]!.time > 3600) sessionStart = i;
     const minute = minuteOf(b.time, tz);
     const closesAt = minute + chartSecs / 60;
     while (known < pivots.length && pivots[known]!.confirmedAt <= i) known++;
@@ -445,6 +469,7 @@ export function runArStrategy(
       if (i > pending.until) {
         skips.push({ index: pending.confirmIndex, price: bars[pending.confirmIndex]!.close, dir: pending.dir, step: 'entry', reason: `pull-back to ${pending.limit.toFixed(2)} never came` });
         pending.leg.dead = 'expired';
+        pending.leg.deadAt = i;
         pending = null;
       } else if (long ? b.low <= pending.limit : b.high >= pending.limit) {
         const fill = long ? Math.min(pending.limit, b.open) : Math.max(pending.limit, b.open);
@@ -479,7 +504,11 @@ export function runArStrategy(
         const key = `${pivots[k - 1]!.index}-${to.index}`;
         let leg = legs.get(key);
         if (!leg) {
-          leg = makeLeg(bars, pivots[k - 1]!, to, cfg.valueRows, cfg.zone);
+          // NSE: the leg starts inside today's session, not across the overnight gap
+          const from = cfg.sessionLegs
+            ? sessionAnchoredFrom(bars, pivots[k - 1]!, to, (a14[to.index] ?? 0) * cfg.swingMult)
+            : pivots[k - 1]!;
+          leg = makeLeg(bars, from, to, cfg.valueRows, cfg.zone);
           // catch up on the candles between the leg's end and now (all in the past)
           for (let j = to.index + 1; j < i; j++) stepLeg(leg, bars, j);
           legs.set(key, leg);
@@ -495,9 +524,13 @@ export function runArStrategy(
     const env = environment(bars, cfg.envWindow, i + 1);
     const checks: Record<StepKey, Check> = {
       environment: envCheck(env, trend, leg),
-      location: locationCheck(leg, b, cfg),
+      location: locationCheck(leg, b, cfg, { bars, tz, sessionStart }),
       path: pathCheck(leg, b.close, avrAt(avr, i), market),
-      confirmation: { state: 'wait', text: 'waiting for price to reach the zone' },
+      confirmation: !leg
+        ? { state: 'wait', text: 'no zone yet' }
+        : leg.dead
+          ? { state: 'wait', text: 'no live zone (see Location)' }
+          : { state: 'wait', text: 'waiting for price to reach the zone' },
     };
     if (open) {
       checks.confirmation = { state: 'pass', text: `in a ${open.dir} from ${open.entry.toFixed(2)}` };
@@ -524,6 +557,7 @@ export function runArStrategy(
       const inWindow = minute >= cfg.windowStart && minute < cfg.windowEnd;
       if (i - leg.touchIndex > cfg.confirmWithin) {
         leg.dead = 'expired';
+        leg.deadAt = i;
         const reason =
           cfg.confirm !== 'orderflow'
             ? `no confirmation within ${cfg.confirmWithin} candles of the touch`
@@ -535,9 +569,10 @@ export function runArStrategy(
       } else if (!flips || i > lastDecidable) {
         checks.confirmation = { state: 'wait', text: waitText };
       } else if (!inWindow) {
-        checks.confirmation = { state: 'fail', text: `confirmed at ${fmtTime(b.time, tz)}, outside his ${windowText(cfg)} ${market.clock} window` };
+        checks.confirmation = { state: 'fail', text: `confirmed at ${fmtTime(b.time, tz)}, outside the ${windowText(cfg)} ${market.clock} window` };
         skips.push({ index: i, price: bars[i]!.close, dir: long ? 'long' : 'short', step: 'confirmation', reason: `confirmation outside ${windowText(cfg)} ${market.clock} time` });
         leg.dead = 'used';
+        leg.deadAt = i;
       } else {
         checks.confirmation = {
           state: 'pass',
@@ -562,6 +597,7 @@ export function runArStrategy(
         }
         const rr = Math.abs(target - entryPx) / Math.max(1e-9, Math.abs(entryPx - stop));
         leg.dead = 'used';
+        leg.deadAt = i;
         if (decision.fail) {
           skips.push({ index: i, price: bars[i]!.close, dir, step: decision.fail.step, reason: decision.fail.text });
         } else if (rr < cfg.minRR) {
@@ -577,8 +613,6 @@ export function runArStrategy(
           pending = { leg, dir, limit: entryPx, stop, target, confirmIndex: i, until: i + cfg.entryWait, warnings: decision.warnings, rule, flow, gamma };
         }
       }
-    } else if (leg?.dead === 'invalidated') {
-      checks.confirmation = { state: 'fail', text: 'zone cancelled' };
     }
 
     reads.push(snaps ? { index: i, checks, tradeId: open?.id ?? null, gamma: readOf(snapFor(i), b.close) } : { index: i, checks, tradeId: open?.id ?? null });
@@ -678,6 +712,7 @@ function stepLeg(leg: Leg, bars: Bar[], i: number) {
   if (leg.touchIndex == null) {
     if (up ? b.high > leg.to.price : b.low < leg.to.price) {
       leg.dead = 'extended';
+      leg.deadAt = i;
       return;
     }
     if (up ? b.low <= leg.zoneNear : b.high >= leg.zoneNear) {
@@ -687,7 +722,10 @@ function stepLeg(leg: Leg, bars: Bar[], i: number) {
   } else if (leg.extremeIndex != null && (up ? b.low < bars[leg.extremeIndex]!.low : b.high > bars[leg.extremeIndex]!.high)) {
     leg.extremeIndex = i;
   }
-  if (leg.touchIndex != null && (up ? b.close < leg.zoneFar : b.close > leg.zoneFar)) leg.dead = 'invalidated';
+  if (leg.touchIndex != null && (up ? b.close < leg.zoneFar : b.close > leg.zoneFar)) {
+    leg.dead = 'invalidated';
+    leg.deadAt = i;
+  }
 }
 
 const windowText = (cfg: ArStrategyCfg) => {
@@ -707,20 +745,38 @@ function envCheck(env: EnvironmentRead | null, trend: Bias, leg: Leg | null): Ch
   return { state: aligned ? 'pass' : 'warn', text: `${t}; trending (expansion)` };
 }
 
-function locationCheck(leg: Leg | null, b: Bar, cfg: ArStrategyCfg): Check {
-  if (!leg) return { state: 'wait', text: 'no swing leg in the trend’s direction yet' };
+function locationCheck(leg: Leg | null, b: Bar, cfg: ArStrategyCfg, c: LegCtx): Check {
+  if (!leg) return { state: 'wait', text: 'no swing in the trend’s direction yet' };
   const side = leg.dir === 'up' ? 'discount' : 'premium';
-  if (leg.dead === 'invalidated') return { state: 'fail', text: `closed past ${leg.farName} (${leg.zoneFar.toFixed(2)}): zone cancelled` };
-  if (leg.dead === 'extended') return { state: 'wait', text: 'price ran past the swing before retracing: waiting for a new leg' };
-  if (leg.dead === 'used' || leg.dead === 'expired') return { state: 'wait', text: 'this leg’s setup is done: waiting for a new leg' };
+  const idea = leg.dir === 'up' ? 'long' : 'short';
+  const name = legName(leg, c);
+  const when = leg.deadAt != null ? fmtWhen(c.bars[leg.deadAt]!.time, c.tz) : '';
+  if (leg.dead === 'invalidated') {
+    // cancelled in this session: a red mark; an older cancel is just history, so wait for the next swing
+    if (leg.deadAt != null && leg.deadAt >= c.sessionStart)
+      return { state: 'fail', text: `closed past ${leg.farName} (${leg.zoneFar.toFixed(2)}) at ${when}: ${idea} zone cancelled · ${name}` };
+    return { state: 'wait', text: `the last ${idea} zone was cancelled on ${when} (${name}): waiting for a new swing` };
+  }
+  if (leg.dead === 'extended')
+    return { state: 'wait', text: `price ran past the swing ${leg.dir === 'up' ? 'high' : 'low'} ${leg.to.price.toFixed(2)} at ${when} before pulling back: waiting for a new swing` };
+  if (leg.dead === 'used') return { state: 'wait', text: `this swing’s setup was decided at ${when} (${name}): waiting for a new swing` };
+  if (leg.dead === 'expired') return { state: 'wait', text: `this swing’s setup ran out of time at ${when} (${name}): waiting for a new swing` };
   const value = leg.insideValue
-    ? { state: (cfg.requireOutsideValue ? 'fail' : 'warn') as CheckState, note: 'zone overlaps the value area' }
-    : { state: 'pass' as CheckState, note: `zone outside value (${leg.dir === 'up' ? 'below VAL' : 'above VAH'})` };
+    ? { state: (cfg.requireOutsideValue ? 'fail' : 'warn') as CheckState, note: 'zone overlaps the value area: a busy price, less ideal' }
+    : { state: 'pass' as CheckState, note: `zone is ${leg.dir === 'up' ? 'below' : 'above'} the value area, as he prefers` };
   if (leg.touchIndex == null) {
     const away = Math.abs(b.close - leg.zoneNear);
-    return { state: 'wait', text: `${side} ${leg.farName === '0.886' ? 'zone' : 'decoder box'} ${Math.min(leg.zoneNear, leg.zoneFar).toFixed(2)}–${Math.max(leg.zoneNear, leg.zoneFar).toFixed(2)}, ${away.toFixed(2)} away` };
+    return { state: 'wait', text: `${side} ${leg.farName === '0.886' ? 'zone' : 'decoder box'} ${Math.min(leg.zoneNear, leg.zoneFar).toFixed(2)}–${Math.max(leg.zoneNear, leg.zoneFar).toFixed(2)} (${idea}), ${away.toFixed(2)} away · ${name}` };
   }
-  return { state: value.state, text: `price reached the ${side} zone; ${value.note}` };
+  return {
+    state: value.state,
+    text: `price reached the ${side} zone (${idea}); ${value.note} · ${name}`,
+    lines: [
+      { state: 'pass', text: `price reached the ${side} zone (${idea})` },
+      { state: value.state, text: value.note },
+    ],
+    detail: `Fib drawn on ${name}`,
+  };
 }
 
 function pathCheck(leg: Leg | null, price: number, day: AvrDay | null, market: ArMarket): Check {

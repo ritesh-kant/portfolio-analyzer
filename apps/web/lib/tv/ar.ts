@@ -44,9 +44,11 @@ export const AR_SESSIONS: SessionSpec[] = [
 /**
  * How the AR model maps onto the market a chart shows. The course trades US index futures; elsewhere the session
  * parts are OUR adaptation:
- * - `us` (everything that is not NSE): his New York sessions, window 09:30–11:00 and flat by 16:00 New York.
+ * - `us` (everything that is not NSE): his New York sessions; entries may confirm 09:30–16:00 and are flat by 16:00
+ *   New York (the operator removed his 09:30–11:00 limit on 2026-11-25; the "New York" box still marks it).
  * - `nse`: NSE trades 09:15–15:30 India time only, so New York's open (19:00–20:00 India) and the overnight Asia
- *   session never happen on it. The window is NSE's own first 90 minutes (09:15–10:45), flat by 15:15 (before the
+ *   session never happen on it. Entries may confirm all session (09:15–15:15: the operator removed the first-90-minutes
+ *   limit on 2026-11-25; the "NSE open" box still marks 09:15–10:45), flat by 15:15 (before the
  *   broker's intraday square-off), and the Asia-range levels do not apply.
  */
 export interface ArMarket {
@@ -67,7 +69,7 @@ const US_MARKET: ArMarket = {
   tz: NEW_YORK,
   clock: 'New York',
   sessions: AR_SESSIONS,
-  window: { start: 9 * 60 + 30, end: 11 * 60 },
+  window: { start: 9 * 60 + 30, end: 16 * 60 },
   flatAt: 16 * 60,
   hasAsia: true,
 };
@@ -77,7 +79,7 @@ const NSE_MARKET: ArMarket = {
   tz: INDIA,
   clock: 'India',
   sessions: [{ key: 'open', label: 'NSE open', start: 9 * 60 + 15, end: 10 * 60 + 45, tz: INDIA }],
-  window: { start: 9 * 60 + 15, end: 10 * 60 + 45 },
+  window: { start: 9 * 60 + 15, end: 15 * 60 + 15 },
   flatAt: 15 * 60 + 15,
   hasAsia: false,
 };
@@ -379,7 +381,59 @@ export function structureBias(pivots: Pivot[]): Bias {
   return 'neutral';
 }
 
-/** Bias on each of his four timeframes, built from the chart's candles (a timeframe finer than the chart is null). */
+/**
+ * Trend per candle by break of structure, the way a trader reads a chart (OUR rule; he gives none):
+ * - It starts once the swings show a pattern (`structureBias`: higher high + higher low, or the reverse).
+ * - In an uptrend the "protected low" is the swing low that led to the latest higher high. The trend stays up until
+ *   a candle CLOSES below it by more than `tolMult` × ATR, then turns down (protected high = the latest swing high).
+ *   Downtrends mirror it.
+ * A single slightly lower high, or a wick through an old low, does not flip it (`structureBias` alone would).
+ * Each value uses only swings confirmed by that candle and that candle's close: no look-ahead.
+ */
+export function structureTrend(bars: Bar[], pivots: Pivot[], tolMult = 0.25, atrLength = 14): Bias[] {
+  const out: Bias[] = new Array(bars.length).fill('neutral');
+  const a = atr(bars, atrLength);
+  const known: Pivot[] = [];
+  const lastOf = (kind: 'H' | 'L', before = known.length) => {
+    for (let j = before - 1; j >= 0; j--) if (known[j]!.kind === kind) return known[j]!;
+    return null;
+  };
+  let state: Bias = 'neutral';
+  let prot: number | null = null;
+  let k = 0;
+  for (let i = 0; i < bars.length; i++) {
+    while (k < pivots.length && pivots[k]!.confirmedAt <= i) {
+      const p = pivots[k++]!;
+      known.push(p);
+      if (state === 'neutral') {
+        const s = structureBias(known);
+        if (s !== 'neutral') {
+          state = s;
+          prot = lastOf(s === 'bull' ? 'L' : 'H')?.price ?? null;
+        }
+        continue;
+      }
+      const prevSame = lastOf(p.kind, known.length - 1);
+      const prevOpp = lastOf(p.kind === 'H' ? 'L' : 'H', known.length - 1);
+      // a new higher high (uptrend) / lower low (downtrend) moves the protected level to the swing before it
+      if (state === 'bull' && p.kind === 'H' && prevSame && p.price > prevSame.price && prevOpp) prot = prevOpp.price;
+      if (state === 'bear' && p.kind === 'L' && prevSame && p.price < prevSame.price && prevOpp) prot = prevOpp.price;
+    }
+    const tol = (a[i] ?? 0) * tolMult;
+    const c = bars[i]!.close;
+    if (state === 'bull' && prot != null && c < prot - tol) {
+      state = 'bear';
+      prot = lastOf('H')?.price ?? null;
+    } else if (state === 'bear' && prot != null && c > prot + tol) {
+      state = 'bull';
+      prot = lastOf('L')?.price ?? null;
+    }
+    out[i] = state;
+  }
+  return out;
+}
+
+/** Bias on daily plus his four timeframes, built from the chart's candles (a timeframe finer than the chart is null). */
 export function biasLadder(
   bars: Bar[],
   chartSecs: number,
@@ -387,6 +441,7 @@ export function biasLadder(
   mult = 2,
 ): { label: string; secs: number; bias: Bias | null }[] {
   const tfs = [
+    { label: '1D', secs: 86400 },
     { label: '4h', secs: 14400 },
     { label: '1h', secs: 3600 },
     { label: '15m', secs: 900 },
@@ -395,7 +450,11 @@ export function biasLadder(
   return tfs.map(({ label, secs }) => {
     if (secs < chartSecs || !bars.length) return { label, secs, bias: null };
     const tfBars = secs === chartSecs ? bars : aggregateBars(bars, secs, timeZone);
-    return { label, secs, bias: tfBars.length > 30 ? structureBias(swings(tfBars, mult).pivots) : null };
+    return {
+      label,
+      secs,
+      bias: tfBars.length > 30 ? (structureTrend(tfBars, swings(tfBars, mult).pivots).at(-1) ?? 'neutral') : null,
+    };
   });
 }
 
@@ -558,13 +617,43 @@ export interface RangeFib {
 }
 
 /**
+ * OUR adaptation for markets that close overnight (NSE): a swing leg may not start before the session its end swing
+ * is in. A leg from yesterday's low to today's high (with an opening gap between) starts instead at today's lowest
+ * low before that high; a down leg at today's highest high. The ZigZag cannot see this on its own: an opening gap
+ * is not a pull-back, so yesterday's swing and today's run merge into one leg.
+ *
+ * Kept as it was when the leg already starts in the session, or when the session's own part is smaller than
+ * `minSpan` (the move was mostly the gap). A session break is a gap of over an hour between candles. Reads only
+ * candles up to the leg's end: no look-ahead.
+ */
+export function sessionAnchoredFrom(bars: Bar[], from: Pivot, to: Pivot, minSpan = 0): Pivot {
+  let start = to.index;
+  while (start > 0 && bars[start]!.time - bars[start - 1]!.time <= 3600) start--;
+  if (from.index >= start) return from;
+  const up = to.kind === 'H';
+  let k = start;
+  for (let j = start; j < to.index; j++) if (up ? bars[j]!.low < bars[k]!.low : bars[j]!.high > bars[k]!.high) k = j;
+  if (k >= to.index) return from;
+  const price = up ? bars[k]!.low : bars[k]!.high;
+  if (Math.abs(to.price - price) < minSpan) return from;
+  return { index: k, price, kind: from.kind, confirmedAt: from.confirmedAt };
+}
+
+/**
  * The latest leg in the wanted direction (`prefer`: the higher-timeframe bias; neutral = simply the latest leg)
  * and how price has behaved since it ended. A leg is only used once its end swing is confirmed.
  */
-export function rangeFib(bars: Bar[], pivots: Pivot[], prefer: Bias = 'neutral', rows = 30): RangeFib | null {
+export function rangeFib(
+  bars: Bar[],
+  pivots: Pivot[],
+  prefer: Bias = 'neutral',
+  rows = 30,
+  /** Start legs inside the end swing's session (`sessionAnchoredFrom`): markets that close overnight. */
+  session?: { minSpanAt: (index: number) => number },
+): RangeFib | null {
   for (let k = pivots.length - 1; k >= 1; k--) {
     const to = pivots[k]!;
-    const from = pivots[k - 1]!;
+    const from = session ? sessionAnchoredFrom(bars, pivots[k - 1]!, to, session.minSpanAt(to.index)) : pivots[k - 1]!;
     const dir = to.kind === 'H' ? 'up' : 'down';
     if (prefer === 'bull' && dir !== 'up') continue;
     if (prefer === 'bear' && dir !== 'down') continue;

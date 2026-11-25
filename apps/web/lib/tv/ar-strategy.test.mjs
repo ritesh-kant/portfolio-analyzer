@@ -142,10 +142,10 @@ test('a still-forming last candle never confirms', () => {
   assert.equal(live.reads[confirm].checks.confirmation.state, 'wait');
 });
 
-test('NSE: the window is 09:15–10:45 India time and the Asia-range path step is skipped, not failed', () => {
+test('NSE: the window is the whole session, 09:15–15:15 India time and the Asia-range path step is skipped, not failed', () => {
   assert.deepEqual(arStrategyDefaults('America/New_York'), AR_STRATEGY_DEFAULTS);
   const d = arStrategyDefaults('Asia/Kolkata');
-  assert.deepEqual([d.windowStart, d.windowEnd, d.flatAt], [555, 645, 915]);
+  assert.deepEqual([d.windowStart, d.windowEnd, d.flatAt], [555, 915, 915]);
 
   const IST = 'Asia/Kolkata';
   const ist = (t) => {
@@ -163,10 +163,10 @@ test('NSE: the window is 09:15–10:45 India time and the Asia-range path step i
   assert.ok(confirmations.length > 0, 'the scenario must reach confirmation');
   for (const t of trades) {
     const m = ist(bars[t.confirmIndex].time);
-    assert.ok(m >= 555 && m < 645, `trade confirmed at ${m} min IST, outside 09:15–10:45`);
+    assert.ok(m >= 555 && m < 915, `trade confirmed at ${m} min IST, outside 09:15–15:15`);
   }
   for (const k of skips.filter((k) => k.step === 'confirmation' && /outside/.test(k.reason))) {
-    assert.match(k.reason, /09:15–10:45 India time/);
+    assert.match(k.reason, /09:15–15:15 India time/);
   }
   assert.ok(reads.some((r) => r.checks.path.state === 'warn' && /NSE/.test(r.checks.path.text)));
   assert.ok(!reads.some((r) => r.checks.path.state === 'fail'));

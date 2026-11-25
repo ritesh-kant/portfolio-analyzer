@@ -117,6 +117,7 @@ const SETTING: Record<keyof ArStrategyCfg, string> = {
   gamma: 'Gamma',
   valueRows: 'Value-area rows',
   envWindow: 'Environment window',
+  sessionLegs: "Swings start in today's session",
 };
 const settingText = (k: keyof ArStrategyCfg, v: unknown) =>
   k === 'windowStart' || k === 'windowEnd' || k === 'flatAt'

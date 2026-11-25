@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AreaSeries,
@@ -197,7 +197,7 @@ import {
   environment,
   rangeFib,
   sessionBoxes,
-  structureBias,
+  structureTrend,
   structureLabels,
   swings,
   arMarket,
@@ -229,19 +229,27 @@ import { TradeDialog } from './trade-dialog';
 import {
   cancelOrder as paperCancel,
   closePosition as paperClose,
-  DEFAULT_CAPITAL,
   OLD_DEFAULT_CAPITAL,
+  accountCurrency,
   equityOf,
   newAccount,
+  newAccounts,
+  splitAccount,
+  type Accounts,
   placeMarket,
   placePending,
   moveOrder as paperMove,
   updateOrder as paperUpdate,
   reversePosition as paperReverse,
+  closePart as paperClosePart,
+  breakevenStop as paperBreakeven,
+  cancelOrders as paperCancelOrders,
+  flattenSymbol as paperFlatten,
   setBracket as paperBracket,
   step as paperStep,
   updateSettings as paperSettings,
-  contractMargin as paperContractMargin,
+  marginRule as paperMarginRule,
+  pointValue as paperPointValue,
   type PaperState,
 } from '../../lib/tv/paper';
 import { DEFAULT_ROWS } from '../../lib/tv/volume-profile';
@@ -254,6 +262,15 @@ import { useTickSteps } from './use-tick-steps';
 import { Icons } from './icons';
 import { IndicatorPicker, IndicatorSettings } from './indicator-dialog';
 import { LeftToolbar, type Tool, SVP_KEY, ZOOM_IN_KEY, toolForKey } from './left-toolbar';
+import { HotkeySettingsDialog } from './hotkey-settings';
+import {
+  DEFAULT_HOTKEYS,
+  actionFor,
+  mergeHotkeys,
+  passiveLimit,
+  type HotkeyAction,
+  type HotkeySettings,
+} from '../../lib/tv/hotkeys';
 import { FibSettingsDialog } from './fib-settings';
 import { VpSettingsDialog } from './vp-settings';
 import { PositionSettings } from './position-settings';
@@ -577,6 +594,8 @@ export function TvChart({
   /** The symbol the active replay belongs to. */
   const replaySymbolRef = useRef<string | null>(null);
   const replayPickRef = useRef(false);
+  /** Set each render once the paper account exists: handles a trading hotkey, true when it did. */
+  const hotkeyRef = useRef<((e: KeyboardEvent) => boolean) | null>(null);
   const fullTimesRef = useRef<number[]>([]);
   const fineTimesRef = useRef<number[]>([]);
   const tfSecsRef = useRef(300);
@@ -746,6 +765,8 @@ export function TvChart({
   const [maxPaneId, setMaxPaneId] = useState<string | null>(null);
   const [fpNoteClosed, setFpNoteClosed] = useState(false);
   const [paneEls, setPaneEls] = useState<(HTMLElement | null)[]>([]);
+  /** The price pane's legend (title, OHLC, ticket, indicator rows); canvas labels keep clear of its rows. */
+  const legendRef = useRef<HTMLDivElement>(null);
 
   const tf = timeframeById(tfId);
   const timeZone = meta?.timezone ?? 'UTC';
@@ -1058,6 +1079,11 @@ export function TvChart({
       ),
     [bars, tf.secs],
   );
+  // The mouse handlers read the axis through a ref: depending on it would tear their effect down on every candle
+  // refresh (each live poll, each replay step), dropping a half-drawn drawing and leaving its tool armed.
+  const axisRef = useRef(axis);
+  axisRef.current = axis;
+  const cancelDraftRef = useRef<() => void>(() => {});
   const drawings = useMemo(
     () => (drawState.symbol === symbol ? drawState.list : []),
     [drawState, symbol],
@@ -1454,9 +1480,13 @@ export function TvChart({
     if (!ready || replayEnd != null) return;
     let stopped = false;
     let busy = false;
+    // Consecutive failures (e.g. Upstox throttling the IP): wait 3 s, 6 s … up to 60 s between tries instead of hammering.
+    let fails = 0;
+    let nextAt = 0;
+    const base = tf.intraday ? 3000 : 30000;
     const timer = setInterval(
       async () => {
-        if (document.hidden || busy) return;
+        if (document.hidden || busy || Date.now() < nextAt) return;
         busy = true;
         try {
           const res = await fetchBars(
@@ -1467,6 +1497,7 @@ export function TvChart({
             wantPrepost,
           );
           if (stopped) return;
+          fails = 0;
           setUpdatedAt(Date.now());
           setRaw((cur) => {
             if (!cur.key.startsWith(`${symbol}|`)) return cur;
@@ -1488,12 +1519,13 @@ export function TvChart({
             });
           }
         } catch {
-          // transient — next tick retries
+          fails += 1;
+          nextAt = Date.now() + Math.min(60_000, base * 2 ** Math.min(fails, 5));
         } finally {
           busy = false;
         }
       },
-      tf.intraday ? 3000 : 30000,
+      base,
     );
     return () => {
       stopped = true;
@@ -1582,8 +1614,11 @@ export function TvChart({
       arStructCfg || arFibCfg || dpd?.side === 'trend' ? biasLadder(bars, tf.secs, timeZone, structMult) : [];
     // His rule: draw the range in the direction of the higher-timeframe trend (1h, else the chart's own).
     const prefer =
-      ladder.find((r) => r.label === '1h')?.bias ?? (structSwings ? structureBias(structSwings.pivots) : 'neutral');
-    const fib = fibSwings ? rangeFib(bars, fibSwings.pivots, prefer ?? 'neutral', arFibCfg?.length || 30) : null;
+      ladder.find((r) => r.label === '1h')?.bias ?? (structSwings ? (structureTrend(bars, structSwings.pivots).at(-1) ?? 'neutral') : 'neutral');
+    // NSE closes overnight: the zone's leg starts inside its end swing's session (same rule as the strategy)
+    const fibAtr = !arMarket(timeZone).hasAsia ? atr(bars, 14) : null;
+    const fibSession = fibAtr ? { minSpanAt: (i: number) => (fibAtr[i] ?? 0) * fibMult } : undefined;
+    const fib = fibSwings ? rangeFib(bars, fibSwings.pivots, prefer ?? 'neutral', arFibCfg?.length || 30, fibSession) : null;
     const labels = arStructCfg && structSwings ? structureLabels(structSwings.pivots) : [];
     // Dark Pool Decoder: its own swing size; "trend" keeps the legs in the 1-hour trend's direction (his rule)
     let decoders: DecoderZone[] = [];
@@ -2020,6 +2055,8 @@ export function TvChart({
   }, [chartType, fp.on]);
 
   // Gamma levels as price lines on the main series (after it is built, so a rebuild re-attaches them).
+  /** TanukiTrade chips at the strike lines' left ends (on by default). */
+  const chipsOn = gexCfg?.gexChips !== false;
   const gexLinesRef = useRef<{ series: ISeriesApi<SeriesType, Time>; lines: IPriceLine[] } | null>(
     null,
   );
@@ -2086,11 +2123,13 @@ export function TvChart({
         lineWidth: l.width as LineWidth,
         lineStyle: l.style,
         axisLabelVisible: true,
-        title: `${l.titles.join(' | ')}${n >= 2 ? `  ${n}×` : ''}`,
+        // With the chips on, the labels already sit at the line's left end; a second copy at the right end ran
+        // across the legend's OHLC row whenever a strike was near the top of the pane.
+        title: chipsOn ? '' : `${l.titles.join(' | ')}${n >= 2 ? `  ${n}×` : ''}`,
       });
     });
     gexLinesRef.current = { series: main.series, lines };
-  }, [gexShown, gexRes, gexStyle, chartType, fp.on]);
+  }, [gexShown, gexRes, gexStyle, chartType, fp.on, chipsOn]);
 
   // Net GEX by strike, as a histogram on the right edge (all expiries in the window).
   const gexProfileOn = gexCfg?.gexProfile !== false;
@@ -3154,7 +3193,7 @@ export function TvChart({
       const raw = series.coordinateToPrice(yl);
       if (logical == null || raw == null) return null;
       let price: number = raw;
-      let t = axis.toTime(logical);
+      let t = axisRef.current.toTime(logical);
       if (snap && latest.current.magnet) {
         const idx = Math.max(0, Math.min(latest.current.bars.length - 1, Math.round(logical)));
         const b = latest.current.bars[idx];
@@ -3210,6 +3249,7 @@ export function TvChart({
       setDraft(null);
       drag = null;
     };
+    cancelDraftRef.current = cancelDraft;
 
     const onDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
@@ -3308,7 +3348,7 @@ export function TvChart({
           const spanBars = range ? Math.max(8, (range.to - range.from) * 0.2) : 20;
           if (above == null) return;
           const riskDist = Math.abs(above - pt.p);
-          const widthSecs = axis.toTime(axis.toLogical(pt.t) + spanBars) - pt.t;
+          const widthSecs = axisRef.current.toTime(axisRef.current.toLogical(pt.t) + spanBars) - pt.t;
           pts = positionPts(kind, pt, widthSecs, riskDist, riskDist * 2);
         }
         const d: Drawing = {
@@ -3413,7 +3453,7 @@ export function TvChart({
           const moved: Drawing = {
             ...drag.orig,
             pts: drag.orig.pts.map((pt) => ({
-              t: axis.toTime(axis.toLogical(pt.t) + dl),
+              t: axisRef.current.toTime(axisRef.current.toLogical(pt.t) + dl),
               p: pt.p + dp,
             })),
           };
@@ -3543,7 +3583,7 @@ export function TvChart({
 
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (target.closest('input, textarea, select')) return;
+      if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
       if (!activeRef.current) return;
       if (e.shiftKey && e.key === 'ArrowRight' && replayEndRef.current != null) {
         e.preventDefault();
@@ -3559,6 +3599,8 @@ export function TvChart({
         setReplayPick(false);
         return;
       }
+      // trading hotkeys win over drawing-tool keys (the hotkey dialog flags the clash)
+      if (hotkeyRef.current?.(e)) return;
       if (!e.ctrlKey && !e.metaKey && e.shiftKey && e.code === SVP_KEY.code) {
         e.preventDefault();
         setIndicators((list) =>
@@ -3599,7 +3641,7 @@ export function TvChart({
           const moved: Drawing = {
             ...d,
             pts: d.pts.map((pt) => ({
-              t: dl ? axis.toTime(axis.toLogical(pt.t) + dl) : pt.t,
+              t: dl ? axisRef.current.toTime(axisRef.current.toLogical(pt.t) + dl) : pt.t,
               p: pt.p + dp,
             })),
           };
@@ -3716,11 +3758,11 @@ export function TvChart({
       wrap.removeEventListener('dblclick', onDbl, true);
       window.removeEventListener('keydown', onKey);
     };
-  }, [axis, setDrawings, undo, redo, startReplayAt, stepReplay]);
+  }, [setDrawings, undo, redo, startReplayAt, stepReplay]);
 
-  // Drop an unfinished draft when the tool changes.
+  // Drop an unfinished draft when the tool changes (the handlers' own copy too, or the next move revives it).
   useEffect(() => {
-    if (tool === 'cursor') setDraft(null);
+    if (tool === 'cursor') cancelDraftRef.current();
   }, [tool]);
 
   // ── toolbar actions ───────────────────────────────────────────────────
@@ -4131,8 +4173,10 @@ export function TvChart({
       : null,
   ];
 
-  const priceLegend = (
+  // A function: the ticket row reads paper state declared further down.
+  const priceLegend = () => (
     <div
+      ref={legendRef}
       className="pointer-events-none absolute left-2 top-1.5 z-10 select-none"
       style={{ fontFamily: FONT }}
     >
@@ -4163,10 +4207,60 @@ export function TvChart({
           </span>
         ) : null}
       </div>
+      {/* TradingView: the Sell / Buy ticket sits on its own row under the title, never over the OHLC. */}
+      {paperOpen && prefs.showButtons ? (
+        <PaperTicket
+          price={lastPrice}
+          decimals={decimals}
+          qty={paperQty}
+          onQty={(v) => {
+            setPaperQty(v);
+            save('tv:paperQty', v);
+          }}
+          oneClick={oneClick}
+          onSide={(side) => {
+            if (oneClick) {
+              const err = placeOrder({ side, type: 'market', qty: Number(paperQty) });
+              if (err) window.alert(err);
+            } else setOrderDlg({ side, type: 'market' });
+          }}
+          onDialog={() => setOrderDlg({ side: 'buy', type: 'market' })}
+        />
+      ) : null}
       {maxPane == null ? computed.filter((c) => c.pane === 0).map(legendRow) : null}
       {maxPane == null ? panelLegendRows : null}
     </div>
   );
+
+  // Every render (OHLC text changes width on hover): the legend rows' boxes, in price-pane pixels, so the
+  // GEX chips drawn at the pane's left edge start past them instead of writing over the title.
+  useLayoutEffect(() => {
+    const legend = legendRef.current;
+    const pane = paneEls[0] ?? chartRef.current?.panes()[0]?.getHTMLElement() ?? null;
+    const prim = gexPrimRef.current;
+    if (!prim) return;
+    if (!legend || !pane) {
+      prim.setAvoid([]);
+      return;
+    }
+    const origin = pane.getBoundingClientRect();
+    const rects: { x: number; y: number; w: number; h: number }[] = [];
+    for (const row of Array.from(legend.children) as HTMLElement[]) {
+      // A wrapping row is full width; its own items say how far the text really reaches.
+      const items = row.children.length ? (Array.from(row.children) as HTMLElement[]) : [row];
+      for (const el of items) {
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        rects.push({
+          x: Math.round(r.left - origin.left),
+          y: Math.round(r.top - origin.top),
+          w: Math.round(r.width),
+          h: Math.round(r.height),
+        });
+      }
+    }
+    prim.setAvoid(rects);
+  });
 
   const portals = paneEls.map((el, paneIdx) => {
     if (!el || paneIdx === 0) return null;
@@ -4251,33 +4345,74 @@ export function TvChart({
   const [brokerOpen, setBrokerOpen] = useState(false);
   const [brokerSel, setBrokerSel] = useState<string | null>(null);
   const [tradeOpen, setTradeOpen] = useState(false);
-  const [livePaper, setLivePaper] = useState<PaperState>(() => newAccount());
-  const initialLivePaper = useRef(livePaper);
+  // two paper accounts, never mixed: Indian symbols trade the INR one, everything else the USD one
+  const [liveAccounts, setLiveAccounts] = useState<Accounts>(() => newAccounts());
+  const initialLiveAccounts = useRef(liveAccounts);
+  const paperCcy = accountCurrency(
+    symbol,
+    meta?.symbol?.toUpperCase() === symbol.toUpperCase() ? meta.currency : null,
+  );
+  const livePaper = liveAccounts[paperCcy];
+  const setLivePaper = useCallback(
+    (u: PaperState | ((s: PaperState) => PaperState)) =>
+      setLiveAccounts((a) => {
+        const next = typeof u === 'function' ? u(a[paperCcy]) : u;
+        return next === a[paperCcy] ? a : { ...a, [paperCcy]: next };
+      }),
+    [paperCcy],
+  );
   const [replayPaper, setReplayPaper] = useState<PaperState>(() => newAccount());
   const paperHydrated = useRef(false);
   useEffect(() => {
     setPaperOpen(load<boolean>('tv:paperOpen', false));
-    const saved = load<PaperState | null>('tv:paper', null);
-    if (saved && saved.positions && saved.orders && saved.history) {
-      const untouched =
-        saved.initial === OLD_DEFAULT_CAPITAL &&
-        saved.cash === OLD_DEFAULT_CAPITAL &&
-        !saved.history.length &&
-        !saved.orders.length &&
-        !Object.keys(saved.positions).length;
-      setLivePaper(
-        untouched
-          ? newAccount(DEFAULT_CAPITAL, saved.commissionPct)
-          : { ...newAccount(), ...saved, log: saved.log ?? [] },
-      );
+    const fix = (s: PaperState): PaperState => ({ ...newAccount(), ...s, log: s.log ?? [] });
+    const valid = (s: PaperState | null | undefined): s is PaperState =>
+      !!s && !!s.positions && !!s.orders && !!s.history;
+    const accounts = load<Partial<Accounts> | null>('tv:paperAccounts', null);
+    if (accounts && valid(accounts.USD) && valid(accounts.INR)) {
+      setLiveAccounts({ USD: fix(accounts.USD), INR: fix(accounts.INR) });
+    } else {
+      // before the split: one account held every currency; it is split by symbol, the old key is left alone
+      const saved = load<PaperState | null>('tv:paper', null);
+      if (valid(saved)) {
+        const untouched =
+          saved.initial === OLD_DEFAULT_CAPITAL &&
+          saved.cash === OLD_DEFAULT_CAPITAL &&
+          !saved.history.length &&
+          !saved.orders.length &&
+          !Object.keys(saved.positions).length;
+        setLiveAccounts(
+          untouched ? newAccounts(saved.commissionPct) : splitAccount(fix(saved)),
+        );
+      }
     }
     paperHydrated.current = true;
   }, []);
   useEffect(() => {
-    // never write the blank starter account: on mount (twice under StrictMode) it would overwrite the saved one before it is read
-    if (paperHydrated.current && livePaper !== initialLivePaper.current)
-      save('tv:paper', livePaper);
-  }, [livePaper]);
+    // never write the blank starter accounts: on mount (twice under StrictMode) they would overwrite the saved ones before they are read
+    if (paperHydrated.current && liveAccounts !== initialLiveAccounts.current)
+      save('tv:paperAccounts', liveAccounts);
+  }, [liveAccounts]);
+  useEffect(() => {
+    // Another tab of the chart saved the accounts: take its copy. Every tab re-saves on each price tick, so without
+    // this a second open tab would overwrite a change (a new balance, a trade) with its stale copy.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== 'tv:paperAccounts' || !e.newValue) return;
+      try {
+        const a = JSON.parse(e.newValue) as Partial<Accounts>;
+        if (a.USD?.positions && a.INR?.positions) {
+          const next = { USD: a.USD, INR: a.INR } as Accounts;
+          // mark it as already saved, so it is not written straight back
+          initialLiveAccounts.current = next;
+          setLiveAccounts(next);
+        }
+      } catch {
+        // a malformed value from elsewhere: keep ours
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
   const paper = replayActive ? replayPaper : livePaper;
   const setPaper = replayActive ? setReplayPaper : setLivePaper;
   const wasReplayPaper = useRef(false);
@@ -4286,6 +4421,7 @@ export function TvChart({
       setReplayPaper({
         ...newAccount(livePaper.initial, livePaper.commissionPct),
         futuresMargin: livePaper.futuresMargin,
+        nseFutMarginPct: livePaper.nseFutMarginPct,
       });
     wasReplayPaper.current = replayActive;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4299,13 +4435,15 @@ export function TvChart({
   const lastPrice = barsReady && lastBar ? lastBar.close : null;
   // a fill happens at the last close, i.e. when that candle ends
   const paperNow = lastBar ? lastBar.time + tf.secs : 0;
+  // money per point per unit of paper qty: NQ $20 a contract, NIFTY futures one lot (65 units), else 1
+  const paperPv = paperPointValue(symbol, meta?.lotSize);
   const placeOrder = useCallback(
     (o: OrderRequest): string | null => {
       if (lastPrice == null) return 'No price yet';
       const bracket = { sl: o.sl, tp: o.tp };
       const res =
         o.type === 'market'
-          ? placeMarket(paper, symbol, o.side, o.qty, lastPrice, paperNow, bracket)
+          ? placeMarket(paper, symbol, o.side, o.qty, lastPrice, paperNow, bracket, paperPv)
           : placePending(
               paper,
               symbol,
@@ -4317,12 +4455,13 @@ export function TvChart({
               paperNow,
               bracket,
               o.tif,
+              paperPv,
             );
       if (res.error) return res.error;
       setPaper(res.state);
       return null;
     },
-    [paper, symbol, lastPrice, paperNow, setPaper],
+    [paper, symbol, lastPrice, paperNow, setPaper, paperPv],
   );
   // TradingView's trading layer: quantity, one-click mode and the order dialog
   const [paperQty, setPaperQty] = useState('1');
@@ -4345,6 +4484,96 @@ export function TvChart({
   );
   const lastPriceRef = useRef(lastPrice);
   lastPriceRef.current = lastPrice;
+
+  // Trading hotkeys (paper account): bindings, the settings dialog and a short toast for each action.
+  const [hotkeys, setHotkeys] = useState<HotkeySettings>(DEFAULT_HOTKEYS);
+  const [hotkeyDlg, setHotkeyDlg] = useState(false);
+  const [toast, setToast] = useState<{ text: string; err: boolean; n: number } | null>(null);
+  useEffect(() => setHotkeys(mergeHotkeys(load<unknown>('tv:hotkeys', null))), []);
+  const updateHotkeys = useCallback((next: HotkeySettings) => {
+    setHotkeys(next);
+    save('tv:hotkeys', next);
+  }, []);
+  const notify = useCallback(
+    (text: string, err = false) => setToast((t) => ({ text, err, n: (t?.n ?? 0) + 1 })),
+    [],
+  );
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(() => setToast(null), toast.err ? 4000 : 2500);
+    return () => window.clearTimeout(id);
+  }, [toast]);
+  const shortSym = symbol.replace(/\.(NS|BO)$|=[FX]$/, '');
+  const runHotkey = (a: HotkeyAction) => {
+    if (lastPrice == null) return notify('No price yet', true);
+    const fix = (n: number) => n.toFixed(decimals);
+    const qty = Number(paperQty);
+    const apply = (r: { state: PaperState; error?: string }, ok: string) => {
+      if (r.error) return notify(r.error, true);
+      setPaper(r.state);
+      notify(ok);
+    };
+    switch (a) {
+      case 'buyMarket':
+      case 'sellMarket':
+      case 'buyLimit':
+      case 'sellLimit': {
+        const side = a.startsWith('buy') ? 'buy' : 'sell';
+        const type = a.endsWith('Market') ? 'market' : 'limit';
+        const price = type === 'limit' ? passiveLimit(side, lastPrice, hotkeys.limitTicks, decimals) : undefined;
+        if (!oneClick) {
+          setOrderDlg({ side, type, price });
+          return;
+        }
+        const err = placeOrder({ side, type, qty, price });
+        if (err) return notify(err, true);
+        return notify(
+          `${side.toUpperCase()} ${qty} ${shortSym} @ ${type === 'market' ? `${fix(lastPrice)} MKT` : `${fix(price!)} LMT`}`,
+        );
+      }
+      case 'flatten': {
+        const r = paperFlatten(paper, symbol, lastPrice, paperNow);
+        const parts = [
+          r.closed ? `closed ${r.closed} @ ${fix(lastPrice)}` : '',
+          r.cancelled ? `cancelled ${r.cancelled} order${r.cancelled > 1 ? 's' : ''}` : '',
+        ].filter(Boolean);
+        return apply(r, `Flatten ${shortSym}: ${parts.join(', ')}`);
+      }
+      case 'reverse':
+        return apply(paperReverse(paper, symbol, lastPrice, paperNow), `Reversed ${shortSym} @ ${fix(lastPrice)}`);
+      case 'closeHalf': {
+        const pos = paper.positions[symbol];
+        const half = pos ? Math.floor(Math.abs(pos.qty) / 2) : 0;
+        return apply(
+          paperClosePart(paper, symbol, 0.5, lastPrice, paperNow),
+          `Closed ${half} of ${shortSym} @ ${fix(lastPrice)}`,
+        );
+      }
+      case 'breakeven': {
+        const pos = paper.positions[symbol];
+        return apply(
+          paperBreakeven(paper, symbol, lastPrice),
+          `Stop to breakeven ${pos ? fix(pos.avg) : ''} on ${shortSym}`,
+        );
+      }
+      case 'cancelSymbol':
+      case 'cancelAll': {
+        const r = paperCancelOrders(paper, a === 'cancelAll' ? null : symbol, paperNow);
+        if (!r.n) return notify('No working orders', true);
+        setPaper(r.state);
+        return notify(`Cancelled ${r.n} order${r.n > 1 ? 's' : ''}${a === 'cancelAll' ? ' (all symbols)' : ` on ${shortSym}`}`);
+      }
+    }
+  };
+  hotkeyRef.current = (e: KeyboardEvent) => {
+    if (hotkeyDlg || orderDlg || replayPick) return false;
+    const a = actionFor(e, hotkeys);
+    if (!a) return false;
+    e.preventDefault();
+    // a held key auto-repeats: never turn that into a burst of orders
+    if (!e.repeat) runHotkey(a);
+    return true;
+  };
   const setBrackets = useCallback(
     (sl: number | undefined | null, tp: number | undefined | null): string | null => {
       const r = paperBracket(paper, symbol, sl ?? undefined, tp ?? undefined);
@@ -4510,32 +4739,8 @@ export function TvChart({
                 className="absolute z-30 w-52 rounded border border-sky-500 bg-neutral-900 px-2 py-1 text-sm text-neutral-100 shadow-lg outline-none placeholder:text-neutral-500"
               />
             ) : null}
-            {priceLegend}
+            {priceLegend()}
             {portals}
-            {paperOpen ? (
-              <>
-                {prefs.showButtons ? (
-                  <PaperTicket
-                    price={lastPrice}
-                    decimals={decimals}
-                    shifted={!!selected}
-                    qty={paperQty}
-                    onQty={(v) => {
-                      setPaperQty(v);
-                      save('tv:paperQty', v);
-                    }}
-                    oneClick={oneClick}
-                    onSide={(side) => {
-                      if (oneClick) {
-                        const err = placeOrder({ side, type: 'market', qty: Number(paperQty) });
-                        if (err) window.alert(err);
-                      } else setOrderDlg({ side, type: 'market' });
-                    }}
-                    onDialog={() => setOrderDlg({ side: 'buy', type: 'market' })}
-                  />
-                ) : null}
-              </>
-            ) : null}
             {/* the on-chart "+" / right-click menu works whether or not the paper panel is open */}
             <>
               <PaperOverlay
@@ -4604,6 +4809,7 @@ export function TvChart({
                       sl: o.sl,
                       tp: o.tp,
                     },
+                    o.pv ?? paperPv,
                   );
                   if (!r.error) setPaper(r.state);
                   return r.error ?? null;
@@ -4634,11 +4840,12 @@ export function TvChart({
                   symbol={symbol}
                   last={lastPrice}
                   decimals={decimals}
-                  currency={meta?.currency ?? ''}
+                  currency={paperCcy}
                   qty={paperQty}
                   oneClick={oneClick}
                   equity={equityOf(paper)}
-                  contractMargin={paperContractMargin(paper, symbol)}
+                  pv={paperPv}
+                  rule={paperMarginRule(paper, symbol)}
                   onModify={(id, patch) => {
                     if (lastPrice == null) return 'No price yet';
                     const r = paperUpdate(paper, id, patch, lastPrice);
@@ -4653,6 +4860,24 @@ export function TvChart({
                   }}
                   onClose={() => setOrderDlg(null)}
                 />
+              ) : null}
+              {hotkeyDlg ? (
+                <HotkeySettingsDialog
+                  value={hotkeys}
+                  onChange={updateHotkeys}
+                  onClose={() => setHotkeyDlg(false)}
+                />
+              ) : null}
+              {toast ? (
+                <div
+                  key={toast.n}
+                  role="status"
+                  className={`pointer-events-none absolute bottom-10 left-1/2 z-30 max-w-[90%] -translate-x-1/2 truncate rounded px-3 py-1.5 text-[12px] font-medium shadow-lg ${
+                    toast.err ? 'bg-[#4a1a1f] text-[#ff8a8a]' : 'bg-[#1e222d] text-[#d1d4dc] ring-1 ring-[#363a45]'
+                  }`}
+                >
+                  {toast.text}
+                </div>
               ) : null}
             </>
             {status === 'loading' ? (
@@ -5050,7 +5275,7 @@ export function TvChart({
                   replay={replayActive}
                   prices={lastPrice != null ? { [symbol]: lastPrice } : {}}
                   decimals={decimals}
-                  currency={meta?.currency ?? ''}
+                  currency={paperCcy}
                   tz={timeZone}
                   onClose={() => {
                     setPaperOpen(false);
@@ -5071,10 +5296,12 @@ export function TvChart({
                     setPaper({
                       ...newAccount(paper.initial, paper.commissionPct),
                       futuresMargin: paper.futuresMargin,
+                      nseFutMarginPct: paper.nseFutMarginPct,
                     })
                   }
                   prefs={prefs}
                   onPrefs={updatePrefs}
+                  onHotkeys={() => setHotkeyDlg(true)}
                 />
               ) : null}
               <BottomBar

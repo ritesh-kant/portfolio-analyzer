@@ -616,7 +616,7 @@ export function ArStrategyFields({
       <div className="mb-2 text-[12px] leading-snug text-[#787b86]">
         Each candle is checked against his four steps (environment, location, path, confirmation). Confirmation is
         estimated from candles, or read from the footprint. Times are {market.clock} time
-        {market.key === 'nse' ? ' (NSE: his New York window becomes the first 90 minutes after 09:15)' : ''}. Results
+        {market.key === 'nse' ? ' (NSE: entries all session, 09:15–15:15)' : ' (entries 09:30–16:00 New York)'}; his own rule was only the first 90 minutes. Results
         are in points before costs.
       </div>
       <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
@@ -716,6 +716,11 @@ export function ArStrategyFields({
         label="Take setups where a step only warns"
         checked={v.allowWarnings}
         onChange={(on) => set({ allowWarnings: on })}
+      />
+      <Check
+        label="Swings start inside today's session (not across the overnight gap)"
+        checked={v.sessionLegs}
+        onChange={(on) => set({ sessionLegs: on })}
       />
       <Check
         label="Zone must sit outside the value area"

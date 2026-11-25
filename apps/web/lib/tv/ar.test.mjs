@@ -14,6 +14,8 @@ import {
   DECODER_LEVELS,
   sessionBoxes,
   structureBias,
+  structureTrend,
+  sessionAnchoredFrom,
   structureLabels,
   swings,
 } from './ar.ts';
@@ -144,6 +146,7 @@ test('structure labels and bias', () => {
   assert.deepEqual(
     ladder.map((r) => [r.label, r.bias === null]),
     [
+      ['1D', true],
       ['4h', true],
       ['1h', true],
       ['15m', true],
@@ -322,4 +325,67 @@ test('decoderZones: no look-ahead, a decided box in any prefix is decided the sa
       else if (z.touchedAt != null) assert.equal(z.touchedAt, f.touchedAt);
     }
   }
+});
+
+test('structureTrend: a shallow lower low does not flip an uptrend, a close through the protected low does', () => {
+  // HH 210 from HL 160 (the protected low); then a dip to 158 and a lower high 205: the plain read says bear
+  const shallow = path([100, 150, 130, 180, 160, 210, 158, 205, 170]);
+  const sp = swings(shallow, 2, 5).pivots;
+  assert.equal(structureBias(sp), 'bear');
+  const st = structureTrend(shallow, sp, 1, 5);
+  assert.equal(st.at(-1), 'bull');
+  // a real break: a close well below 160 turns it down, and it stays down
+  const deep = path([100, 150, 130, 180, 160, 210, 120, 150]);
+  const dt = structureTrend(deep, swings(deep, 2, 5).pivots, 1, 5);
+  assert.equal(dt.at(-1), 'bear');
+  const firstBear = dt.indexOf('bear');
+  assert.ok(firstBear > 0 && deep[firstBear].close < 160 - 5);
+  // no look-ahead: a prefix gives the same values
+  for (const cut of [30, 55, 66]) {
+    const early = deep.slice(0, cut);
+    assert.deepEqual(structureTrend(early, swings(early, 2, 5).pivots, 1, 5), dt.slice(0, cut), `cut ${cut}`);
+  }
+});
+
+test('sessionAnchoredFrom: a leg across an overnight gap starts at the session low', () => {
+  // day 1 falls to 100; day 2 gaps up to 150, dips to 140, runs to 200
+  const day1 = path([130, 100]);
+  const t0 = day1.at(-1).time + 18 * 3600;
+  const day2 = path([150, 140, 200]).map((b) => ({ ...b, time: b.time - day1[0].time + t0 }));
+  const bars = [...day1, ...day2];
+  const lowIdx = day1.findIndex((b) => b.low === 100);
+  const from = { index: lowIdx, price: 100, kind: 'L', confirmedAt: lowIdx + 3 };
+  const to = { index: bars.length - 1, price: 200, kind: 'H', confirmedAt: bars.length - 1 };
+  const a = sessionAnchoredFrom(bars, from, to);
+  assert.equal(a.price, 140);
+  assert.ok(a.index > day1.length - 1);
+  // the session part is too small: keep the original start
+  assert.equal(sessionAnchoredFrom(bars, from, to, 70).price, 100);
+  // a leg already inside the session is untouched
+  const inside = { index: day1.length + 5, price: 145, kind: 'L', confirmedAt: day1.length + 8 };
+  assert.equal(sessionAnchoredFrom(bars, inside, to), inside);
+});
+
+test('checklist names the swing, and a zone cancelled in an earlier session is shown as waiting, not failed', async () => {
+  const { runArStrategy } = await import('./ar-strategy.ts');
+  // day 1: up leg 100 → 200, then a close past 0.886 (111.40) cancels it; day 2 (after an overnight gap) drifts
+  const day1 = path([130, 100, 200, 105]);
+  const t0 = day1.at(-1).time + 18 * 3600;
+  const day2 = path([105, 109, 106]).map((b) => ({ ...b, time: b.time - day1[0].time + t0 }));
+  const bars = [...day1, ...day2];
+  const { reads } = runArStrategy(bars, { timeZone: TZ, chartSecs: 300, cfg: { swingMult: 2, flatAt: 99999 } });
+  const cancel = reads.findIndex((r) => r.checks.location.state === 'fail');
+  assert.ok(cancel > 0 && cancel < day1.length, 'cancelled on day 1');
+  assert.match(reads[cancel].checks.location.text, /zone cancelled · swing 100\.00 \(/);
+  assert.equal(reads[cancel].checks.confirmation.state, 'wait');
+  const later = reads.slice(day1.length).map((r) => r.checks.location);
+  assert.ok(!later.some((c) => c.state === 'fail'), 'no red mark the next day');
+  assert.ok(later.every((c) => /the last long zone was cancelled on .*waiting for a new swing/.test(c.text)));
+  // in the zone before the cancel: one marked line per part, then the swing
+  const touched = reads.slice(0, cancel).map((r) => r.checks.location).find((c) => c.lines);
+  assert.ok(touched, 'a touched read is split');
+  assert.equal(touched.lines[0].state, 'pass');
+  assert.match(touched.lines[0].text, /^price reached the discount zone \(long\)$/);
+  assert.equal(touched.lines[1].state, touched.state);
+  assert.match(touched.detail, /^Fib drawn on swing 100\.00 \(/);
 });

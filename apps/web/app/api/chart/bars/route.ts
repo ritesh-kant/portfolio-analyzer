@@ -8,6 +8,7 @@ import { hasExtendedBars, sessionFor } from '../../../../lib/tv/sessions';
 import { sessionDay, wallClock } from '../../../../lib/tv/timeframes';
 import type { Bar, BarsResponse } from '../../../../lib/tv/types';
 import { futureBySymbol } from '../../../../lib/broker/upstox-instruments';
+import { mergeLiveMinutes, type LiveMinute } from '../../../../lib/tv/futures-live';
 
 export const dynamic = 'force-dynamic';
 
@@ -141,6 +142,86 @@ const RANGE_DAYS: Record<string, number> = {
 };
 const istDay = (unix: number) => new Date((unix + 19_800) * 1000).toISOString().slice(0, 10);
 
+/**
+ * The previous and the forming 1-minute candle from Upstox's live quote. Needs `UPSTOX_ANALYTICS_TOKEN` (read-only);
+ * without it, or on any error, none — the chart then shows the candle API's closed minutes only.
+ */
+const quoteCache = new Map<string, { at: number; minutes: LiveMinute[] }>();
+let quoteBlockedUntil = 0;
+async function liveMinutes(key: string): Promise<LiveMinute[]> {
+  const token = process.env.UPSTOX_ANALYTICS_TOKEN;
+  if (!token) return [];
+  const hit = quoteCache.get(key);
+  const now = Date.now();
+  if (hit && (now - hit.at < 2000 || now < quoteBlockedUntil)) return hit.minutes;
+  if (now < quoteBlockedUntil) return [];
+  type Ohlc = { open: number; high: number; low: number; close: number; volume: number; ts: number };
+  try {
+    const res = await fetch(`${UPSTOX}/v3/market-quote/ohlc?instrument_key=${encodeURIComponent(key)}&interval=I1`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    if (res.status === 429) quoteBlockedUntil = Date.now() + (Number(res.headers.get('retry-after')) || 30) * 1000;
+    if (!res.ok) return [];
+    const body = (await res.json()) as {
+      data?: Record<string, { instrument_token?: string; last_price?: number; prev_ohlc?: Ohlc; live_ohlc?: Ohlc }>;
+    };
+    const q = Object.values(body.data ?? {}).find((v) => v.instrument_token === key);
+    if (!q) return [];
+    const out: LiveMinute[] = [];
+    for (const o of [q.prev_ohlc, q.live_ohlc]) {
+      if (o && o.ts > 0) out.push({ time: Math.floor(o.ts / 1000), open: o.open, high: o.high, low: o.low, close: o.close, volume: o.volume });
+    }
+    // The forming candle's close is the last trade; make sure it is the very latest one the quote carries.
+    const forming = out[out.length - 1];
+    if (forming && q.last_price && q.last_price > 0 && q.live_ohlc) {
+      forming.close = q.last_price;
+      forming.high = Math.max(forming.high, q.last_price);
+      forming.low = Math.min(forming.low, q.last_price);
+    }
+    quoteCache.set(key, { at: Date.now(), minutes: out });
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Upstox's public candle API sits behind Cloudflare and bans an IP (HTTP 429 / error 1015, `retry-after` minutes)
+ * that polls too hard — the chart polls every 3 s. So: identical requests inside `ttlMs` share one reply, concurrent
+ * ones share one flight, and after a 429 nothing is sent until the cooldown ends (the last good reply is served).
+ */
+const upstoxCache = new Map<string, { at: number; body: unknown; inflight?: Promise<unknown> }>();
+let upstoxBlockedUntil = 0;
+async function upstoxJson<T>(path: string, ttlMs: number): Promise<T | null> {
+  const hit = upstoxCache.get(path);
+  const now = Date.now();
+  if (hit?.body !== undefined && (now - hit.at < ttlMs || now < upstoxBlockedUntil)) return hit.body as T;
+  if (hit?.inflight) return (await hit.inflight) as T | null;
+  if (now < upstoxBlockedUntil) return null;
+  const flight = (async () => {
+    try {
+      const res = await fetch(`${UPSTOX}${path}`, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      if (res.status === 429) {
+        const wait = Number(res.headers.get('retry-after')) || 60;
+        upstoxBlockedUntil = Date.now() + wait * 1000;
+        return hit?.body ?? null;
+      }
+      if (!res.ok) return hit?.body ?? null;
+      const body = await res.json();
+      upstoxCache.set(path, { at: Date.now(), body });
+      return body;
+    } catch {
+      return hit?.body ?? null;
+    } finally {
+      const cur = upstoxCache.get(path);
+      if (cur) delete cur.inflight;
+    }
+  })();
+  upstoxCache.set(path, { at: hit?.at ?? 0, body: hit?.body, inflight: flight });
+  return (await flight) as T | null;
+}
+
 /** NSE futures (`NIFTY1!.NFO`, `NIFTY26NOVFUT.NFO`): Yahoo has none, so candles come from Upstox's public API. */
 async function futuresBars(symbol: string, interval: string, range: string, window?: Window) {
   const fut = await futureBySymbol(symbol);
@@ -162,26 +243,37 @@ async function futuresBars(symbol: string, interval: string, range: string, wind
     const start = Math.max(from, end - (chunkDays - 1) * 86400);
     paths.push(`/v3/historical-candle/${enc}/${u}/${n}/${istDay(end)}/${istDay(start)}`);
   }
-  if (istDay(to) >= today && (u === 'minutes' || u === 'hours')) paths.push(`/v3/historical-candle/intraday/${enc}/${u}/${n}`);
+  const liveWanted = istDay(to) >= today && (u === 'minutes' || u === 'hours');
+  if (liveWanted) paths.push(`/v3/historical-candle/intraday/${enc}/${u}/${n}`);
   type Raw = [string, number, number, number, number, number, number?][];
+  // The candle API only has closed minutes (~15–20 s late), so the price was 20–80 s old. Fold in the live quote's
+  // previous + forming minute; for 5m+ also ask which minute the candle API has published, so none counts twice.
+  const live: LiveMinute[] = liveWanted ? await liveMinutes(fut.key) : [];
+  // With the live quote covering the newest minutes, the closed-candle API only needs to be asked every ~25 s — it is
+  // the public, IP-throttled one. Without the quote it is the only source of the tail, so it stays fresher (8 s).
+  const intradayTtl = live.length ? 25_000 : 8000;
+  const lastPublished: Promise<number | null> = !liveWanted
+    ? Promise.resolve(null)
+    : upstoxJson<{ data?: { candles?: Raw } }>(`/v3/historical-candle/intraday/${enc}/minutes/1`, intradayTtl).then((b) => {
+        const t = b?.data?.candles?.[0]?.[0];
+        return t ? Math.floor(Date.parse(t) / 1000) : null;
+      });
   const byTime = new Map<number, Bar>();
   let ok = 0;
   const responses = await Promise.all(
-    paths.map((path) =>
-      fetch(`${UPSTOX}${path}`, { headers: { Accept: 'application/json' }, cache: 'no-store' }).catch(() => null),
-    ),
+    paths.map((path) => upstoxJson<{ data?: { candles?: Raw } }>(path, path.includes('/intraday/') ? intradayTtl : 300_000)),
   );
-  for (const res of responses) {
-    if (!res?.ok) continue;
+  for (const body of responses) {
+    if (!body) continue;
     ok += 1;
-    const body = (await res.json()) as { data?: { candles?: Raw } };
     for (const [t, open, high, low, close, volume] of body.data?.candles ?? []) {
       const time = Math.floor(Date.parse(t) / 1000);
       if (Number.isFinite(time) && time >= from && time <= to) byTime.set(time, { time, open, high, low, close, volume });
     }
   }
   if (!ok) return NextResponse.json({ error: 'upstox unavailable' }, { status: 502 });
-  const bars = [...byTime.values()].sort((a, b) => a.time - b.time);
+  let bars = [...byTime.values()].sort((a, b) => a.time - b.time);
+  if (liveWanted) bars = mergeLiveMinutes(bars, live, await lastPublished, n * (u === 'hours' ? 3600 : 60));
   const last = bars[bars.length - 1];
   const meta: BarsResponse['meta'] = {
     symbol,

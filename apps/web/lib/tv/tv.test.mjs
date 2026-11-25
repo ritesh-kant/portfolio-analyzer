@@ -1017,6 +1017,8 @@ import {
   newAccount,
   placeMarket,
   placePending,
+  accountCurrency,
+  splitAccount,
   pointValue,
   marginUsed,
   updateSettings,
@@ -1082,12 +1084,78 @@ test('paper: NQ futures are worth $20 a point per contract', () => {
   assert.match(placeMarket(newAccount(299999), 'NQ=F', 'buy', 10, 26000, 0).error, /margin/);
   assert.ok(!placeMarket(newAccount(300000), 'NQ=F', 'buy', 10, 26000, 0).error);
   // the margin is editable per root
-  const custom = updateSettings(newAccount(20000), 20000, 0, { NQ: 20000 });
+  const custom = updateSettings(newAccount(20000), 20000, 0, { futures: { NQ: 20000 } });
   assert.ok(!placeMarket(custom, 'NQ=F', 'buy', 1, 26000, 0).error);
   assert.equal(marginUsed(placeMarket(newAccount(1e6), 'MNQ=F', 'buy', 4, 26000, 0).state), 12000);
   assert.equal(pointValue('MNQ=F'), 2);
   assert.equal(pointValue('RELIANCE.NS'), 1);
 });
+
+test('paper: NSE futures trade in lots with a % of value as margin', () => {
+  // NIFTY: 65 units a lot; 1 lot at 26,000 = ₹16.9 lakh, 12 % margin = ₹2,02,800
+  let s = newAccount(300000);
+  s = placeMarket(s, 'NIFTY1!.NFO', 'sell', 1, 26000, 60, undefined, 65).state;
+  assert.equal(s.positions['NIFTY1!.NFO'].pv, 65);
+  assert.ok(Math.abs(marginUsed(s) - 202800) < 1e-6);
+  s = closePosition(s, 'NIFTY1!.NFO', 25990, 120);
+  assert.equal(s.history[0].pnl, 650); // 10 points × 65 units
+  assert.match(
+    placeMarket(newAccount(200000), 'NIFTY1!.NFO', 'buy', 1, 26000, 0, undefined, 65).error,
+    /margin/,
+  );
+  // the % is editable, and a pending order keeps its lot size until it fills
+  const low = updateSettings(newAccount(200000), 200000, 0, { nsePct: 10 });
+  assert.ok(!placeMarket(low, 'NIFTY1!.NFO', 'buy', 1, 26000, 0, undefined, 65).error);
+  let p = placePending(
+    newAccount(300000),
+    'NIFTY1!.NFO',
+    'buy',
+    'limit',
+    1,
+    25990,
+    26000,
+    120,
+    undefined,
+    'gtc',
+    65,
+  ).state;
+  p = paperStep(p, 'NIFTY1!.NFO', [pb(2, 26000, 26000, 25980, 25995)], 60);
+  assert.equal(p.positions['NIFTY1!.NFO'].pv, 65);
+});
+
+
+test('paper: INR and USD accounts are kept apart, and an old mixed account splits exactly', () => {
+  assert.equal(accountCurrency('NIFTY1!.NFO'), 'INR');
+  assert.equal(accountCurrency('RELIANCE.NS'), 'INR');
+  assert.equal(accountCurrency('^NSEI'), 'INR');
+  assert.equal(accountCurrency('NQ=F'), 'USD');
+  assert.equal(accountCurrency('AAPL'), 'USD');
+  assert.equal(accountCurrency('WHATEVER', 'INR'), 'INR');
+  let s = newAccount(500000, 0.1);
+  s = placeMarket(s, 'NQ=F', 'buy', 1, 26000, 60).state;
+  s = closePosition(s, 'NQ=F', 26010, 120); // +$200 less fees
+  s = placeMarket(s, 'NIFTY1!.NFO', 'sell', 1, 26000, 180, undefined, 65).state; // still open
+  s = placeMarket(s, 'RELIANCE.NS', 'buy', 10, 1400, 240).state;
+  s = closePosition(s, 'RELIANCE.NS', 1390, 300); // −₹100 less fees
+  const { USD, INR } = splitAccount(s);
+  assert.deepEqual(Object.keys(USD.positions), []);
+  assert.deepEqual(Object.keys(INR.positions), ['NIFTY1!.NFO']);
+  assert.deepEqual(
+    USD.history.map((t) => t.symbol),
+    ['NQ=F'],
+  );
+  assert.deepEqual(
+    INR.history.map((t) => t.symbol),
+    ['RELIANCE.NS'],
+  );
+  assert.ok(Math.abs(USD.cash - (500000 + USD.history[0].pnl)) < 1e-6);
+  assert.ok(
+    Math.abs(INR.cash - (500000 + INR.history[0].pnl - INR.positions['NIFTY1!.NFO'].fees)) < 1e-6,
+  );
+  // the two halves add back up to the old account's cash
+  assert.ok(Math.abs(USD.cash + INR.cash - 500000 - s.cash) < 1e-6);
+});
+
 
 test('paper: validation', () => {
   const s = newAccount(1000);

@@ -9,9 +9,11 @@ import type { Bar } from './types';
  * Only candles that start at or after an order's `since` may fill it with their full range, so an order never
  * fills on history that happened before it was placed; the newest candle is checked at its close only.
  * If one candle reaches both the stop and the target, the stop wins (the pessimistic reading).
- * Quantity is in contracts for CME futures (`NQ=F` is worth $20 a point per contract, `ES=F` $50 …) and in units of
- * the price for everything else; every P&L, fee and exposure figure goes through `pointValue`.
- * Margin: futures tie up a fixed deposit per contract (like a futures broker); everything else value ÷ MAX_LEVERAGE.
+ * Quantity is in contracts for CME futures (`NQ=F` is worth $20 a point per contract, `ES=F` $50 …), in lots for NSE
+ * futures (NIFTY: 65 units a lot, from the chart's contract data), and in units of the price for everything else.
+ * Each position and order keeps that point value (`pv`), so a later lot-size change never re-prices an open trade.
+ * Margin: CME futures a fixed deposit per contract, NSE futures a % of the contract value (SPAN + exposure, roughly),
+ * everything else value ÷ MAX_LEVERAGE.
  * Pure functions — the same code drives live charts and replay.
  */
 
@@ -37,6 +39,9 @@ export const DEFAULT_FUTURES_MARGIN: Record<string, number> = {
   MGC: 2_000,
 };
 
+/** NSE futures: margin as a % of contract value. Roughly NIFTY's SPAN + exposure; stock futures often need more. */
+export const DEFAULT_NSE_FUT_MARGIN_PCT = 12;
+
 export interface Order {
   id: number;
   symbol: string;
@@ -51,6 +56,8 @@ export interface Order {
   tif: Tif;
   /** Unix s: the order is cancelled once a candle starts at or after this (absent = good till cancelled). */
   expires?: number;
+  /** Money per point per unit of qty (contract multiplier / lot size); absent = pointValue(symbol). */
+  pv?: number;
 }
 
 /** One line of the Orders tab history: how an order ended. */
@@ -77,6 +84,8 @@ export interface Position {
   fees: number;
   openedAt: number;
   since: number;
+  /** Money per point per unit of qty (contract multiplier / lot size); absent = pointValue(symbol). */
+  pv?: number;
 }
 
 export interface Trade {
@@ -108,6 +117,8 @@ export interface PaperState {
   nextId: number;
   /** Per-contract futures margin overrides by root (`NQ`); absent ones use DEFAULT_FUTURES_MARGIN. */
   futuresMargin?: Record<string, number>;
+  /** NSE futures margin, % of contract value; absent = DEFAULT_NSE_FUT_MARGIN_PCT. */
+  nseFutMarginPct?: number;
 }
 
 export const DEFAULT_CAPITAL = 1_000;
@@ -128,6 +139,51 @@ export function newAccount(initial = DEFAULT_CAPITAL, commissionPct = 0): PaperS
   };
 }
 
+/** The paper account keeps money apart by currency: Indian symbols trade the INR account, everything else USD. */
+export type AccountCcy = 'USD' | 'INR';
+export type Accounts = Record<AccountCcy, PaperState>;
+/** A fresh INR account starts with ₹1,00,000 (DEFAULT_CAPITAL is in dollars). */
+export const DEFAULT_CAPITAL_INR = 100_000;
+
+const INDIAN = /\.(NS|BO|NFO)$|^\^(NSE|BSE|CNX)/i;
+
+/** Which account `symbol` trades: the chart's own currency when known, else by the symbol's exchange suffix. */
+export function accountCurrency(symbol: string, metaCurrency?: string | null): AccountCcy {
+  if (metaCurrency) return metaCurrency.toUpperCase() === 'INR' ? 'INR' : 'USD';
+  return INDIAN.test(symbol) || isNseFuture(symbol) ? 'INR' : 'USD';
+}
+
+export function newAccounts(commissionPct = 0): Accounts {
+  return {
+    USD: newAccount(DEFAULT_CAPITAL, commissionPct),
+    INR: newAccount(DEFAULT_CAPITAL_INR, commissionPct),
+  };
+}
+
+/**
+ * Splits one old mixed-currency account in two by symbol. Each side keeps the starting capital and its own
+ * positions, orders and trades; its cash is rebuilt as capital + its realized P&L − entry fees still open, which is
+ * exactly how `fill` moves cash.
+ */
+export function splitAccount(s: PaperState): Accounts {
+  const side = (ccy: AccountCcy): PaperState => {
+    const mine = (symbol: string) => accountCurrency(symbol) === ccy;
+    const positions = Object.fromEntries(Object.entries(s.positions).filter(([sym]) => mine(sym)));
+    const history = s.history.filter((t) => mine(t.symbol));
+    const openFees = Object.values(positions).reduce((a, p) => a + p.fees, 0);
+    return {
+      ...s,
+      cash: s.initial + history.reduce((a, t) => a + t.pnl, 0) - openFees,
+      positions,
+      orders: s.orders.filter((o) => mine(o.symbol)),
+      history,
+      log: (s.log ?? []).filter((l) => mine(l.symbol)),
+      prices: Object.fromEntries(Object.entries(s.prices).filter(([sym]) => mine(sym))),
+    };
+  };
+  return { USD: side('USD'), INR: side('INR') };
+}
+
 function logOrder(s: PaperState, o: Omit<OrderLog, 'id'> & { id?: number }): void {
   s.log = [{ ...o, id: o.id ?? s.nextId++ }, ...(s.log ?? [])].slice(0, 300);
 }
@@ -138,9 +194,15 @@ const clone = (s: PaperState): PaperState => JSON.parse(JSON.stringify(s)) as Pa
  * Money per 1.0 point per unit of quantity: the contract multiplier for the CME futures the Strategy Tester knows
  * (NQ $20, MNQ $2, ES $50, MES $5, GC $100, MGC $10), 1 for stocks, crypto and NSE futures (lot size unknown here).
  */
-export function pointValue(symbol: string): number {
+export function pointValue(symbol: string, lotSize?: number): number {
+  if (isNseFuture(symbol)) return lotSize && lotSize > 0 ? lotSize : 1;
   return futuresRoot(symbol) ? instrumentFor(symbol).pointValue : 1;
 }
+
+/** The point value a position or order was opened with. */
+export const pvOf = (x: { symbol: string; pv?: number }): number => x.pv ?? pointValue(x.symbol);
+
+export const isNseFuture = (symbol: string): boolean => instrumentFor(symbol).id === 'NSEFUT';
 
 /** `NQ=F` → `NQ`: the CME futures root the paper account sizes and margins per contract, else null. */
 export function futuresRoot(symbol: string): string | null {
@@ -155,16 +217,29 @@ export function contractMargin(s: PaperState, symbol: string): number | null {
   return s.futuresMargin?.[root] ?? DEFAULT_FUTURES_MARGIN[root] ?? null;
 }
 
-/** Margin `qty` of `symbol` ties up: contracts × per-contract margin for futures, value ÷ 5 for the rest. */
-export function marginFor(s: PaperState, symbol: string, qty: number, price: number): number {
+export type MarginRule =
+  | { kind: 'contract'; per: number }
+  | { kind: 'pct'; pct: number }
+  | { kind: 'leverage'; x: number };
+
+/** How `symbol` is margined: per contract (CME), % of value (NSE futures) or value ÷ MAX_LEVERAGE. */
+export function marginRule(s: PaperState, symbol: string): MarginRule {
   const per = contractMargin(s, symbol);
-  return per != null
-    ? Math.abs(qty) * per
-    : (Math.abs(qty) * price * pointValue(symbol)) / MAX_LEVERAGE;
+  if (per != null) return { kind: 'contract', per };
+  if (isNseFuture(symbol))
+    return { kind: 'pct', pct: s.nseFutMarginPct ?? DEFAULT_NSE_FUT_MARGIN_PCT };
+  return { kind: 'leverage', x: MAX_LEVERAGE };
 }
 
-export const unrealized = (p: Position, price: number): number =>
-  p.qty * (price - p.avg) * pointValue(p.symbol);
+/** Margin `qty` (contracts / lots / units) ties up under `rule`, at `pv` money per point per unit. */
+export function marginOf(rule: MarginRule, qty: number, price: number, pv: number): number {
+  const value = Math.abs(qty) * price * pv;
+  if (rule.kind === 'contract') return Math.abs(qty) * rule.per;
+  if (rule.kind === 'pct') return (value * rule.pct) / 100;
+  return value / rule.x;
+}
+
+export const unrealized = (p: Position, price: number): number => p.qty * (price - p.avg) * pvOf(p);
 
 export function equityOf(s: PaperState): number {
   let e = s.cash;
@@ -178,7 +253,7 @@ export const realizedOf = (s: PaperState): number => s.history.reduce((a, t) => 
 export function marginUsed(s: PaperState): number {
   let m = 0;
   for (const p of Object.values(s.positions))
-    m += marginFor(s, p.symbol, p.qty, s.prices[p.symbol] ?? p.avg);
+    m += marginOf(marginRule(s, p.symbol), p.qty, s.prices[p.symbol] ?? p.avg, pvOf(p));
   return m;
 }
 
@@ -201,11 +276,13 @@ function fill(
   time: number,
   reason: CloseReason,
   bracket?: { sl?: number; tp?: number },
+  newPv?: number,
 ): boolean {
   const signed = side === 'buy' ? qty : -qty;
-  const pv = pointValue(symbol);
-  const fee = (q: number) => (Math.abs(q) * price * pv * s.commissionPct) / 100;
   const pos = s.positions[symbol];
+  // an open position keeps the point value it was opened with; a new one takes the order's
+  const pv = pos ? pvOf(pos) : (newPv ?? pointValue(symbol));
+  const fee = (q: number) => (Math.abs(q) * price * pv * s.commissionPct) / 100;
   s.prices[symbol] = price;
   if (!pos) {
     const f = fee(qty);
@@ -219,6 +296,7 @@ function fill(
       fees: f,
       openedAt: time,
       since: time,
+      pv,
     };
     return true;
   }
@@ -268,6 +346,7 @@ function fill(
       fees: f,
       openedAt: time,
       since: time,
+      pv,
     };
   } else if (closeQty === Math.abs(pos.qty)) {
     delete s.positions[symbol];
@@ -303,9 +382,10 @@ function pendingMarginError(
   side: Side,
   qty: number,
   price: number,
+  pv?: number,
 ): string | null {
   const t = clone(state);
-  fill(t, symbol, side, qty, price, 0, 'manual');
+  fill(t, symbol, side, qty, price, 0, 'manual', undefined, pv);
   return marginOk(t) ? null : marginError(t);
 }
 
@@ -317,13 +397,15 @@ export function placeMarket(
   price: number,
   time: number,
   bracket?: { sl?: number; tp?: number },
+  /** Point value for a new position (NSE: the lot size); absent = pointValue(symbol). */
+  pv?: number,
 ): Result {
   if (!(qty > 0)) return fail(state, 'Quantity must be positive');
   if (!(price > 0)) return fail(state, 'No price yet');
   const bad = checkBracket(side, price, bracket?.sl, bracket?.tp);
   if (bad) return fail(state, bad);
   const s = clone(state);
-  fill(s, symbol, side, qty, price, time, 'manual', bracket);
+  fill(s, symbol, side, qty, price, time, 'manual', bracket, pv);
   if (!marginOk(s)) return fail(state, marginError(s));
   logOrder(s, { symbol, side, type: 'market', qty, price, status: 'filled', time });
   return { state: s };
@@ -340,6 +422,8 @@ export function placePending(
   since: number,
   bracket?: { sl?: number; tp?: number },
   tif: Tif = 'gtc',
+  /** Point value if this order opens a position (NSE: the lot size); absent = pointValue(symbol). */
+  pv?: number,
 ): Result {
   if (!(qty > 0)) return fail(state, 'Quantity must be positive');
   if (!(price > 0)) return fail(state, 'Enter a price');
@@ -353,7 +437,7 @@ export function placePending(
   const bad = checkBracket(side, price, bracket?.sl, bracket?.tp);
   if (bad) return fail(state, bad);
   // check now, not only at fill time, so a limit is refused the same way a market order is
-  const margin = pendingMarginError(state, symbol, side, qty, price);
+  const margin = pendingMarginError(state, symbol, side, qty, price, pv);
   if (margin) return fail(state, margin);
   const s = clone(state);
   s.orders.push({
@@ -368,6 +452,7 @@ export function placePending(
     since,
     tif,
     expires: tif === 'gtc' ? undefined : since + TIF_SECS[tif],
+    pv,
   });
   return { state: s };
 }
@@ -420,6 +505,66 @@ export function reversePosition(
     price,
     time,
   );
+}
+
+/** Closes `fraction` of the position (rounded down to whole units) at `price`. */
+export function closePart(
+  state: PaperState,
+  symbol: string,
+  fraction: number,
+  price: number,
+  time: number,
+): Result {
+  const pos = state.positions[symbol];
+  if (!pos) return fail(state, 'No open position');
+  const qty = Math.floor(Math.abs(pos.qty) * fraction + 1e-9);
+  if (qty < 1) return fail(state, `Position is ${Math.abs(pos.qty)}; nothing to split`);
+  return placeMarket(state, symbol, pos.qty > 0 ? 'sell' : 'buy', qty, price, time);
+}
+
+/**
+ * Moves the position's stop to its entry price. Refused while price is not beyond entry (the stop would fill
+ * at once) or when the stop already sits at or past entry. Fees are not included, so a breakeven stop-out
+ * still loses the round-trip commission.
+ */
+export function breakevenStop(state: PaperState, symbol: string, last: number): Result {
+  const pos = state.positions[symbol];
+  if (!pos) return fail(state, 'No open position');
+  const long = pos.qty > 0;
+  if (long ? last <= pos.avg : last >= pos.avg)
+    return fail(state, `Price must be ${long ? 'above' : 'below'} entry ${pos.avg} first`);
+  if (pos.sl != null && (long ? pos.sl >= pos.avg : pos.sl <= pos.avg))
+    return fail(state, 'Stop is already at or past breakeven');
+  return {
+    state: { ...state, positions: { ...state.positions, [symbol]: { ...pos, sl: pos.avg } } },
+  };
+}
+
+/** Cancels every working order for `symbol`, or for every symbol when `symbol` is null. */
+export function cancelOrders(
+  state: PaperState,
+  symbol: string | null,
+  time = 0,
+): { state: PaperState; n: number } {
+  const ids = state.orders.filter((o) => symbol == null || o.symbol === symbol).map((o) => o.id);
+  let s = state;
+  for (const id of ids) s = cancelOrder(s, id, time);
+  return { state: s, n: ids.length };
+}
+
+/** Cancels the symbol's working orders and closes its position at `price`. */
+export function flattenSymbol(
+  state: PaperState,
+  symbol: string,
+  price: number,
+  time: number,
+): Result & { cancelled: number; closed: number } {
+  const c = cancelOrders(state, symbol, time);
+  const pos = c.state.positions[symbol];
+  if (!pos && !c.n) return { ...fail(state, 'Nothing to flatten'), cancelled: 0, closed: 0 };
+  if (pos && !(price > 0)) return { ...fail(state, 'No price yet'), cancelled: 0, closed: 0 };
+  const s = pos ? closePosition(c.state, symbol, price, time) : c.state;
+  return { state: s, cancelled: c.n, closed: pos ? Math.abs(pos.qty) : 0 };
 }
 
 /** Drags a working order to a new price (same side rules as placing it). */
@@ -477,7 +622,7 @@ export function updateOrder(
     );
   const bad = checkBracket(next.side, next.price, next.sl, next.tp);
   if (bad) return fail(state, bad);
-  const margin = pendingMarginError(state, next.symbol, next.side, next.qty, next.price);
+  const margin = pendingMarginError(state, next.symbol, next.side, next.qty, next.price, next.pv);
   if (margin) return fail(state, margin);
   return { state: { ...state, orders: state.orders.map((x) => (x.id === id ? next : x)) } };
 }
@@ -500,7 +645,7 @@ export function updateSettings(
   state: PaperState,
   initial: number,
   commissionPct: number,
-  futuresMargin?: Record<string, number>,
+  margins?: { futures?: Record<string, number>; nsePct?: number },
 ): PaperState {
   const delta = initial - state.initial;
   return {
@@ -508,7 +653,8 @@ export function updateSettings(
     initial,
     cash: state.cash + delta,
     commissionPct,
-    futuresMargin: futuresMargin ?? state.futuresMargin,
+    futuresMargin: margins?.futures ?? state.futuresMargin,
+    nseFutMarginPct: margins?.nsePct ?? state.nseFutMarginPct,
   };
 }
 
@@ -573,7 +719,7 @@ export function step(
       if (px == null) continue;
       s.orders = s.orders.filter((x) => x.id !== o.id);
       const before = clone(s);
-      fill(s, symbol, o.side, o.qty, px, b.time, 'manual', { sl: o.sl, tp: o.tp });
+      fill(s, symbol, o.side, o.qty, px, b.time, 'manual', { sl: o.sl, tp: o.tp }, o.pv);
       if (!marginOk(s)) {
         Object.assign(s, before);
         logOrder(s, {

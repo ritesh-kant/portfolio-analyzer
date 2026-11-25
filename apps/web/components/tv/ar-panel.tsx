@@ -197,7 +197,21 @@ export function ArPanel({
                     <span className="text-[#d1d4dc]">
                       {n + 1} {s.label}
                     </span>{' '}
-                    <span className="text-[#9598a1]">{c.text}</span>
+                    {c.lines ? (
+                      <>
+                        {c.lines.map((l, j) => (
+                          <span key={j} className="flex gap-1.5">
+                            <span className="w-3 shrink-0 text-center font-semibold" style={{ color: MARK[l.state].color }}>
+                              {MARK[l.state].glyph}
+                            </span>
+                            <span className="text-[#9598a1]">{l.text}</span>
+                          </span>
+                        ))}
+                        {c.detail ? <span className="block pl-[18px] text-[#787b86]">{c.detail}</span> : null}
+                      </>
+                    ) : (
+                      <span className="text-[#9598a1]">{c.text}</span>
+                    )}
                   </span>
                 </li>
               );

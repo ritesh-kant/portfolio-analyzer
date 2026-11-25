@@ -84,6 +84,8 @@ export class GexProfilePrimitive implements ISeriesPrimitive<Time> {
   ];
   /** Labelled strikes, drawn as chips at the pane's left edge. */
   private tags: GexTagRow[] = [];
+  /** Pane areas the chips must not cover (the legend rows at the top-left), in media pixels. */
+  private avoid: { x: number; y: number; w: number; h: number }[] = [];
   private tagViews: IPrimitivePaneView[] = [
     {
       // Above the candles, like the level labels they belong to.
@@ -140,6 +142,19 @@ export class GexProfilePrimitive implements ISeriesPrimitive<Time> {
     this.requestUpdate?.();
   }
 
+  /** Boxes the chips start to the right of when their row crosses them (the legend's text rows). */
+  setAvoid(rects: { x: number; y: number; w: number; h: number }[]) {
+    const same =
+      rects.length === this.avoid.length &&
+      rects.every((r, i) => {
+        const o = this.avoid[i]!;
+        return r.x === o.x && r.y === o.y && r.w === o.w && r.h === o.h;
+      });
+    if (same) return;
+    this.avoid = rects;
+    this.requestUpdate?.();
+  }
+
   private tagRows(h: number): (GexTagRow & { y: number })[] {
     const series = this.series;
     if (!series) return [];
@@ -184,7 +199,11 @@ export class GexProfilePrimitive implements ISeriesPrimitive<Time> {
       return cw;
     };
     for (const t of rows) {
+      // Start past any legend row the chip row would cross, so the title and OHLC stay readable.
       let x = 6;
+      for (const r of this.avoid) {
+        if (t.y + 8 > r.y && t.y - 8 < r.y + r.h) x = Math.max(x, r.x + r.w + 8);
+      }
       for (const label of t.labels) {
         x += chip(x, t.y, label, tagColor(label), 'rgba(19, 23, 34, 0.85)') + 3;
       }

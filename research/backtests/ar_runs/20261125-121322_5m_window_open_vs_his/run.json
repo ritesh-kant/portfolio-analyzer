@@ -1,0 +1,177 @@
+{
+  "id": "20261125-121322_5m_window_open_vs_his",
+  "created": "2026-11-25T12:13:22.064Z",
+  "symbol": "NQ=F",
+  "interval": "5m",
+  "window": {
+    "from": "2026-09-03 00:05",
+    "to": "2026-11-24 08:30",
+    "days": 69,
+    "candles": 15697,
+    "formingLast": false
+  },
+  "gamma": {
+    "snapshots": 1,
+    "from": "2026-11-14 07:36",
+    "to": "2026-11-14 07:36",
+    "tradesWithSnapshot": 0
+  },
+  "footprint": {
+    "candles": 8053,
+    "from": "2026-10-14 01:30",
+    "source": "estimated from 1m bars",
+    "rowStep": 5
+  },
+  "engine": "apps/web/lib/tv/ar-strategy.ts",
+  "costs": {
+    "instrument": "NQ",
+    "contracts": 1,
+    "commission": null,
+    "slipTicks": 1,
+    "roundTripPts": 0.725
+  },
+  "a": {
+    "settings": {
+      "swingMult": 2,
+      "valueRows": 30,
+      "envWindow": 24,
+      "windowStart": 570,
+      "windowEnd": 660,
+      "flatAt": 960,
+      "minRR": 1.5,
+      "entry": "pullback",
+      "entryWait": 3,
+      "confirmWithin": 6,
+      "stopBuffer": 0.1,
+      "requireOutsideValue": false,
+      "allowWarnings": true,
+      "requireStack": false,
+      "confirm": "candles",
+      "absorbVol": 1.5,
+      "flipShare": 0.1,
+      "zone": "fib",
+      "gamma": "off",
+      "sessionLegs": false
+    },
+    "changed": {
+      "windowEnd": 660
+    },
+    "stats": {
+      "trades": 2,
+      "wins": 1,
+      "losses": 1,
+      "winRate": 0.5,
+      "gross": 2977.073120924615,
+      "cost": 29,
+      "net": 2948.073120924615,
+      "avgNet": 1474.0365604623075,
+      "medianNet": 1474.0365604623075,
+      "avgR": 0.4601112960711208,
+      "medianR": 0.4601112960711208,
+      "profitFactor": 2.4242402235201124,
+      "avgWin": 5018,
+      "avgLoss": -2069.926879075385,
+      "best": 5018,
+      "worst": -2069.926879075385,
+      "maxDrawdown": 2069.926879075385,
+      "netWithoutTop3": 0,
+      "byOutcome": {
+        "target": {
+          "n": 1,
+          "net": 5018
+        },
+        "stop": {
+          "n": 1,
+          "net": -2069.926879075385
+        }
+      },
+      "byDir": {
+        "long": {
+          "n": 0,
+          "net": 0,
+          "wins": 0
+        },
+        "short": {
+          "n": 2,
+          "net": 2948.073120924615,
+          "wins": 1
+        }
+      }
+    },
+    "skips": 266
+  },
+  "b": {
+    "settings": {
+      "swingMult": 2,
+      "valueRows": 30,
+      "envWindow": 24,
+      "windowStart": 570,
+      "windowEnd": 960,
+      "flatAt": 960,
+      "minRR": 1.5,
+      "entry": "pullback",
+      "entryWait": 3,
+      "confirmWithin": 6,
+      "stopBuffer": 0.1,
+      "requireOutsideValue": false,
+      "allowWarnings": true,
+      "requireStack": false,
+      "confirm": "candles",
+      "absorbVol": 1.5,
+      "flipShare": 0.1,
+      "zone": "fib",
+      "gamma": "off",
+      "sessionLegs": false
+    },
+    "changed": {
+      "windowEnd": 960
+    },
+    "stats": {
+      "trades": 17,
+      "wins": 7,
+      "losses": 10,
+      "winRate": 0.4117647058823529,
+      "gross": 9870.003047920472,
+      "cost": 246.5,
+      "net": 9623.503047920472,
+      "avgNet": 566.0884145835572,
+      "medianNet": -361.62876089455676,
+      "avgR": 0.4297001033788721,
+      "medianR": -1.007054495661029,
+      "profitFactor": 2.0284270566373874,
+      "avgWin": 2711.5714285714284,
+      "avgLoss": -935.7496952079528,
+      "best": 5018,
+      "worst": -2069.926879075385,
+      "maxDrawdown": 2698.761688123617,
+      "netWithoutTop3": -2912.9969520795275,
+      "byOutcome": {
+        "stop": {
+          "n": 9,
+          "net": -9307.996952079528
+        },
+        "target": {
+          "n": 5,
+          "net": 16100
+        },
+        "time": {
+          "n": 3,
+          "net": 2831.5
+        }
+      },
+      "byDir": {
+        "long": {
+          "n": 6,
+          "net": -3768.4499505021377,
+          "wins": 1
+        },
+        "short": {
+          "n": 11,
+          "net": 13391.95299842261,
+          "wins": 6
+        }
+      }
+    },
+    "skips": 251
+  }
+}

@@ -3,9 +3,12 @@
 import { useEffect, useState } from 'react';
 import {
   DEFAULT_FUTURES_MARGIN,
+  DEFAULT_NSE_FUT_MARGIN_PCT,
   equityOf,
+  isNseFuture,
+  marginOf,
   marginUsed,
-  pointValue,
+  type MarginRule,
   realizedOf,
   tradeStats,
   unrealized,
@@ -61,11 +64,13 @@ export interface ModifyPatch {
   tp?: number | null;
 }
 
-/** TradingView's chart-top ticket: SELL price │ quantity │ BUY price, plus a button for the full order dialog. */
+/**
+ * TradingView's chart ticket: SELL price │ quantity │ BUY price, plus a button for the full order dialog. It is a
+ * row of the price legend (under the symbol and OHLC), so it never covers the legend text.
+ */
 export function PaperTicket({
   price,
   decimals,
-  shifted,
   qty,
   onQty,
   oneClick,
@@ -74,7 +79,6 @@ export function PaperTicket({
 }: {
   price: number | null;
   decimals: number;
-  shifted: boolean;
   qty: string;
   onQty: (v: string) => void;
   oneClick: boolean;
@@ -82,42 +86,37 @@ export function PaperTicket({
   onDialog: () => void;
 }) {
   const px = price != null ? price.toFixed(decimals) : '—';
-  const side = (s: Side, bg: string, text: string) => (
+  const side = (s: Side, color: string, text: string) => (
     <button
       type="button"
       onClick={() => onSide(s)}
       title={oneClick ? `${text} at market` : `Open the ${text.toLowerCase()} order dialog`}
-      className="flex min-w-[78px] flex-col items-center px-3 py-1 text-white hover:brightness-110"
-      style={{ background: bg }}
+      className="flex min-w-[76px] flex-col items-center rounded-md border bg-[#131722]/80 px-2 py-0.5 hover:bg-[#2a2e39]"
+      style={{ borderColor: color, color }}
     >
+      <span className="text-[13px] font-medium leading-4 tabular-nums">{px}</span>
       <span className="text-[10px] font-semibold uppercase leading-3">{text}</span>
-      <span className="text-[13px] font-semibold tabular-nums">{px}</span>
     </button>
   );
   return (
-    <div
-      className={`absolute left-1/2 z-20 -translate-x-1/2 ${shifted ? 'top-12' : 'top-2'}`}
-      data-tv-ui
-    >
-      <div className="flex items-stretch overflow-hidden rounded-md border border-[#363a45] bg-[#1e222d] shadow-lg">
-        {side('sell', RED, 'Sell')}
-        <input
-          aria-label="Quantity"
-          value={qty}
-          onChange={(e) => onQty(e.target.value)}
-          inputMode="decimal"
-          className="w-14 bg-transparent px-1 text-center text-[13px] tabular-nums text-[#d1d4dc] outline-none"
-        />
-        {side('buy', BLUE, 'Buy')}
-        <button
-          type="button"
-          title="Order dialog"
-          onClick={onDialog}
-          className="px-2 text-[14px] text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white"
-        >
-          ≡
-        </button>
-      </div>
+    <div className="pointer-events-auto my-1 flex w-fit items-center gap-1" data-tv-ui>
+      {side('sell', '#f7525f', 'Sell')}
+      <input
+        aria-label="Quantity"
+        value={qty}
+        onChange={(e) => onQty(e.target.value)}
+        inputMode="decimal"
+        className="w-12 rounded bg-transparent px-1 text-center text-[12px] tabular-nums text-[#b2b5be] outline-none hover:bg-[#2a2e39] focus:bg-[#2a2e39]"
+      />
+      {side('buy', '#5b8def', 'Buy')}
+      <button
+        type="button"
+        title="Order dialog"
+        onClick={onDialog}
+        className="rounded px-1.5 text-[14px] text-[#b2b5be] hover:bg-[#2a2e39] hover:text-white"
+      >
+        ≡
+      </button>
     </div>
   );
 }
@@ -144,7 +143,8 @@ export function PaperOrderDialog({
   decimals,
   currency,
   equity,
-  contractMargin,
+  pv,
+  rule,
   qty: qty0,
   oneClick,
   onOneClick,
@@ -158,8 +158,9 @@ export function PaperOrderDialog({
   decimals: number;
   currency: string;
   equity: number;
-  /** Futures: margin per contract; null = value ÷ MAX_LEVERAGE. */
-  contractMargin: number | null;
+  /** Money per point per unit of qty: contract multiplier (NQ 20), lot size (NIFTY 65), else 1. */
+  pv: number;
+  rule: MarginRule;
   qty: string;
   oneClick: boolean;
   onOneClick: (v: boolean) => void;
@@ -183,8 +184,6 @@ export function PaperOrderDialog({
 
   const tick = 10 ** -decimals;
   const q = Number(qty) > 0 ? Number(qty) : 0;
-  // money per point for the whole order: contracts × the contract multiplier (NQ $20)
-  const pv = pointValue(symbol);
   const entry = type === 'market' ? last : Number(price) > 0 ? Number(price) : last;
   const dir = side === 'buy' ? 1 : -1;
   const color = side === 'buy' ? BLUE : RED;
@@ -393,7 +392,11 @@ export function PaperOrderDialog({
           />
         </label>
         <label className="flex flex-col gap-1">
-          {pv !== 1 ? `Contracts · ${pv} ${currency || '$'}/pt` : 'Units'}
+          {isNseFuture(symbol)
+            ? `Lots · ${pv} units each`
+            : pv !== 1
+              ? `Contracts · ${pv} ${currency || '$'}/pt`
+              : 'Units'}
           <input className={input} value={qty} onChange={(e) => setQty(e.target.value)} />
         </label>
         <div className="grid grid-cols-2 gap-2">
@@ -442,14 +445,15 @@ export function PaperOrderDialog({
       <div className="flex justify-between pb-2.5 text-[12px] text-[#b2b5be]">
         <span>
           Margin (
-          {contractMargin != null
-            ? `${Math.round(contractMargin).toLocaleString('en-US')}/contract`
-            : `${MAX_LEVERAGE}×`}
+          {rule.kind === 'contract'
+            ? `${Math.round(rule.per).toLocaleString('en-US')}/contract`
+            : rule.kind === 'pct'
+              ? `${rule.pct}% of value`
+              : `${rule.x}×`}
           )
         </span>
         <span className="tabular-nums text-[#d1d4dc]">
-          {money(contractMargin != null ? q * contractMargin : (q * pv * entry) / MAX_LEVERAGE)}{' '}
-          {currency}
+          {money(marginOf(rule, q, entry, pv))} {currency}
         </span>
       </div>
       {err ? (
@@ -503,6 +507,7 @@ export function PaperPanel({
   onReset,
   prefs,
   onPrefs,
+  onHotkeys,
 }: {
   state: PaperState;
   symbol: string;
@@ -518,11 +523,12 @@ export function PaperPanel({
   onSettings: (
     initial: number,
     commissionPct: number,
-    futuresMargin: Record<string, number>,
+    margins: { futures: Record<string, number>; nsePct: number },
   ) => void;
   onReset: () => void;
   prefs: TradingPrefs;
   onPrefs: (p: TradingPrefs) => void;
+  onHotkeys?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>('positions');
   const [filter, setFilter] = useState<'all' | 'working' | 'filled' | 'cancelled' | 'rejected'>(
@@ -548,6 +554,26 @@ export function PaperPanel({
         String(state.futuresMargin?.[k] ?? v),
       ]),
     ),
+  );
+  const [nsePct, setNsePct] = useState(String(state.nseFutMarginPct ?? DEFAULT_NSE_FUT_MARGIN_PCT));
+  // the fields follow the account on screen: another currency, another tab's change, a reset
+  useEffect(() => setInitial(String(state.initial)), [state.initial]);
+  useEffect(() => setComm(String(state.commissionPct)), [state.commissionPct]);
+  useEffect(
+    () => setNsePct(String(state.nseFutMarginPct ?? DEFAULT_NSE_FUT_MARGIN_PCT)),
+    [state.nseFutMarginPct],
+  );
+  useEffect(
+    () =>
+      setFm(
+        Object.fromEntries(
+          Object.entries(DEFAULT_FUTURES_MARGIN).map(([k, v]) => [
+            k,
+            String(state.futuresMargin?.[k] ?? v),
+          ]),
+        ),
+      ),
+    [state.futuresMargin],
   );
   const used = marginUsed(state);
   const positions = Object.values(state.positions);
@@ -632,6 +658,7 @@ export function PaperPanel({
         <div className="flex-1" />
         <span className="mr-2 rounded bg-[#2a2e39] px-2 py-0.5 text-[11px] font-semibold uppercase text-[#b2b5be]">
           {replay ? 'Replay account' : 'Paper account'}
+          {currency ? ` · ${currency}` : ''}
         </span>
         {cell('Account balance', `${money(state.cash)} ${currency}`)}
         {cell('Equity', `${money(equity)} ${currency}`)}
@@ -683,6 +710,18 @@ export function PaperPanel({
                   {label}
                 </label>
               ))}
+              {onHotkeys ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettingsAt(null);
+                    onHotkeys();
+                  }}
+                  className="mt-1 w-full rounded border border-[#363a45] py-1 text-[12px] text-[#b2b5be] hover:text-white"
+                >
+                  Trading hotkeys…
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -949,7 +988,9 @@ export function PaperPanel({
                   setErr('Capital must be positive and commission zero or more');
                 else if (Object.values(m).some((v) => !(v > 0)))
                   setErr('Each futures margin must be a positive amount');
-                else onSettings(i, c, m);
+                else if (!(Number(nsePct) > 0 && Number(nsePct) <= 100))
+                  setErr('NSE futures margin must be between 0 and 100 %');
+                else onSettings(i, c, { futures: m, nsePct: Number(nsePct) });
               }}
             >
               Apply
@@ -970,9 +1011,18 @@ export function PaperPanel({
             </button>
             <div className="flex basis-full flex-wrap items-end gap-3">
               <span className="basis-full text-[11px] text-[#787b86]">
-                Futures margin per contract (USD). Rough exchange figures; your broker&apos;s may
-                differ. Everything else needs {MAX_LEVERAGE}× less than its value.
+                Futures margin: NSE as a % of the contract value (lot × price), CME per contract in
+                USD. Rough exchange figures; your broker&apos;s may differ. Everything else needs{' '}
+                {MAX_LEVERAGE}× less than its value.
               </span>
+              <label className="flex w-40 flex-col gap-1">
+                NSE futures (% of value)
+                <input
+                  className={input}
+                  value={nsePct}
+                  onChange={(e) => setNsePct(e.target.value)}
+                />
+              </label>
               {Object.keys(fm).map((k) => (
                 <label key={k} className="flex w-24 flex-col gap-1">
                   {k}
