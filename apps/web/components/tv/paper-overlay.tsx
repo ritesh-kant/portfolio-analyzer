@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { IChartApi, ISeriesApi, SeriesType, Time } from 'lightweight-charts';
-import { unrealized, type PaperState, type Side } from '../../lib/tv/paper';
+import { pointValue, unrealized, type PaperState, type Side } from '../../lib/tv/paper';
 
 const GREEN = '#089981';
 const RED = '#f23645';
@@ -489,8 +489,10 @@ export function PaperOverlay(p: Props) {
           {...lv}
         >
           {(shown) =>
-            levelTag('tp', Math.abs(pos.qty) * (shown - pos.avg) * dir, () =>
-              flash(p.onBracket(pos.sl, null)),
+            levelTag(
+              'tp',
+              Math.abs(pos.qty) * (shown - pos.avg) * dir * pointValue(pos.symbol),
+              () => flash(p.onBracket(pos.sl, null)),
             )
           }
         </Level>
@@ -506,8 +508,10 @@ export function PaperOverlay(p: Props) {
           {...lv}
         >
           {(shown) =>
-            levelTag('sl', Math.abs(pos.qty) * (shown - pos.avg) * dir, () =>
-              flash(p.onBracket(null, pos.tp)),
+            levelTag(
+              'sl',
+              Math.abs(pos.qty) * (shown - pos.avg) * dir * pointValue(pos.symbol),
+              () => flash(p.onBracket(null, pos.tp)),
             )
           }
         </Level>
@@ -570,7 +574,7 @@ export function PaperOverlay(p: Props) {
                 {...lv}
               >
                 {(shown) =>
-                  levelTag('tp', o.qty * (shown - o.price) * od, () =>
+                  levelTag('tp', o.qty * (shown - o.price) * od * pointValue(o.symbol), () =>
                     flash(p.onUpdateOrder(o.id, { tp: null })),
                   )
                 }
@@ -586,7 +590,7 @@ export function PaperOverlay(p: Props) {
                 {...lv}
               >
                 {(shown) =>
-                  levelTag('sl', o.qty * (shown - o.price) * od, () =>
+                  levelTag('sl', o.qty * (shown - o.price) * od * pointValue(o.symbol), () =>
                     flash(p.onUpdateOrder(o.id, { sl: null })),
                   )
                 }

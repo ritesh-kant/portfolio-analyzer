@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import {
+  DEFAULT_FUTURES_MARGIN,
   equityOf,
+  marginUsed,
+  pointValue,
   realizedOf,
   tradeStats,
   unrealized,
@@ -141,6 +144,7 @@ export function PaperOrderDialog({
   decimals,
   currency,
   equity,
+  contractMargin,
   qty: qty0,
   oneClick,
   onOneClick,
@@ -154,6 +158,8 @@ export function PaperOrderDialog({
   decimals: number;
   currency: string;
   equity: number;
+  /** Futures: margin per contract; null = value ÷ MAX_LEVERAGE. */
+  contractMargin: number | null;
   qty: string;
   oneClick: boolean;
   onOneClick: (v: boolean) => void;
@@ -177,6 +183,8 @@ export function PaperOrderDialog({
 
   const tick = 10 ** -decimals;
   const q = Number(qty) > 0 ? Number(qty) : 0;
+  // money per point for the whole order: contracts × the contract multiplier (NQ $20)
+  const pv = pointValue(symbol);
   const entry = type === 'market' ? last : Number(price) > 0 ? Number(price) : last;
   const dir = side === 'buy' ? 1 : -1;
   const color = side === 'buy' ? BLUE : RED;
@@ -200,7 +208,7 @@ export function PaperOrderDialog({
     return {
       ticks: String(Math.round(dist / tick)),
       price: v,
-      money: money(q * dist),
+      money: money(q * pv * dist),
       pct: ((dist / entry) * 100).toFixed(2),
     };
   };
@@ -213,7 +221,7 @@ export function PaperOrderDialog({
     let dist: number;
     if (field === 'price') return set(text);
     if (field === 'ticks') dist = n * tick;
-    else if (field === 'money') dist = q ? n / q : 0;
+    else if (field === 'money') dist = q ? n / (q * pv) : 0;
     else dist = (entry * n) / 100;
     set(fix(entry + sign * dist));
   };
@@ -231,8 +239,8 @@ export function PaperOrderDialog({
 
   const slNum = slOn && Number(sl) > 0 ? Number(sl) : undefined;
   const tpNum = tpOn && Number(tp) > 0 ? Number(tp) : undefined;
-  const riskAmt = slNum != null ? q * Math.abs(entry - slNum) : null;
-  const rewardAmt = tpNum != null ? q * Math.abs(tpNum - entry) : null;
+  const riskAmt = slNum != null ? q * pv * Math.abs(entry - slNum) : null;
+  const rewardAmt = tpNum != null ? q * pv * Math.abs(tpNum - entry) : null;
 
   const priceTicks =
     type === 'market' || !(Number(price) > 0)
@@ -385,7 +393,7 @@ export function PaperOrderDialog({
           />
         </label>
         <label className="flex flex-col gap-1">
-          Units
+          {pv !== 1 ? `Contracts · ${pv} ${currency || '$'}/pt` : 'Units'}
           <input className={input} value={qty} onChange={(e) => setQty(e.target.value)} />
         </label>
         <div className="grid grid-cols-2 gap-2">
@@ -428,13 +436,20 @@ export function PaperOrderDialog({
       <div className="mt-3 flex justify-between border-t border-[#2a2e39] pt-2.5 text-[12px] text-[#b2b5be]">
         <span>Order value</span>
         <span className="tabular-nums text-[#d1d4dc]">
-          {money(q * entry)} {currency}
+          {money(q * pv * entry)} {currency}
         </span>
       </div>
       <div className="flex justify-between pb-2.5 text-[12px] text-[#b2b5be]">
-        <span>Margin ({MAX_LEVERAGE}×)</span>
+        <span>
+          Margin (
+          {contractMargin != null
+            ? `${Math.round(contractMargin).toLocaleString('en-US')}/contract`
+            : `${MAX_LEVERAGE}×`}
+          )
+        </span>
         <span className="tabular-nums text-[#d1d4dc]">
-          {money((q * entry) / MAX_LEVERAGE)} {currency}
+          {money(contractMargin != null ? q * contractMargin : (q * pv * entry) / MAX_LEVERAGE)}{' '}
+          {currency}
         </span>
       </div>
       {err ? (
@@ -500,7 +515,11 @@ export function PaperPanel({
   onClosePos: (symbol: string) => void;
   onCancel: (id: number) => void;
   onBracket: (symbol: string, sl?: number, tp?: number) => string | null;
-  onSettings: (initial: number, commissionPct: number) => void;
+  onSettings: (
+    initial: number,
+    commissionPct: number,
+    futuresMargin: Record<string, number>,
+  ) => void;
   onReset: () => void;
   prefs: TradingPrefs;
   onPrefs: (p: TradingPrefs) => void;
@@ -522,6 +541,15 @@ export function PaperPanel({
   const [err, setErr] = useState<string | null>(null);
   const [initial, setInitial] = useState(String(state.initial));
   const [comm, setComm] = useState(String(state.commissionPct));
+  const [fm, setFm] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      Object.entries(DEFAULT_FUTURES_MARGIN).map(([k, v]) => [
+        k,
+        String(state.futuresMargin?.[k] ?? v),
+      ]),
+    ),
+  );
+  const used = marginUsed(state);
   const positions = Object.values(state.positions);
   const equity = equityOf(state);
   const open = positions.reduce(
@@ -607,6 +635,8 @@ export function PaperPanel({
         </span>
         {cell('Account balance', `${money(state.cash)} ${currency}`)}
         {cell('Equity', `${money(equity)} ${currency}`)}
+        {cell('Margin used', `${money(used)} ${currency}`)}
+        {cell('Available', `${money(equity - used)} ${currency}`, tone(equity - used))}
         {cell('Open P&L', signed(open), tone(open))}
         {cell('Realized', signed(realizedOf(state)), tone(realizedOf(state)))}
         <div data-tv-settings>
@@ -912,8 +942,14 @@ export function PaperPanel({
               onClick={() => {
                 const i = Number(initial);
                 const c = Number(comm);
-                if (i > 0 && c >= 0) onSettings(i, c);
-                else setErr('Capital must be positive and commission zero or more');
+                const m = Object.fromEntries(
+                  Object.entries(fm).map(([k, v]) => [k, Number(v.replace(/,/g, ''))]),
+                );
+                if (!(i > 0 && c >= 0))
+                  setErr('Capital must be positive and commission zero or more');
+                else if (Object.values(m).some((v) => !(v > 0)))
+                  setErr('Each futures margin must be a positive amount');
+                else onSettings(i, c, m);
               }}
             >
               Apply
@@ -932,6 +968,22 @@ export function PaperPanel({
             >
               Reset account
             </button>
+            <div className="flex basis-full flex-wrap items-end gap-3">
+              <span className="basis-full text-[11px] text-[#787b86]">
+                Futures margin per contract (USD). Rough exchange figures; your broker&apos;s may
+                differ. Everything else needs {MAX_LEVERAGE}× less than its value.
+              </span>
+              {Object.keys(fm).map((k) => (
+                <label key={k} className="flex w-24 flex-col gap-1">
+                  {k}
+                  <input
+                    className={input}
+                    value={fm[k]}
+                    onChange={(e) => setFm((v) => ({ ...v, [k]: e.target.value }))}
+                  />
+                </label>
+              ))}
+            </div>
             <div className="basis-full text-[11px] leading-4 text-[#787b86]">
               Fills use the chart&apos;s own candles (market orders at the last price; limit / stop
               when a candle reaches them; stop wins if one candle touches both stop and target). No

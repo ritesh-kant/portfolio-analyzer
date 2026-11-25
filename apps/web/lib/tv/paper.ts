@@ -1,3 +1,4 @@
+import { instrumentFor } from './strategy-tester.ts';
 import type { Bar } from './types';
 
 /**
@@ -8,6 +9,9 @@ import type { Bar } from './types';
  * Only candles that start at or after an order's `since` may fill it with their full range, so an order never
  * fills on history that happened before it was placed; the newest candle is checked at its close only.
  * If one candle reaches both the stop and the target, the stop wins (the pessimistic reading).
+ * Quantity is in contracts for CME futures (`NQ=F` is worth $20 a point per contract, `ES=F` $50 …) and in units of
+ * the price for everything else; every P&L, fee and exposure figure goes through `pointValue`.
+ * Margin: futures tie up a fixed deposit per contract (like a futures broker); everything else value ÷ MAX_LEVERAGE.
  * Pure functions — the same code drives live charts and replay.
  */
 
@@ -17,8 +21,21 @@ export type Tif = 'day' | 'week' | 'gtc';
 export const TIF_SECS: Record<Tif, number> = { day: 86400, week: 604800, gtc: 0 };
 export type CloseReason = 'manual' | 'sl' | 'tp' | 'flip';
 
-/** Gross exposure allowed as a multiple of equity. */
+/** Non-futures: gross exposure allowed as a multiple of equity (margin = value ÷ 5). */
 export const MAX_LEVERAGE = 5;
+
+/**
+ * Futures: margin per contract, in USD. Rough exchange initial margins; brokers publish the exact, changing figure,
+ * so each one can be edited in the paper panel's Account tab.
+ */
+export const DEFAULT_FUTURES_MARGIN: Record<string, number> = {
+  NQ: 30_000,
+  MNQ: 3_000,
+  ES: 25_000,
+  MES: 2_500,
+  GC: 20_000,
+  MGC: 2_000,
+};
 
 export interface Order {
   id: number;
@@ -89,6 +106,8 @@ export interface PaperState {
   /** Last price seen per symbol, for marking positions that are not on screen. */
   prices: Record<string, number>;
   nextId: number;
+  /** Per-contract futures margin overrides by root (`NQ`); absent ones use DEFAULT_FUTURES_MARGIN. */
+  futuresMargin?: Record<string, number>;
 }
 
 export const DEFAULT_CAPITAL = 1_000;
@@ -115,7 +134,37 @@ function logOrder(s: PaperState, o: Omit<OrderLog, 'id'> & { id?: number }): voi
 
 const clone = (s: PaperState): PaperState => JSON.parse(JSON.stringify(s)) as PaperState;
 
-export const unrealized = (p: Position, price: number): number => p.qty * (price - p.avg);
+/**
+ * Money per 1.0 point per unit of quantity: the contract multiplier for the CME futures the Strategy Tester knows
+ * (NQ $20, MNQ $2, ES $50, MES $5, GC $100, MGC $10), 1 for stocks, crypto and NSE futures (lot size unknown here).
+ */
+export function pointValue(symbol: string): number {
+  return futuresRoot(symbol) ? instrumentFor(symbol).pointValue : 1;
+}
+
+/** `NQ=F` → `NQ`: the CME futures root the paper account sizes and margins per contract, else null. */
+export function futuresRoot(symbol: string): string | null {
+  const id = instrumentFor(symbol).id;
+  return id === 'NSEFUT' || id === 'custom' ? null : id;
+}
+
+/** The deposit one contract of `symbol` ties up, or null when it is not margined per contract. */
+export function contractMargin(s: PaperState, symbol: string): number | null {
+  const root = futuresRoot(symbol);
+  if (!root) return null;
+  return s.futuresMargin?.[root] ?? DEFAULT_FUTURES_MARGIN[root] ?? null;
+}
+
+/** Margin `qty` of `symbol` ties up: contracts × per-contract margin for futures, value ÷ 5 for the rest. */
+export function marginFor(s: PaperState, symbol: string, qty: number, price: number): number {
+  const per = contractMargin(s, symbol);
+  return per != null
+    ? Math.abs(qty) * per
+    : (Math.abs(qty) * price * pointValue(symbol)) / MAX_LEVERAGE;
+}
+
+export const unrealized = (p: Position, price: number): number =>
+  p.qty * (price - p.avg) * pointValue(p.symbol);
 
 export function equityOf(s: PaperState): number {
   let e = s.cash;
@@ -125,10 +174,12 @@ export function equityOf(s: PaperState): number {
 
 export const realizedOf = (s: PaperState): number => s.history.reduce((a, t) => a + t.pnl, 0);
 
-function exposureOf(s: PaperState): number {
-  let g = 0;
-  for (const p of Object.values(s.positions)) g += Math.abs(p.qty) * (s.prices[p.symbol] ?? p.avg);
-  return g;
+/** Margin all open positions tie up together. */
+export function marginUsed(s: PaperState): number {
+  let m = 0;
+  for (const p of Object.values(s.positions))
+    m += marginFor(s, p.symbol, p.qty, s.prices[p.symbol] ?? p.avg);
+  return m;
 }
 
 /** Validates SL / TP against the side they protect. Returns an error message or null. */
@@ -152,7 +203,8 @@ function fill(
   bracket?: { sl?: number; tp?: number },
 ): boolean {
   const signed = side === 'buy' ? qty : -qty;
-  const fee = (q: number) => (Math.abs(q) * price * s.commissionPct) / 100;
+  const pv = pointValue(symbol);
+  const fee = (q: number) => (Math.abs(q) * price * pv * s.commissionPct) / 100;
   const pos = s.positions[symbol];
   s.prices[symbol] = price;
   if (!pos) {
@@ -184,7 +236,7 @@ function fill(
   // reducing or flipping
   const closeQty = Math.min(Math.abs(pos.qty), qty);
   const dir = pos.qty > 0 ? 1 : -1;
-  const gross = closeQty * (price - pos.avg) * dir;
+  const gross = closeQty * (price - pos.avg) * dir * pv;
   const exitFee = fee(closeQty);
   const entryShare = (pos.fees * closeQty) / Math.abs(pos.qty);
   s.cash += gross - exitFee;
@@ -234,7 +286,27 @@ export interface Result {
 const fail = (state: PaperState, error: string): Result => ({ state, error });
 
 function marginOk(s: PaperState): boolean {
-  return exposureOf(s) <= Math.max(0, equityOf(s)) * MAX_LEVERAGE + 1e-9;
+  return marginUsed(s) <= Math.max(0, equityOf(s)) + 1e-9;
+}
+
+const whole = (n: number) => Math.round(n).toLocaleString('en-US');
+
+/** The rejection message, with the numbers: the margin the account would need vs its equity. */
+function marginError(s: PaperState): string {
+  return `Not enough margin: needs ${whole(marginUsed(s))}, equity ${whole(Math.max(0, equityOf(s)))}`;
+}
+
+/** Margin check for a resting order, as if it filled at its own price now. */
+function pendingMarginError(
+  state: PaperState,
+  symbol: string,
+  side: Side,
+  qty: number,
+  price: number,
+): string | null {
+  const t = clone(state);
+  fill(t, symbol, side, qty, price, 0, 'manual');
+  return marginOk(t) ? null : marginError(t);
 }
 
 export function placeMarket(
@@ -252,7 +324,7 @@ export function placeMarket(
   if (bad) return fail(state, bad);
   const s = clone(state);
   fill(s, symbol, side, qty, price, time, 'manual', bracket);
-  if (!marginOk(s)) return fail(state, `Exceeds ${MAX_LEVERAGE}× buying power`);
+  if (!marginOk(s)) return fail(state, marginError(s));
   logOrder(s, { symbol, side, type: 'market', qty, price, status: 'filled', time });
   return { state: s };
 }
@@ -280,6 +352,9 @@ export function placePending(
     );
   const bad = checkBracket(side, price, bracket?.sl, bracket?.tp);
   if (bad) return fail(state, bad);
+  // check now, not only at fill time, so a limit is refused the same way a market order is
+  const margin = pendingMarginError(state, symbol, side, qty, price);
+  if (margin) return fail(state, margin);
   const s = clone(state);
   s.orders.push({
     id: s.nextId++,
@@ -402,6 +477,8 @@ export function updateOrder(
     );
   const bad = checkBracket(next.side, next.price, next.sl, next.tp);
   if (bad) return fail(state, bad);
+  const margin = pendingMarginError(state, next.symbol, next.side, next.qty, next.price);
+  if (margin) return fail(state, margin);
   return { state: { ...state, orders: state.orders.map((x) => (x.id === id ? next : x)) } };
 }
 
@@ -423,9 +500,16 @@ export function updateSettings(
   state: PaperState,
   initial: number,
   commissionPct: number,
+  futuresMargin?: Record<string, number>,
 ): PaperState {
   const delta = initial - state.initial;
-  return { ...state, initial, cash: state.cash + delta, commissionPct };
+  return {
+    ...state,
+    initial,
+    cash: state.cash + delta,
+    commissionPct,
+    futuresMargin: futuresMargin ?? state.futuresMargin,
+  };
 }
 
 /**

@@ -1017,6 +1017,9 @@ import {
   newAccount,
   placeMarket,
   placePending,
+  pointValue,
+  marginUsed,
+  updateSettings,
   setBracket,
   updateOrder,
   step as paperStep,
@@ -1068,10 +1071,31 @@ test('paper: stop and target trigger; stop wins when one candle hits both', () =
   assert.equal(up.history[0].reason, 'tp');
 });
 
+test('paper: NQ futures are worth $20 a point per contract', () => {
+  let s = newAccount(200000);
+  s = placeMarket(s, 'NQ=F', 'buy', 1, 26000, 60).state;
+  s = closePosition(s, 'NQ=F', 26010, 120);
+  assert.equal(s.history[0].pnl, 200); // 10 points × $20 × 1 contract
+  // futures tie up a per-contract margin (NQ $30k), not value ÷ 5 ($104k)
+  assert.ok(!placeMarket(newAccount(30000), 'NQ=F', 'buy', 1, 26000, 0).error);
+  assert.match(placeMarket(newAccount(29999), 'NQ=F', 'buy', 1, 26000, 0).error, /margin/);
+  assert.match(placeMarket(newAccount(299999), 'NQ=F', 'buy', 10, 26000, 0).error, /margin/);
+  assert.ok(!placeMarket(newAccount(300000), 'NQ=F', 'buy', 10, 26000, 0).error);
+  // the margin is editable per root
+  const custom = updateSettings(newAccount(20000), 20000, 0, { NQ: 20000 });
+  assert.ok(!placeMarket(custom, 'NQ=F', 'buy', 1, 26000, 0).error);
+  assert.equal(marginUsed(placeMarket(newAccount(1e6), 'MNQ=F', 'buy', 4, 26000, 0).state), 12000);
+  assert.equal(pointValue('MNQ=F'), 2);
+  assert.equal(pointValue('RELIANCE.NS'), 1);
+});
+
 test('paper: validation', () => {
   const s = newAccount(1000);
   assert.ok(placeMarket(s, 'X', 'buy', 1, 100, 0, { sl: 105 }).error);
   assert.ok(placeMarket(s, 'X', 'buy', 100, 100, 0).error); // 10,000 > 5 × 1,000
+  // a limit / stop that could never fill is refused when placed, not silently rejected later
+  assert.match(placePending(s, 'X', 'buy', 'limit', 100, 99, 100, 0).error, /margin/);
+  assert.ok(!placePending(s, 'X', 'buy', 'limit', 10, 99, 100, 0).error);
   assert.ok(placePending(s, 'X', 'buy', 'limit', 1, 105, 100, 0).error);
   assert.ok(setBracket(s, 'X', 90, undefined).error);
   const p = placePending(s, 'X', 'sell', 'stop', 1, 90, 100, 0).state;

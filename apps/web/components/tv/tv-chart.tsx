@@ -241,6 +241,7 @@ import {
   setBracket as paperBracket,
   step as paperStep,
   updateSettings as paperSettings,
+  contractMargin as paperContractMargin,
   type PaperState,
 } from '../../lib/tv/paper';
 import { DEFAULT_ROWS } from '../../lib/tv/volume-profile';
@@ -4282,7 +4283,10 @@ export function TvChart({
   const wasReplayPaper = useRef(false);
   useEffect(() => {
     if (replayActive && !wasReplayPaper.current)
-      setReplayPaper(newAccount(livePaper.initial, livePaper.commissionPct));
+      setReplayPaper({
+        ...newAccount(livePaper.initial, livePaper.commissionPct),
+        futuresMargin: livePaper.futuresMargin,
+      });
     wasReplayPaper.current = replayActive;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replayActive]);
@@ -4634,6 +4638,7 @@ export function TvChart({
                   qty={paperQty}
                   oneClick={oneClick}
                   equity={equityOf(paper)}
+                  contractMargin={paperContractMargin(paper, symbol)}
                   onModify={(id, patch) => {
                     if (lastPrice == null) return 'No price yet';
                     const r = paperUpdate(paper, id, patch, lastPrice);
@@ -5061,8 +5066,13 @@ export function TvChart({
                     if (!r.error) setPaper(r.state);
                     return r.error ?? null;
                   }}
-                  onSettings={(i, c) => setPaper(paperSettings(paper, i, c))}
-                  onReset={() => setPaper(newAccount(paper.initial, paper.commissionPct))}
+                  onSettings={(i, c, m) => setPaper(paperSettings(paper, i, c, m))}
+                  onReset={() =>
+                    setPaper({
+                      ...newAccount(paper.initial, paper.commissionPct),
+                      futuresMargin: paper.futuresMargin,
+                    })
+                  }
                   prefs={prefs}
                   onPrefs={updatePrefs}
                 />
