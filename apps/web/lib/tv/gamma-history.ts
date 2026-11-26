@@ -7,7 +7,8 @@ import type { GexLevels, GexResponse } from './gex.ts';
  * research/backtests/gamma_snapshots/<SYMBOL>.jsonl. Pure helpers: the file reading is in the recorder and the route.
  *
  * NQ's levels come from QQQ's option chain (Yahoo has no options on futures), stored in QQQ prices with the
- * NQ ÷ QQQ ratio at the time (`scale`), the way the chart's Gamma Levels indicator draws them.
+ * NQ ÷ QQQ ratio at the time (`scale`), the way the chart's Gamma Levels indicator draws them. NIFTY futures work
+ * the same way: NIFTY index options from Upstox, stored in index prices with futures ÷ index (`proxy: 'NIFTY'`).
  *
  * His rule (course notes §1e): price above the gamma flip ("HVL") = positive gamma = compression, mean reversion,
  * take profit quickly; below = negative gamma = expansion, hold winners toward the targets.
@@ -62,22 +63,38 @@ const set = (l: GexLevels | undefined): GammaSet | null =>
       }
     : null;
 
-/** A `/api/chart/gex` (or `usLevels`) response → one snapshot line; null when it has no levels. */
-export function snapFromResponse(res: GexResponse, days: number): GammaSnap | null {
+/**
+ * A `/api/chart/gex` (`usLevels` / `nseLevels`) response → one snapshot line; null when it has no levels.
+ * `chartSymbol` names the chart the line is for when the response names the underlying instead (NSE: NIFTY for
+ * NIFTY1!.NFO); a futures chart then stores the index as the proxy and futures ÷ index as the scale.
+ */
+export function snapFromResponse(res: GexResponse, days: number, chartSymbol?: string): GammaSnap | null {
   const all = set(res.all);
   if (!res.supported || !all || !res.asOf || !res.spot || !res.symbol) return null;
+  const proxy = res.proxy ?? (chartSymbol && chartSymbol !== res.symbol && res.scale ? res.symbol : undefined);
+  // an NSE futures chart needs futures ÷ index; without it the levels would sit a whole basis away
+  if (!proxy && /(\.NFO|1!)$/i.test(chartSymbol ?? '')) return null;
   return {
     asOf: res.asOf,
-    symbol: res.symbol,
-    ...(res.proxy ? { proxy: res.proxy } : {}),
+    symbol: chartSymbol ?? res.symbol,
+    ...(proxy ? { proxy } : {}),
     spot: res.spot,
-    scale: res.proxy ? (res.scale ?? NaN) : 1,
+    scale: proxy ? (res.scale ?? NaN) : 1,
     convention: res.convention ?? 'dealer_long_calls',
     days,
     expiries: res.expiries ?? [],
     all,
     nearest: set(res.nearest),
   };
+}
+
+/**
+ * The snapshot file for a chart symbol: `NQ=F` → `NQ_F.jsonl`, `NIFTY1!.NFO` → `NIFTY1_.NFO.jsonl`. Null for
+ * anything that is not a plain ticker (no paths).
+ */
+export function snapshotFileName(symbol: string): string | null {
+  if (!/^[A-Z0-9^.=!-]{1,24}$/i.test(symbol) || symbol.includes('..')) return null;
+  return `${symbol.toUpperCase().replace(/[=!]/g, '_')}.jsonl`;
 }
 
 /** JSON lines → snapshots sorted by time (bad lines and proxies without a scale are dropped). */

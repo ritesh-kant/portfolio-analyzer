@@ -29,6 +29,7 @@
     "bt:nq": "python3 -I research/backtests/yahoo_futures_history.py",
     "bt:ar": "node research/backtests/ar_backtest.mjs",
     "bt:gex": "node research/backtests/gex_snapshot.mjs",
+    "bt:gex:nifty": "node research/backtests/gex_snapshot.mjs --symbol NIFTY1!.NFO",
     "gex": "cd apps/signal-engine && .venv/bin/python scripts/nifty_gex.py",
     "bt:import":"apps/signal-engine/.venv/bin/python research/backtests/import_trades_to_mongo.py"
   },

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { firstLevelBefore, gammaLevels, gammaRegime, parseSnapshots, snapAt, snapFromResponse } from './gamma-history.ts';
+import { firstLevelBefore, gammaLevels, gammaRegime, parseSnapshots, snapAt, snapFromResponse, snapshotFileName } from './gamma-history.ts';
 
 const snap = (asOf, all = {}, scale = 40) => ({
   asOf,
@@ -60,4 +60,28 @@ test('snapFromResponse keeps the first three walls and the proxy scale; unsuppor
   assert.equal(s.nearest.flip, null);
   assert.equal(snapFromResponse({ supported: false, reason: 'x' }, 45), null);
   assert.equal(snapFromResponse({ supported: true, symbol: 'SPY', asOf: 1, spot: 600, all: lv(1) }, 45).scale, 1);
+});
+
+test('snapshotFileName: NQ=F keeps its old name; NIFTY futures get a safe one; paths are refused', () => {
+  assert.equal(snapshotFileName('NQ=F'), 'NQ_F.jsonl');
+  assert.equal(snapshotFileName('NIFTY1!.NFO'), 'NIFTY1_.NFO.jsonl');
+  assert.equal(snapshotFileName('^nsei'), '^NSEI.jsonl');
+  assert.equal(snapshotFileName('../etc'), null);
+  assert.equal(snapshotFileName('a/b'), null);
+});
+
+test('snapFromResponse: an NSE futures chart stores the index as proxy and futures ÷ index as scale', () => {
+  const lv = { flip: 25900, callWalls: [26000, 26200], putWalls: [25800], gammaWall: 26000, netGex: 5e9 };
+  const res = { supported: true, source: 'upstox', symbol: 'NIFTY', asOf: 1000, spot: 25800, futurePrice: 25929, scale: 25929 / 25800, all: lv, nearest: lv };
+  const fut = snapFromResponse(res, 45, 'NIFTY1!.NFO');
+  assert.equal(fut.symbol, 'NIFTY1!.NFO');
+  assert.equal(fut.proxy, 'NIFTY');
+  assert.ok(Math.abs(gammaLevels(fut)[0].price - 25900 * (25929 / 25800)) < 1e-9, 'flip moved onto futures prices');
+  // the index chart itself: no futures price, no proxy, scale 1
+  const idx = snapFromResponse({ ...res, futurePrice: undefined, scale: undefined }, 45, '^NSEI');
+  assert.equal(idx.symbol, '^NSEI');
+  assert.equal(idx.proxy, undefined);
+  assert.equal(idx.scale, 1);
+  // a futures chart without a futures price cannot be placed: no line
+  assert.equal(snapFromResponse({ ...res, futurePrice: undefined, scale: undefined }, 45, 'NIFTY1!.NFO'), null);
 });

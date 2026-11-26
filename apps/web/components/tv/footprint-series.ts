@@ -332,9 +332,19 @@ class FootprintRenderer implements ICustomSeriesPaneRenderer {
     const pb = poc ? box(poc.price) : null;
     if (pb) {
       const line = Math.max(2, Math.round(2 * hr));
-      ctx.strokeStyle = POC_LINE;
+      const rx = left + 1.5 * line;
+      const ry = pb.top + line / 2;
+      const rw = w - 3 * line;
+      const rh = Math.max(line, pb.h - line);
+      // A dark halo under the outline keeps it readable on top of the yellow buy-sweep bars; on a buy-sweep row
+      // itself the outline turns white, since yellow on yellow disappears.
+      const onBuySweep = inSweep[rows.poc]?.side === 'buy';
+      ctx.strokeStyle = '#131722';
+      ctx.lineWidth = line + 2 * Math.max(1, Math.round(hr));
+      ctx.strokeRect(rx, ry, rw, rh);
+      ctx.strokeStyle = onBuySweep ? '#ffffff' : POC_LINE;
       ctx.lineWidth = line;
-      ctx.strokeRect(left + 1.5 * line, pb.top + line / 2, w - 3 * line, Math.max(line, pb.h - line));
+      ctx.strokeRect(rx, ry, rw, rh);
     }
 
     // 5. Value area: dotted lines at its top and bottom row edges.
