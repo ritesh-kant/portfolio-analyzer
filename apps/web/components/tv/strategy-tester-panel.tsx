@@ -26,6 +26,7 @@ import {
   tradeOverlap,
   tradeResults,
 } from '../../lib/tv/strategy-tester';
+import { wallClock } from '../../lib/tv/timeframes';
 import { ArStrategyFields, NumberField } from './indicator-dialog';
 
 /**
@@ -38,6 +39,8 @@ interface Props {
   symbol: string;
   /** The chart's exchange time zone: the strategy's default window follows its market. */
   timeZone: string;
+  /** The chart's display time zone (the clock setting): times that are not a candle's are written on it. */
+  displayTz: string;
   decimals: number;
   /** The chart's quote currency (INR, USD …): money for contracts without a preset. */
   currency?: string;
@@ -113,11 +116,27 @@ const SETTING: Record<keyof ArStrategyCfg, string> = {
   confirm: 'Confirmation',
   absorbVol: 'Absorption volume ×',
   flipShare: 'Delta flip share',
+  flowRule: 'Order-flow rule',
+  absorbAt: 'Absorption candle',
   zone: 'Zone',
   gamma: 'Gamma',
   valueRows: 'Value-area rows',
-  envWindow: 'Environment window',
+  envWindow: 'Environment window (1h candles)',
+  envWindow4h: 'Environment window (4h candles)',
   sessionLegs: "Swings start in today's session",
+  trendRule: '1h trend rule',
+  candleRule: 'Candle confirmation',
+  legRule: 'Intraday leg',
+  envRule: 'Market read',
+  compress: 'Choppy below (× normal day range)',
+  sideways: 'Sideways market',
+  sidewaysWhen: 'Sideways means',
+  range: 'Range',
+  rangeDays: 'Week range (days)',
+  legTrades: 'Trades per week range',
+  breakeven: 'Breakeven after',
+  breakevenUnit: 'Breakeven unit',
+  trail: 'Trailing stop',
 };
 const settingText = (k: keyof ArStrategyCfg, v: unknown) =>
   k === 'windowStart' || k === 'windowEnd' || k === 'flatAt'
@@ -234,6 +253,7 @@ export function StrategyTesterPanel(p: Props) {
           results={results}
           open={open}
           times={p.times}
+          displayTz={p.displayTz}
           decimals={p.decimals}
           money={money}
           onGoTo={p.onGoTo}
@@ -491,6 +511,7 @@ function TradesTable({
   results,
   open,
   times,
+  displayTz,
   decimals,
   money,
   onGoTo,
@@ -499,6 +520,7 @@ function TradesTable({
   results: TradeResult<ArTrade>[];
   open: ArTrade[];
   times: number[];
+  displayTz: string;
   decimals: number;
   money: Money;
   onGoTo: (index: number) => void;
@@ -510,7 +532,14 @@ function TradesTable({
     ...[...results].reverse().map((r) => ({ t: r.trade, r })),
   ];
   if (!rows.length) return <Empty>No trades on the loaded candles. The Overview lists why setups were skipped.</Empty>;
-  const OUT: Record<string, string> = { target: 'Target', stop: 'Stop', time: 'End of day', open: 'Open' };
+  const OUT: Record<string, string> = {
+    target: 'Target',
+    stop: 'Stop',
+    breakeven: 'Breakeven',
+    trail: 'Trailing stop',
+    time: 'End of day',
+    open: 'Open',
+  };
   return (
     <table className="w-full" onMouseLeave={() => onFocus(null)}>
       <thead>
@@ -571,7 +600,7 @@ function TradesTable({
                 t.gamma
                   ? `${t.gamma.regime === 'positive' ? 'Positive' : 'Negative'} gamma: ${
                       t.gamma.flip != null ? `price ${t.gamma.regime === 'positive' ? 'above' : 'below'} the flip ${px(t.gamma.flip)}` : 'no flip in range, net GEX sign'
-                    }. Snapshot ${new Date(t.gamma.asOf * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC.${
+                    }. Snapshot ${when(wallClock(t.gamma.asOf, displayTz))}.${
                       t.gamma.level ? ` Target moved from the leg's end ${px(t.gamma.legTarget)} to ${t.gamma.level}.` : ''
                     }`
                   : 'No gamma snapshot covers this trade (recording started 2026-11-14)'

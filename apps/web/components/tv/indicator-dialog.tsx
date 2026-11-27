@@ -453,13 +453,38 @@ function ArFields({
     case 'arfib':
       return (
         <>
-          {note('A swing counts once price moves this many ATRs away from it. Bigger = fewer, larger legs.')}
-          <NumberField
-            label="Swing size (× ATR 14)"
-            value={cfg.mult ?? 2}
-            min={0.5}
-            onChange={(mult) => onChange({ ...cfg, mult: Math.min(10, mult) })}
-          />
+          <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+            Range
+            <select
+              value={cfg.arRange ?? 'week'}
+              onChange={(e) => onChange({ ...cfg, arRange: e.target.value as 'week' | 'swing' })}
+              className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+            >
+              <option value="week">Week range: last week&apos;s high and low (his)</option>
+              <option value="swing">Latest swing leg</option>
+            </select>
+          </label>
+          {(cfg.arRange ?? 'week') === 'week' ? (
+            <>
+              {note('His "most active range" on the hourly: the highest high and lowest low of the last N days, drawn from the earlier one to the later one. Same range as the AR Strategy.')}
+              <NumberField
+                label="Days back"
+                value={cfg.arRangeDays ?? 7}
+                min={2}
+                onChange={(d) => onChange({ ...cfg, arRangeDays: Math.min(60, d) })}
+              />
+            </>
+          ) : (
+            <>
+              {note('A swing counts once price moves this many ATRs away from it. Bigger = fewer, larger legs.')}
+              <NumberField
+                label="Swing size (× ATR 14)"
+                value={cfg.mult ?? 2}
+                min={0.5}
+                onChange={(mult) => onChange({ ...cfg, mult: Math.min(10, mult) })}
+              />
+            </>
+          )}
           <NumberField
             label="Value-area rows"
             value={cfg.length || 30}
@@ -641,12 +666,26 @@ export function ArStrategyFields({
           onChange={(e) => set({ confirm: e.target.value as ArStrategyCfg['confirm'] })}
           className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
         >
-          <option value="candles">Candles (close beyond the extreme candle)</option>
-          <option value="orderflow">Order flow: absorption, then delta flip</option>
+          <option value="orderflow">Order flow: absorption, then delta flip (his)</option>
+          <option value="candles">Candles (close beyond the extreme candle, ours)</option>
         </select>
       </label>
       {v.confirm === 'orderflow' ? (
         <>
+          <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+            Order-flow rule
+            <select
+              value={v.flowRule}
+              onChange={(e) => set({ flowRule: e.target.value as ArStrategyCfg['flowRule'] })}
+              className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+            >
+              <option value="tree">His decision tree: aggression fails, delta flips</option>
+              <option value="video">One absorption candle (POC in the wick)</option>
+              <option value="ours">Our thresholds</option>
+            </select>
+          </label>
+          {v.flowRule === 'ours' && (
+            <>
           <NumberField
             label="Absorption volume (× usual)"
             value={v.absorbVol}
@@ -659,12 +698,170 @@ export function ArStrategyFields({
             min={0}
             onChange={(n) => set({ flipShare: Math.min(100, n) / 100 })}
           />
+            </>
+          )}
           <div className="pb-1 text-[11px] leading-snug text-[#787b86]">
             Reads the footprint: real volume only where ticks were recorded (NSE futures and stocks, blue box); elsewhere it is
             estimated from 1-minute bars, where the delta mostly repeats the candle&apos;s colour.
           </div>
         </>
       ) : null}
+      <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+        Breakeven after
+        <span className="flex items-center gap-1">
+          <input
+            type="number"
+            min={0}
+            step={v.breakevenUnit === 'R' ? 0.1 : 1}
+            value={v.breakeven}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n) && n >= 0) set({ breakeven: n });
+            }}
+            className="w-20 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+          />
+          <select
+            value={v.breakevenUnit}
+            onChange={(e) => set({ breakevenUnit: e.target.value as ArStrategyCfg['breakevenUnit'] })}
+            className="w-20 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+          >
+            <option value="points">points</option>
+            <option value="R">R</option>
+          </select>
+        </span>
+      </label>
+      <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+        Trailing stop
+        <select
+          value={v.trail}
+          onChange={(e) => set({ trail: e.target.value as ArStrategyCfg['trail'] })}
+          className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+        >
+          <option value="candle">Behind each candle (his)</option>
+          <option value="poc15">Past the last 15-min POC (footprint)</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <div className="pb-1 text-[11px] leading-snug text-[#787b86]">
+        His live trades: at +25 points the stop goes to breakeven, then it trails just past each 5-minute candle. Both use
+        completed candles only and apply from the next candle. 0 = no breakeven (the trail then starts right after the
+        fill). On NSE the default is 0.6 R, since 25 points means very different things per stock.
+      </div>
+      <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+        Range (where the Fib is drawn)
+        <select
+          value={v.range}
+          onChange={(e) => set({ range: e.target.value as ArStrategyCfg['range'] })}
+          className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+        >
+          <option value="both">Week range + latest intraday swing</option>
+          <option value="week">Week range only (his)</option>
+          <option value="swing">Latest swing only</option>
+        </select>
+      </label>
+      {v.range !== 'week' && (
+        <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+          Intraday leg
+          <select
+            value={v.legRule}
+            onChange={(e) => set({ legRule: e.target.value as ArStrategyCfg['legRule'] })}
+            className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+          >
+            <option value="structure">Today&apos;s structure leg (pull-backs inside it don&apos;t replace it)</option>
+            <option value="latest">Latest swing (older rule)</option>
+          </select>
+        </label>
+      )}
+      {v.range !== 'swing' ? (
+        <>
+          <NumberField label="Week range (days back)" value={v.rangeDays} min={2} onChange={(n) => set({ rangeDays: Math.min(60, n) })} />
+          <NumberField label="Trades per week range" value={v.legTrades} min={1} onChange={(n) => set({ legTrades: Math.min(10, n) })} />
+          <div className="pb-1 text-[11px] leading-snug text-[#787b86]">
+            His &quot;most active range&quot;: the highest high and lowest low of the last week, drawn from the earlier one to
+            the later one. It also sets the trend: high first = down (sell its premium), low first = up (buy its
+            discount). A close past its 0.886 makes the trend unclear until a new high or low. While price sits in the
+            zone the setup is watched again after each confirmation window, up to this many trades.
+            {v.range === 'both' &&
+              ' Both: the latest swing leg on the chart in the 4h trend\'s direction is watched too (with the structure read; none while the 4h is sideways), and whichever zone price reaches first is traded.'}
+          </div>
+        </>
+      ) : (
+        <>
+      <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+        1h trend
+        <select
+          value={v.trendRule}
+          onChange={(e) => set({ trendRule: e.target.value as ArStrategyCfg['trendRule'] })}
+          className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+        >
+          <option value="swings">Latest swings: up / down / unclear</option>
+          <option value="break">Break of structure (never unclear)</option>
+        </select>
+      </label>
+      <div className="pb-1 text-[11px] leading-snug text-[#787b86]">
+        Up = higher high and higher low, down = lower high and lower low; anything else is unclear and takes no trade.
+        A close through the latest swing makes it unclear until new swings confirm a direction.
+      </div>
+        </>
+      )}
+      <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+        Market read
+        <select
+          value={v.envRule}
+          onChange={(e) => set({ envRule: e.target.value as ArStrategyCfg['envRule'] })}
+          className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+        >
+          <option value="structure">4h swings + day range</option>
+          <option value="efficiency">Efficiency (older)</option>
+        </select>
+      </label>
+      <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+        Sideways market
+        <select
+          value={v.sideways}
+          onChange={(e) => set({ sideways: e.target.value as ArStrategyCfg['sideways'] })}
+          className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+        >
+          <option value="block">No trade</option>
+          <option value="warn">Warn only</option>
+        </select>
+      </label>
+      {v.envRule === 'structure' ? (
+        <>
+          <NumberField
+            label="Choppy below (× a normal day's range)"
+            value={v.compress}
+            min={0}
+            step={0.05}
+            onChange={(n) => set({ compress: Math.min(1.5, n) })}
+          />
+          <div className="pb-1 text-[11px] leading-snug text-[#787b86]">
+            Trending = higher highs and higher lows on 4-hour candles (or a close past the last swing), mirrored for
+            down; overlapping swings = sideways (warn: a fade of the range&apos;s edge). Choppy = the last trading
+            day&apos;s range is small next to a normal day&apos;s: no trade. The 1h is shown but does not decide.
+          </div>
+        </>
+      ) : (
+        <>
+      <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
+        Sideways means
+        <select
+          value={v.sidewaysWhen}
+          onChange={(e) => set({ sidewaysWhen: e.target.value as ArStrategyCfg['sidewaysWhen'] })}
+          className="w-40 rounded border border-[#363a45] bg-[#131722] px-2 py-1 text-[#d1d4dc] outline-none focus:border-[#2962ff]"
+        >
+          <option value="both">1h and 4h both sideways</option>
+          <option value="either">1h or 4h sideways (stricter)</option>
+        </select>
+      </label>
+      <NumberField label="Market read: 1h candles" value={v.envWindow} min={4} onChange={(n) => set({ envWindow: Math.min(48, n) })} />
+      <NumberField label="Market read: 4h candles" value={v.envWindow4h} min={3} onChange={(n) => set({ envWindow4h: Math.min(30, n) })} />
+      <div className="pb-1 text-[11px] leading-snug text-[#787b86]">
+        Trending, sideways or choppy is read on completed 1-hour and 4-hour candles, not on the pull-back itself.
+        Choppy on either one is no trade.
+      </div>
+        </>
+      )}
       <label className="flex items-center justify-between gap-6 py-1.5 text-[13px] text-[#d1d4dc]">
         Zone
         <select

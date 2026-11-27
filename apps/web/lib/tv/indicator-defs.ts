@@ -80,6 +80,12 @@ export interface IndicatorCfg {
   stackUsed?: boolean;
   /** Range Fib Zone: also draw the decoder box on its leg (absent = off; the Dark Pool Decoder indicator draws it). */
   arDecoder?: boolean;
+  /**
+   * Range Fib Zone: which leg to draw. Absent / 'week' = his "most active range", the last week's high and low
+   * (`weekRanges`, `arRangeDays` days, absent = 7); 'swing' = the latest swing leg of `mult` × ATR in the 1h trend.
+   */
+  arRange?: 'week' | 'swing';
+  arRangeDays?: number;
   /** Dark Pool Decoder: levels and which legs (absent = `DPD_DEFAULTS`). Boxes kept = `length`, swing size = `mult`. */
   dpd?: Partial<DpdSettings>;
   /** AR strategy: overrides of `AR_STRATEGY_DEFAULTS`. */
@@ -230,7 +236,7 @@ export const CATALOG: CatalogEntry[] = [
   {
     type: 'arfib',
     name: 'Range Fib Zone',
-    description: 'Latest swing leg: 0.705–0.886 zone, value area, premium/discount, target and invalidation',
+    description: 'The week range (or latest swing leg): 0.705–0.886 zone, value area, premium/discount, target and invalidation',
     where: 'overlay',
     defaults: { type: 'arfib', length: 30, mult: 2 },
     group: 'AR Model',
@@ -362,7 +368,7 @@ export function indicatorLabel(i: IndicatorCfg): string {
     case 'avr':
       return `AVR ${i.length}`;
     case 'arfib':
-      return `Range Fib ${i.mult ?? 2}×ATR`;
+      return i.arRange === 'swing' ? `Range Fib ${i.mult ?? 2}×ATR` : `Range Fib ${i.arRangeDays ?? 7}d`;
     case 'arstruct':
       return `Structure ${i.mult ?? 2}×ATR`;
     case 'arenv':

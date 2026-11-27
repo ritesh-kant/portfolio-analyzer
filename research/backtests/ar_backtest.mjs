@@ -211,7 +211,7 @@ console.log('exploratory: confirmation is estimated (candles, or a footprint bui
 
 const ROWS = [
   ['Trades', (s) => String(s.trades)],
-  ['  target / stop / end of day', (s) => ['target', 'stop', 'time'].map((o) => s.byOutcome[o]?.n ?? 0).join(' / ')],
+  ['  target / stop / breakeven / trail / end of day', (s) => ['target', 'stop', 'breakeven', 'trail', 'time'].map((o) => s.byOutcome[o]?.n ?? 0).join(' / ')],
   ['  long / short', (s) => `${s.byDir.long.n} / ${s.byDir.short.n}`],
   ['Win rate', (s) => (s.trades ? pct(s.winRate) : '–')],
   ['Before costs', (s) => money(s.gross)],

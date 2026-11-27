@@ -6,6 +6,8 @@ import {
   avrDays,
   avrUnits,
   biasLadder,
+  candlesPerDay,
+  dayRangeRatio,
   dailyAtrByDay,
   environment,
   rangeFib,
@@ -14,10 +16,14 @@ import {
   DECODER_LEVELS,
   sessionBoxes,
   structureBias,
+  structureReads,
   structureTrend,
+  swingTrend,
   sessionAnchoredFrom,
   structureLabels,
   swings,
+  weekPivots,
+  weekRanges,
 } from './ar.ts';
 
 const TZ = 'America/New_York';
@@ -347,6 +353,33 @@ test('structureTrend: a shallow lower low does not flip an uptrend, a close thro
   }
 });
 
+test('swingTrend: up / down only when both swings agree, unclear otherwise; a break goes to unclear, not the opposite', () => {
+  const read = (pts) => {
+    const b = path(pts);
+    return { b, t: swingTrend(b, swings(b, 2, 5).pivots, 1, 5) };
+  };
+  // higher highs and higher lows: up
+  assert.equal(read([100, 150, 130, 180, 160, 210, 190]).t.at(-1), 'bull');
+  // lower highs and lower lows: down
+  assert.equal(read([210, 160, 180, 130, 150, 100, 120]).t.at(-1), 'bear');
+  // the 11-25 NQ case: a fall, then one spike to a higher high while the last low is still the lowest: unclear
+  const spike = read([210, 160, 180, 100, 190, 170]);
+  assert.equal(spike.t.at(-1), 'neutral');
+  // lower high + higher low (a squeeze): unclear
+  assert.equal(read([100, 200, 120, 180, 140, 160]).t.at(-1), 'neutral');
+  // an uptrend whose close falls through the latest swing low turns unclear at once, never straight to down
+  const brk = read([100, 150, 130, 180, 160, 210, 120]);
+  const firstOff = brk.t.lastIndexOf('bull') + 1;
+  assert.equal(brk.t.at(-1), 'neutral');
+  assert.ok(brk.b[firstOff].close < 160 - 5, 'it turns unclear on the close through 160');
+  assert.ok(!brk.t.includes('bear'));
+  // no look-ahead: a prefix gives the same values
+  for (const cut of [20, 40, 55]) {
+    const early = brk.b.slice(0, cut);
+    assert.deepEqual(swingTrend(early, swings(early, 2, 5).pivots, 1, 5), brk.t.slice(0, cut), `cut ${cut}`);
+  }
+});
+
 test('sessionAnchoredFrom: a leg across an overnight gap starts at the session low', () => {
   // day 1 falls to 100; day 2 gaps up to 150, dips to 140, runs to 200
   const day1 = path([130, 100]);
@@ -373,7 +406,7 @@ test('checklist names the swing, and a zone cancelled in an earlier session is s
   const t0 = day1.at(-1).time + 18 * 3600;
   const day2 = path([105, 109, 106]).map((b) => ({ ...b, time: b.time - day1[0].time + t0 }));
   const bars = [...day1, ...day2];
-  const { reads } = runArStrategy(bars, { timeZone: TZ, chartSecs: 300, cfg: { swingMult: 2, flatAt: 99999 } });
+  const { reads } = runArStrategy(bars, { timeZone: TZ, chartSecs: 300, cfg: { swingMult: 2, flatAt: 99999, envRule: 'efficiency', range: 'swing' } });
   const cancel = reads.findIndex((r) => r.checks.location.state === 'fail');
   assert.ok(cancel > 0 && cancel < day1.length, 'cancelled on day 1');
   assert.match(reads[cancel].checks.location.text, /zone cancelled · swing 100\.00 \(/);
@@ -388,4 +421,150 @@ test('checklist names the swing, and a zone cancelled in an earlier session is s
   assert.match(touched.lines[0].text, /^price reached the discount zone \(long\)$/);
   assert.equal(touched.lines[1].state, touched.state);
   assert.match(touched.detail, /^Fib drawn on swing 100\.00 \(/);
+});
+
+test('weekRanges: highest high and lowest low of the last N days, earlier extreme → later one, no look-ahead', () => {
+  // 15 days of hourly candles, a random walk
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) - 0.5;
+  const H = 3600;
+  const t0 = Date.parse('2026-10-01T00:00:00Z') / 1000;
+  const bars = [];
+  let px = 100;
+  for (let i = 0; i < 15 * 24; i++) {
+    const o = px;
+    px += rnd() * 4;
+    bars.push({ time: t0 + i * H, open: o, high: Math.max(o, px) + Math.abs(rnd()), low: Math.min(o, px) - Math.abs(rnd()), close: px, volume: 1 });
+  }
+  const got = weekRanges(bars, 7);
+  for (let i = 0; i < bars.length; i++) {
+    const t = bars[i].time;
+    if (bars[0].time > t - 7 * 86400) {
+      assert.equal(got[i], null, `candle ${i}: not a full week yet`);
+      continue;
+    }
+    let h = -1;
+    let l = -1;
+    for (let j = 0; j <= i; j++) {
+      if (bars[j].time <= t - 7 * 86400) continue;
+      if (h < 0 || bars[j].high > bars[h].high) h = j;
+      if (l < 0 || bars[j].low < bars[l].low) l = j;
+    }
+    const r = got[i];
+    assert.equal(bars[r.down ? r.from : r.to].high, bars[h].high, `candle ${i}: high`);
+    assert.equal(bars[r.down ? r.to : r.from].low, bars[l].low, `candle ${i}: low`);
+    assert.ok(r.from < r.to);
+    assert.equal(r.down, h < l);
+    // the same answer from the candles up to i only
+    assert.deepEqual(weekRanges(bars.slice(0, i + 1), 7)[i], r);
+    const [from, to] = weekPivots(bars, r, i);
+    assert.deepEqual([from.kind, to.kind], r.down ? ['H', 'L'] : ['L', 'H']);
+  }
+});
+
+// ── structure environment (envRule: 'structure') ──
+
+/** Flat candles at `px` with hand-made pivots, to test the structure rule on its own. */
+function pivotScene(closes) {
+  return closes.map((c, i) => bar(1_800_000_000 + i * 3600, c, c + 0.5, c - 0.5, c));
+}
+const P = (index, price, kind, confirmedAt = index + 1) => ({ index, price, kind, confirmedAt });
+
+test('structureReads: HH+HL up, LH+LL down, mixed sideways, a close past the last swing wins', () => {
+  const bars = pivotScene(new Array(12).fill(105));
+  const up = structureReads(bars, [P(0, 100, 'L'), P(1, 110, 'H'), P(2, 102, 'L'), P(3, 112, 'H')]);
+  assert.equal(up[3], null, 'pivot 3 is confirmed only at candle 4');
+  assert.deepEqual(up[5], { dir: 'bull', why: 'higher highs and higher lows' });
+  const down = structureReads(bars, [P(0, 112, 'H'), P(1, 102, 'L'), P(2, 110, 'H'), P(3, 100, 'L')]);
+  assert.equal(down[5].dir, 'bear');
+  const mixed = structureReads(bars, [P(0, 102, 'L'), P(1, 110, 'H'), P(2, 100, 'L'), P(3, 112, 'H')]);
+  assert.deepEqual(mixed[5], { dir: 'neutral', why: 'the swings overlap (higher high, lower low)' });
+  // the same overlapping swings, but the candle closes well above the last swing high
+  const broke = pivotScene([...new Array(11).fill(105), 120]);
+  assert.deepEqual(structureReads(broke, [P(0, 102, 'L'), P(1, 110, 'H'), P(2, 100, 'L'), P(3, 112, 'H')])[11], {
+    dir: 'bull',
+    why: 'closed above the last swing high 112.00',
+  });
+});
+
+test('structureReads: a prefix of the candles gives the same reads (no look-ahead)', () => {
+  let px = 100;
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) - 0.5;
+  const bars = [];
+  for (let i = 0; i < 400; i++) {
+    const o = px;
+    px += rnd() * 4 + Math.sin(i / 25) * 1.5;
+    bars.push(bar(1_800_000_000 + i * 3600, o, Math.max(o, px) + Math.abs(rnd()), Math.min(o, px) - Math.abs(rnd()), px));
+  }
+  const full = structureReads(bars, swings(bars, 2).pivots);
+  assert.ok(full.filter((r) => r?.dir === 'bull').length > 10 && full.filter((r) => r?.dir === 'bear').length > 10);
+  for (const k of [60, 150, 233, 399]) {
+    const part = bars.slice(0, k);
+    assert.deepEqual(structureReads(part, swings(part, 2).pivots), full.slice(0, k));
+  }
+});
+
+test('dayRangeRatio: matches a brute-force count, and a quiet last day reads small', () => {
+  let seed = 3;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const bars = Array.from({ length: 200 }, (_, i) => {
+    const m = 100 + rnd() * 10;
+    return bar(1_800_000_000 + i * 3600, m, m + rnd() * 3, m - rnd() * 3, m);
+  });
+  const m = 7;
+  const span = (e) => Math.max(...bars.slice(e - m + 1, e + 1).map((b) => b.high)) - Math.min(...bars.slice(e - m + 1, e + 1).map((b) => b.low));
+  const got = dayRangeRatio(bars, m);
+  for (let k = 0; k < bars.length; k++) {
+    if (k < 3 * m - 1) {
+      assert.equal(got[k], null);
+      continue;
+    }
+    const past = [];
+    for (let e = k - m; e >= m - 1 && past.length < 40; e -= 3) past.push(span(e));
+    past.sort((a, b) => a - b);
+    assert.ok(Math.abs(got[k] - span(k) / past[Math.floor(past.length / 2)]) < 1e-12, `k=${k}`);
+  }
+  const quiet = [...bars, ...Array.from({ length: m }, (_, i) => bar(1_800_000_000 + (200 + i) * 3600, 105, 105.5, 104.5, 105))];
+  assert.ok(dayRangeRatio(quiet, m).at(-1) < 0.3);
+});
+
+test('candlesPerDay: the median count per market day', () => {
+  const t0 = Date.parse('2026-11-02T09:00:00-05:00') / 1000;
+  const bars = [];
+  for (const [d, n] of [[0, 7], [1, 7], [2, 3], [3, 7]]) for (let k = 0; k < n; k++) bars.push(bar(t0 + d * 86400 + k * 3600, 1, 1, 1, 1));
+  assert.equal(candlesPerDay(bars, TZ), 7);
+});
+
+test('structureLeg: inner swings are ignored, a new extreme extends from the lowest low, a break of the origin ends it', async () => {
+  const { structureLeg } = await import('./ar.ts');
+  const P = (index, price, kind) => ({ index, price, kind, confirmedAt: index + 1 });
+  const piv = [P(0, 100, 'L'), P(1, 160, 'H'), P(2, 130, 'L'), P(3, 150, 'H'), P(4, 120, 'L')];
+  assert.deepEqual(structureLeg(piv, 'up').map((p) => p.price), [100, 160], 'the lower high 150 is internal');
+  const more = [...piv, P(5, 175, 'H')];
+  assert.deepEqual(structureLeg(more, 'up').map((p) => p.price), [120, 175], 'new high: from the lowest low since 160');
+  assert.equal(structureLeg([...piv, P(5, 140, 'H'), P(6, 95, 'L')], 'up'), null, 'a low under 100 ends the up structure');
+  const down = piv.map((p) => ({ ...p, price: 300 - p.price, kind: p.kind === 'H' ? 'L' : 'H' }));
+  assert.deepEqual(structureLeg(down, 'down').map((p) => p.price), [200, 140]);
+});
+
+test('withSessionOpen: a session that runs straight from the open gets its opening low as the leg origin', async () => {
+  const { structureLeg, withSessionOpen } = await import('./ar.ts');
+  // 25 Nov NIFTY futures shape: gap up, rally to the session's first swing high, no swing low before it
+  const t0 = 1_800_000_000;
+  const bars = [
+    bar(t0, 100, 101, 99, 100), // yesterday
+    bar(t0 + 20 * 3600, 130, 135, 129, 134), // gap open: the low of the session
+    bar(t0 + 20 * 3600 + 300, 134, 150, 133, 149),
+    bar(t0 + 20 * 3600 + 600, 149, 170, 148, 168),
+    bar(t0 + 20 * 3600 + 900, 168, 169, 150, 152),
+  ];
+  const high = { index: 3, price: 170, kind: 'H', confirmedAt: 4 };
+  assert.equal(structureLeg([high], 'up'), null, 'one swing: no leg');
+  const ps = withSessionOpen(bars, 1, [high]);
+  assert.deepEqual(ps[0], { index: 1, price: 129, kind: 'L', confirmedAt: 4 }, 'counted from when the high is confirmed');
+  assert.deepEqual(structureLeg(ps, 'up').map((p) => p.price), [129, 170]);
+  assert.deepEqual(withSessionOpen(bars, 1, []), [], 'no swing yet: unchanged');
+  const low = { index: 1, price: 129, kind: 'L', confirmedAt: 2 };
+  assert.deepEqual(withSessionOpen(bars, 1, [low, high]), [low, high], 'the extreme is the swing itself: unchanged');
 });

@@ -355,6 +355,15 @@ export class ArPrimitive implements ISeriesPrimitive<Time> {
         this.hline(ctx, x, t.stop, 'rgba(242, 54, 69, 0.8)');
         this.hline(ctx, x, t.target, 'rgba(8, 153, 129, 0.8)');
       }
+      // the stop after breakeven / trail moves: a dashed step from the candle after each move to the next one
+      const moves = t.stopMoves ?? [];
+      for (let k = 0; k < moves.length; k++) {
+        const m = moves[k]!;
+        // in force from the candle after the move through the candle that decided the next one (or the exit)
+        const end = k + 1 < moves.length ? moves[k + 1]!.index : (t.exitIndex ?? this.state.lastIndex);
+        const sx = this.span(m.index + 1, end, w, t.exitIndex == null && k + 1 === moves.length);
+        if (sx) this.hline(ctx, sx, m.price, m.why === 'breakeven' ? 'rgba(209, 212, 220, 0.9)' : 'rgba(255, 167, 38, 0.9)', [4, 3]);
+      }
       // entry: a triangle under (long) / over (short) the entry price
       const ex = this.x(t.entryIndex);
       const ey = this.y(t.entry);

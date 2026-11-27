@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { ArMarket, AvrDay, Bias, EnvironmentRead, RangeFib } from '../../lib/tv/ar';
 import { type ArStrategyResult, type CheckState, STEPS, arSummary } from '../../lib/tv/ar-strategy';
 import type { StackZone } from '../../lib/tv/stacked-imbalance';
+import { wallClock } from '../../lib/tv/timeframes';
 
 /** What the panel reads from the chart's AR state (tv-chart.tsx `arState`). */
 export interface ArPanelState {
@@ -103,6 +104,7 @@ export function ArPanel({
   decimals,
   hoverIndex,
   times,
+  displayTz,
   onFocusTrade,
   onGoTo,
 }: {
@@ -113,10 +115,16 @@ export function ArPanel({
   hoverIndex: number | null;
   /** Wall-clock time of each candle, for labels. */
   times: number[];
+  /** The chart's display time zone (the clock setting), for times that are not a candle's. */
+  displayTz: string;
   onFocusTrade: (id: number | null) => void;
   onGoTo: (index: number) => void;
 }) {
   const [open, setOpenState] = useState(readOpen);
+  /** A trade clicked in the list: the checklist shows its confirmation candle until the cursor is on the chart. */
+  const [pinnedTrade, setPinnedTrade] = useState<number | null>(null);
+  /** The pin icon on a trade: the checklist stays on that trade while you move around the chart. */
+  const [locked, setLocked] = useState(false);
   const setOpen = (v: boolean) => {
     setOpenState(v);
     try {
@@ -151,7 +159,17 @@ export function ArPanel({
   const section = 'border-t border-[#2a2e39] px-2.5 py-2';
   const head = 'mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#787b86]';
   const strat = state.strat;
-  const readIndex = strat ? (hoverIndex != null && strat.reads[hoverIndex] ? hoverIndex : strat.reads.length - 1) : -1;
+  const pinned = pinnedTrade != null ? (strat?.trades.find((t) => t.id === pinnedTrade) ?? null) : null;
+  const lockedOn = locked && pinned != null && !!strat?.reads[pinned.confirmIndex];
+  const hovering = !lockedOn && hoverIndex != null && !!strat?.reads[hoverIndex];
+  const readIndex = strat
+    ? hovering
+      ? hoverIndex!
+      : pinned && strat.reads[pinned.confirmIndex]
+        ? pinned.confirmIndex
+        : strat.reads.length - 1
+    : -1;
+  const showingPin = !hovering && pinned != null && readIndex === pinned.confirmIndex;
   const read = strat?.reads[readIndex];
   const skipHere = strat?.skips.filter((k) => k.index === readIndex) ?? [];
   const tradeHere = read?.tradeId != null ? strat?.trades.find((t) => t.id === read.tradeId) : null;
@@ -182,8 +200,33 @@ export function ArPanel({
           <div className={head}>
             Checklist · {mmdd(times[readIndex])} {hhmm(times[readIndex])}{' '}
             <span className="normal-case tracking-normal">
-              {hoverIndex != null && readIndex === hoverIndex ? '(candle under the cursor)' : '(latest candle)'}
+              {hovering
+                ? '(candle under the cursor)'
+                : lockedOn
+                  ? `(locked to the ${mmdd(times[pinned.entryIndex])} ${hhmm(times[pinned.entryIndex])} trade)`
+                  : showingPin
+                    ? '(the clicked trade’s confirmation candle)'
+                    : '(latest candle)'}
             </span>
+            {lockedOn ? (
+              <button
+                type="button"
+                onClick={() => setLocked(false)}
+                title="Unlock: the checklist follows the cursor again"
+                className="ml-1 rounded px-1 normal-case tracking-normal text-[#2962ff] hover:bg-[#2a2e39]"
+              >
+                unlock ×
+              </button>
+            ) : showingPin ? (
+              <button
+                type="button"
+                onClick={() => setPinnedTrade(null)}
+                title="Back to the latest candle"
+                className="ml-1 rounded px-1 normal-case tracking-normal text-[#2962ff] hover:bg-[#2a2e39]"
+              >
+                latest ×
+              </button>
+            ) : null}
           </div>
           <ul className="space-y-1">
             {STEPS.map((s, n) => {
@@ -231,7 +274,7 @@ export function ArPanel({
                       read.gamma.flip != null
                         ? `${read.gamma.regime === 'positive' ? 'above' : 'below'} the flip ${fmt(read.gamma.flip)}`
                         : 'no flip in range (net GEX sign)'
-                    } · snapshot ${new Date(read.gamma.asOf * 1000).toISOString().slice(5, 10)}`
+                    } · snapshot ${mmdd(wallClock(read.gamma.asOf, displayTz))}`
                   : state.gamma.snapshots
                     ? 'Gamma: no snapshot covers this candle (recording started later, or it is over 4 days old)'
                     : 'Gamma: no snapshots recorded for this symbol (pnpm bt:gex)'}
@@ -279,13 +322,21 @@ export function ArPanel({
           )}
           <ul className="max-h-40 space-y-0.5 overflow-y-auto">
             {[...strat.trades].reverse().slice(0, 30).map((t) => (
-              <li key={t.id}>
+              <li
+                key={t.id}
+                className={`group flex items-center rounded hover:bg-[#2a2e39] ${pinned?.id === t.id ? 'bg-[#2a2e39]' : ''} ${
+                  lockedOn && pinned?.id === t.id ? 'ring-1 ring-[#2962ff]' : ''
+                }`}
+              >
                 <button
                   type="button"
-                  className="flex w-full items-center justify-between rounded px-1 py-0.5 text-left tabular-nums hover:bg-[#2a2e39]"
+                  className="flex min-w-0 flex-1 items-center justify-between px-1 py-0.5 text-left tabular-nums"
                   onMouseEnter={() => onFocusTrade(t.id)}
                   onMouseLeave={() => onFocusTrade(null)}
-                  onClick={() => onGoTo(t.entryIndex)}
+                  onClick={() => {
+                    setPinnedTrade(t.id);
+                    onGoTo(t.entryIndex);
+                  }}
                   title={[
                     t.warnings.length ? `Taken with warnings:\n${t.warnings.join('\n')}` : 'All four steps passed',
                     t.stack ? `Stacked-imbalance zone at the fill: ${t.stack === 'zone' ? 'yes' : t.stack === 'none' ? 'no' : 'no footprint data'}` : '',
@@ -307,6 +358,33 @@ export function ArPanel({
                     <span className="text-[#787b86]">{t.outcome} </span>
                     <span style={{ color: t.r == null ? MUTED : t.r >= 0 ? UP : DOWN }}>{fmtR(t.r)}</span>
                   </span>
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={lockedOn && pinned?.id === t.id}
+                  title={
+                    lockedOn && pinned?.id === t.id
+                      ? 'Unlock: the checklist follows the cursor again'
+                      : 'Lock the checklist on this trade while you move around the chart'
+                  }
+                  onClick={() => {
+                    if (lockedOn && pinned?.id === t.id) {
+                      setLocked(false);
+                      return;
+                    }
+                    setPinnedTrade(t.id);
+                    setLocked(true);
+                    onGoTo(t.entryIndex);
+                  }}
+                  className={`shrink-0 px-1 py-0.5 ${
+                    lockedOn && pinned?.id === t.id
+                      ? 'text-[#2962ff]'
+                      : 'text-[#5d606b] opacity-0 hover:text-[#d1d4dc] focus-visible:opacity-100 group-hover:opacity-100'
+                  }`}
+                >
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <path d="M10.5 1.5 14.5 5.5 13 6l-2.5 2.5.5 3.5-1 1-3-3-4 4.5-1-1L6.5 9l-3-3 1-1 3.5.5L10.5 3z" />
+                  </svg>
                 </button>
               </li>
             ))}

@@ -1,0 +1,213 @@
+{
+  "id": "20261127-095516_5m_of_video_profile",
+  "created": "2026-11-27T09:55:16.834Z",
+  "symbol": "NQ=F",
+  "interval": "5m",
+  "window": {
+    "from": "2026-09-03 00:05",
+    "to": "2026-11-24 08:30",
+    "days": 69,
+    "candles": 15697,
+    "formingLast": false
+  },
+  "gamma": {
+    "snapshots": 1,
+    "from": "2026-11-14 07:36",
+    "to": "2026-11-14 07:36",
+    "tradesWithSnapshot": 0
+  },
+  "footprint": {
+    "candles": 8053,
+    "from": "2026-10-14 01:30",
+    "source": "estimated from 1m bars",
+    "rowStep": 5
+  },
+  "engine": "apps/web/lib/tv/ar-strategy.ts",
+  "costs": {
+    "instrument": "NQ",
+    "contracts": 1,
+    "commission": null,
+    "slipTicks": 1,
+    "roundTripPts": 0.725
+  },
+  "a": {
+    "settings": {
+      "swingMult": 2,
+      "valueRows": 30,
+      "envWindow": 12,
+      "envWindow4h": 6,
+      "windowStart": 570,
+      "windowEnd": 960,
+      "flatAt": 960,
+      "minRR": 1.5,
+      "entry": "pullback",
+      "entryWait": 3,
+      "confirmWithin": 6,
+      "candleRule": "beyond",
+      "stopBuffer": 0.1,
+      "requireOutsideValue": false,
+      "allowWarnings": true,
+      "requireStack": false,
+      "confirm": "orderflow",
+      "absorbVol": 1.5,
+      "flipShare": 0.1,
+      "flowRule": "video",
+      "absorbAt": "extreme",
+      "zone": "fib",
+      "gamma": "off",
+      "sessionLegs": false,
+      "trendRule": "swings",
+      "envRule": "structure",
+      "compress": 0.6,
+      "sideways": "warn",
+      "sidewaysWhen": "both",
+      "range": "both",
+      "rangeDays": 7,
+      "legRule": "structure",
+      "legTrades": 3,
+      "breakeven": 25,
+      "breakevenUnit": "points",
+      "trail": "candle"
+    },
+    "changed": {},
+    "stats": {
+      "trades": 5,
+      "wins": 3,
+      "losses": 2,
+      "winRate": 0.6,
+      "gross": 133.3297472004051,
+      "cost": 72.5,
+      "net": 60.82974720040511,
+      "avgNet": 12.165949440081022,
+      "medianNet": 347.0598537596816,
+      "avgR": 0.32287234543664256,
+      "medianR": 0.5219115968006139,
+      "profitFactor": 1.0407058036327248,
+      "avgWin": 518.40167982074,
+      "avgLoss": -747.1876461309075,
+      "best": 739.3602009582246,
+      "worst": -1098.7773092063726,
+      "maxDrawdown": 1494.375292261815,
+      "netWithoutTop3": -1494.375292261815,
+      "byOutcome": {
+        "stop": {
+          "n": 2,
+          "net": -1494.375292261815
+        },
+        "trail": {
+          "n": 3,
+          "net": 1555.2050394622202
+        }
+      },
+      "byDir": {
+        "long": {
+          "n": 0,
+          "net": 0,
+          "wins": 0
+        },
+        "short": {
+          "n": 5,
+          "net": 60.82974720040511,
+          "wins": 3
+        }
+      }
+    },
+    "skips": 110
+  },
+  "b": {
+    "settings": {
+      "swingMult": 2,
+      "valueRows": 30,
+      "envWindow": 12,
+      "envWindow4h": 6,
+      "windowStart": 570,
+      "windowEnd": 960,
+      "flatAt": 960,
+      "minRR": 0,
+      "entry": "pullback",
+      "entryWait": 3,
+      "confirmWithin": 12,
+      "candleRule": "beyond",
+      "stopBuffer": 0.1,
+      "requireOutsideValue": false,
+      "allowWarnings": true,
+      "requireStack": false,
+      "confirm": "orderflow",
+      "absorbVol": 1.5,
+      "flipShare": 0.1,
+      "flowRule": "video",
+      "absorbAt": "zone",
+      "zone": "fib",
+      "gamma": "off",
+      "sessionLegs": false,
+      "trendRule": "swings",
+      "envRule": "structure",
+      "compress": 0.6,
+      "sideways": "warn",
+      "sidewaysWhen": "both",
+      "range": "both",
+      "rangeDays": 7,
+      "legRule": "structure",
+      "legTrades": 3,
+      "breakeven": 25,
+      "breakevenUnit": "points",
+      "trail": "candle"
+    },
+    "changed": {
+      "absorbAt": "zone",
+      "confirmWithin": 12,
+      "minRR": 0
+    },
+    "stats": {
+      "trades": 12,
+      "wins": 5,
+      "losses": 7,
+      "winRate": 0.4166666666666667,
+      "gross": -4446.414592701331,
+      "cost": 174,
+      "net": -4620.414592701331,
+      "avgNet": -385.03454939177755,
+      "medianNet": -182.80675673943915,
+      "avgR": -0.12355786797816593,
+      "medianR": -0.5071234058200306,
+      "profitFactor": 0.4566274152613171,
+      "avgWin": 776.5603315874032,
+      "avgLoss": -1214.745178662621,
+      "best": 1847.0966184747958,
+      "worst": -2787.3395892013214,
+      "maxDrawdown": 4692.959355157422,
+      "netWithoutTop3": -7687.371412134351,
+      "byOutcome": {
+        "stop": {
+          "n": 6,
+          "net": -8488.716250638347
+        },
+        "trail": {
+          "n": 4,
+          "net": 3402.301657937016
+        },
+        "time": {
+          "n": 1,
+          "net": 480.5
+        },
+        "breakeven": {
+          "n": 1,
+          "net": -14.5
+        }
+      },
+      "byDir": {
+        "long": {
+          "n": 3,
+          "net": -6643.227444897653,
+          "wins": 0
+        },
+        "short": {
+          "n": 9,
+          "net": 2022.8128521963226,
+          "wins": 5
+        }
+      }
+    },
+    "skips": 101
+  }
+}

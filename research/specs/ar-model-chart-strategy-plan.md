@@ -67,6 +67,25 @@ strategy hook, ready for when weeks of snapshots exist.
   `pnpm bt:gex` every pre-market (not scheduled yet). A gamma test needs a few months of snapshots and a
   pre-registered BT number.
 
+**Location rebuilt on the week range (2026-11-26).** His condensed course (`WEHgjZhg5bI`) says the range is the
+hourly "most active range" over about a week, and his dated example (MNQ 21 → 23 Oct 2026) confirms it.
+- **The rule.** The strategy and Range Fib Zone now draw the Fib on the highest high and lowest low of the last 7
+  days by default (`range: 'week'`, `weekRanges` in `ar.ts`). The same range sets the trend: high first = down; a
+  close past 0.886 = unclear.
+- **Re-arming.** While price sits in the zone, the setup re-arms up to `legTrades` (3) trades per range.
+- **Result.** It reproduces his zone to within 2 pts. On the 5 m cache: 11 trades vs 6, net −$5,936 vs −$1,540
+  (exploratory; `README-ar-backtest.md`).
+- **Old rule.** `range: 'swing'` keeps the previous behaviour.
+
+**Environment rebuilt on 4h structure (2026-11-26).** The efficiency read called step-wise trends sideways (NIFTY
+11-23) and counted candles, not days. Default now `envRule: 'structure'`: 4h higher highs/lows = trending (a zone
+against it fails), overlapping swings = sideways (warns, his "fade the extremes"), last day's range < 0.6 × normal
+= choppy (no trade); the 1h is shown only. Details and the A/B: `README-ar-backtest.md`.
+
+**Location: week range + latest intraday swing (2026-11-26).** Default `range: 'both'`: the week zone and the latest
+chart swing leg in the 4h trend's direction are both watched; the first one reached is traded. NQ 5m: 29 trades vs
+15, net −$6,656 vs −$6,524 (exploratory).
+
 ## Design in one paragraph
 
 One **TypeScript strategy engine** (`apps/web/lib/tv/strategies/ar/`) of pure functions: bars in → levels, setups,

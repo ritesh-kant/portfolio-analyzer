@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { absorption, deltaFlip, lvnPrice, usualVolume } from './ar-orderflow.ts';
+import { absorption, deltaFlip, failedAggression, lvnPrice, usualVolume } from './ar-orderflow.ts';
 
 const bar = (o, h, l, c, v = 100) => ({ time: 0, open: o, high: h, low: l, close: c, volume: v });
 /** Footprint from [price, bid, ask] rows (low → high). */
@@ -77,4 +77,45 @@ test('LVN: the thinnest inner row on the pull-back side of the close, nearest th
   assert.equal(lvnPrice(bar(118, 118, 100, 101), f, 'short') != null, true);
   assert.equal(lvnPrice(b, f, 'short'), null);
   assert.equal(lvnPrice(b, fp([[100, 1, 1], [103, 1, 1]], 3), 'long'), null);
+});
+
+test("rule 'video': POC in the wick and a bearish close, no volume threshold; any delta flip that closes down", () => {
+  // short at a high: open 100, high 110, low 98, close 99 → body 99–100, upper wick 100–110; ordinary volume (1×)
+  const bars = [...history, bar(100, 110, 98, 99, 100), bar(99, 100, 95, 96, 100)];
+  const inWick = fp([[98, 5, 5], [101, 10, 10], [107, 60, 70]], 3); // POC row 107 → middle 108.5, in the wick
+  const a = absorption(bars, inWick, 12, 'short', 1.5, 'video');
+  assert.equal(a.ok, true, a.why.join());
+  assert.equal(absorption(bars, inWick, 12, 'short', 1.5).ok, false, 'our rule wants 1.5× volume');
+  const inBody = fp([[98, 60, 70], [101, 10, 10], [107, 5, 5]], 3); // POC 99.5: inside the body
+  assert.match(absorption(bars, inBody, 12, 'short', 1.5, 'video').why.join(), /not in the upper wick/);
+  const green = [...history, bar(99, 110, 98, 100, 100)];
+  assert.match(absorption(green, inWick, 12, 'short', 1.5, 'video').why.join(), /did not close bearish/);
+  // flip: a small negative delta is enough, but the candle must close down
+  const tiny = fp([[95, 51, 49]], 5);
+  assert.equal(deltaFlip(bars, tiny, 13, 12, 'short', 0.1, 'video').ok, true);
+  assert.equal(deltaFlip(bars, tiny, 13, 12, 'short', 0.1).ok, false, 'our rule wants 10% of volume');
+  const up = [...bars.slice(0, 13), bar(96, 100, 95, 99, 100)];
+  assert.match(deltaFlip(up, tiny, 13, 12, 'short', 0.1, 'video').why, /closed up/);
+});
+
+test("failedAggression: the 26 Nov NIFTY sequence — heavy selling at 13:55 fails, 14:05 flips (rule 'tree')", () => {
+  // 13:50, 13:55, 14:00, 14:05 (prices and deltas from the estimated footprint), zone near edge 25,910.69
+  const bars = [
+    bar(25946.3, 25959, 25906, 25906, 35425),
+    bar(25906, 25923, 25881.5, 25893.2, 53105),
+    bar(25893.8, 25909.8, 25882, 25897.9, 28665),
+    bar(25902, 25960, 25891.2, 25959.2, 28990),
+  ];
+  const d = (delta) => ({ poc: 0, levels: [{ price: 25900, bid: 1, ask: 1 }], delta, total: 1e5, step: 5 });
+  const fps = [d(-18136), d(-27245), d(-2846), d(20051)];
+  // at 14:00: the 13:55 selling has held (14:00's low 25,882 is above 25,881.5); 13:50 has not (13:55 went lower)
+  assert.deepEqual(failedAggression(bars, fps, 0, 2, 'long', 25910.69).agg?.index, 1);
+  assert.equal(deltaFlip(bars, fps[2], 2, 1, 'long', 0, 'video').ok, false, '14:00 delta still negative');
+  assert.equal(deltaFlip(bars, fps[3], 3, 1, 'long', 0, 'video').ok, true, '14:05 flips and closes up');
+  assert.equal(failedAggression(bars, fps, 0, 3, 'long', 25910.69).agg?.index, 1);
+  // a later candle under 25,881.5 means the selling did not fail
+  const lower = [...bars.slice(0, 3), bar(25902, 25960, 25870, 25959.2, 28990)];
+  assert.equal(failedAggression(lower, fps, 0, 3, 'long', 25910.69).agg, null);
+  // no footprint at the level → noData
+  assert.equal(failedAggression(bars, [null, null, null, null], 0, 3, 'long', 25910.69).noData, true);
 });

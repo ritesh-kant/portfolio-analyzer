@@ -1,0 +1,189 @@
+{
+  "id": "20261126-165157_5m_of_ours_vs_novol",
+  "created": "2026-11-26T16:51:57.952Z",
+  "symbol": "NQ=F",
+  "interval": "5m",
+  "window": {
+    "from": "2026-10-13 20:00",
+    "to": "2026-11-24 08:30",
+    "days": 37,
+    "candles": 8119,
+    "formingLast": false
+  },
+  "gamma": {
+    "snapshots": 1,
+    "from": "2026-11-14 07:36",
+    "to": "2026-11-14 07:36",
+    "tradesWithSnapshot": 0
+  },
+  "footprint": {
+    "candles": 8053,
+    "from": "2026-10-14 01:30",
+    "source": "estimated from 1m bars",
+    "rowStep": 5
+  },
+  "engine": "apps/web/lib/tv/ar-strategy.ts",
+  "costs": {
+    "instrument": "NQ",
+    "contracts": 1,
+    "commission": null,
+    "slipTicks": 1,
+    "roundTripPts": 0.725
+  },
+  "a": {
+    "settings": {
+      "swingMult": 2,
+      "valueRows": 30,
+      "envWindow": 12,
+      "envWindow4h": 6,
+      "windowStart": 570,
+      "windowEnd": 960,
+      "flatAt": 960,
+      "minRR": 1.5,
+      "entry": "pullback",
+      "entryWait": 3,
+      "confirmWithin": 6,
+      "candleRule": "beyond",
+      "stopBuffer": 0.1,
+      "requireOutsideValue": false,
+      "allowWarnings": true,
+      "requireStack": false,
+      "confirm": "orderflow",
+      "absorbVol": 1.5,
+      "flipShare": 0.1,
+      "flowRule": "ours",
+      "zone": "fib",
+      "gamma": "off",
+      "sessionLegs": false,
+      "trendRule": "swings",
+      "envRule": "structure",
+      "compress": 0.6,
+      "sideways": "warn",
+      "sidewaysWhen": "both",
+      "range": "both",
+      "rangeDays": 7,
+      "legTrades": 3,
+      "breakeven": 25,
+      "breakevenUnit": "points",
+      "trail": "candle"
+    },
+    "changed": {
+      "confirm": "orderflow"
+    },
+    "stats": {
+      "trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "winRate": 0,
+      "gross": 0,
+      "cost": 0,
+      "net": 0,
+      "avgNet": 0,
+      "medianNet": 0,
+      "avgR": 0,
+      "medianR": 0,
+      "profitFactor": 0,
+      "avgWin": 0,
+      "avgLoss": 0,
+      "best": 0,
+      "worst": 0,
+      "maxDrawdown": 0,
+      "netWithoutTop3": 0,
+      "byOutcome": {},
+      "byDir": {
+        "long": {
+          "n": 0,
+          "net": 0,
+          "wins": 0
+        },
+        "short": {
+          "n": 0,
+          "net": 0,
+          "wins": 0
+        }
+      }
+    },
+    "skips": 61
+  },
+  "b": {
+    "settings": {
+      "swingMult": 2,
+      "valueRows": 30,
+      "envWindow": 12,
+      "envWindow4h": 6,
+      "windowStart": 570,
+      "windowEnd": 960,
+      "flatAt": 960,
+      "minRR": 1.5,
+      "entry": "pullback",
+      "entryWait": 3,
+      "confirmWithin": 6,
+      "candleRule": "beyond",
+      "stopBuffer": 0.1,
+      "requireOutsideValue": false,
+      "allowWarnings": true,
+      "requireStack": false,
+      "confirm": "orderflow",
+      "absorbVol": 0,
+      "flipShare": 0.1,
+      "flowRule": "ours",
+      "zone": "fib",
+      "gamma": "off",
+      "sessionLegs": false,
+      "trendRule": "swings",
+      "envRule": "structure",
+      "compress": 0.6,
+      "sideways": "warn",
+      "sidewaysWhen": "both",
+      "range": "both",
+      "rangeDays": 7,
+      "legTrades": 3,
+      "breakeven": 25,
+      "breakevenUnit": "points",
+      "trail": "candle"
+    },
+    "changed": {
+      "confirm": "orderflow",
+      "absorbVol": 0
+    },
+    "stats": {
+      "trades": 1,
+      "wins": 0,
+      "losses": 1,
+      "winRate": 0,
+      "gross": -381.09798305544246,
+      "cost": 14.5,
+      "net": -395.59798305544246,
+      "avgNet": -395.59798305544246,
+      "medianNet": -395.59798305544246,
+      "avgR": -1.0380479578604607,
+      "medianR": -1.0380479578604607,
+      "profitFactor": 0,
+      "avgWin": 0,
+      "avgLoss": -395.59798305544246,
+      "best": -395.59798305544246,
+      "worst": -395.59798305544246,
+      "maxDrawdown": 395.59798305544246,
+      "netWithoutTop3": 0,
+      "byOutcome": {
+        "stop": {
+          "n": 1,
+          "net": -395.59798305544246
+        }
+      },
+      "byDir": {
+        "long": {
+          "n": 0,
+          "net": 0,
+          "wins": 0
+        },
+        "short": {
+          "n": 1,
+          "net": -395.59798305544246,
+          "wins": 0
+        }
+      }
+    },
+    "skips": 65
+  }
+}

@@ -277,11 +277,69 @@ Beyond the far side of the absorption / the swing extreme ("stop at the lows", "
 - **Breakeven** after roughly +25 pts, or once the move clears a large resting order. `[S 3:37, 3:47]`
 - **Trail** just past the last 5 m candle, the POC of the last 15 m candle, or a large resting order on the DOM.
   Tighter in positive gamma and when buyers/sellers have already defended an area once. `[S 3:33–3:35, 3:47–3:48]`
+- **His words in the live trades (transcript re-read 2026-11-26):**
+  - 3:33: "trailing my stop … right above the POC of this candle", "right above these large sellers".
+  - 3:37: "we're 25 points in profit. If it stops going to break even … we are going to have to trail stop even
+    tighter".
+  - 3:47: "moving my stop to break even … I'm going to tighten stop right above this 5-minute candle … right here is
+    the POC of the last 15-minute candle", then "Stop's now at break even", then "Stop is going to actually trail
+    behind this 5-minute candle", and tighter near areas buyers defended.
+  - Built as `breakeven` / `trail` in the strategy (README-ar-backtest.md).
 - **Re-entry:** he re-takes the same idea after a stop-out (three shorts toward the same P1 on one day). `[S 3:38]`
 - **Stop for the day** once the idea has played out, when the market starts compressing, or when the 5 m ATR is very
   large for the account (an 81-pt 5 m ATR made him cut size and quit). `[S 3:38–3:39]`
 - **Risk rules** `[S 4:00–4:22, keyword scan]`: a hard daily loss limit, trade limits, cut size after emotional
   escalation. No numbers given.
+
+## Second source: the condensed course `[C]` (YouTube `WEHgjZhg5bI`, 2026-11-08, 32 min)
+
+Same author ("The Complete Orderflow Trading Course (Beginner to Advanced)"), billed as the condensed version of
+the 4-hour video. Read 2026-11-26: the full transcript plus the frames at 19:10. `[C m:ss]` points into this
+video. Mostly the same rules. What it adds or makes sharper:
+
+- **Structure timeframes and their windows** `[C 14:23–14:54, 16:27–16:58]`:
+  - **4 h** = roughly the last 30 days.
+  - **1 h** = roughly the last week.
+  - **15 m** = roughly the last 24 hours.
+  The bias is the 4 h/1 h direction. A 15 m move against it is "just pulling back into premium for the higher
+  time frame". The bias stays bearish while "we haven't made higher highs and higher lows yet on the higher time
+  frame".
+- **The range is the hourly "most active range"** `[C 17:59–18:59]`: the swing high and swing low on the hourly,
+  with a fixed-range volume profile and a Fib on the same two points. His premium is "about 200 points"
+  `[C 20:32]`, so the range is about 1,100 pts, a multi-day leg. **This settles the "significant swing" gap in
+  §2a.1:** it is the week's hourly range, not the latest small swing.
+- **A dated example, checked against our data (frame 19:10):**
+  - Chart: MNQ, 20–28 Oct 2026.
+  - Range: high 30,117 (21 Oct) → low 28,994 (23 Oct); labels 70.5 % 29,780.57, 78.8 % 29,873.47,
+    88.6 % 29,983.16.
+  - Bias: the higher timeframe was bearish, and the 15 m was pushing up into premium.
+  - Our Yahoo NQ: 30,113 (21 Oct) → 28,987 (23 Oct). The "highest and lowest of the last 7 days of 1 h candles"
+    rule gives the zone **29,781–29,985**, his zone to within 2 pts.
+  - What happened: price sat inside the zone on 27–28 Oct, then closed above 0.886 and the range high (30,178 at
+    16:00 on 28 Oct). That is his "push past it = structure shifting bullish" case.
+- **Location within location** `[C 19:30–24:05]`: inside the ~200-pt zone, he narrows to levels that stack there:
+  - weekly VAH/VAL;
+  - the 0DTE call or put wall;
+  - session profiles (overnight and regular-hours VAH/POC/VAL);
+  - the 30-day composite profile;
+  - value migration (weekly and session value areas moving with the trend).
+  The early clues for a session are the **overnight VAL** and the **prior regular session's levels**: acceptance
+  back through them means value is migrating the other way. He writes if/then scenarios before the open.
+- **Environments** `[C 26:08–27:41]`:
+  - **trending:** continuation models;
+  - **rotational:** fade the extremes, look for reversals (breakouts and continuation are "not ideal", but he does
+    not say no trade);
+  - **compression/chop:** don't trade, since there isn't even room for a decent reward-to-risk.
+  Continuation models die in ranges, and reversal models get run over in trends unless the location is extreme and
+  the confirmation is very good. "Not trading is a position"; some days have zero trades.
+- **Confirmation** `[C 7:13–11:19, 24:36–25:37]`: the same effort-vs-result read:
+  - aggression at the level or in the wick with no progress;
+  - the candle's POC in the wick, on the side that failed;
+  - a delta flip (example: −1,800 then +1,700 on 5 m candles).
+  A delta flip counts only at a structural level, and in chop flips are noise. Stacked imbalances are 3 levels at
+  ≥ 300–400 %. "The signal in order flow always comes last."
+- **Not in this video:** the 09:30–11:00 window (he only says "every New York session"), Asia-range/AVR levels, the
+  decoder, numbers for stops and targets.
 
 ## Not rules
 

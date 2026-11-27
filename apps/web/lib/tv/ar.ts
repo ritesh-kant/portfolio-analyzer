@@ -433,6 +433,49 @@ export function structureTrend(bars: Bar[], pivots: Pivot[], tolMult = 0.25, atr
   return out;
 }
 
+/**
+ * Trend per candle from the latest swings only, with "unclear" as a real answer (OUR rule, the AR strategy's default):
+ * - up   = the latest swing high is higher than the one before AND the latest swing low is higher than the one before;
+ * - down = both lower;
+ * - anything else (higher high + lower low, lower high + higher low) is neutral: no clear direction.
+ * A candle that CLOSES past the latest swing on the other side (by more than `tolMult` × ATR) drops the trend to
+ * neutral straight away. It never flips straight to the opposite direction: that takes the new swings to confirm it.
+ * Each value uses only swings confirmed by that candle and that candle's close: no look-ahead.
+ */
+export function swingTrend(bars: Bar[], pivots: Pivot[], tolMult = 0.25, atrLength = 14): Bias[] {
+  const out: Bias[] = new Array(bars.length).fill('neutral');
+  const a = atr(bars, atrLength);
+  const known: Pivot[] = [];
+  let k = 0;
+  let base: Bias = 'neutral';
+  let broken = false;
+  for (let i = 0; i < bars.length; i++) {
+    let changed = false;
+    while (k < pivots.length && pivots[k]!.confirmedAt <= i) {
+      known.push(pivots[k++]!);
+      changed = true;
+    }
+    if (changed) {
+      base = structureBias(known);
+      broken = false;
+    }
+    if (base !== 'neutral' && !broken) {
+      const tol = (a[i] ?? 0) * tolMult;
+      const c = bars[i]!.close;
+      let lastH: Pivot | null = null;
+      let lastL: Pivot | null = null;
+      for (let j = known.length - 1; j >= 0 && (!lastH || !lastL); j--) {
+        if (known[j]!.kind === 'H' && !lastH) lastH = known[j]!;
+        if (known[j]!.kind === 'L' && !lastL) lastL = known[j]!;
+      }
+      if (base === 'bull' && lastL && c < lastL.price - tol) broken = true;
+      if (base === 'bear' && lastH && c > lastH.price + tol) broken = true;
+    }
+    out[i] = broken ? 'neutral' : base;
+  }
+  return out;
+}
+
 /** Bias on daily plus his four timeframes, built from the chart's candles (a timeframe finer than the chart is null). */
 export function biasLadder(
   bars: Bar[],
@@ -617,6 +660,59 @@ export interface RangeFib {
 }
 
 /**
+ * The leg the market structure is building, in `dir`, from swings in time order (his "latest clear leg" made of
+ * "higher highs and higher lows"; OUR rule for which swings count):
+ * - a swing beyond the current leg's end (a higher high for an up leg) starts or extends the leg, from the most
+ *   extreme opposite swing since the previous leg end (the lowest low before the breakout);
+ * - a swing that stays inside the leg (a lower high in an up leg) is an internal pull-back and changes nothing;
+ * - a swing past the leg's origin (a lower low under an up leg's start) ends the structure until a new leg forms.
+ * Pass only swings already confirmed; the strategy passes those of the current session.
+ */
+export function structureLeg(pivots: Pivot[], dir: 'up' | 'down'): [Pivot, Pivot] | null {
+  const up = dir === 'up';
+  let leg: [Pivot, Pivot] | null = null;
+  let since = 0;
+  for (let j = 0; j < pivots.length; j++) {
+    const p = pivots[j]!;
+    if (up ? p.kind === 'H' : p.kind === 'L') {
+      if (!leg || (up ? p.price > leg[1].price : p.price < leg[1].price)) {
+        let o: Pivot | null = null;
+        for (let q = since; q < j; q++) {
+          const c = pivots[q]!;
+          if ((up ? c.kind === 'L' : c.kind === 'H') && (!o || (up ? c.price < o.price : c.price > o.price))) o = c;
+        }
+        if (o) {
+          leg = [o, p];
+          since = j;
+        }
+      }
+    } else if (leg && (up ? p.price < leg[0].price : p.price > leg[0].price)) {
+      leg = null;
+      since = j;
+    }
+  }
+  return leg;
+}
+
+/**
+ * OUR adaptation for markets that close overnight (NSE), for `structureLeg`: a session that gaps and runs straight
+ * from the open has no swing at its start (the ZigZag carries yesterday's leg across the gap), so its first swing has
+ * no origin to measure from. This puts the session's opening extreme in front of `pivots` (the session's own swings,
+ * in time order): the lowest low before a first swing high, or the highest high before a first swing low. It counts
+ * from when that first swing is confirmed. Unchanged when the session has no swing yet, or the extreme is the swing.
+ */
+export function withSessionOpen(bars: Bar[], sessionStart: number, pivots: Pivot[]): Pivot[] {
+  const first = pivots[0];
+  if (!first) return pivots;
+  const high = first.kind === 'L';
+  let k = sessionStart;
+  for (let j = sessionStart; j < first.index; j++) if (high ? bars[j]!.high > bars[k]!.high : bars[j]!.low < bars[k]!.low) k = j;
+  if (k >= first.index) return pivots;
+  const open: Pivot = { index: k, price: high ? bars[k]!.high : bars[k]!.low, kind: high ? 'H' : 'L', confirmedAt: first.confirmedAt };
+  return [open, ...pivots];
+}
+
+/**
  * OUR adaptation for markets that close overnight (NSE): a swing leg may not start before the session its end swing
  * is in. A leg from yesterday's low to today's high (with an opening gap between) starts instead at today's lowest
  * low before that high; a down leg at today's highest high. The ZigZag cannot see this on its own: an opening gap
@@ -637,6 +733,61 @@ export function sessionAnchoredFrom(bars: Bar[], from: Pivot, to: Pivot, minSpan
   const price = up ? bars[k]!.low : bars[k]!.high;
   if (Math.abs(to.price - price) < minSpan) return from;
   return { index: k, price, kind: from.kind, confirmedAt: from.confirmedAt };
+}
+
+/** The week range at one candle: indices of its two extremes, `from` the earlier one, `to` the later one. */
+export interface WeekRangeAt {
+  from: number;
+  to: number;
+  /** The high came first: a down leg (premium above, a short idea). */
+  down: boolean;
+}
+
+/**
+ * His "most active range" (condensed course `WEHgjZhg5bI` 17:59–18:59, research/specs/orderflow-course-ar-model.md
+ * "Second source"): the swing high and swing low on the hourly over about the last week. OUR codification: the
+ * highest high and the lowest low of the candles that started in the last `days` calendar days, up to and including
+ * candle i. The leg runs from the earlier extreme to the later one, so a high that came first makes a down leg
+ * (premium above, a short idea). Checked against his 20–28 Oct 2026 MNQ example: it gives his zone within 2 points.
+ *
+ * null until the candles reach back `days` days. Reads only candles up to i: no look-ahead. O(n) (monotonic queues).
+ */
+export function weekRanges(bars: Bar[], days = 7): (WeekRangeAt | null)[] {
+  const out: (WeekRangeAt | null)[] = new Array(bars.length).fill(null);
+  if (!bars.length) return out;
+  const span = days * 86400;
+  const hi: number[] = []; // indices, highs decreasing; the front is the window's high
+  const lo: number[] = []; // indices, lows increasing; the front is the window's low
+  let start = 0;
+  let hh = 0;
+  let hl = 0;
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i]!;
+    while (hi.length > hh && bars[hi[hi.length - 1]!]!.high <= b.high) hi.pop();
+    hi.push(i);
+    while (lo.length > hl && bars[lo[lo.length - 1]!]!.low >= b.low) lo.pop();
+    lo.push(i);
+    while (bars[start]!.time <= b.time - span) start++;
+    while (hi[hh]! < start) hh++;
+    while (lo[hl]! < start) hl++;
+    if (bars[0]!.time > b.time - span) continue; // not a full window yet
+    const h = hi[hh]!;
+    const l = lo[hl]!;
+    if (h === l) continue;
+    out[i] = h < l ? { from: h, to: l, down: true } : { from: l, to: h, down: false };
+  }
+  return out;
+}
+
+/** A week range as the two pivots `rangeFib` and the strategy take (the high an H pivot, the low an L pivot). */
+export function weekPivots(bars: Bar[], r: WeekRangeAt, confirmedAt: number): [Pivot, Pivot] {
+  const piv = (i: number, high: boolean): Pivot => ({
+    index: i,
+    price: high ? bars[i]!.high : bars[i]!.low,
+    kind: high ? 'H' : 'L',
+    confirmedAt,
+  });
+  return [piv(r.from, r.down), piv(r.to, !r.down)];
 }
 
 /**
@@ -800,4 +951,99 @@ export function environment(bars: Bar[], window = 24, end = bars.length): Enviro
         ? 'compression'
         : 'rotation';
   return { env, efficiency, rangeRatio, overlap };
+}
+
+/** Market structure at one candle's close (`structureReads`). */
+export interface StructureRead {
+  /** Up / down from the swings, or neutral when they overlap (a range). */
+  dir: Bias;
+  /** What the swings did, in words, for the checklist. */
+  why: string;
+}
+
+/**
+ * Plain market structure (his step 1a, `[S 0:07, 1:20]`), per candle as of its close: only swings confirmed by then
+ * and that candle's close, so no look-ahead. OUR wording of his rule:
+ * - a close beyond the latest swing high (low) by more than `tolMult` × ATR = up (down): price accepted outside the
+ *   last range, before the swings have had time to show it;
+ * - otherwise higher high + higher low = up, lower high + lower low = down;
+ * - anything else (a higher high with a lower low, or the reverse) = the swings overlap = sideways.
+ * Null until there are two swing highs and two swing lows.
+ */
+export function structureReads(bars: Bar[], pivots: Pivot[], tolMult = 0.25, atrLength = 14): (StructureRead | null)[] {
+  const out: (StructureRead | null)[] = new Array(bars.length).fill(null);
+  const a = atr(bars, atrLength);
+  const highs: Pivot[] = [];
+  const lows: Pivot[] = [];
+  const px = (p: number) => p.toFixed(2);
+  let k = 0;
+  for (let i = 0; i < bars.length; i++) {
+    while (k < pivots.length && pivots[k]!.confirmedAt <= i) {
+      const p = pivots[k++]!;
+      (p.kind === 'H' ? highs : lows).push(p);
+    }
+    if (highs.length < 2 || lows.length < 2) continue;
+    const h = highs[highs.length - 1]!;
+    const h0 = highs[highs.length - 2]!;
+    const l = lows[lows.length - 1]!;
+    const l0 = lows[lows.length - 2]!;
+    const c = bars[i]!.close;
+    const tol = (a[i] ?? 0) * tolMult;
+    if (c > h.price + tol) out[i] = { dir: 'bull', why: `closed above the last swing high ${px(h.price)}` };
+    else if (c < l.price - tol) out[i] = { dir: 'bear', why: `closed below the last swing low ${px(l.price)}` };
+    else if (h.price > h0.price && l.price > l0.price) out[i] = { dir: 'bull', why: 'higher highs and higher lows' };
+    else if (h.price < h0.price && l.price < l0.price) out[i] = { dir: 'bear', why: 'lower highs and lower lows' };
+    else
+      out[i] = {
+        dir: 'neutral',
+        why: `the swings overlap (${h.price > h0.price ? 'higher' : 'lower'} high, ${l.price > l0.price ? 'higher' : 'lower'} low)`,
+      };
+  }
+  return out;
+}
+
+/**
+ * The last trading day's range ÷ a normal day's, per candle as of its close: the high-low of the last `perDay`
+ * candles over the median of earlier `perDay`-candle windows (up to 40 of them, half a day apart). Counting candles
+ * rather than hours makes a day mean the same on NSE (about 7 hourly candles) as on CME (about 23), and a weekend
+ * gap does not shrink it. Null until 3 days of candles exist. Below about 0.6 = compression (his "chop": no room for
+ * a decent reward-to-risk).
+ */
+export function dayRangeRatio(bars: Bar[], perDay: number): (number | null)[] {
+  const m = Math.max(2, Math.round(perDay));
+  const n = bars.length;
+  // span[k] = high-low of the m candles ending at k (monotonic deques)
+  const span: number[] = new Array(n).fill(0);
+  const hi: number[] = [];
+  const lo: number[] = [];
+  for (let k = 0; k < n; k++) {
+    while (hi.length && bars[hi[hi.length - 1]!]!.high <= bars[k]!.high) hi.pop();
+    hi.push(k);
+    while (lo.length && bars[lo[lo.length - 1]!]!.low >= bars[k]!.low) lo.pop();
+    lo.push(k);
+    while (hi[0]! <= k - m) hi.shift();
+    while (lo[0]! <= k - m) lo.shift();
+    span[k] = bars[hi[0]!]!.high - bars[lo[0]!]!.low;
+  }
+  const step = Math.max(1, Math.floor(m / 2));
+  const out: (number | null)[] = new Array(n).fill(null);
+  for (let k = 3 * m - 1; k < n; k++) {
+    const past: number[] = [];
+    for (let e = k - m; e >= m - 1 && past.length < 40; e -= step) past.push(span[e]!);
+    past.sort((x, y) => x - y);
+    const median = past[Math.floor(past.length / 2)] ?? 0;
+    out[k] = median > 0 ? span[k]! / median : null;
+  }
+  return out;
+}
+
+/** Median number of candles per trading day (days by the market's clock), for `dayRangeRatio`. */
+export function candlesPerDay(bars: Bar[], timeZone: string): number {
+  const counts = new Map<number, number>();
+  for (const b of bars) {
+    const d = Math.floor(wallClock(b.time, timeZone) / 86400);
+    counts.set(d, (counts.get(d) ?? 0) + 1);
+  }
+  const c = [...counts.values()].sort((x, y) => x - y);
+  return c.length ? c[Math.floor(c.length / 2)]! : 1;
 }

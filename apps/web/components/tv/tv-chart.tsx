@@ -196,13 +196,15 @@ import {
   decoderZones,
   environment,
   rangeFib,
+  weekPivots,
+  weekRanges,
   sessionBoxes,
   structureTrend,
   structureLabels,
   swings,
   arMarket,
 } from '../../lib/tv/ar';
-import { type ArStrategyCfg, runArStrategy } from '../../lib/tv/ar-strategy';
+import { AR_STRATEGY_DEFAULTS, type ArStrategyCfg, runArStrategy } from '../../lib/tv/ar-strategy';
 import type { GammaSnap } from '../../lib/tv/gamma-history';
 import { stackedZones } from '../../lib/tv/stacked-imbalance';
 import { GEX_STRIP_WIDTH, GexProfilePrimitive } from './gex-profile-primitive';
@@ -1149,14 +1151,26 @@ export function TvChart({
 
   // Multi-chart layout: panes tell each other about symbol / interval changes (the flags are the layout menu's).
   const chanRef = useRef<BroadcastChannel | null>(null);
+  const goToTimeRef = useRef<(t: number, sym: string) => void>(() => {});
   const syncedOnce = useRef(false);
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return;
     const ch = new BroadcastChannel('tv-layout');
     chanRef.current = ch;
     ch.onmessage = (
-      e: MessageEvent<{ symbol: string; tfId: string; symbolChanged: boolean; tfChanged: boolean }>,
+      e: MessageEvent<{
+        symbol: string;
+        tfId: string;
+        symbolChanged: boolean;
+        tfChanged: boolean;
+        goTo?: number;
+      }>,
     ) => {
+      // a trade was clicked in another pane: centre this one on the same moment (see goToBar)
+      if (typeof e.data.goTo === 'number') {
+        goToTimeRef.current(e.data.goTo, e.data.symbol);
+        return;
+      }
       const flags = {
         symbol: true,
         interval: false,
@@ -1595,6 +1609,7 @@ export function TvChart({
     const runStrat = (cfg: Partial<ArStrategyCfg> | undefined) =>
       runArStrategy(bars, {
         timeZone,
+        displayTimeZone: displayTz,
         chartSecs: tf.secs,
         avr: avrAll,
         formingLast,
@@ -1618,7 +1633,13 @@ export function TvChart({
     // NSE closes overnight: the zone's leg starts inside its end swing's session (same rule as the strategy)
     const fibAtr = !arMarket(timeZone).hasAsia ? atr(bars, 14) : null;
     const fibSession = fibAtr ? { minSpanAt: (i: number) => (fibAtr[i] ?? 0) * fibMult } : undefined;
-    const fib = fibSwings ? rangeFib(bars, fibSwings.pivots, prefer ?? 'neutral', arFibCfg?.length || 30, fibSession) : null;
+    // his "most active range" (default): the last week's high and low, the same range the AR Strategy uses
+    const fibWeek = arFibCfg && arFibCfg.arRange !== 'swing' ? weekRanges(bars, arFibCfg.arRangeDays ?? 7).at(-1) : null;
+    const fib = fibWeek
+      ? rangeFib(bars, weekPivots(bars, fibWeek, bars.length - 1), 'neutral', arFibCfg?.length || 30)
+      : fibSwings && arFibCfg?.arRange === 'swing'
+        ? rangeFib(bars, fibSwings.pivots, prefer ?? 'neutral', arFibCfg?.length || 30, fibSession)
+        : null;
     const labels = arStructCfg && structSwings ? structureLabels(structSwings.pivots) : [];
     // Dark Pool Decoder: its own swing size; "trend" keeps the legs in the 1-hour trend's direction (his rule)
     let decoders: DecoderZone[] = [];
@@ -1662,7 +1683,7 @@ export function TvChart({
           }
         : null,
       strat,
-      confirm: arStratCfg?.arStrat?.confirm ?? 'candles',
+      confirm: arStratCfg?.arStrat?.confirm ?? AR_STRATEGY_DEFAULTS.confirm,
       /** Gamma snapshots on file and the regime at the latest candle (null without one that covers it). */
       gamma: arStratCfg
         ? { snapshots: gammaSnaps?.length ?? 0, read: strat?.reads[strat.reads.length - 1]?.gamma ?? null }
@@ -1685,6 +1706,7 @@ export function TvChart({
     tf.secs,
     bars,
     timeZone,
+    displayTz,
     arDaily,
     arGamma,
     symbol,
@@ -2700,15 +2722,31 @@ export function TvChart({
   // AR model layers → primitive. `arFocus`: the trade hovered in the AR panel.
   const [arFocus, setArFocus] = useState<number | null>(null);
   /** Centre the chart on candle `index` and re-fit prices to it (AR panel and Strategy Tester trade lists). */
-  const goToBar = (index: number) => {
+  const goToBar = (index: number, broadcast = true) => {
     const ts = chartRef.current?.timeScale();
     if (!ts) return;
+    // every other open chart jumps to the same moment (their own timeframe / bar grid)
+    const t = bars[index]?.time;
+    if (broadcast && typeof t === 'number')
+      chanRef.current?.postMessage({ goTo: t, symbol, tfId, symbolChanged: false, tfChanged: false });
     const r = ts.getVisibleLogicalRange();
     const half = r ? (r.to - r.from) / 2 : 60;
     ts.setVisibleLogicalRange({ from: index - half, to: index + half });
     // re-fit prices to the trade's candles, like the bottom bar's "auto"
     chartRef.current?.priceScale('right').applyOptions({ autoScale: true });
     setAutoScale(true);
+  };
+  goToTimeRef.current = (t, sym) => {
+    if (sym !== symbol || !bars.length) return;
+    // last bar starting at or before t
+    let lo = 0;
+    let hi = bars.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if ((bars[mid]!.time as number) <= t) lo = mid;
+      else hi = mid - 1;
+    }
+    goToBar(lo, false);
   };
   const stratInd = indicators.find((i) => i.type === 'arstrat') ?? null;
   const lotSize = meta?.lotSize;
@@ -4178,7 +4216,8 @@ export function TvChart({
     <div
       ref={legendRef}
       className="pointer-events-none absolute left-2 top-1.5 z-10 select-none"
-      style={{ fontFamily: FONT }}
+      // Stop at the price axis: a long O/H/L/C row wraps instead of running under the axis labels.
+      style={{ fontFamily: FONT, right: (chartRef.current?.priceScale('right').width() ?? 64) + 6 }}
     >
       <div className="flex flex-wrap items-center gap-x-2 text-[13px]">
         <span className="font-semibold text-[#d1d4dc]">{meta?.name ?? symbol}</span>
@@ -4186,7 +4225,7 @@ export function TvChart({
           · {tf.label} · {meta?.exchange}
         </span>
         {bar ? (
-          <span className="flex items-center gap-2 tabular-nums" style={{ color: candleColor }}>
+          <span className="flex flex-wrap items-center gap-x-2 tabular-nums" style={{ color: candleColor }}>
             <span>
               O<b className="ml-0.5 font-medium">{bar.open.toFixed(decimals)}</b>
             </span>
@@ -5242,6 +5281,7 @@ export function TvChart({
                 <StrategyTesterPanel
                   symbol={symbol}
                   timeZone={timeZone}
+                  displayTz={displayTz}
                   decimals={decimals}
                   currency={meta?.currency ?? ''}
                   contract={testerContract}
@@ -5358,6 +5398,7 @@ export function TvChart({
                 decimals={decimals}
                 hoverIndex={hoverIdx != null && hoverIdx >= 0 && hoverIdx < bars.length ? hoverIdx : null}
                 times={wall as number[]}
+                displayTz={displayTz}
                 onFocusTrade={setArFocus}
                 onGoTo={goToBar}
               />
